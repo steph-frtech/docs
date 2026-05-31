@@ -65,7 +65,9 @@
               "steps/concept/s06-mirror-completeness",
               "steps/internals/s06-mirror-completeness",
               "steps/concept/s07-sensors",
-              "steps/internals/s07-sensors"
+              "steps/internals/s07-sensors",
+              "steps/concept/s08-expr-dsl",
+              "steps/internals/s08-expr-dsl"
             ]
           }
         ]

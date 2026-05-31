@@ -1,0 +1,72 @@
+---
+title: "S08 · L'Expr DSL — le comportement comme artefact, jamais du code libre"
+description: "L'Expr DSL d'AIDOS : un AST JSON typé (lit/ref/call/obj/arr) sur un catalogue de fonctions CLOSED et des refs $-racinées, évalué par une fonction pure. La condition d'un bouton (visible_when, enabled_when) devient un artefact versionnable du noyau — exécutable, déterministe — jamais du code libre."
+keywords: ["aidos", "krd", "expr", "dsl", "ast", "lit", "ref", "call", "obj", "arr", "catalogue", "visible_when", "enabled_when", "comportement-artefact", "déterminisme", "kernel.expr", "content-addressed"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S08](/steps/internals/s08-expr-dsl).</Note>
+
+## En une phrase
+
+S08 pose **l'Expr DSL** : la condition qui décide si un bouton est visible ou actif (`visible_when`, `enabled_when`) n'est plus du code écrit à la main quelque part — c'est un **arbre de syntaxe (AST) JSON typé**, fait de cinq sortes de nœuds, sur un **catalogue de fonctions fermé**, stocké dans le noyau et évalué par une fonction **pure et déterministe**.
+
+## Le problème que ça résout
+
+Un bouton « Commander » ne doit s'afficher que si le panier a des articles. Dans un projet ordinaire, cette règle vit comme un bout de code (`if (cart.items.length > 0)`) — libre, dispersé, non versionné comme une vérité, impossible à auditer ou à rejouer. C'est le contraire de ce que KRD exige.
+
+KRD §24.5 pose la règle : **le comportement est un artefact contraint, jamais du code libre.** Une condition d'interface est une *donnée typée* du noyau, comme une entité ou une politique — on peut la lire, la versionner par son hash, prouver son évaluation par un miroir. S08 est le moment où cette idée devient exécutable : un mini-langage d'expressions, volontairement minuscule et **fermé** — pas de boucle, pas de fonction définie par l'utilisateur, pas d'évasion vers du code arbitraire.
+
+## Les idées-clés
+
+<Field name="AST typé (l'arbre de syntaxe)">
+  Une expression est un **arbre** de nœuds, pas une chaîne à parser. Chaque nœud porte une `kind` (sa nature) — l'arbre est donc directement typé, vérifiable, et rendu tel quel à l'écran.
+</Field>
+
+<Field name="les cinq sortes de nœuds (lit/ref/call/obj/arr)">
+  **lit** = une valeur littérale (un nombre, une chaîne, un booléen, `null`). **ref** = un chemin $-racinné dans l'environnement (`$.cart.items.length`). **call** = l'application d'une fonction du catalogue à des arguments. **obj** / **arr** = des composeurs structurels (un objet, une liste). Aucune autre sorte n'existe — `Parse` rejette tout le reste.
+</Field>
+
+<Field name="les racines ($-rooted)">
+  Une `ref` part toujours de `$` : `$.input`, `$.auth.user.name`, `$.cart.items`. `$` est la donnée du moment (l'état de l'écran, l'utilisateur, le formulaire) contre laquelle l'expression s'évalue. `.length` sur une liste ou une chaîne donne sa longueur.
+</Field>
+
+<Field name="le catalogue FERMÉ (pas d'évasion vers du code libre)">
+  L'ensemble des fonctions appelables est une **allow-list close** : `lowercase`, `concat`, `now`, `uuid`, `randomToken` (les fonctions nommées par KRD §24.5), plus les opérateurs que les exemples de bouton exigent (`>`, `&&`, `!`, `length`). Une fonction hors liste — `exec`, par exemple — est **rejetée à l'analyse**, jamais évaluée. C'est ça qui rend le DSL sûr : il n'y a pas de porte vers du code arbitraire.
+</Field>
+
+<Field name="évaluation pure et déterministe">
+  `Eval` est une fonction pure : aucune entrée/sortie, aucune horloge, aucun aléatoire. `now`/`uuid`/`randomToken` passent par des fournisseurs *injectés* — donc même expression + même environnement ⇒ **toujours** le même résultat. C'est testable et rejouable.
+</Field>
+
+## Le bouton « Commander », bout par bout
+
+<Steps>
+  <Step title="La règle, exprimée">
+    `$.cart.items.length > 0` — « le bouton est visible quand le panier a au moins un article ».
+  </Step>
+  <Step title="La règle, en AST">
+    Un nœud `call` `>` avec deux arguments : une `ref` `$.cart.items.length` et un `lit` `0`. C'est l'arbre que le noyau stocke.
+  </Step>
+  <Step title="L'évaluation, panier plein">
+    Environnement `{ "$": { "cart": { "items": [{...},{...}] } } }` ⇒ la `ref` vaut `2`, `2 > 0` ⇒ **true**. Le bouton est visible.
+  </Step>
+  <Step title="L'évaluation, panier vide">
+    Le **même** AST contre `{ "$": { "cart": { "items": [] } } }` ⇒ `0 > 0` ⇒ **false**. Le bouton est masqué. Une seule vérité, deux environnements.
+  </Step>
+  <Step title="La fonction interdite">
+    Un AST qui appelle `exec` est **rejeté à l'analyse** — « unknown function (closed allow-list) » — il n'atteint jamais l'évaluation.
+  </Step>
+</Steps>
+
+## Ce que ça vous permet de faire
+
+- **Versionner le comportement comme une vérité** : une condition de bouton est un artefact du noyau, adressé par son hash, append-only — pas un bout de code perdu dans un composant.
+- **Auditer et rejouer** : l'évaluation est déterministe, donc on peut prouver « cette condition donnait *true* dans cet état » par un simple test.
+- **Être sûr de ce qui est exécutable** : le catalogue fermé garantit qu'aucune condition ne peut faire autre chose que comparer, composer, mettre en minuscule — jamais exécuter du code arbitraire.
+- **Voir le DSL dans le Workbench**, sur la route `/expr` : les cinq sortes de nœuds, le catalogue fermé, l'AST `visible_when` rendu en arbre typé, et son résultat évalué (vrai pour un panier plein, faux pour un panier vide).
+
+L'Expr DSL, c'est ce qui transforme « le comportement de l'interface » en **données du noyau** — lisibles, prouvées, versionnées — au lieu de code libre dispersé.
+
+<Card title="Pour aller plus loin — l'implémentation" icon="wrench" href="/steps/internals/s08-expr-dsl">
+  Les types Go de l'AST, le `Parse` qui valide la grammaire close, l'`Eval` pur à fournisseurs injectés, la table content-addressée `kernel.expr`, et les mirrors (fixture N2 + property rapid).
+</Card>
