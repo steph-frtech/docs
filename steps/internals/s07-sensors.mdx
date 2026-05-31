@@ -1,0 +1,71 @@
+---
+title: "S07 · Les sensors — implémentation"
+description: "Le détail technique des sensors computationnels : le hook PostToolUse Go (résolveur de code changé + adaptateurs par capteur + agrégateur de verdict), le BlockReason SENSOR_FAILED, la table runtime.sensor_runs (append-only, sous la ligne), les mirrors (Godog journey + property rapid + fault-injection par capteur), la route Workbench /sensors, et la place dans le cliquet KRD."
+keywords: ["aidos", "krd", "implémentation", "sensor", "posttooluse", "hook", "go", "gofmt", "vet", "lint", "archtest", "affected", "sensor_runs", "postgres", "atlas", "rapid", "godog", "blockreason", "sensor_failed", "adr-0014"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S07](/steps/concept/s07-sensors).</Info>
+
+S07 câble **les sensors computationnels** au `PostToolUse` (KRD §19/§74 : `PostToolUse = les sensors`, ligne `run: ["typecheck","lint","archtest","run-mirrors --affected"], on_fail: block`). Après chaque diff de l'agent sous la ligne de flottaison, un hook Go résout le **code changé**, lance la suite de capteurs déterministes, et rend un verdict : sur le moindre échec, `block` avec un `BlockReason{code: SENSOR_FAILED}` actionnable ; tout-vert, `allow`. Chaque exécution est journalisée append-only dans `runtime.sensor_runs`.
+
+## Implémentation
+
+<Note>La couche **Implémentation** est complétée au vert (CLAUDE.md §6) — code réel, fichiers, schéma. Les couches **Méta** et **Méta-méta** ci-dessous sont écrites dès le grill.</Note>
+
+Le hook vit dans `back/hooks/posttooluse/` (logique à usage unique, pas de paquet séparé — §Simplicité). Trois pièces, une interface :
+
+- **le résolveur de code changé** — `event → fichiers changés → paquets affectés` ;
+- **l'adaptateur de capteur** (une interface : `name → {pass, output, duration}`) — `gofmt`, `vet`, `lint`, `archtest`, `affected`, chacun **invoquant** l'outil gelé en sous-processus, jamais réimplémenté ;
+- **l'agrégateur de verdict** — `any-fail ⇒ block`, sinon `allow` ; un capteur en erreur est un échec.
+
+La table `runtime.sensor_runs` (+ `runtime.sensor_check_results` pour les lignes par capteur) est posée par une migration Atlas append-only, content-addressée par le hash de l'événement. (Détail complété au vert.)
+
+## Méta
+
+Le comportement de S07 est prouvé par **trois formes de mirror**, une par nature de vérité, plus un e2e Playwright côté front.
+
+<Steps>
+  <Step title="Mirror acceptation (Gherkin / Godog, N0)">
+    `reflects=runtime.sensors`, `test_kind=acceptance`, `cert_language=gherkin`, `liveness=live`, `authority=below`. Le journey : *un diff dont un test affecté échoue ⇒ verdict `block`, `BlockReason` code `SENSOR_FAILED` nommant le capteur fautif + un how_to_fix, et une ligne `sensor_runs` verdict `block`* ; un `Scenario Outline` sur `gofmt | vet | lint | archtest | affected` (chaque capteur bloque sur sa propre faute) ; *un diff propre ⇒ `allow` + une ligne `sensor_runs` verdict `allow`*.
+  </Step>
+  <Step title="Mirror invariant (property / rapid, ∀)">
+    `test_kind=property`, `cert_language=rapid`, `liveness=live`. L'invariant ∀ : pour **tout** sous-ensemble de capteurs marqués en échec, `aggregate(results) ⇒ block` **ssi** au moins un capteur a échoué, sinon `allow` ; pas de troisième verdict ; `block ⇒ code SENSOR_FAILED` et le `failing[]` enregistré est **exactement** le sous-ensemble fautif (aucun drop silencieux — un capteur inconnu/en erreur est lui-même un échec, KRD §82 `.passthrough()`).
+  </Step>
+  <Step title="Fault-injection (sensor-honesty, le test §5 obligatoire)">
+    Depuis un workspace vert, injecter **une vraie faute par capteur** — du Go non formaté (gofmt rouge), une erreur vet, une frontière d'archi franchie, un test affecté qui échoue — et asserter que le hook rend `block` à chaque fois ; revert ⇒ `allow`. Cela prouve que le capteur tire sur ce qu'il surveille, pas seulement que l'agrégateur calcule juste.
+  </Step>
+  <Step title="e2e Playwright (route /sensors)">
+    `tests/e2e/sensors.spec.ts` — la suite computationnelle liste gofmt/vet/lint/archtest/affected, la dernière exécution montre un verdict par capteur, et un événement `SENSOR_FAILED` est visible avec son how_to_fix.
+  </Step>
+</Steps>
+
+**Hook-honesty (CLAUDE.md §5) — un capteur qui ne tire jamais est mort.** La fault-injection ci-dessus *est* la preuve : casser ce que chaque capteur surveille le fait virer au rouge ; un contrôle négatif (diff propre) doit **passer** (un hook qui bloque toujours est aussi mort qu'un qui ne bloque jamais — KRD §16 « le test décisif »).
+
+**Déterminisme-first (CLAUDE.md §8).** Le verdict est une **fonction pure de l'événement** et du code qu'il pointe — pas d'aléatoire, pas d'horloge dans la décision — donc même diff ⇒ même verdict ; le property rapid en est le mirror de reproductibilité. Le hook **invoque** les outils gelés (gofmt, go vet, go test) en sous-processus ; il ne réimplémente aucun, et ne délègue la décision à aucun LLM (un capteur jugé par un agent serait un *determinism gap* qui bloque l'étape).
+
+## Méta-méta
+
+**Place dans le cliquet.** S07 est le **mécanisme** `PostToolUse = les sensors` des cinq guardrails KRD (§74 : *PreToolUse = le mur · PostToolUse = les sensors · Stop = l'arrêt non-gameable · PostKernelChange = la stigmergie · SessionStart = l'auto-test*). Il consomme S04 (la forme du hook + du `BlockReason`, la ligne de flottaison qui définit le « sous la ligne ») et S05 (le précédent `runtime.mirror_runs` : un journal append-only sous la ligne, et l'idée de rejouer les miroirs *affectés*) sans toucher leur contrat. Il laisse une phase stable que les étapes suivantes consomment : le hook `Stop` (S12, complétude + arrêt non-gameable) et le résolveur d'affectés de `run-mirrors --affected`.
+
+**Le mur (appliqué à S07).** Le hook **n'écrit aucune vérité** : il classe un diff et bloque, il ne touche ni `kernel` ni `mirrors` ni `fitness`. La table `runtime.sensor_runs` est un **journal de runtime sous la ligne** (pas de la vérité) : le rôle agent y a `INSERT` + `SELECT`, jamais `UPDATE/DELETE/TRUNCATE` — exactement le précédent S05 `mirror_runs`, et les `ALTER DEFAULT PRIVILEGES IN SCHEMA runtime GRANT INSERT, SELECT` posés à S05 couvrent déjà toute table future du schéma. Le grant n'est donc **pas inventé** : il est confirmé contre S04/S05. La route `/sensors` est strictement **lecture seule** : elle projette `sensor_runs`, elle ne la réencode pas. La clause *action-capable* de `ui-completeness` est satisfaite **par le vide** — il n'y a aucune capacité backend à lier (le hook est invoqué par le cycle de vie du harnais, pas appelé comme outil), donc aucune capacité headless cachée.
+
+**ADR concernés.**
+
+- **ADR 0014** (cette étape) — deux choix dans des slots `replaceable` : la **résolution du code changé** (les chemins de l'événement, et non `git diff` / `go list` complet) et l'**adaptateur archtest** (un contrôle de frontière déterministe par défaut tant que `go-arch-lint`/depguard n'est pas câblé). Les deux sont réversibles (changement d'adaptateur / de résolveur).
+- **ADR 0003** — slot Arch-fitness `go-arch-lint / depguard`, marqué `replaceable` ; S07 reste dans le slot.
+- **ADR 0012** — la migration `sensor_runs` est versionnée Atlas (expand-contract, append-only).
+- **ADR 0010 / 0011** — la route `/sensors` est thémée (tokens) et bilingue (next-intl, FR par défaut).
+
+**Pas de nouvel artefact superflu (CLAUDE.md §5).** **Pas de serveur MCP** — le hook est invoqué par le harnais, ce n'est pas une op appelable (un MCP `sensors` pour rerun à la demande est une **OpenQuestion** OQ-S07-3, pas inventée maintenant). **Pas de Skill** — le geste `/diagnose` existe déjà ; une skill « fix-failing-sensor » ne se mérite qu'après un échec récurrent réel. **Pas de mutation-testing** (gremlins est un capteur pipeline/post-intégration, le second tiroir du §19, pas ce tiroir per-diff). Un nouvel artefact ne fait qu'**ajouter** une garde, jamais en retirer une.
+
+**Anti-écrasement (CLAUDE.md §9).** S07 n'édite que ses propres fichiers : `back/hooks/posttooluse/**`, la migration `back/migrations/` `sensor_runs`, ses mirrors `tests/`, `tests/e2e/sensors.spec.ts`, `front/web/app/sensors/**`. Il ne touche **pas** le hook S04 `PreToolUse` ni ses GRANTs ; il ne hand-édite pas `back/gen/**`. Tout changement d'un contrat antérieur (la forme du `BlockReason`, la ligne de flottaison, la surface des checks du CLI S03) passerait par un **ChangeSet** + un **SemanticDiff** — jamais une réécriture furtive. Le `BlockReason` est re-déclaré dans le paquet du hook en suivant le précédent des deux hooks existants (même contrat JSON), aucun contrat antérieur n'est édité.
+
+**Forward-dependencies (OpenQuestions, pas des `residual_issues`).**
+
+- **OQ-S07-1** — la précision de l'affected set : passer des chemins-événement à la fermeture de dépendances inverses `go list` quand une étape ultérieure exige les tests affectés transitifs.
+- **OQ-S07-2** — câbler `go-arch-lint`/depguard avec une config déclarée à l'étape arch-fitness ; le contrôle de frontière par défaut tient jusque-là.
+- **OQ-S07-3** — un serveur MCP `sensors` pour le rerun à la demande (hors périmètre ici).
+
+<Card title="Voir le concept de l'étape" icon="lightbulb" href="/steps/concept/s07-sensors">
+  Ce qu'apportent les sensors — le mur de feedback, le code changé, le BlockReason SENSOR_FAILED — sans le code.
+</Card>

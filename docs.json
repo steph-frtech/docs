@@ -63,7 +63,9 @@
               "steps/concept/s05-ci-ratchet",
               "steps/internals/s05-ci-ratchet",
               "steps/concept/s06-mirror-completeness",
-              "steps/internals/s06-mirror-completeness"
+              "steps/internals/s06-mirror-completeness",
+              "steps/concept/s07-sensors",
+              "steps/internals/s07-sensors"
             ]
           }
         ]

@@ -1,0 +1,72 @@
+---
+title: "S07 · Les sensors — le diff propre ou rien"
+description: "Les sensors computationnels d'AIDOS : à chaque diff de l'agent, un hook PostToolUse lance les vérifications déterministes sur le code changé (gofmt/vet, lint, archtest, tests/miroirs affectés) ; tout échec bloque avec un BlockReason actionnable. Le jumeau du mur : PreToolUse bloque une écriture interdite, PostToolUse bloque un diff cassé."
+keywords: ["aidos", "krd", "sensor", "capteur", "computational", "posttooluse", "hook", "gofmt", "vet", "lint", "archtest", "affected", "blockreason", "sensor_failed", "on_fail block", "feedback wall", "self-certify"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S07](/steps/internals/s07-sensors).</Note>
+
+## En une phrase
+
+S07 câble **les sensors** : à chaque modification que l'agent produit, un capteur `PostToolUse` lance sur le **code changé** un jeu de vérifications **déterministes** — formatage, types, lint, architecture, tests affectés — et si l'une échoue, il **bloque** le diff avec un message actionnable. L'agent ne passe jamais une modification qui a fait virer un capteur au rouge.
+
+## Le problème que ça résout
+
+Le mur (S04) empêche l'agent d'écrire la *vérité*. Mais sous la ligne de flottaison, l'agent écrit librement — et un agent qui code librement produit, tôt ou tard, du code qui ne compile pas, mal formaté, qui franchit une frontière d'architecture interdite, ou qui rougit un test qui passait. Sans capteur, ces régressions s'accumulent en silence jusqu'à ce qu'un humain les découvre — bien trop tard.
+
+KRD pose la règle (§19, §74) : **l'agent s'auto-certifie sur le *computational* — et seulement là.** Le formatage, les types, le lint, l'architecture, les tests affectés sont *déterministes* : la machine tranche, sans avis, sans humain, à chaque diff. C'est la **qualité à gauche** — détecter la casse à l'instant où elle est produite, pas à l'intégration. S07 est le moment où cette règle devient une barrière : `on_fail: block`.
+
+## Les idées-clés
+
+<Field name="sensor (capteur)">
+  Un détecteur qui vérifie une projection contre sa source. Trois régimes : **computational** (déterministe — c'est S07), **inferential** (juge LLM, gardé), **meter** (budget). *Un capteur qui ne se déclenche jamais est mort.*
+</Field>
+
+<Field name="computational vs inferential">
+  Le **computational** est déterministe : gofmt, vet, lint, archtest, tests affectés. L'agent s'auto-certifie dessus. L'**inferential** (revue par LLM) et le **meter** (budgets k6, mutation) ne sont **pas** dans S07 — l'agent ne s'auto-certifie jamais seul sur le comportement métier.
+</Field>
+
+<Field name="le code changé (affected set)">
+  Le sous-ensemble que le capteur examine : le ou les fichiers nommés par l'événement, et leurs paquets — **jamais** tout le dépôt. Le capteur est une fonction pure de l'événement et du code qu'il pointe : même diff ⇒ même verdict.
+</Field>
+
+<Field name="on_fail: block (le mur de feedback)">
+  La politique de verdict : tout capteur en échec rend **block**, avec un `BlockReason` (code `SENSOR_FAILED`). Le jumeau du mur — `PreToolUse` bloque une *écriture* interdite, `PostToolUse` bloque un *diff cassé*. Exactement deux verdicts (`block` / `allow`), pas de troisième.
+</Field>
+
+<Field name="un capteur en erreur est un échec">
+  Un capteur manquant, planté ou de résultat inconnu n'est **jamais** un succès silencieux : il **bloque** (anti-pattern KRD §82 `.passthrough()`). On ne laisse jamais passer ce qu'on n'a pas pu vérifier.
+</Field>
+
+## Les cinq capteurs de S07
+
+<Steps>
+  <Step title="gofmt — le formatage">
+    Le code Go changé est-il formaté au cordeau ? Sinon, `block` : *le diff dérive du format canonique*.
+  </Step>
+  <Step title="vet — les types / la compilation">
+    `go vet` sur les paquets affectés : le code se construit-il, sans erreur suspecte ? Sinon, `block`.
+  </Step>
+  <Step title="lint — le Go strict">
+    La passe lint stricte sur le code changé. Une violation bloque.
+  </Step>
+  <Step title="archtest — les frontières d'architecture">
+    Aucune dépendance interdite n'a-t-elle été introduite ? (Par exemple : une projection sous la ligne qui importerait le noyau.) Une frontière franchie bloque.
+  </Step>
+  <Step title="affected — les tests/miroirs affectés">
+    Les tests et miroirs des paquets touchés passent-ils toujours ? Un vert-devenu-rouge bloque — c'est la régression attrapée à l'instant.
+  </Step>
+</Steps>
+
+## Ce que ça vous permet de faire
+
+- **Coder sans accumuler de dette** : chaque diff est propre, ou il ne passe pas. La casse est attrapée là où elle naît.
+- **Comprendre chaque blocage** : le `BlockReason SENSOR_FAILED` nomme *quel capteur* a échoué, *pourquoi*, et *comment* réparer — pas une erreur opaque, une marche à suivre.
+- **Auditer l'historique** : chaque exécution de capteur est enregistrée (append-only) — verdict + résultat par capteur — donc on prouve que le capteur s'est bien déclenché.
+- **Voir les capteurs vivre** dans le Workbench, sur la route `/sensors` : la suite computationnelle, la dernière exécution avec le verdict par capteur, et un flux des blocages `SENSOR_FAILED`.
+
+Les sensors, c'est ce qui rend AIDOS **sûr de laisser un agent itérer vite** : la vitesse est permise parce que chaque pas est vérifié à la machine, à l'instant, sans attendre l'humain.
+
+<Card title="Pour aller plus loin — l'implémentation" icon="wrench" href="/steps/internals/s07-sensors">
+  Le résolveur de code changé, l'interface d'adaptateur par capteur, l'agrégateur de verdict, la table `sensor_runs`, et les mirrors (Godog + property rapid + fault-injection par capteur).
+</Card>
