@@ -1,0 +1,149 @@
+---
+title: "S02 · Enregistrements du KRDCore — implémentation"
+description: "Le détail technique des sept types d'enregistrement du Kernel : migration Atlas des tables JSONB content-addressed, package Go records (Canonicalize / Hash / Validate), mur in-database (SELECT seul), route Workbench /records."
+keywords: ["aidos", "krd", "implémentation", "kernel", "records", "jsonb", "content-addressed", "append-only", "postgres", "atlas", "godog", "rapid", "testcontainers", "waterline"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S02](/steps/concept/s02-krdcore-records).</Info>
+
+S02 pose le **substrat typé du Kernel** : les sept types d'enregistrement — Idea, Truth, Mirror, Layer, Link, ChangeSet, Phase — comme des lignes **JSONB content-addressed** (`id == version == hash(corps canonique)`) et **append-only** (la tête bouge en insérant une nouvelle ligne, jamais en mutant l'ancienne). Cette étape livre **la forme et le substrat seulement** : pas de DSL AST, pas de propagation, pas de runner, pas de requête sqlc, pas de serveur MCP.
+
+## Implémentation
+
+### Les sept tables (Postgres)
+
+La DDL canonique est `back/migrations/kernel_records_baseline.sql` — expand-only, append-only, appliquée via Atlas, et **miroir byte-for-byte** dans le dir versionné `back/migrations/atlas_migrations/20260531000002_kernel_records_baseline.sql` (intégrité dans `atlas.sum`). Les sept tables vivent dans leurs schémas canoniques (CLAUDE.md §1) : `ideas`, `kernel`, `mirrors`, `changesets`, `dag`.
+
+| Kind | Table | Schéma |
+|---|---|---|
+| Idea | `ideas.idea` | candidate-truths (KRD §118) |
+| Truth | `kernel.truth` | vérités gelées avec typage épistémique |
+| Layer | `kernel.layer` | le méta-type unique (KRD §21) |
+| Link | `kernel.link` | les six types de lien (KRD §41) |
+| Mirror | `mirrors.mirror` | la preuve exécutable d'une vérité (KRD §34) |
+| ChangeSet | `changesets.changeset` | l'enveloppe atomique réversible (KRD §98) |
+| Phase | `dag.phase` | une phase stable / coupe cohérente (KRD §43) |
+
+Chaque table a la **même forme content-addressed** :
+
+```sql
+-- back/migrations/kernel_records_baseline.sql
+CREATE TABLE IF NOT EXISTS kernel.truth (
+    id            TEXT        NOT NULL,   -- SHA-256 hex du corps canonique (l'adresse)
+    body          JSONB       NOT NULL,   -- le corps canonique (records.Canonicalize)
+    version       TEXT        NOT NULL,   -- le même hash (KRD §12 : la licence à changer)
+    superseded_by TEXT,                   -- NULL pour une tête ; sinon l'id qui la remplace
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT truth_pkey PRIMARY KEY (id)
+);
+```
+
+L'append-only n'est pas une convention de code : le **mur est gravé dans la base** par les GRANTs. Le rôle `aidos_agent` reçoit `USAGE` sur les cinq schémas et **`SELECT` uniquement** sur les sept tables ; un `REVOKE INSERT, UPDATE, DELETE, TRUNCATE` ceinture-et-bretelles garantit qu'aucune écriture n'est possible. L'agent peut **lire** un enregistrement typé, jamais en écrire — seul le rôle privilégié `aidos` écrit, via un ChangeSet approuvé.
+
+### Le package Go `records`
+
+Tout dans `back/kernel/records/`, **pur** — aucune I/O, aucun appel DB. La DB est atteinte plus tard via sqlc/pgx ; cette étape n'ajoute pas de repository.
+
+| Fonction | Comportement | Référence |
+|---|---|---|
+| `Kinds() []Kind` | les sept kinds en ordre canonique (jamais inventés) | `records.go:55` |
+| `DefaultAuthority(k) Authority` | placement déclaré au-dessus/sous le mur par kind | `records.go:75` |
+| `Canonicalize(body) ([]byte, error)` | encodage JSONB déterministe : clés triées récursivement, espaces insignifiants supprimés | `records.go:112` |
+| `Hash(b) string` | SHA-256 hex canonique — identique à `contentstore.Hash` (S01) | `records.go:101` |
+| `Validate(r Record) error` | vérifie la forme + l'invariant d'adresse (`id == version == Hash(Canonicalize(body))`) | `records.go:209` |
+| `NewRecord(kind, body) (Record, error)` | construit une ligne content-addressed qui passe toujours `Validate` | `records.go:236` |
+| `EmptyExampleBody(k)` / `EmptyExampleSet()` | le squelette « exemple vide » par kind, dont les champs reflètent le Tome (non inventés) | `example.go:15` / `example.go:101` |
+| `Check(rs)` / `CheckEmptyExample()` | la validation pure derrière `aidos check` | `check.go:17` / `check.go:32` |
+
+Le cœur déterministe est `Canonicalize` : il re-parse le JSON (avec `UseNumber`) puis ré-émet avec les **clés d'objet triées lexicographiquement, récursivement**, sans espace insignifiant. Deux corps logiquement identiques — quel que soit l'ordre des clés en entrée — produisent les mêmes octets, donc le même hash. `Validate` rejette tout enregistrement dont l'`id` ou la `version` n'est pas ce hash : l'adresse ne peut pas être falsifiée.
+
+```go
+// back/kernel/records/records.go:209
+func Validate(r Record) error {
+	if !isKnownKind(r.Kind) { /* ErrUnknownKind */ }
+	bk, err := bodyKind(r.Body) // le corps porte son propre "kind"
+	if bk != r.Kind { /* ErrBodyKindMismatch */ }
+	canon, err := Canonicalize(r.Body)
+	want := Hash(canon)
+	if r.ID != want || r.Version != want { /* ErrContentAddress */ }
+	return nil
+}
+```
+
+### La route Workbench `/records`
+
+`front/web/app/records/page.tsx` est un panneau **lecture seule** (`export const dynamic = "force-dynamic"`) : il lit les sept tables de vérité vives à chaque requête (SELECT seul — le mur) via `lib/records-data.ts`, et retombe sur une fixture démo déterministe si Postgres est injoignable, pour que le panneau et ses e2e restent autonomes. `RecordsPanel.tsx` rend à gauche les sept types sélectionnables (badge au-dessus/sous le mur + compteur), à droite les têtes du type sélectionné avec un aperçu JSONB compact.
+
+Le chemin d'écriture gouverné est présent mais désamorcé : `ProposeControl.tsx` rend, par type, le contrôle « Proposer un enregistrement / Ouvrir un ChangeSet » — **présent mais désactivé** et marqué « à venir (S20) », parce que le moteur de ChangeSet (S20) et l'idea-intake (S27) n'existent pas encore. Il n'écrit **rien** ; cliquer l'affordance d'info révèle seulement la note de dépendance-avant. C'est la loi `ui-completeness` sous le mur : la capacité d'écriture est *atteignable* depuis l'écran, mais une écriture de vérité passe toujours par propose → ChangeSet → approbation, jamais un write direct. Le panneau enseigne aussi (`RecordsTeach.tsx` : tutoriel + exemple travaillé). Thème ADR 0010 ; bilingue via next-intl (ADR 0011, parité FR/EN).
+
+### Lancer / tester
+
+```bash
+go test ./back/kernel/records/...          # property + Godog + Testcontainers
+npx playwright test tests/e2e/records.spec.ts
+```
+
+Les tests d'intégration utilisent **Testcontainers** (vrai `postgres:16-alpine`) : `migration_roundtrip_test.go` applique `kernel_records_baseline.sql`, insère un exemple vide par kind comme propriétaire, le relit et re-valide l'invariant d'adresse depuis la base — puis prouve, sous le rôle `aidos_agent`, que `SELECT` passe mais que `INSERT/UPDATE/DELETE` sont rejetés avec `permission denied`.
+
+## Méta
+
+Le comportement de S02 est prouvé par **trois mirrors vivants** ; les mirrors d'intégration tournent sur un vrai Postgres (Testcontainers), pas sur un mock.
+
+<Steps>
+  <Step title="Mirror acceptation (Gherkin / Godog)">
+    `tests/kernel/krdcore_records.feature` — `reflects=kernel.records`, `test_kind=acceptance`, `cert_language=gherkin`, `liveness=live`, `authority=above`. Un scénario, exécuté par Godog (`krdcore_records_bdd_test.go`) : `aidos check` accepte le jeu d'exemples vides canonique des sept kinds, chaque `id == hash == version`, et **aucune écriture d'agent n'est requise** pour valider (un rôle SELECT-only suffit, car la validation est pure).
+  </Step>
+  <Step title="Mirror invariant (property / rapid)">
+    `records_property_test.go` — `reflects=records.Hash/Canonicalize/Validate`, `test_kind=property`, `cert_language=rapid`, `liveness=live`, `authority=below`. Les propriétés ∀ :
+
+    - `Canonicalize` est **stable sous réordonnancement des clés** (même objet, ordre permuté ⇒ mêmes octets, même hash).
+    - Tout changement de contenu d'un corps ⇒ un **hash différent** (une nouvelle version, jamais une mutation en place).
+    - `Validate(NewRecord(kind, EmptyExampleBody(kind))) == OK` pour chaque kind, avec `id == version == hash`.
+    - `Validate` **rejette** un enregistrement dont l'`id` n'est pas le hash du corps.
+  </Step>
+  <Step title="Mirror persistance + mur (intégration / Testcontainers)">
+    `migration_roundtrip_test.go` — `reflects=kernel.records-migration`, `test_kind=integration`, `liveness=live`. Sur un vrai Postgres avec la migration appliquée : chaque table round-trip un exemple vide comme JSONB validé (`id == version == hash`, corps relu canoniquement), **et** le rôle `aidos_agent` a SELECT-only — chaque `INSERT/UPDATE/DELETE` est rejeté avec `permission denied` (le mur, §2).
+  </Step>
+</Steps>
+
+**red → green.** Au départ, ni les sept schémas, ni le validateur `aidos check`, ni la route n'existaient : les mirrors étaient rouges. Ils passent au vert une fois la migration appliquée, le package `records` codé et les GRANTs en place. Une **injection de faute** (rendre `Hash` constant) repasse le mirror property en rouge, ce qui prouve qu'il est **vivant**, pas mort. Le contrat n'est pas encore matérialisé dans le schéma Postgres `mirrors` (il n'existe qu'à partir de S06) : ici les mirrors sont **matérialisés en fichiers + tests exécutables**, exactement comme l'autorise l'exception bootstrap.
+
+<Note>**Score de mutation.** La définition KRD de « done » inclut un seuil de mutation (gremlins). Aucun run gremlins n'est encore enregistré pour `records` — c'est un OpenQuestion, pas une affirmation. Les trois mirrors verts + Testcontainers + l'injection de faute sont la preuve disponible à ce stade.</Note>
+
+### Déterminisme
+
+S02 n'a **aucune** surface agent/LLM : chaque capacité est une **fonction pure et déterministe**, donc **code autoritatif**, couverte par un mirror de reproductibilité.
+
+| Capacité | Déterministe ? | Implémentation autoritative | Mirror de reproductibilité |
+|---|---|---|---|
+| Canonicalisation JSONB (clés triées) | oui | `records.Canonicalize` (`records.go:112`) | property test → `Canonicalize` stable sous réordonnancement des clés |
+| Adresse de contenu (SHA-256 hex) | oui | `records.Hash` (`records.go:101`) | property test → tout changement ⇒ nouveau hash |
+| Validation (forme + invariant d'adresse) | oui | `records.Validate` (`records.go:209`) | property test → `Validate(empty example) == OK` ; rejet d'une adresse falsifiée |
+| `aidos check` (jeu d'exemples vides) | oui | `records.Check` / `CheckEmptyExample` (`check.go`) | mirror acceptation Gherkin |
+| Projection lecture front (TS) | oui | `front/web/lib/records-data.ts` (SELECT seul + fixture démo) | e2e Playwright `records.spec.ts` |
+
+**Équivalence cross-impl.** `records.Hash` est byte-identique à `contentstore.Hash` (S01) : un enregistrement atterrit sous la **même adresse** dans l'un ou l'autre magasin. Aucune capacité de S02 n'est irréductible : tout est code déterministe, rien n'est délégué à un agent.
+
+## Méta-méta
+
+**Place dans le cliquet.** S02 est le **premier contrat du Kernel** et le dictionnaire de tout le reste : les sept formes d'enregistrement que les DSL (expr/policy/operation/control/action/entity), la propagation, les runners et le DAG viendront remplir et relier. Une dent isolée, testée, visualisée, qui laisse une phase stable que les étapes suivantes consomment. Elle s'appuie sur le content-addressing append-only posé par S01 (Archive) sans toucher à son contrat.
+
+**Le mur.** Les sept tables sont de la **vérité** : Truth/Mirror/Layer/Link/ChangeSet/Phase sont **au-dessus** de la ligne (ancrées par l'humain), Idea est la candidate **sous** la ligne avant gel. Le mur in-database (GRANTs SELECT-only du rôle `aidos_agent`) interdit toute écriture par l'agent ; le panneau `/records` est strictement lecture seule, et le contrôle de proposition reste désamorcé jusqu'à ce que le moteur de ChangeSet existe (S20).
+
+**ADR concernés.**
+
+- **ADR 0004** — la vérité (et son substrat de versions) vit dans Postgres, append-only et content-addressed. S02 incarne directement ce choix : sept tables append-only, version = hash.
+- **ADR 0012** — Atlas applique la DDL en migrations **versionnées, forward-only** : la DDL canonique de S02 est miroitée byte-for-byte dans le dir versionné `atlas_migrations/`, intégrité dans `atlas.sum` ; l'apply end-to-end est prouvé par la suite Go Testcontainers (pas besoin de la CLI Atlas en CI).
+- **ADR 0009 / 0010 / 0011** — pas de serveur MCP à cette étape (aucune capacité écriture exposée encore — le `store` MCP est une étape ultérieure) ; la route `/records` est thémée (tokens ADR 0010) et bilingue (next-intl, ADR 0011).
+
+**Migrations & changements.** La DDL est appliquée en **expand-only, append-only**. Tout changement futur d'un contrat figé ici (forme d'un enregistrement, invariant d'adresse, un GRANT) passe par un **ChangeSet** accompagné d'un **SemanticDiff** — jamais une réécriture silencieuse (CLAUDE.md §9).
+
+**Forward-dependencies (OpenQuestions, pas des `residual_issues`).**
+
+- La persistance des mirrors dans le schéma Postgres `mirrors` est différée à **S06** ; jusque-là les mirrors de S02 vivent en fichiers exécutables.
+- Le chemin d'écriture gouverné (propose → ChangeSet → approbation) dépend de **S20** (moteur de ChangeSet) et **S27** (idea-intake) ; le contrôle `/records` est présent mais désamorcé jusque-là.
+- Pas de DSL AST, pas de requête sqlc, pas de repository à cette étape — par conception.
+
+<Card title="Voir le concept de l'étape" icon="lightbulb" href="/steps/concept/s02-krdcore-records">
+  Ce qu'apportent les sept enregistrements du KRDCore, sans le code.
+</Card>

@@ -1,0 +1,74 @@
+---
+title: "S02 · Les sept enregistrements du KRDCore"
+description: "Les sept types d'enregistrement — Idea, Truth, Mirror, Layer, Link, ChangeSet, Phase — comme substrat JSONB content-addressed et append-only du Kernel : chaque ligne est désignée par le hash de son corps, et rien n'est jamais écrasé."
+keywords: ["aidos", "krd", "kernel", "records", "idea", "truth", "mirror", "layer", "link", "changeset", "phase", "jsonb", "content-addressed", "append-only", "waterline"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S02](/steps/internals/s02-krdcore-records).</Note>
+
+## En une phrase
+
+S02 définit les **sept types d'enregistrement** qui forment le vocabulaire de base du Kernel — **Idea, Truth, Mirror, Layer, Link, ChangeSet, Phase** — et les pose comme des lignes **JSONB** content-addressed (désignées par le hash de leur contenu) et append-only (jamais écrasées) dans Postgres.
+
+## Le problème que ça résout
+
+S01 a posé un magasin générique : un endroit où ranger des octets sous leur hash, sans rien perdre. Mais le Kernel n'a pas besoin de stocker « des octets » — il a besoin de stocker **des vérités typées** : une idée candidate, une vérité gelée, le mirror qui la prouve, le lien qui les relie, le ChangeSet qui les fait bouger, la phase stable qui fige un état cohérent.
+
+S02 nomme donc ces **sept familles** une fois pour toutes, leur donne une forme canonique, et leur dédie une table par famille. À partir de là, chaque étape ultérieure a un **enregistrement typé** à lire et à écrire — et le [mur](/internals/the-wall-and-ratchet) a des tables précises à interdire à l'agent. Cette étape pose **uniquement** la forme et le substrat : pas encore de DSL, pas encore de propagation, pas encore de runner.
+
+## Les idées-clés
+
+Le vocabulaire introduit ici, défini simplement.
+
+<Field name="Idea (idée)">
+  Une **vérité candidate** : une intention pas encore gelée, sans mirror, qui attend d'être éprouvée. C'est la seule porte d'entrée vers le Kernel — une idée devient vérité seulement après avoir traversé son mirror et l'approbation humaine.
+</Field>
+
+<Field name="Truth (vérité)">
+  Une **affirmation falsifiable et gelée** du Kernel, avec son typage épistémique (de quelle nature est la claim, où elle tient, à quel point elle est prouvable, qui en a l'autorité). C'est le cœur de la vérité du produit.
+</Field>
+
+<Field name="Mirror (miroir)">
+  La **preuve exécutable** d'une vérité : le test qui la reflète. Sans mirror, une vérité n'est qu'un vœu (un *monstre*). Un mirror qui ne reflète rien est aussi un monstre. Chaque mirror dit ce qu'il reflète, sa nature (acceptation, invariant, fixture) et son langage de certification.
+</Field>
+
+<Field name="Layer (couche)">
+  Le **méta-type unique** à partir duquel toute vérité est construite. Une Layer dit de quelle nature est l'artefact de vérité (schéma, prédicat ∀, fixture, seuil…), qui en est propriétaire, de quel côté du mur elle se trouve, et si elle est une source ou une projection.
+</Field>
+
+<Field name="Link (lien)">
+  Une **relation typée** entre deux enregistrements — et, point crucial, elle pointe toujours vers une **version** (un hash), jamais vers une identité floue. Les six natures de lien (vertical, horizontal, généalogique, provenance, déclenche, lie) tissent le graphe du Kernel.
+</Field>
+
+<Field name="ChangeSet (jeu de changements)">
+  L'**enveloppe atomique et réversible** d'une transition : pourquoi le changement, son statut (`DRAFT`, `APPLIED`, `REVERTED`), et les versions d'enregistrement qu'il touche. C'est la seule façon de faire bouger une vérité — jamais une édition en place.
+</Field>
+
+<Field name="Phase (phase stable)">
+  Une **coupe cohérente** de l'état : la version épinglée de chaque contrainte (le « lockfile »), avec l'assurance que tous les liens se résolvent et que tous les capteurs sont verts en même temps. C'est ce qu'une étape laisse derrière elle pour que la suivante s'y appuie.
+</Field>
+
+<Field name="content-addressed (adressé par contenu)">
+  L'identité d'un enregistrement **est** son contenu : son `id` et sa `version` sont tous deux le hash de son corps canonique. Changer un octet du corps change l'adresse — donc crée un **nouvel** enregistrement, jamais une mutation.
+</Field>
+
+<Field name="append-only (ajout seul)">
+  On n'écrase jamais une ligne. La « tête » avance en insérant une **nouvelle** ligne et en fermant l'ancienne (`superseded_by`) — l'historique reste complet, rien ne se perd.
+</Field>
+
+<Field name="au-dessus / sous le mur (waterline)">
+  Chaque enregistrement se situe par rapport à la ligne d'eau. **Au-dessus** : la vérité ancrée par l'humain, hors d'atteinte de l'IA (Truth, Mirror, Layer, Link, ChangeSet, Phase). **Sous** : la candidate avant gel (Idea). L'agent ne peut que **lire** ces tables, jamais y écrire.
+</Field>
+
+## Ce que ça vous permet de faire
+
+- **Lire les sept familles d'enregistrement** du Kernel, chacune dans sa table dédiée, avec son badge « au-dessus / sous le mur ».
+- **Faire confiance à l'adresse.** L'`id` d'un enregistrement *est* le hash de son corps : on ne peut pas le falsifier sans changer l'adresse.
+- **Compter sur l'historique complet.** Comme tout est append-only, la tête bouge sans rien détruire — l'ancien reste lisible.
+- **Voir le chemin d'écriture gouverné.** Écrire une vérité ne se fait jamais directement depuis l'écran : cela passe par un ChangeSet proposé puis approuvé (à venir, S20).
+
+Ces sept formes sont le **dictionnaire** sur lequel tout le reste d'AIDOS s'écrit : les DSL, la propagation, les runners, le DAG des versions viendront tous remplir et relier ces enregistrements.
+
+<Card title="Pour aller plus loin — l'implémentation" icon="wrench" href="/steps/internals/s02-krdcore-records">
+  Le code, les mirrors, le mur in-database et la place dans le cliquet KRD.
+</Card>
