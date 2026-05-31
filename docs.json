@@ -111,7 +111,9 @@
               "steps/concept/s22-red-wave",
               "steps/internals/s22-red-wave",
               "steps/concept/s23-phase-stable",
-              "steps/internals/s23-phase-stable"
+              "steps/internals/s23-phase-stable",
+              "steps/concept/s24-version-dag",
+              "steps/internals/s24-version-dag"
             ]
           }
         ]

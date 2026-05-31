@@ -1,0 +1,53 @@
+---
+title: "S24 · Le DAG de versions — brancher, revenir, rebrancher (l'ancienne ligne n'est jamais détruite)"
+description: "L'espace des versions d'AIDOS est un DAG, pas une ligne (KRD §120) : les phases stables sont des NŒUDS, les ChangeSets des ARÊTES. Trois mouvements §121 deviennent de première classe : BRANCHER (ouvrir une ligne de vérité alternative depuis une phase stable), CHECKOUT D'UN ANCÊTRE (rendre une phase antérieure la tête courante — un mouvement en arrière, le flag de tête se déplace, rien n'est supprimé), REBRANCHER (depuis cet ancêtre, ouvrir une NOUVELLE ligne — la branche-d'une-branche). Append-only avec tête mutable : l'ancienne ligne abandonnée n'est JAMAIS détruite, elle reste dans le DAG comme stepping stone potentiel (§123). Un nœud peut avoir ≥1 parents (DAG, pas arbre). Le DAG peut tenir PLUSIEURS têtes parallèles (une branche stable pendant qu'une autre est en flux, §125). Stratifié par la ligne de flottaison (§124) : vérité humaine au-dessus, variantes évolutives en dessous. « Revenir à l'ancienne version » (undo humain) et « échantillonner un stepping stone » (évolution) sont LE MÊME geste. S24 fige branche/checkout-ancêtre/rebranche ; le merge sémantique (§122) et la promotion gated-by-mirror (§124) sont des dents ultérieures."
+keywords: ["aidos", "krd", "DAG de versions", "version DAG", "brancher", "branch", "checkout ancêtre", "checkout-ancestor", "rebrancher", "rebranch", "revenir", "stepping stone", "append-only", "ajout-seul", "tête mutable", "mutable head", "nœud", "node", "arête", "edge", "phase stable", "ChangeSet", "ligne abandonnée", "jamais détruite", "plusieurs têtes", "têtes parallèles", "ligne de flottaison", "waterline", "above", "below", "stratification", "DAG pas arbre", "merge sémantique", "dag.node", "dag.edge", "le mur", "lecture seule", "KRD §120", "KRD §121", "KRD §123", "KRD §124", "KRD §125"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S24](/steps/internals/s24-version-dag).</Note>
+
+## En une phrase
+
+S24 fait de l'espace des versions un **DAG, pas une ligne** (KRD §120) : les **phases stables** (S23) sont des **nœuds**, les **ChangeSets** (S20) des **arêtes**, et trois mouvements de navigation deviennent de première classe — **brancher**, **checkout d'un ancêtre** (revenir), **rebrancher** — qui font **grandir** le DAG en **ajout-seul**, à **tête mutable**. **Rien n'est jamais détruit** : une ligne abandonnée reste dans le DAG comme **stepping stone** potentiel.
+
+## Le problème que ça résout
+
+Une histoire de versions **linéaire** force un choix cruel : pour explorer une alternative, ou revenir en arrière, il faut **écraser** ou **jeter** ce qui existait. On perd les chemins non pris. KRD §120 refuse : l'espace des versions est un **DAG** où l'on se déplace **en avant** (un nouveau ChangeSet), **en arrière** (checkout d'un ancêtre) et **latéralement** (brancher) — et où **revenir n'efface pas**. Le mouvement « en arrière » ne **détruit** pas la ligne quittée : il déplace seulement le **flag de tête**. L'ancienne ligne demeure, accessible, prête à être ré-empruntée. C'est la même structure qui sert l'**undo humain** et la **mémoire évolutive** (QD) : variante = branche, stepping stone = ancêtre, niche = branche parallèle.
+
+## Les idées-clés
+
+<Field name="Un DAG, pas une ligne, pas un arbre (§120)" type="≥1 parents par nœud">
+  L'espace des versions est un **DAG** : un nœud peut avoir **plusieurs parents** (un merge, plus tard). Ce n'est ni un « historique git », ni un « log de commits », ni une « timeline » — un tag git ne fait que *cartographier* une phase stable. Les **nœuds** sont des phases stables (une coupe cohérente, S23) ; les **arêtes** sont des ChangeSets (S20).
+</Field>
+
+<Field name="Brancher — ouvrir une ligne de vérité alternative (§121)" type="la tête bouge, l'origine reste">
+  **Brancher** depuis une phase stable ouvre une **ligne alternative** : un nouveau nœud parenté sur elle. Brancher depuis la **tête** y déplace la tête ; brancher depuis un **ancêtre interne** laisse la tête existante en place — d'où **deux têtes parallèles** (§125). Dans tous les cas, le nœud d'origine **n'est jamais supprimé**.
+</Field>
+
+<Field name="Checkout d'un ancêtre — revenir sans rien détruire (§120/§121)" type="déplacement du flag de tête">
+  **Checkout d'un ancêtre** rend une phase **antérieure** la tête courante : un mouvement **en arrière**. Seul le **flag de tête** se déplace — **chaque nœud ultérieur reste** dans le DAG (la ligne quittée n'est pas détachée, pas effacée). C'est l'**undo** qui n'efface rien.
+</Field>
+
+<Field name="Rebrancher — la branche-d'une-branche (§121)" type="une nouvelle ligne depuis l'ancêtre">
+  Depuis l'ancêtre recheckout-é, **rebrancher** ouvre une **nouvelle** ligne : un nouveau nœud parenté sur cet ancêtre, accessible depuis la racine. L'ancienne ligne **demeure** dans le DAG. C'EST le critère done : on peut brancher, revenir, et rebrancher — et la ligne abandonnée n'est **jamais** détruite.
+</Field>
+
+<Field name="Append-only avec tête mutable (§120)" type="rien n'est jamais détruit">
+  Le DAG ne fait que **croître** : aucun mouvement ne supprime un nœud ni une arête. Seul le **flag de tête** est mutable. Une ligne abandonnée reste un **stepping stone** potentiel (§123) — « revenir à l'ancienne version » (humain) et « échantillonner un stepping stone » (évolution) sont **le même geste** : checkout d'un ancêtre + rebranche.
+</Field>
+
+<Field name="Stratifié par la ligne de flottaison (§124)" type="vérité humaine vs variantes évolutives">
+  Chaque nœud porte un **stratum** : **au-dessus** = branches de vérité humaine ; **en dessous** = variantes d'implémentation évolutives. Le DAG des versions et l'archive QD sont **une seule structure**, deux bandes séparées par la ligne de flottaison.
+</Field>
+
+## Ce que S24 ne fait pas (dents ultérieures)
+
+- **Pas de merge sémantique / conflit-comme-senseur** (§122) : fusionner deux branches de vérité en rejouant les miroirs sur la coupe fusionnée est **S25**, la dent suivante.
+- **Pas de promotion gated-by-mirror des variantes évolutives** (§124) ni d'**échantillonnage QD** des stepping stones (§123) : ils **roulent** sur ce DAG, mais sont ultérieurs (S26).
+- **Pas de red-wave / firing `/goal`** : un mouvement déplace la tête ; drainer une vague de rouge est une étape Runtime ultérieure.
+- **Pas de suppression / pruning** : le DAG est **append-only** — une ligne abandonnée n'est **jamais** détruite. La curation (garder/compresser/tombstone, §44.4) est S26.
+- **Pas de nouveau hook, pas de nouveau skill** : le mur (S04) + le GRANT SELECT-seul + le commit-gate S20 couvrent déjà la règle ; les trois mouvements passent par les outils du MCP `dag`.
+
+## Le mur
+
+L'écran /version-dag est en **lecture seule** : il **projette** le DAG et **anime** les mouvements (sur l'état local), il n'écrit aucune vérité. Le schéma `dag` est **au-dessus de la ligne de flottaison** — l'agent y a un accès **SELECT seulement**. **Enregistrer** un nœud/une arête dans `dag.node`/`dag.edge`, ou **déplacer la tête**, passe uniquement par le rôle **writer `aidos`** via le **MCP `dag`** (l'unique porte). Un « checkout d'un ancêtre » est un **déplacement du flag de tête**, jamais une suppression.
