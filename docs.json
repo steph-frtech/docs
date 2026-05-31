@@ -105,7 +105,9 @@
               "steps/concept/s19-weighted-propagation",
               "steps/internals/s19-weighted-propagation",
               "steps/concept/s20-changeset",
-              "steps/internals/s20-changeset"
+              "steps/internals/s20-changeset",
+              "steps/concept/s21-semantic-diff",
+              "steps/internals/s21-semantic-diff"
             ]
           }
         ]

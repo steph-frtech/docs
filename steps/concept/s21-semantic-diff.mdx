@@ -1,0 +1,49 @@
+---
+title: "S21 · Le SemanticDiff — lire la nature d'un changement, pas un diff textuel"
+description: "Un SemanticDiff lit la NATURE réelle d'un changement de noyau entre deux versions (old@hash → new@hash) plutôt qu'un diff textuel ligne à ligne, et la nomme avec un membre de l'ensemble FERMÉ {add, refine, override, rescope, reweight, deprecate} (les six que S21 pose, sur les huit de KRD §44.1). La règle du done : un changement de scope est un rescope (pas un override) ; un enabled_when incompatible est un override (une promesse révoquée) ; cosmetic → load-bearing est un reweight. La commande aidos diff la rend en langage humain, en lecture seule. S21 fige le classifieur de KRD §44.1."
+keywords: ["aidos", "krd", "semanticdiff", "semantic diff", "change_type", "add", "refine", "override", "rescope", "reweight", "deprecate", "aidos diff", "nature d'un changement", "diff textuel", "enabled_when", "promesse révoquée", "TruthScope", "composes", "poids", "load-bearing", "cosmetic", "TruthLifecycle", "deprecate", "blast_radius", "requires_authority", "red_wave", "unclassifiable", "OpenQuestion", "lecture seule", "le mur", "KRD §44.1", "KRD §11", "KRD §12", "KRD §96", "KRD §44.2"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S21](/steps/internals/s21-semantic-diff).</Note>
+
+## En une phrase
+
+S21 fige le **SemanticDiff** : la fonction pure du Runtime qui, entre **deux versions de noyau** (`old@hash → new@hash`), lit la **nature** réelle d'un changement — `add · refine · override · rescope · reweight · deprecate` — au lieu d'un **diff textuel** ligne à ligne, pour que le Workbench puisse dire « vous transformez une hypothèse UX en vérité produit active ; autorité requise : … » plutôt que de cracher un patch YAML.
+
+## Le problème que ça résout
+
+Un diff textuel montre **que** des lignes ont changé, jamais **ce que** le changement signifie. Or la signification décide de tout : un ajout en terrain libre est sûr par construction ; un resserrement cohérent l'est sous condition ; mais **changer ce qu'une contrainte existante dit** — révoquer une promesse — est dangereux, humain, et doit être tracé (KRD §11/§12). Si l'on traite ces trois cas de la même façon, on laisse passer une régression silencieuse derrière un « petit ajustement ». KRD §44.1 répond : **lire la nature**, pas le texte.
+
+## Les idées-clés
+
+<Field name="l'ensemble FERMÉ des change_type">
+  KRD §44.1 nomme huit natures : `add, refine, override, deprecate, rescope, reauthorize, reweight, replace_mirror`. S21 en pose **six** — `add, refine, override, rescope, reweight, deprecate` — et **pas** `reauthorize` (qui suit l'AuthorityGraph, S16) ni `replace_mirror` (qui suit le plan Mirror, S06) : ce sont des dents ultérieures, leurs règles ne sont **pas inventées** ici. L'ensemble est **fermé** : on n'ajoute jamais une nature que KRD ne nomme pas.
+</Field>
+
+<Field name="override — changer ce qu'une contrainte DIT (une promesse révoquée)">
+  *Le critère de done.* Sur le même bouton `checkout-button`, un `enabled_when` qui passe de `$.form.valid && !$.submitting` à `$.form.valid` **n'est pas** un raffinement : la condition se **relâche**, la promesse est **révoquée**. C'est un **override** — dangereux, humain, tracé (KRD §11/§12). Toute condition `enabled_when` qui n'est **pas impliquée** par l'ancienne est un override.
+</Field>
+
+<Field name="rescope — un déplacement de TruthScope, pas un override">
+  *Le critère de done.* Quand `refund-policy` passe de `scope: {cells: [EU]}` à `{cells: [EU, US]}`, **le corps de la règle est identique** : seul son **périmètre** (où elle s'applique, S15) bouge. C'est un **rescope**, **pas** un override. Confondre les deux ferait croire qu'on change la règle alors qu'on en change la portée.
+</Field>
+
+<Field name="reweight — une requalification de poids, pas un changement de règle">
+  *Le critère de done.* Quand le lien `composes(checkout → help-link)` passe de `weight: cosmetic` à `load-bearing` (KRD §96), on ne change **pas** la règle : on **requalifie son importance**. C'est un **reweight** — distinct d'un changement de la règle elle-même.
+</Field>
+
+<Field name="add, refine, deprecate — les trois autres natures">
+  **add** : une contrainte en **terrain libre** (aucune version antérieure) — sûre par construction (KRD §11). **refine** : une contrainte strictement **plus spécifique** sous une existante, **sans la contredire** (KRD §11). **deprecate** : un déplacement de `TruthLifecycle.status` vers `deprecated/shadowed/removed`, corps inchangé — *une vérité meurt par succession, jamais par suppression* (KRD §44.2).
+</Field>
+
+<Field name="inclassable → OpenQuestion, jamais une nature fabriquée">
+  Si un changement ne correspond à **aucune** des six natures, `Classify` rend `unclassifiable` + une **OpenQuestion** (la raison, en provenance) — **jamais** un `change_type` inventé. L'honnêteté avant la complétude apparente (CLAUDE.md §8).
+</Field>
+
+## Ce que S21 n'est PAS
+
+S21 livre le **classifieur** + la commande `aidos diff` en **lecture seule** — pas l'application d'un changement (ça reste le chemin ChangeSet, S20). Ce n'est **pas** `reauthorize`/`replace_mirror` (S16/S06, plus tard). Ce n'est **pas** le calcul de la **vague rouge** ni de l'`aidos impact` : `blast_radius`, `requires_authority` et `red_wave` sont **référencés** depuis les contrats antérieurs (S15/S16/S17), jamais recalculés ici. `aidos diff` n'écrit **aucune** vérité (le mur).
+
+## À voir dans le Workbench
+
+La route **`/semantic-diff`** rend le classifieur en **langage humain** (KRD §44.1 : pas un patch YAML). Choisissez une des **trois paires canoniques** et lancez la classification : un **badge `change_type`**, la **phrase en clair** (« vous révoquez la promesse enabled_when du bouton checkout — autorité requise : UX + Product ; vague rouge sur son miroir »), et les `blast_radius` / `requires_authority` / `red_wave` **référencés**. La paire `enabled_when` incompatible montre **override**, la paire scope EU→EU+US montre **rescope** (pas override), la paire help-link cosmetic→load-bearing montre **reweight** — *les critères de done, rendus à l'écran*. **Lecture seule** (le mur) : appliquer un changement passe par un ChangeSet.
