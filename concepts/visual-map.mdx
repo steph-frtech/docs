@@ -1,0 +1,377 @@
+---
+title: "AIDOS en schémas"
+description: "La table des matières visuelle des concepts d'AIDOS — les cinq sous-systèmes, le V des couches de preuve, le cycle KRD, le bicéphale, la verticale, la vague de rouge, les boucles vivantes et le mur, tous en un coup d'œil."
+keywords: ["aidos", "krd", "schémas", "diagrammes", "carte visuelle", "sous-systèmes", "couches de preuve", "ligne de flottaison", "bicéphale", "verticale", "vague de rouge", "mur", "boucles vivantes"]
+---
+
+<Note>
+  Cette page est une **visite guidée visuelle** : un schéma par grand concept, chacun
+  relié à sa page détaillée. C'est la *table des matières en images* d'AIDOS — survolez,
+  cliquez là où vous voulez approfondir.
+</Note>
+
+<Info>
+  Certains éléments schématisés ici décrivent la **méthode KRD** et la **vision**
+  d'AIDOS, vraies indépendamment de l'état d'avancement du build (qui se construit dent
+  par dent). Chaque schéma renvoie à sa page concept, où l'**état d'implémentation** est
+  détaillé honnêtement. Là où une capacité n'est pas encore câblée, vous trouverez un
+  repère « à venir ».
+</Info>
+
+## En une phrase
+
+AIDOS tient une petite **vérité** ancrée par un humain, la **prouve** par un miroir,
+**contraint** le code que l'IA écrit librement, et **se souvient** de tout — et tout
+cela se raconte mieux en schémas qu'en paragraphes. Voici les huit images qui suffisent
+à comprendre l'ensemble.
+
+---
+
+## 1. Les cinq sous-systèmes
+
+AIDOS se divise en cinq rôles qui se contraignent les uns les autres : le **Kernel**
+tient l'intention, le **Mirror** la prouve, le **Runtime** fait respecter les règles et
+produit le code, l'**Archive** se souvient, et le **Workbench** est l'écran par lequel
+un humain gouverne.
+
+```mermaid
+flowchart TB
+    H(("Humain")) -->|gouverne via| WB
+
+    subgraph TRUTH["La vérité — possédée par l'humain"]
+        direction LR
+        K["<b>Kernel</b><br/>l'intention figée"]
+        M["<b>Mirror</b><br/>la preuve exécutable"]
+        K <-->|bicéphale · mirrors| M
+    end
+
+    subgraph ENGINE["Le moteur — l'IA écrit, jamais la vérité"]
+        direction LR
+        RT["<b>Runtime</b><br/>harnais · hooks · capteurs · générateurs"]
+        AR["<b>Archive</b><br/>le DAG des versions · la mémoire"]
+    end
+
+    WB["<b>Workbench</b><br/>l'écran de gouvernance"]
+
+    WB --> TRUTH
+    WB --> ENGINE
+    RT -->|contraint| K
+    RT -->|fait respecter le mur| M
+    M -->|déclenche la vague de rouge| RT
+    AR <-->|ChangeSet atomique| TRUTH
+
+    classDef truth fill:#1e3a8a,stroke:#1e40af,color:#fff;
+    classDef engine fill:#0f766e,stroke:#115e59,color:#fff;
+    classDef hub fill:#2563eb,stroke:#1d4ed8,color:#fff,font-weight:bold;
+    class K,M truth;
+    class RT,AR engine;
+    class WB hub;
+```
+
+<Card title="Les cinq sous-systèmes, en détail" icon="diagram-project" href="/concepts/five-subsystems">
+  Ce qu'est chacun en langage clair, et comment ils se tiennent ensemble.
+</Card>
+
+---
+
+## 2. Le « V » des couches de preuve N0→N5 et la ligne de flottaison
+
+Un comportement n'est jamais prouvé en bloc : il est prouvé **par tranches**, à six
+altitudes. Une seule ligne — la **ligne de flottaison** — passe entre N2 et N3 : au-dessus,
+l'humain ancre le *sens* ; en dessous, l'IA s'auto-certifie sur le *déterminisme*.
+
+```mermaid
+flowchart TB
+    N0["<b>N0 · Parcours</b><br/>scénario d'acceptation (Gherkin)"]
+    N1["<b>N1 · Invariants ∀</b><br/>propriété, vraie sur tous les chemins"]
+    N2["<b>N2 · Workflow</b><br/>fixture état→commande→events"]
+
+    WL{{"≈≈≈  LIGNE DE FLOTTAISON  ≈≈≈<br/>au-dessus : l'humain ancre le SENS<br/>en dessous : l'IA s'auto-certifie"}}
+
+    N3["<b>N3 · Contrat / port</b><br/>schéma versionné + contrats"]
+    N4["<b>N4 · Code / unité</b><br/>test unitaire + typage strict"]
+    N5["<b>N5 · Infra / adaptateurs</b><br/>intégration sur de vrais systèmes"]
+
+    N0 --> N1 --> N2 --> WL --> N3 --> N4 --> N5
+
+    classDef human fill:#1e3a8a,stroke:#1e40af,color:#fff;
+    classDef ai fill:#0f766e,stroke:#115e59,color:#fff;
+    classDef wl fill:#2563eb,stroke:#1d4ed8,color:#fff,font-weight:bold;
+    class N0,N1,N2 human;
+    class N3,N4,N5 ai;
+    class WL wl;
+```
+
+<Card title="Les couches de preuve (N0–N5)" icon="layer-group" href="/concepts/proof-levels">
+  Le « V », la ligne de flottaison, Métier vs Fonctionnel, computational vs inferential.
+</Card>
+
+---
+
+## 3. Le cycle KRD
+
+On n'implémente jamais en partant du code. On bouge un cran du Kernel — une **idée**
+devient un **miroir rouge** (c'est ça, le `/goal`) — puis l'IA ramène le code au **vert**
+sous la contrainte, jusqu'à une **phase stable**.
+
+```mermaid
+flowchart LR
+    I["💡 Idée<br/>candidat-vérité"] --> MR["Miroir<br/><b>ROUGE</b>"]
+    MR -->|le set rouge EST le goal| G["/goal"]
+    G --> C["L'IA réconcilie<br/>le code (outside-in)"]
+    C --> V{"vert ∧<br/>antérieur intact ∧<br/>pas de monstre ?"}
+    V -->|non| C
+    V -->|oui| PS["✅ Phase stable<br/>une coupe cohérente"]
+    PS -.->|cran suivant| I
+
+    classDef red fill:#b91c1c,stroke:#991b1b,color:#fff;
+    classDef green fill:#15803d,stroke:#166534,color:#fff;
+    classDef step fill:#1e3a8a,stroke:#1e40af,color:#fff;
+    class MR red;
+    class PS green;
+    class I,G,C step;
+```
+
+<Card title="Le goal et le workflow" icon="bullseye" href="/concepts/goal-and-workflow">
+  Pourquoi le test rouge EST le goal, et la condition d'arrêt non-gameable.
+</Card>
+
+---
+
+## 4. Le bicéphale Kernel ⇄ Mirror — et le monstre
+
+Un seul corps — la vérité — avec **deux têtes** : l'intention (le Kernel) et la preuve
+(le Mirror), reliées par le lien `mirrors` et **co-versionnées**. La **loi de complétude**
+interdit toute vérité sans miroir vivant et tout miroir orphelin : ce sont des **monstres**.
+
+```mermaid
+flowchart TB
+    subgraph BODY["Un corps · deux têtes · co-versionnés"]
+        direction LR
+        K["<b>Kernel</b><br/>l'intention<br/>« ce qui doit être vrai »"]
+        MI["<b>Mirror</b><br/>la preuve<br/>« comment on le prouve »"]
+        K <-->|mirrors · le 6ᵉ lien| MI
+    end
+
+    MON1["⚠ Monstre<br/>vérité SANS miroir<br/>(un vœu)"]
+    MON2["⚠ Monstre<br/>miroir orphelin<br/>(sans vérité)"]
+
+    K -.->|interdit par<br/>la complétude| MON1
+    MI -.->|interdit par<br/>la complétude| MON2
+
+    classDef truth fill:#1e3a8a,stroke:#1e40af,color:#fff;
+    classDef monster fill:#7c2d12,stroke:#9a3412,color:#fff;
+    class K,MI truth;
+    class MON1,MON2 monster;
+```
+
+<Card title="Kernel et Mirror" icon="circle-half-stroke" href="/concepts/kernel-mirror">
+  Le couple intention/preuve, la loi de complétude, le monstre, la ligne de flottaison du miroir.
+</Card>
+
+---
+
+## 5. La verticale — de la source au bouton et son action
+
+Quelques **sources** humaines, figées (entity, operation, policy, view, control,
+action) ; le code n'en est que des **projections** dérivées et jetables (Go, DDL,
+TS, UI). La verticale descend jusqu'au **bouton**, qui exécute une **action** liée à
+une opération.
+
+```mermaid
+flowchart TB
+    subgraph SRC["SOURCES — humaines, figées, above the line"]
+        direction LR
+        E["entity"]
+        OP["operation"]
+        PO["policy"]
+        VW["view / écran"]
+        CT["control / bouton"]
+        AC["action"]
+    end
+
+    subgraph PROJ["PROJECTIONS — dérivées, IA, jetables, below the line"]
+        direction LR
+        GO["Go (sqlc)"]
+        DDL["Postgres DDL"]
+        TS["types TS"]
+        UI["composant UI"]
+    end
+
+    E --> GO
+    E --> DDL
+    E --> TS
+    OP --> GO
+    VW --> UI
+    CT --> UI
+    AC -->|binds| OP
+
+    UI --> BTN["🔘 Bouton rendu"]
+    BTN -->|onClick| ACT["Action exécutée"]
+    ACT -->|invoke| OP
+
+    classDef src fill:#1e3a8a,stroke:#1e40af,color:#fff;
+    classDef proj fill:#0f766e,stroke:#115e59,color:#fff;
+    classDef live fill:#2563eb,stroke:#1d4ed8,color:#fff,font-weight:bold;
+    class E,OP,PO,VW,CT,AC src;
+    class GO,DDL,TS,UI proj;
+    class BTN,ACT live;
+```
+
+<Note>La descente complète source → projections (émetteurs) → bouton est **en cours de câblage** : les DSL Expr, Policy, Operation, Control et Action sont déjà épinglés (S08–S11) ; l'entité-source, les émetteurs et les projections web/DB/API arrivent au fil du cliquet (S34–S38, **à venir**).</Note>
+
+<Card title="Couches et verticale" icon="diagram-next" href="/concepts/layers-and-vertical">
+  Le méta-modèle `Layer`, Source vs Projection, et la descente jusqu'au bouton.
+</Card>
+
+---
+
+## 6. La vague de rouge, puis la phase stable
+
+Quand une vérité change, son hash change : **tous ses consommateurs virent au rouge**
+le long des liens — c'est la **vague de rouge** (RedWave), une worklist auto-générée.
+Quand tout est revenu au vert, AIDOS enregistre une **phase stable** : une coupe
+cohérente du graphe.
+
+```mermaid
+flowchart LR
+    T["Vérité modifiée<br/>(hash change)"] -->|propage| A["Consommateur A<br/><b>ROUGE</b>"]
+    T -->|propage| B["Consommateur B<br/><b>ROUGE</b>"]
+    A -->|propage| C["Consommateur C<br/><b>ROUGE</b>"]
+
+    A -.->|réconcilié| Av["A vert"]
+    B -.->|réconcilié| Bv["B vert"]
+    C -.->|réconcilié| Cv["C vert"]
+
+    Av --> CUT["✂ Phase stable<br/>coupe cohérente<br/>(no red · no monster)"]
+    Bv --> CUT
+    Cv --> CUT
+
+    classDef red fill:#b91c1c,stroke:#991b1b,color:#fff;
+    classDef green fill:#15803d,stroke:#166534,color:#fff;
+    classDef src fill:#1e3a8a,stroke:#1e40af,color:#fff;
+    class A,B,C red;
+    class Av,Bv,Cv,CUT green;
+    class T src;
+```
+
+<Note>À venir (S22 · S23) : la propagation de la vague de rouge (PostKernelChange + RedWorkQueue) et l'enregistrement d'une phase stable (`aidos stable`) sont des capacités à venir. La méthode, elle, est posée d'emblée.</Note>
+
+<Card title="Comportement et versioning" icon="code-branch" href="/concepts/behavior-and-versioning">
+  Le comportement comme espace contraint, les six liens, la vague de rouge, la phase stable.
+</Card>
+
+---
+
+## 7. Les quatre boucles vivantes autour du checkout
+
+Le Kernel est le **point fixe** ; quatre boucles l'orbitent, de la plus rapide à la
+plus lente. **Chacune a une fitness qu'elle ne peut pas éditer** — c'est ce qui rend
+l'auto-évolution *ancrée* plutôt que circulaire.
+
+```mermaid
+flowchart TB
+    K(("Kernel<br/>point fixe"))
+
+    L1["① Interne · minutes<br/>code ← noyau (déduction)<br/>fitness : le miroir red→green<br/>geste : /goal"]
+    L2["② Moyenne · heures<br/>variantes ← fitness (évolution)<br/>fitness : computational + out-of-sample<br/>geste : /evolve"]
+    L3["③ Externe · jours<br/>noyau ← réalité (induction)<br/>fitness : la production / les incidents<br/>geste : telemetry"]
+    L4["④ Méta · semaines<br/>harnais ← harnais (ADAS)<br/>fitness : injection de faute<br/>geste : self-test"]
+
+    K --- L1
+    K --- L2
+    K --- L3
+    K --- L4
+
+    classDef fix fill:#1e3a8a,stroke:#1e40af,color:#fff,font-weight:bold;
+    classDef loop fill:#0f766e,stroke:#115e59,color:#fff;
+    class K fix;
+    class L1,L2,L3,L4 loop;
+```
+
+<Note>À venir : la boucle ② (EvolutionSandbox · S42), la boucle ③ (RealityMirror · S43) et le self-test méta-méta (S39) sont des capacités à venir. La boucle ① (le `/goal` · S29, à venir) repose sur le mur (S04) et les capteurs (S07), déjà câblés. La règle d'or est gravée d'emblée : aucune boucle n'édite sa propre fitness.</Note>
+
+<Card title="Le système vivant" icon="infinity" href="/concepts/living-system">
+  Les quatre boucles, le miroir comme ancre de fitness, l'archive qui apprend.
+</Card>
+
+---
+
+## 8. Le mur — la ligne de flottaison de la propriété
+
+Le **mur** est la frontière unique d'AIDOS : au-dessus, ce que l'**humain possède**
+(la vérité, qu'il écrit lui-même) ; en dessous, ce que l'**IA écrit** (le code, librement,
+mais jamais la vérité). Pour changer une vérité, il faut passer par la **porte officielle**
+— jamais en passant.
+
+```mermaid
+flowchart TB
+    subgraph ABOVE["AU-DESSUS — l'humain possède la vérité"]
+        direction LR
+        A1["Kernel<br/>(intention)"]
+        A2["Mirror<br/>(preuve)"]
+        A3["fitness<br/>(définit « passé »)"]
+    end
+
+    WALL{{"🧱  LE MUR  🧱<br/>l'IA n'écrit JAMAIS au-dessus<br/>(hook PreToolUse + GRANTs Postgres)"}}
+
+    subgraph BELOW["EN DESSOUS — l'IA écrit le code"]
+        direction LR
+        B1["projections<br/>(Go · DDL · TS)"]
+        B2["adaptateurs"]
+        B3["composants UI"]
+    end
+
+    DOOR["🚪 La seule porte :<br/>idée → miroir → /goal → approbation humaine"]
+
+    ABOVE --- WALL --- BELOW
+    BELOW -.->|veut changer une vérité ?| DOOR
+    DOOR -.->|ChangeSet approuvé| ABOVE
+
+    classDef above fill:#1e3a8a,stroke:#1e40af,color:#fff;
+    classDef below fill:#0f766e,stroke:#115e59,color:#fff;
+    classDef wall fill:#b91c1c,stroke:#991b1b,color:#fff,font-weight:bold;
+    classDef door fill:#2563eb,stroke:#1d4ed8,color:#fff;
+    class A1,A2,A3 above;
+    class B1,B2,B3 below;
+    class WALL wall;
+    class DOOR door;
+```
+
+<Card title="Le mur et le cliquet" icon="block-brick" href="/internals/the-wall-and-ratchet">
+  La même frontière que la ligne de flottaison, vue du dedans : le hook PreToolUse, les
+  GRANTs Postgres, le cliquet, la complétude.
+</Card>
+
+---
+
+## Tout relier
+
+Les huit schémas racontent la même histoire à des altitudes différentes. Pour suivre
+un fil d'un bout à l'autre :
+
+<Steps>
+  <Step title="Comprendre le produit et la méthode">
+    Commencez par [ce qu'est AIDOS](/concepts/what-is-aidos) et la [méthode KRD](/concepts/krd-method),
+    puis le [glossaire](/concepts/glossary) pour le vocabulaire.
+  </Step>
+  <Step title="Voir comment la vérité tient">
+    [Kernel et Mirror](/concepts/kernel-mirror) (le bicéphale), les
+    [couches de preuve](/concepts/proof-levels) (le V), et
+    [comportement et versioning](/concepts/behavior-and-versioning) (la vague de rouge).
+  </Step>
+  <Step title="Suivre une modification de bout en bout">
+    Le [goal et le workflow](/concepts/goal-and-workflow), la
+    [verticale jusqu'au bouton](/concepts/layers-and-vertical), et le
+    [système vivant](/concepts/living-system).
+  </Step>
+</Steps>
+
+<Columns cols={2}>
+  <Card title="Commencer à développer votre app" icon="rocket" href="/guide/getting-started">
+    Les premiers pas concrets : ouvrir le Workbench et poser votre première intention.
+  </Card>
+  <Card title="Comment l'OS est bâti" icon="wrench" href="/internals/overview">
+    Le détail d'implémentation : le dépôt construit dent par dent, et chaque étape en trois couches.
+  </Card>
+</Columns>
