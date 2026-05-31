@@ -107,7 +107,9 @@
               "steps/concept/s20-changeset",
               "steps/internals/s20-changeset",
               "steps/concept/s21-semantic-diff",
-              "steps/internals/s21-semantic-diff"
+              "steps/internals/s21-semantic-diff",
+              "steps/concept/s22-red-wave",
+              "steps/internals/s22-red-wave"
             ]
           }
         ]

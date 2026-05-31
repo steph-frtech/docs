@@ -1,0 +1,52 @@
+---
+title: "S22 · La vague de rouge — l'ensemble exact des liens périmés après un bump"
+description: "Après un bump de noyau, la vague de rouge (red wave) EST exactement l'ensemble des liens périmés — calculée, jamais traquée (KRD §42). Elle PART du miroir de la source bumpée, puis cascade vers les projections (api/db/types/operation/action/button), dans cet ordre (mirror-first, §42/§98). Un changement d'entité rougit api/db/types ; un changement de bouton rougit sa vue SSI le bouton est load-bearing (un changement cosmétique ne propage pas). La vague se déverse dans la RedWorkQueue (un RedWorkItem par lien périmé, status open). aidos impact la prévisualise en lecture seule (= krd impact, §82.1). S22 fige le calcul de la vague et son enfilement ; le scheduler qui réclame/leasé/résout les items est une dent ultérieure."
+keywords: ["aidos", "krd", "vague de rouge", "red wave", "impact", "aidos impact", "RedWorkQueue", "RedWorkItem", "version_stale", "failed_test", "incident", "open", "claimed", "blocked", "resolved", "mirror-first", "load-bearing", "cosmetic", "lien périmé", "stale link", "Resolve", "PostKernelChange", "stigmergie", "le mur", "lecture seule", "KRD §42", "KRD §49.4", "KRD §74", "KRD §82.1", "KRD §98", "KRD §112"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S22](/steps/internals/s22-red-wave).</Note>
+
+## En une phrase
+
+S22 fige la **vague de rouge** (*red wave*, KRD §42) : après un **bump de noyau** (une source change de version), AIDOS **calcule** l'ensemble exact des **liens périmés** que ce bump entraîne — partant du **miroir** de la source, puis cascadant vers ses **projections** (api/db/types/operation/action/button) — et déverse cette vague dans la **RedWorkQueue**, la liste de travail qui dit « voici ce qui doit redevenir vert ».
+
+## Le problème que ça résout
+
+Quand vous changez une vérité, qu'est-ce qui devient faux ? Sans réponse **calculée**, on **traque** à la main : on grep, on devine, on oublie une projection — et une régression passe en silence. KRD §42 répond : la vague de rouge **EST exactement l'ensemble des liens périmés** — ni plus (pas de projection rougie sans raison), ni moins (pas un seul lien périmé oublié). Elle est **calculée, jamais traquée**.
+
+## Les idées-clés
+
+<Field name="La vague EST l'ensemble des liens périmés (§42)" type="rien de plus, rien de moins">
+  Un lien (S17) pinné à une version qui n'est plus la tête est **périmé** ; la vague est exactement l'ensemble de ces liens après le bump. La staleness de chaque arête est décidée par le `Resolve` de S17 — réutilisé, jamais réinventé. Pas d'item sans lien périmé ; pas de lien périmé sans item.
+</Field>
+
+<Field name="Elle part du miroir, puis cascade (mirror-first, §42/§98)" type="l'ordre est le contrat">
+  Le bump rougit d'abord le **miroir** de la source (sa réflexion `mirrors`), puis ses **projections** (api/db/types), puis les couches operation/action/button. Cet ordre — le miroir avant les projections — fait partie du contrat : on rétablit la **preuve** avant le **code projeté**.
+</Field>
+
+<Field name="Load-bearing vs cosmetic (§112)" type="le bouton rougit sa vue ssi…">
+  Un changement d'**entité** rougit api/db/types. Un changement de **bouton** rougit sa **vue** SSI le bouton est **load-bearing** — si le rendu de la vue dépend vraiment du bouton. Un changement **cosmétique** ne propage pas : la vue reste verte. « Load-bearing » est le **poids composes déclaré** (S18/S19), pas une nature inventée ici.
+</Field>
+
+<Field name="Un RedWorkItem (§49.4)" type="cible + raison + statut">
+  Chaque élément de la vague vise une **cible** (un `mirror_id` ou une projection), porte une **raison** ∈ `{version_stale, failed_test, incident}` et un **statut** ∈ `{open, claimed, blocked, resolved}`. S22 ne produit que `version_stale` + `open` : il **calcule** et **enfile** ; réclamer/leasé/résoudre est le **scheduler**, une dent ultérieure.
+</Field>
+
+<Field name="aidos impact (= krd impact, §82.1)" type="prévisualiser en lecture seule">
+  `aidos impact <id>` calcule la vague qu'un bump déclencherait et l'imprime en langage humain — **sans rien écrire, sans rien enfiler**. C'est la même fonction pure que le hook PostKernelChange et que l'écran /red-wave exécutent, donc le CLI, le hook et l'écran s'accordent.
+</Field>
+
+<Field name="Le hook PostKernelChange (stigmergie, §74/§98)" type="rehash && fire-red-wave --from-mirror">
+  À chaque changement de hash de noyau, le hook **harness-invoqué** re-dérive la tête, calcule la vague depuis le miroir, et **enfile** les items dans `red_work_queue` (status `open`). C'est la **stigmergie** : le bump laisse une trace de travail rouge que la suite vient résorber.
+</Field>
+
+## Ce que S22 ne fait pas (dents ultérieures)
+
+- **Pas de scheduler** : réclamer/leasé/dispatcher les items, éviter les collisions multi-agents (§49.4) est une dent ultérieure. S22 ne produit que `open`.
+- **Pas de régénération** : rendre les projections vertes est la boucle interne PostToolUse (§98), pas cette étape.
+- **Pas de gate de phase stable** (§43) : « tous les liens résolvent + tous les capteurs verts » est une dent ultérieure.
+- **Pas de MCP red-wave** : exposer la vague comme outil appelable est une dent ultérieure (OpenQuestion).
+
+## Le mur
+
+`aidos impact` et l'écran /red-wave sont en **lecture seule** : ils **calculent** et **projettent** la vague, ils n'écrivent aucune vérité. L'unique écriture est l'`INSERT` du hook PostKernelChange dans `runtime.red_work_queue` — une **liste de travail Runtime sous la ligne de flottaison**, pas une vérité (kernel/mirrors/fitness restent hors d'atteinte de l'agent).
