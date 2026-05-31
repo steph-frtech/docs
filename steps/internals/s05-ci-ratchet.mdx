@@ -1,0 +1,65 @@
+---
+title: "S05 · Le cliquet CI — implémentation"
+description: "Le détail technique du cliquet : le cœur de régression (fonction pure totale qui compare base vs candidat), le mirror-runner (rejeu de tous les miroirs matérialisés + enregistrement append-only dans mirror_runs), le hook ci-ratchet (BlockReason RED_REGRESSION, fail-closed), la migration mirror_runs (append-only, content-addressed, aucun GRANT UPDATE/DELETE à l'agent), les mirrors (Godog + property rapid + fixture + fault-injection), la route Workbench /mirrors, et la place dans le cliquet KRD."
+keywords: ["aidos", "krd", "implémentation", "cliquet", "ratchet", "ci", "mirror-runner", "ci-ratchet", "go", "mcp", "postgres", "append-only", "content-addressed", "rapid", "godog", "blockreason", "RED_REGRESSION", "testcontainers"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S05](/steps/concept/s05-ci-ratchet).</Info>
+
+S05 rend **le cliquet** mécanique : un `mirror-runner` (MCP) rejoue **chaque** miroir matérialisé, enregistre chaque exécution en **append-only** dans `mirror_runs`, et un hook `ci-ratchet` refuse la fusion (`BlockReason RED_REGRESSION`) dès qu'un miroir **vert à la base** devient **rouge** sur le candidat. La décision de régression est une **fonction pure** ; le runner est l'enveloppe I/O.
+
+## Implémentation
+
+### Le cœur de régression — fonction pure totale (`back/mcp/mirror-runner/regression.go`)
+
+Le cœur du cliquet n'est pas l'exécution des miroirs (de l'I/O), c'est la **comparaison** base vs candidat — déterministe, pure, totale. Determinism-first (CLAUDE.md §6) : cette décision **doit** être du code, jamais un agent.
+
+| Élément | Comportement |
+|---|---|
+| `Status` | exactement deux valeurs : `green` / `red` |
+| `MirrorVerdict{MirrorID, Version, ContentHash, Status}` | un verdict de miroir, à la base ou sur le candidat |
+| `Regressed(baseline, candidate) []Regression` | l'ensemble **régressé** : tout miroir `green` à la base et `red` sur le candidat ; trié par `MirrorID` (déterministe) |
+| `Verdict(regressed) (verdict, *BlockReason)` | `ALLOWED` si l'ensemble régressé est vide, sinon `REJECTED` + un `BlockReason{Code: RED_REGRESSION}` nommant les miroirs régressés |
+
+Un miroir rouge déjà rouge à la base **n'est pas** une régression ; un miroir nouvellement vert non plus. Seul le passage vert→rouge bloque. Le tri rend la sortie reproductible — le miroir de reproductibilité (property) le prouve : même entrée → même sortie.
+
+### Le mirror-runner — rejeu + enregistrement (`back/mcp/mirror-runner/`)
+
+L'enveloppe I/O autour du cœur pur. Il lit l'ensemble des miroirs **vivants** du schéma `mirrors` (lecture seule — le mur tient), exécute chacun via son runner (dispatch par `test_kind`), et écrit **uniquement** dans son propre journal `mirror_runs`.
+
+| Tool MCP | Op | Direction |
+|---|---|---|
+| `mirror_replay` | rejouer tous les miroirs vivants ; renvoyer verdicts + résumé | lit la vérité, exécute le runner, écrit `mirror_runs` |
+| `ratchet_check` | rejouer + comparer à la base ; renvoyer l'ensemble régressé + le verdict de fusion | lit la vérité, écrit `mirror_runs` |
+
+### La migration `mirror_runs` (`back/migrations/mirror_runs_baseline.sql`)
+
+Une table **append-only, adressée par contenu** : une ligne immuable par exécution — `(run_id, mirror_id, mirror_version, content_hash, status, baseline_status, regressed, ran_at, ref)`. Un re-run **ajoute** une ligne, n'en modifie jamais une. Le rôle `aidos_agent` reçoit `SELECT` + `INSERT` (le runner journalise) mais **jamais** `UPDATE`/`DELETE`/`TRUNCATE` — l'intégrité de l'historique du cliquet est garantie en base, pas seulement en code. La table vit dans un schéma `runtime` **sous** la ligne de flottaison (c'est un journal de runtime, pas de la vérité), donc l'agent peut y écrire son log sans violer le mur.
+
+### Le hook `ci-ratchet` (`back/hooks/ci-ratchet/`)
+
+La règle non contournable : un *gate* pré-fusion. Il lit sur stdin l'ensemble base + candidat, appelle le cœur de régression, et retourne un code de sortie (0 = ALLOWED, 2 = REJECTED). Sur un ensemble régressé non vide il émet le `BlockReason RED_REGRESSION`. **Fail-closed** : un événement illisible est traité comme un rejet. Son **fault-injection test** rougit délibérément un miroir vert et vérifie que le hook passe au rouge — un détecteur muet est mort (CLAUDE.md §5 hook-honesty).
+
+### La route Workbench `/mirrors`
+
+Server Component, tokens ADR 0010, bilingue ADR 0011. Inventaire des miroirs avec dernier verdict, ensemble régressé surligné, verdict de fusion. **Action-capable** : un contrôle relance le rejeu et recalcule le verdict (la capacité du runner est joignable et exécutable depuis l'écran — pas de capacité headless). Tutoriel + exemple : l'écran est auto-pédagogique.
+
+## Méta
+
+**Pourquoi un cœur pur séparé du runner ?** Parce que la décision du cliquet — « y a-t-il une régression ? » — est exactement le genre de fonction que le mandat *determinism-first* exige en code : un calcul total, reproductible, sans I/O ni jugement. L'exécution des miroirs est de l'I/O (elle lance Godog, rapid, l'interpréteur de fixtures) ; mais *comparer* deux ensembles de verdicts pour produire un verdict de fusion est une fonction pure de ses entrées. On isole donc le jugement (pur, prouvé par un property test) de l'effet (le rejeu, I/O). Le cliquet n'est jamais « un agent qui regarde si ça a régressé » — c'est un diff d'ensembles de verdicts.
+
+**Pourquoi append-only et content-addressed ?** Parce que `mirror_runs` est un **journal de cliquet**, et un cliquet dont on peut réécrire l'historique n'est plus un cliquet. Une ligne par exécution, jamais modifiée ; le `content_hash` lie le verdict au contenu exact du miroir exécuté, si bien qu'on ne peut pas faire passer un verdict pour celui d'un autre miroir. Le re-run ajoute, ne remplace pas — comme le content-store de S01.
+
+**Pourquoi le hook ET le runner ?** Le runner est la *capacité* (rejouer, comparer) ; le hook est la *règle* (refuser la fusion). Séparer les deux suit la table §5 : une capacité est un MCP, une règle non contournable est un hook. Le hook appelle le cœur de régression, pas l'inverse — la règle dépend du jugement pur, jamais de l'effet.
+
+## Méta-méta
+
+**Le cliquet est l'incarnation de la loi anti-Goodhart.** « Done » n'est pas déclaré : c'est `red→green ∧ vert antérieur intact ∧ score de mutation ≥ seuil ∧ pas de monstre`. Le « vert antérieur intact » de cette formule, c'est *exactement* ce que S05 mécanise. Sans cliquet, l'agent pourrait faire passer son nouveau test au vert en cassant un ancien — et se déclarer fini. Le cliquet rend cette triche impossible : la régression est calculée par un juge déterministe (le cœur de régression + le rejeu réel), hors de portée de l'agent.
+
+**Le juge est déterministe, et hors d'atteinte.** Le runner *lit* les miroirs (le mur lui interdit de les écrire) et *écrit seulement* son journal. Il ne peut pas maquiller un verdict : le verdict vient de l'exécution réelle du miroir, pas d'un jugement. C'est la généralisation de « le juge est déterministe » (CLAUDE.md §8) au niveau du processus de fusion : ce qui décide d'un merge, ce n'est pas le diff textuel, c'est le rejeu des miroirs (préfigure le merge sémantique de S25).
+
+**Cette étape ne crée aucune vérité.** S05 prouve un ensemble de miroirs **existant** ; il n'ajoute pas d'invariant qu'il satisferait ensuite (la circularité interdite). Il ajoute un *cran* au cliquet — un garde-fou — et un garde-fou ne fait qu'**ajouter** (meta-loop, §5), jamais retirer.
+
+## Place dans le cliquet KRD
+
+S05 consomme S02 (les enregistrements KRDCore — le schéma `mirrors` et la forme d'un miroir) et S03 (le CLI déterministe). Il prépare S06 (le miroir comme preuve typée vivante : `reflects`/`test_kind`/`cert_language`/`liveness`), S07 (les sensors PostToolUse), S12 (la loi de complétude + le Stop hook), et S20 (le ChangeSet qui rejoue les miroirs à l'application). Le `mirror_runs` journal devient la source que le Stop hook et `aidos stable` (S23) interrogent pour gater une phase.

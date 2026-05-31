@@ -1,0 +1,56 @@
+---
+title: "S05 · Le cliquet CI — rejouer tous les miroirs, refuser les régressions"
+description: "Le cliquet d'AIDOS rendu mécanique : un mirror-runner rejoue chaque miroir matérialisé, enregistre chaque exécution en append-only, et un hook ci-ratchet refuse la fusion à l'instant où une étape fait passer au rouge un miroir qui était vert. La régression est attrapée avant la fusion, jamais après."
+keywords: ["aidos", "krd", "cliquet", "ratchet", "ci", "mirror-runner", "rejouer", "replay", "régression", "red regression", "miroir matérialisé", "baseline", "verdict de fusion", "RED_REGRESSION", "append-only"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S05](/steps/internals/s05-ci-ratchet).</Note>
+
+## En une phrase
+
+S05 rend **le cliquet** mécanique : on **rejoue tous les miroirs** matérialisés, on compare chaque résultat à la **ligne de base verte** enregistrée, et on **refuse la fusion** dès qu'une étape fait passer au **rouge** un miroir qui était **vert**. Le cliquet n'avance que d'un cran ; il ne recule jamais.
+
+## Le problème que ça résout
+
+Le mur (S04) empêche l'agent d'écrire la vérité. Mais il ne dit rien de la **régression silencieuse** : une étape parfaitement légitime, qui n'écrit aucune vérité, peut quand même **casser** un comportement déjà prouvé — un miroir vert devient rouge sans que personne ne le voie, et la dette s'installe.
+
+Le cliquet (en anglais *ratchet* : une roue à rochet qui ne tourne que dans un sens) est la loi KRD qui l'interdit : **ce qui est vert le reste**. S05 transforme cette loi en barrière CI — la régression est attrapée **avant la fusion**, pas découverte trois semaines plus tard en production. C'est l'itération 3 du Tome, rendue automatique.
+
+## Les idées-clés
+
+<Field name="rejouer (replay)">
+  Exécuter **chaque** miroir matérialisé contre le cut courant, et collecter pour chacun un verdict **vert** ou **rouge**. On ne rejoue pas un échantillon : on rejoue tout l'ensemble vivant.
+</Field>
+
+<Field name="miroir matérialisé (materialized mirror)">
+  Un enregistrement de miroir (du schéma `mirrors`) écrit sur disque sous la forme que son runner attend (Gherkin pour Godog, propriété pour rapid, fixture pour l'interpréteur). Le disque est dérivé ; la base fait foi.
+</Field>
+
+<Field name="ligne de base verte (baseline-green)">
+  Le statut **vert** d'un miroir tel qu'enregistré au **point de fusion** (la base). C'est la référence : un miroir vert à la base est un comportement qu'on a promis de ne pas casser.
+</Field>
+
+<Field name="régressé (regressed)">
+  Un miroir **vert à la base** et **rouge maintenant**. C'est exactement ce que le cliquet interdit. Un miroir rouge qui était déjà rouge n'est pas une régression ; un miroir nouvellement vert non plus.
+</Field>
+
+<Field name="RED_REGRESSION">
+  Le `BlockReason` que le hook `ci-ratchet` renvoie quand l'ensemble régressé n'est pas vide. Code actionnable : il nomme les miroirs régressés et la marche à suivre (réparer le comportement, ou ouvrir un `/goal` si le changement est intentionnel).
+</Field>
+
+<Field name="verdict de fusion (merge verdict)">
+  La décision finale du cliquet pour un candidat : **ALLOWED** (aucun miroir régressé) ou **REJECTED — RED_REGRESSION** (au moins un). Une fonction pure de l'ensemble base + l'ensemble candidat.
+</Field>
+
+## Ce que ça vous permet de faire
+
+- **Fusionner en confiance** : le cliquet garantit qu'un merge ne peut pas casser un comportement déjà prouvé — la régression est refusée à la porte.
+- **Voir l'état des miroirs** dans le Workbench, route `/mirrors` : l'inventaire complet, le dernier verdict par miroir, l'ensemble régressé surligné, et le verdict de fusion du candidat.
+- **Relancer le cliquet** depuis l'écran : un bouton déclenche le rejeu de tout l'ensemble et recalcule le verdict — *tout par écran*.
+- **Garder une trace immuable** : chaque exécution est enregistrée en **append-only** dans `mirror_runs` (jamais modifiée en place), adressée par contenu — l'historique du cliquet est intègre.
+
+Le cliquet, c'est ce qui fait qu'AIDOS **n'oublie jamais une victoire** : un comportement prouvé une fois est protégé pour toujours, et la moindre régression bloque la fusion avec une raison actionnable.
+
+<Card title="Pour aller plus loin — l'implémentation" icon="wrench" href="/steps/internals/s05-ci-ratchet">
+  Le cœur de régression (fonction pure), le mirror-runner (rejeu + enregistrement append-only), le hook ci-ratchet (RED_REGRESSION), et les mirrors (Godog + property + fixture + fault-injection).
+</Card>
