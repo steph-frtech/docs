@@ -1,0 +1,47 @@
+---
+title: "S15 · Scope des vérités — aucune vérité n'est universelle par défaut"
+description: "Une vérité tient quelque part, à un moment, pour quelqu'un. S15 donne à chaque vérité un TruthScope (region/tenant/target/time_window/user_segment/environment) et pose la règle : une vérité active sans scope est rejetée — la seule universalité est le global EXPLICITE (region « * »). Une décision réutilisée hors scope est une hallucination structurelle (KRD §13.7)."
+keywords: ["aidos", "krd", "TruthScope", "scope", "region", "tenant", "target", "time_window", "user_segment", "environment", "global explicite", "vérité universelle", "hallucination structurelle", "qualifieur de vérité", "TruthLifecycle", "active", "IsGlobal", "active-truth-without-scope", "kernel", "FR", "EU", "US", "web", "mobile", "voice", "xr", "iot", "premium", "standard", "guest", "prod", "staging", "dev"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S15](/steps/internals/s15-truth-scope).</Note>
+
+## En une phrase
+
+S15 donne à **chaque vérité** un **scope** — le `TruthScope` : *où* (region, tenant, target, environment), *quand* (time_window) et *pour qui* (user_segment) elle tient — et pose la règle **« aucune vérité n'est universelle par défaut »** : une vérité **active** sans scope est **rejetée**, et la **seule** façon d'être universelle est de le dire explicitement (region `*`). *Une vérité sans scope est suspecte ; une décision réutilisée hors scope est une hallucination structurelle* (KRD §13.7).
+
+## Le problème que ça résout
+
+Une règle de TVA vaut **dans une région**. Une exception **expire**. Une UX peut valoir sur **mobile** mais pas sur **Voice**. Une politique peut ne concerner que les clients **premium**. Sans scope, KRD risque la pire erreur d'un système auto-améliorant : **réutiliser une vérité hors de son domaine de validité** — appliquer la TVA française aux États-Unis, garder une promo expirée, étendre une règle premium à tous. C'est l'**hallucination structurelle** : non pas un bug de code, mais une vérité prise pour plus large qu'elle ne l'est.
+
+KRD §13.7 pose la loi : **« Une vérité sans scope est suspecte. Une décision réutilisée hors scope est une hallucination structurelle. »** S15 mécanise la **forme typée** du scope et la **garde** qui refuse une vérité active scope-less.
+
+## Les idées-clés
+
+<Field name="le TruthScope (le OÙ / QUAND / POUR-QUI d'une vérité)">
+  Six dimensions, exactement (KRD §13.7) : **region** (`FR | EU | US | *`), **tenant**, **target** (`web | mobile | voice | xr | iot`), **time_window** (`from`/`to`), **user_segment** (`premium | standard | guest`), **environment** (`prod | staging | dev`). Le `TruthScope` est **l'un des quatre qualifieurs** d'une vérité (KRD §13.6 : `TruthKind` / `TruthScope` / `VerifiabilityLevel` / `AuthorityGraph`) — il **qualifie** une vérité, il **n'est pas** une vérité lui-même.
+</Field>
+
+<Field name="la règle (aucune vérité n'est universelle par défaut)">
+  Une vérité **active** (au sens du `TruthLifecycle`, KRD §44.2) doit **déclarer** son scope. Une vérité active dont le scope est **absent / vide** est **rejetée** avec le code `active-truth-without-scope`. C'est l'inverse du réflexe habituel : par défaut, une vérité n'est **pas** universelle ; elle ne l'est que si on le dit.
+</Field>
+
+<Field name="le global EXPLICITE (la seule universalité, region « * »)">
+  La **seule** échappatoire est de déclarer le scope **explicitement global** : `region == "*"`. C'est un choix **délibéré**, jamais l'implicite. Le prédicat `IsGlobal(scope)` est **exactement** `region == "*"` — un scope vide ou absent n'est **jamais** global. On ne devient universel qu'en le disant.
+</Field>
+
+<Field name="la règle ne lie que les vérités ACTIVES">
+  Une **idée** (pas encore figée), une vérité **deprecated**, **shadowed** ou **removed** **peut** être scope-less : la garde ne la rejette pas. Le scope est exigé seulement quand la vérité est **vivante pour le produit** (`active`). Une idée peut exister sans scope **avant** sa promotion ; c'est la garde, et non une contrainte `NOT NULL`, qui exige le scope à l'activation.
+</Field>
+
+<Field name="hors scope ici (les dents suivantes)">
+  S15 livre **la forme typée** + **la garde pure** + **son miroir** + **l'écran**. Il **ne** branche **pas** encore le scope dans l'évaluation des Policy/Operation, ni dans le ContextRouter (le recouvrement de scope qui décidera si une décision est réutilisable), ni dans le `DataTruthScope` (§44.3, l'inertie des données). « Une décision réutilisée hors scope est une hallucination structurelle » devient *exécutable* à ces étapes ultérieures ; ici on pose le socle.
+</Field>
+
+## Ce que ça donne à l'écran
+
+L'écran **/scopes** du Workbench rend, **en lecture seule**, une **table de scope** : une ligne par vérité candidate, avec ses **puces de dimension** (`region`, `target`, `user_segment`, `environment`, `time_window`, `tenant`), son statut de cycle de vie, et un **badge de verdict** calculé par la garde pure — vert **ACCEPTED** (une vérité active scopée, ou une vérité non-active exemptée), bleu **GLOBAL (explicit)** quand `region == "*"`, rouge **REJECTED — active truth without a scope** (avec le code `active-truth-without-scope`). Le verdict est **calculé**, jamais déclaré.
+
+## La frontière honnête
+
+S15 ajoute **une colonne nullable** `scope jsonb` à l'enregistrement Truth — **additive, expand-only** : le scope **réside dans** le corps content-addressed, donc `id == version == Hash(Canonicalize(body))` tient toujours, et **changer** le scope produit **une nouvelle version** (un `SemanticDiff` de type `rescope`, KRD §44.1), jamais une mutation en place. La colonne naît **nullable** (une idée peut être scope-less avant promotion) — l'exigence du scope sur une vérité active est portée par la **garde pure**, pas par un `NOT NULL`. La garde est **pure** et **lecture seule** : elle lit une vérité, rend un verdict, **n'écrit aucune vérité** (le mur). Les dimensions et leurs valeurs sont **verbatim** de KRD §13.7 — aucune dimension, valeur d'énumération ni sentinelle globale inventée.

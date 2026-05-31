@@ -1,0 +1,52 @@
+---
+title: "S15 · Scope des vérités — implémentation"
+description: "Le détail technique du TruthScope : le paquet pur back/kernel/scope (les énumérations region/target/user_segment/environment verbatim §13.7, le prédicat nommé IsGlobal == region « * », la garde pure Validate), la migration Atlas additive (colonne nullable scope jsonb dans le corps content-addressed), le miroir de propriété rapid (la règle porteuse + le tie-in content-addressed), le miroir de reproductibilité front fast-check, la route Workbench /scopes, et la place dans le noyau KRD §13.6–13.7 / §44.1–44.2."
+keywords: ["aidos", "krd", "implémentation", "TruthScope", "scope", "go", "Validate", "IsGlobal", "IsEmpty", "Region", "Target", "UserSegment", "Environment", "TimeWindow", "RegionGlobal", "Atlas", "migration", "scope jsonb", "nullable", "expand-only", "content-addressed", "rapid", "fast-check", "Testcontainers", "déterminisme", "ligne de flottaison", "rescope", "active-truth-without-scope", "TruthLifecycle"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S15](/steps/concept/s15-truth-scope).</Info>
+
+S15 livre **le scope du vrai** (KRD §13.7) : un **value object typé** `TruthScope`, un prédicat nommé `IsGlobal`, et une **garde pure** `Validate` qui rejette une vérité **active** scope-less (sauf global explicite), plus la colonne de persistance qui porte le scope. C'est une couche **sous la ligne de flottaison** (computationnelle) : la **règle** « aucune vérité n'est universelle par défaut » est celle de l'humain (KRD §13.7), ce step ne fait que l'**appliquer**. Aucune vérité écrite (le mur).
+
+## Implémentation
+
+<Note>La couche **Implémentation** est complétée au vert (CLAUDE.md §6) — code réel, fichiers. Les couches **Méta** et **Méta-méta** ci-dessous sont écrites dès le grill.</Note>
+
+- **`back/kernel/scope/scope.go`** — le cœur **pur** (aucune I/O, aucune horloge, aucun rng). Les énumérations sont **verbatim** de KRD §13.7 : `Region` (`FR | EU | US | *` — quatre membres, incl. le global explicite), `Target` (`web | mobile | voice | xr | iot`), `UserSegment` (`premium | standard | guest`), `Environment` (`prod | staging | dev`), plus `TimeWindow{From, To}` (bornes opaques — §13.7 laisse le type temporel à `...`) et `Tenant` (chaîne libre — §13.7 ne ferme pas son énumération). `IsGlobal(s) == (s.Region == RegionGlobal)` est le prédicat **nommé, délibéré** : un scope vide n'est **jamais** global. `IsEmpty(s)` teste l'absence **totale** de dimension. `Validate(r Record) error` est la garde : un statut **non-active** ⇒ `nil` (la règle ne lie que `active`, KRD §44.2) ; un scope **global explicite** ⇒ `nil` ; un scope **vide** sur une vérité active ⇒ `RejectedError{Code: "active-truth-without-scope"}` ; sinon `ValidateShape` (aucun champ hors énum). `SerializeTruthBody` rend un corps `kernel.truth` portant le scope, pour le tie-in content-addressed.
+- **`back/migrations/kernel_truth_scope_baseline.sql`** — la migration **Atlas additive, expand-only**. Elle `ADD COLUMN IF NOT EXISTS scope jsonb` sur `kernel.truth`, **nullable** : une idée non-active peut être scope-less ; l'exigence du scope sur une vérité active est portée par la **garde** `Validate`, **pas** par un `NOT NULL`. Le scope est une **copie projetée queryable** de `body->'scope'` pour l'écran SELECT-only, **pas** une seconde source de vérité — la source reste le corps content-addressed (`id == version == Hash`). **Aucun** `GRANT` ajouté : le rôle agent garde son SELECT-only, seul le rôle `aidos` écrit la vérité via un ChangeSet approuvé. Migration **autorisée** ici, **appliquée** par le rôle migration.
+- **`back/kernel/CONTEXT.md`** — l'entrée glossaire « TruthScope » (le qualifieur où/quand/pour-qui, au-dessus de la ligne de flottaison) couvre déjà le terme ; aucune dérive à ce step.
+
+## Méta
+
+Le comportement de S15 est prouvé par **deux miroirs** (chacun de la bonne nature), tous rouges avant le code (le rouge **est** le `/goal`). **Aucun parcours Gherkin** n'est ajouté : la nature de la règle de scope est l'**invariant ∀**, pas un parcours — forcer un miroir d'acceptation ici serait un **monstre double-typé** (CLAUDE.md §3).
+
+<Steps>
+  <Step title="Propriété rapid (l'invariant ∀, N1 — le miroir canonique)">
+    `back/kernel/scope/scope_property_test.go` — `reflects=kernel.scope`, `test_kind=property`, `cert_language=rapid`, `authority=above`. C'est le **vrai** rouge de KRD §13.7, pas un test inventé. Les invariants : (1) **la règle porteuse** — `∀ rec` actif ∧ scope absent/vide ∧ ¬`IsGlobal` ⇒ `Validate` rejette avec `active-truth-without-scope` (un `RejectedError`) ; (2) **global explicite** — `∀ rec` actif ∧ `IsGlobal` (region `*`) ⇒ `Validate` passe ; (3) **scope présent** — `∀ rec` actif ∧ scope non-vide ⇒ passe ; (4) **exemption non-active** — `∀ rec` non-active ⇒ passe ; (5) `IsGlobal(s)` ⇔ `region == "*"` (vide jamais global) ; (6) **validité de champ** §13.7 verbatim (region/target/segment/env) + **cardinalités exactes** (region 4, target 5, segment 3, env 3, statuts 4) ; (7) **tie-in content-addressed** — un corps portant un scope round-trip comme `id == version == Hash(Canonicalize(body))`, et **changer** le scope produit une **version différente** (une nouvelle ligne, jamais une mutation en place). Plus le déterminisme (`Validate` totale, jamais de panique).
+  </Step>
+  <Step title="Miroir de reproductibilité front (fast-check)">
+    `front/web/lib/scope.test.ts` — la projection `lib/scope.ts` calque le paquet Go (mêmes énumérations §13.7, même `isGlobal == region "*"`, même garde `verdict`). 7 tests fast-check pinnent les cardinalités exactes, la règle porteuse de rejet, le pass global explicite, le pass scope présent, l'exemption non-active, `isGlobal ⇔ "*"`, et le déterminisme. Une source, pas de dérive entre Go et TS.
+  </Step>
+</Steps>
+
+La persistance est prouvée bout-en-bout par **Testcontainers** (`back/kernel/scope/migration_roundtrip_test.go`) : sur un vrai Postgres avec la baseline S02 + la migration S15 appliquées, une ligne **sans** scope s'insère (nullable, expand-only — un row pré-existant lit `NULL`) ; un `TruthScope` sérialisé **round-trip** dans la colonne jsonb à l'identique ; et le rôle agent **peut** `SELECT` la colonne mais **ne peut pas** `INSERT` (le mur — la nouvelle colonne n'ouvre aucune porte d'écriture). Le `migrate lint` Atlas Pro n'est pas disponible — la convention AIDOS prouve les migrations via Testcontainers au `go test`.
+
+La route Workbench **`/scopes`** (`front/web/app/scopes/page.tsx` + `components/ScopesTable.tsx`, themée ADR 0010, bilingue ADR 0011) rend une **table de scope** : une ligne par vérité candidate, puces de dimension, statut, et **badge de verdict** calculé par la garde pure — vert **ACCEPTED**, bleu **GLOBAL (explicit)**, rouge **REJECTED — active truth without a scope** (avec le code). Lecture seule (ui-completeness CLAUDE.md §7) : elle **projette** le verdict, n'écrit aucune vérité — un `rescope` passerait par propose → ChangeSet → approbation. `tests/e2e/scopes.spec.ts` (5 scénarios, vert) prouve les trois badges + tutoriel + exemple.
+
+## Méta-méta
+
+<Field name="déterminisme-d'abord (la loi de §6/§8)">
+  `Validate`, `IsGlobal` et `IsEmpty` sont des **fonctions pures totales** — aucune horloge, aucun rng, aucune I/O — donc même Record ⇒ même verdict. Le statut « active » d'une vérité est **lu** dans le Record passé, jamais récupéré. Le scope n'est **jamais** jugé par un LLM : c'est une comparaison déterministe sur des énumérations déclarées, prouvée par les miroirs de reproductibilité (rapid + fast-check). Un agent qui « déciderait » du recouvrement de scope à la volée serait un **écart de déterminisme** ; ici c'est du code, et le code fait foi.
+</Field>
+
+<Field name="sous la ligne de flottaison (le mur tient)">
+  La garde **lit** une vérité et rend un verdict ; elle n'écrit **aucune** vérité. La migration est **additive expand-only** et **n'ajoute aucun GRANT** : le rôle agent garde SELECT-only sur `kernel.truth`. Tout `rescope` d'une vérité figée passera par un **ChangeSet** (`DRAFT → APPLIED`, gated complétude) portant un **SemanticDiff** de type `rescope` (KRD §44.1) — **jamais** une édition en place, **jamais** un retro-mutation des lignes existantes (CLAUDE.md §9). S02 (la forme du record Truth) et S04 (le mur) restent intacts.
+</Field>
+
+<Field name="l'honnêteté anti-invention (les énumérations closes, la sentinelle unique)">
+  Les régions (`FR | EU | US | *`), cibles (`web | mobile | voice | xr | iot`), segments (`premium | standard | guest`) et environnements (`prod | staging | dev`) sont **exactement** ceux de KRD §13.7 — aucune dimension, valeur ni **sentinelle globale** alternative inventée : le global est `*`, point. Le code de rejet `active-truth-without-scope` est **local à S15** : ce **n'est pas** un membre de l'énumération close `runtime/blockreason.Code` (figée à S13) — on n'invente jamais un membre là (CLAUDE.md §9). Les bornes de `time_window` et le `tenant` restent **ouverts** car §13.7 les laisse à `...` ; aucune sémantique de calendrier n'est inventée (c'est une dent temporelle ultérieure).
+</Field>
+
+<Field name="la place dans le noyau">
+  S15 mécanise KRD §13.7 (« aucune vérité n'est universelle par défaut ; une décision réutilisée hors scope est une hallucination structurelle ») — le second des quatre qualifieurs (§13.6), après le `TruthKind`/`VerifiabilityLevel` de S14. Il prépare la suite : brancher `Validate` dans la garde de complétude du writer `aidos` (bloquer une vérité active scope-less à l'écriture) ; nourrir le **recouvrement de scope** dans la décision de réutilisation du ContextRouter (là « hors scope = hallucination » devient exécutable) ; le `DataTruthScope` (§44.3) ; et le couplage à l'`AuthorityGraph` (§13.8, la dent suivante).
+</Field>

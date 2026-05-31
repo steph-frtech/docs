@@ -91,7 +91,9 @@
               "steps/concept/s13-blockreason",
               "steps/internals/s13-blockreason",
               "steps/concept/s14-truth-typing",
-              "steps/internals/s14-truth-typing"
+              "steps/internals/s14-truth-typing",
+              "steps/concept/s15-truth-scope",
+              "steps/internals/s15-truth-scope"
             ]
           }
         ]
