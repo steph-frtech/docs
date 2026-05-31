@@ -99,7 +99,9 @@
               "steps/concept/s17-links",
               "steps/internals/s17-links",
               "steps/concept/s18-composes-aggregate",
-              "steps/internals/s18-composes-aggregate"
+              "steps/internals/s18-composes-aggregate",
+              "steps/concept/s19-weighted-propagation",
+              "steps/internals/s19-weighted-propagation"
             ]
           }
         ]

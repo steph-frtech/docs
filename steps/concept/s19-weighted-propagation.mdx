@@ -1,0 +1,43 @@
+---
+title: "S19 · La propagation pondérée — un changement cosmétique ne rougit pas le parent ; un poids critique sans preuve est refusé"
+description: "La vague rouge le long de composes n'est pas une cascade aveugle : chaque lien porte un poids déclaré (cosmetic | load-bearing | critical), le parent porte un seuil d'activation déclaré, et l'agrégat ne se rouvre que si l'activation cumulée des enfants changés atteint le seuil. S19 fige la propagation pondérée et seuillée de KRD §112/§114 et ajoute le tier critical : un engagement above-the-line qui n'est admis que sur une weight evidence enregistrée (§2463). Les poids et seuils sont déclarés, jamais appris (§2465)."
+keywords: ["aidos", "krd", "propagation pondérée", "weighted propagation", "fire_parent", "activation", "seuil", "activation_threshold", "cosmetic", "load-bearing", "critical", "weight evidence", "preuve de poids", "incident", "BlockReason", "CRITICAL_WEIGHT_WITHOUT_EVIDENCE", "déclaré jamais appris", "épingle un défaut pas un changement", "KRD §112", "KRD §114", "KRD §2463", "ADR 0018"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S19](/steps/internals/s19-weighted-propagation).</Note>
+
+## En une phrase
+
+S19 rend la **vague rouge pondérée et seuillée** (KRD §112) : chaque lien `composes` porte un **poids déclaré** (`cosmetic | load-bearing | critical`), le parent porte un **`activation_threshold` déclaré**, et l'agrégat du parent ne **rougit** que si l'**activation cumulée** des enfants **changés** atteint le seuil — donc un changement **cosmétique** ne rougit **pas** le parent, tandis qu'un changement **porteur** le rougit. Le tier **`critical`** est le plus fort, et il est **refusé à l'admission** s'il ne porte pas de **weight evidence**.
+
+## Le problème que ça résout
+
+S18 a posé l'agrégat récursif : un enfant rouge rougit le parent. Mais **tous les changements d'un enfant ne devraient pas rougir le parent** (KRD §112). Renommer un libellé, ajuster une marge — un changement **cosmétique** — ne casse pas l'invariant émergent du tout. Sans pondération, chaque clignotement d'une feuille déclencherait une vague rouge inutile : le système crierait au loup. §112 répond : on **pèse** l'arête et on **seuille** le parent. *« Épingle un défaut, pas un changement. »*
+
+Réciproquement, certains liens sont si **porteurs** qu'on veut les marquer **critical** — le tier le plus fort. Mais relever un poids vers le haut est un **engagement** : KRD §2463 (le sens *backprop*, la boucle externe) dit qu'on ne re-pondère vers le haut **que sur une preuve enregistrée** — un incident de production — **jamais sur une intuition**. D'où la **weight evidence** : un lien `critical` sans référence de preuve est **refusé**.
+
+## Les idées-clés
+
+<Field name="le poids déclaré — cosmetic | load-bearing | critical">
+  Chaque arête `composes` porte un **poids** humain, au-dessus de la ligne. `cosmetic` (activation 0) ne porte pas l'invariant du tout ; `load-bearing` (activation 1) le porte ; `critical` (activation 2) est le **tier le plus fort**, introduit ici comme **extension déclarée** de la paire §112 (enregistrée dans l'ADR 0018, jamais inventée en passant).
+</Field>
+
+<Field name="le tir pondéré (fire_parent, §112)">
+  Quand des enfants **changent**, `activation ← Σ poids(enfants changés)`. Si `activation ≥ seuil_déclaré`, l'invariant émergent du parent se **rouvre** (ROUGE) ; sinon il reste **VERT**. Un changement confiné aux enfants **cosmétiques** donne une activation de 0 — sous tout seuil positif, le parent reste **VERT**.
+</Field>
+
+<Field name="la weight evidence — la discipline §2463">
+  Un poids `critical` est un **engagement above-the-line**. Il n'est **admis** que s'il porte une **weight evidence** : une référence de provenance enregistrée (ex. un id d'incident, `INC-2026-014`). Un `critical` **sans** preuve est **refusé** par un `BlockReason` actionnable — `code: CRITICAL_WEIGHT_WITHOUT_EVIDENCE`, `how_to_fix: [attach_incident_evidence, downgrade_to_load_bearing]`. `cosmetic` et `load-bearing` n'en exigent aucune.
+</Field>
+
+<Field name="déclaré, jamais appris (§2465)">
+  Les poids et les seuils sont des **vérités humaines** au-dessus de la ligne. AIDOS **emprunte la topologie** (un graphe pondéré seuillé) mais **refuse le réseau de neurones appris dans le jugement** : un système qui apprendrait ses propres seuils pourrait se rendre vert en abaissant la barre. Ici la barre est **humaine**, et la weight evidence en est la trace.
+</Field>
+
+## Ce que S19 n'est PAS
+
+S19 livre le **poids typé + la règle d'admission + le moteur de tir** — **pas** le workflow de re-pondération d'un lien vivant (`cosmetic → load-bearing` après un incident) : ça, c'est un `reweight` SemanticDiff (KRD §44.1), une étape **ultérieure**. Il n'érige **pas** de nouveau hook (le mur de S04 garde déjà `kernel.*` ; le tir de la vague rouge dans `PostKernelChange` est une étape runtime), n'expose **pas** de capacité MCP, et n'ajoute **aucun** chemin d'apprentissage des poids (§2465 l'interdit). Le `critical` ne **vérifie pas** que l'incident existe vraiment — il vérifie la **présence** d'une référence (la vérification de provenance est une étape ultérieure).
+
+## À voir dans le Workbench
+
+La route **`/red-propagation`** rend l'exemple §114 : la vue `cart` compose `checkout-button` (load-bearing), `promo-field` (load-bearing), `help-link` (cosmetic), seuil déclaré **1**. Chaque arête est dessinée par l'**épaisseur de son poids** (cosmetic fin, load-bearing épais, critical le plus épais). Une **table de tir** montre, pour chaque jeu de changements, l'activation calculée et le verdict d'agrégat : le changement **cosmétique** (`help-link`) laisse l'agrégat **VERT** (activation 0 < 1) — *le critère de done* ; le changement **porteur** (`checkout-button`) le rend **ROUGE** (activation 1 ≥ 1). Une **table d'admission** montre qu'un poids `critical` **sans** evidence est **refusé** (`CRITICAL_WEIGHT_WITHOUT_EVIDENCE` + `how_to_fix`), et qu'**avec** l'evidence `INC-2026-014` il est **admis**.
