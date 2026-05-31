@@ -1,0 +1,55 @@
+---
+title: "S14 · Typer le vrai — implémentation"
+description: "Le détail technique du typage des vérités : le paquet pur back/kernel/truthtyping (les énumérations TruthKind/VerifiabilityLevel, la table allowed_mode déclarée, Classify), la migration Atlas additive (deux colonnes nullable CHECK-épinglées sur kernel.truth), le miroir Godog + la propriété rapid (invariant de la porte d'admission), le miroir de reproductibilité front fast-check, la route Workbench /truth-typing, et la place dans le noyau KRD §13.4–13.5."
+keywords: ["aidos", "krd", "implémentation", "TruthKind", "VerifiabilityLevel", "go", "Classify", "Routing", "allowed_mode", "kernel", "spike", "experiment", "manual_review", "Atlas", "migration", "CHECK", "nullable", "expand-contract", "Godog", "rapid", "fast-check", "déterminisme", "ligne de flottaison", "missing-truth-kind", "unknown-truth-kind"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S14](/steps/concept/s14-truth-typing).</Info>
+
+S14 livre **le typage du vrai** (KRD §13.4–13.5) : un **classifieur pur** qui donne à chaque vérité son `TruthKind` et son `VerifiabilityLevel`, **rejette** une vérité sans type et **route** vers `/spike` une vérité non certifiable, plus les deux colonnes de persistance qui portent ces champs. C'est une couche **sous la ligne de flottaison** (computationnelle) : la **règle** de typage est celle de l'humain (KRD §13.4–13.5), ce step ne fait que l'**appliquer**. Aucune vérité écrite (le mur).
+
+## Implémentation
+
+<Note>La couche **Implémentation** est complétée au vert (CLAUDE.md §6) — code réel, fichiers. Les couches **Méta** et **Méta-méta** ci-dessous sont écrites dès le grill.</Note>
+
+- **`back/kernel/truthtyping/`** — le cœur **pur** (aucune I/O, aucune horloge, aucun rng). `TruthKind` est une énumération de **sept** membres exactement (KRD §13.4) : `behavioral`, `structural`, `experiential`, `economic`, `regulatory`, `statistical`, `exploratory`. `VerifiabilityLevel` en a **cinq** (KRD §13.5) : `deterministic`, `statistical`, `delayed`, `human_judged`, `unverifiable`. La table **`allowedMode map[VerifiabilityLevel]AllowedMode`** est la **règle déclarée** de KRD §13.5 faite donnée (pas un `switch` éparpillé) : seul `deterministic` → `kernel` ; `statistical` → `experiment` ; `human_judged` → `manual_review` ; `delayed`/`unverifiable` → `spike`. `Classify(t Truth) (Routing, error)` : un `truth_kind` **absent** ⇒ rejeté (`missing-truth-kind`) ; un `truth_kind` **hors énum** ⇒ rejeté (`unknown-truth-kind`) ; sinon le `Routing{Zone, AllowedMode, Admitted, Code}` est calculé via l'`allowed_mode` (kernel ⇒ admise ; tout autre mode ⇒ routée hors du noyau, cliquet OFF). `Kinds()`/`Levels()` énumèrent en ordre canonique ; `AllowedModeOf` n'invente rien.
+- **`back/migrations/kernel_truth_typing_baseline.sql`** (mirroré dans `atlas_migrations/20260531000007_…`) — la migration **Atlas additive, expand-only**. Elle `ADD COLUMN IF NOT EXISTS truth_kind text` et `verifiability_level text` sur `kernel.truth`, **nullable**, chacune avec une contrainte `CHECK (… IS NULL OR … IN (…))` qui épingle la valeur à l'énumération KRD **exacte** — une valeur hors énum est une erreur **DB**, pas une chaîne silencieuse (défense en profondeur en plus du contrôle de bord de `Classify`). **Aucun** `NOT NULL`, **aucun** backfill, **aucun** `GRANT` ajouté : le rôle agent garde son SELECT-only, seul le rôle `aidos` écrit la vérité via un ChangeSet approuvé. Migration **autorisée** ici, **appliquée** par le rôle migration.
+- **`back/kernel/CONTEXT.md`** — l'entrée glossaire « epistemic typing » déjà présente couvre `truth_kind` / `VerifiabilityLevel` ; aucune dérive de terme à ce step.
+
+## Méta
+
+Le comportement de S14 est prouvé par **trois miroirs** (chacun de la bonne nature), tous rouges avant le code (le rouge **est** le `/goal`).
+
+<Steps>
+  <Step title="Miroir d'acceptation Godog (le parcours, N0)">
+    `tests/kernel/truth_typing.feature` + `back/kernel/truthtyping/truth_typing_bdd_test.go` — `reflects=kernel.truthtyping`, `test_kind=acceptance`, `cert_language=gherkin`, `authority=above`. Quatre scénarios prouvent les deux critères de fin : une vérité **sans** `truth_kind` est **rejetée** (`missing-truth-kind`), non admise ; une vérité `experiential` + `unverifiable` est **routée** vers la zone `/spike`, non admise ; une vérité `behavioral` + `deterministic` est **admise** en zone `kernel` ; un `truth_kind` hors énum (`vibes`) est **rejeté** (`unknown-truth-kind`). C'est la nature *parcours* — Godog, pas rapid (CLAUDE.md §3).
+  </Step>
+  <Step title="Propriété rapid (l'invariant ∀, N1)">
+    `back/kernel/truthtyping/truthtyping_property_test.go` — `test_kind=property`, `cert_language=rapid`, `authority=below`. L'invariant porteur est le **vrai** rouge de KRD §13.5, pas inventé : **aucune vérité dont l'`allowed_mode` exclut `kernel` n'est jamais admise au noyau** — `Classify` admet une vérité (kind connu, niveau connu) **ssi** l'`allowed_mode` du niveau est `kernel` (et seul `deterministic` le porte). Plus : `Classify` est **déterministe** (même Truth ⇒ même Routing, jamais de panique sur une chaîne arbitraire) ; une vérité rejetée n'est **jamais** admise et porte toujours un code non vide (jamais une prison) ; et les énumérations ont **exactement** sept et cinq membres (un changement d'énum fait rougir ce miroir).
+  </Step>
+  <Step title="Miroir de reproductibilité front (fast-check)">
+    `front/web/lib/truth-typing.test.ts` — la projection `lib/truth-typing.ts` calque le paquet Go (mêmes sept kinds, cinq niveaux, table `allowed_mode`, verdict). 10 tests fast-check pinnent les cardinalités exactes, l'invariant de la porte d'admission, les cas de rejet §13.4, et le déterminisme. Une source, pas de dérive entre Go et TS.
+  </Step>
+</Steps>
+
+La persistance est prouvée bout-en-bout par **Testcontainers** (`back/kernel/truthtyping/migration_roundtrip_test.go`) : sur un vrai Postgres avec la baseline S02 + la migration S14 appliquées, une ligne **sans** colonnes de typage s'insère (nullable, expand-only) ; chacun des sept kinds et cinq niveaux est accepté ; une valeur hors énum est **rejetée par le `CHECK`** (le `migrate lint` Atlas Pro n'est pas disponible — la convention AIDOS prouve les migrations via Testcontainers au `go test`).
+
+La route Workbench **`/truth-typing`** (`front/web/app/truth-typing/page.tsx` + `components/TruthTypingTable.tsx`, themée ADR 0010, bilingue ADR 0011) rend une **table de typage** : une ligne par vérité candidate, puce `TruthKind`, puce `VerifiabilityLevel`, et **badge de routage** calculé par le classifieur pur — vert **KERNEL**, ambre **/SPIKE**, rouge **REJECTED** (avec le code). Lecture seule (ui-completeness CLAUDE.md §7) : elle **projette** le verdict, n'écrit aucune vérité. `tests/e2e/truth-typing.spec.ts` (5 scénarios, vert) prouve les trois badges + tutoriel + exemple.
+
+## Méta-méta
+
+<Field name="déterminisme-d'abord (la loi de §6/§8)">
+  `Classify` est une **fonction pure totale** — aucune horloge, aucun rng, aucune I/O — donc même Truth ⇒ même Routing. Le typage n'est **jamais** produit par un LLM : c'est une **table déclarée** (`allowedMode`) et une logique de bord, prouvées par les miroirs de reproductibilité. Un agent qui « jugerait » la vérifiabilité à la volée serait un **écart de déterminisme** ; ici c'est du code, et le code fait foi. La règle est **déclarée, jamais apprise** (CLAUDE.md §8).
+</Field>
+
+<Field name="sous la ligne de flottaison (le mur tient)">
+  Le classifieur **lit** une Truth et rend un verdict ; il n'écrit **aucune** vérité. La migration est **additive expand-only** et **n'ajoute aucun GRANT** : le rôle agent garde SELECT-only sur `kernel.truth`. Un éventuel passage à `NOT NULL` (et le backfill) — ou tout retypage d'une vérité figée — passera par un **ChangeSet** (`DRAFT → APPLIED`, gated complétude) portant un **SemanticDiff**, **jamais** une édition en place (CLAUDE.md §9). S02 (la forme du record Truth) et S04 (le mur) restent intacts.
+</Field>
+
+<Field name="l'honnêteté anti-invention (les énumérations closes)">
+  Les sept `TruthKind` et les cinq `VerifiabilityLevel` (avec les quatre `allowed_mode`) sont **exactement** ceux de KRD §13.4/§13.5 — aucun membre ajouté, renommé ni retiré. Les codes de rejet (`missing-truth-kind`, `unknown-truth-kind`) sont **locaux à S14** : ce **ne sont pas** des membres de l'énumération close `runtime/blockreason.Code` (figée à S13, majuscule) — on n'invente jamais un membre là (CLAUDE.md §9). Le `TruthScope`, l'`AuthorityGraph` et l'`ExperienceClaim` (KRD §13.6–13.8) sont **hors périmètre** : leurs propres étapes.
+</Field>
+
+<Field name="la place dans le noyau">
+  S14 mécanise KRD §13.4 (« toute affirmation doit déclarer son type de vérité […] et son droit à entrer — ou non — dans le noyau ») et §13.5 (« si le signal n'est pas vérifiable, KRD ne certifie pas. Il passe en /spike, en expérimentation ou en revue humaine »). Il prépare la suite : `TruthScope` (où/quand/pour-qui une vérité tient), l'`AuthorityGraph` (qui approuve), et le chemin `/harvest` qui relève une vérité `exploratory` routée vers `/spike` en candidate du noyau une fois rendue falsifiable.
+</Field>

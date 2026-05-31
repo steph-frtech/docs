@@ -1,0 +1,47 @@
+---
+title: "S14 · Typer le vrai — TruthKind, VerifiabilityLevel, et la route vers /spike"
+description: "Avant que le cliquet ne morde, toute vérité déclare son type épistémique (TruthKind) et son mode de vérification (VerifiabilityLevel). Une vérité sans TruthKind est rejetée ; une vérité non vérifiable est routée vers /spike au lieu d'être figée. La méthode mature sait dire « ici je ne sais pas prouver » (KRD §13.4–13.5)."
+keywords: ["aidos", "krd", "TruthKind", "VerifiabilityLevel", "typer le vrai", "épistémologie opérationnelle", "behavioral", "structural", "experiential", "economic", "regulatory", "statistical", "exploratory", "deterministic", "human_judged", "unverifiable", "allowed_mode", "kernel", "spike", "experiment", "manual_review", "cliquet", "routage", "missing-truth-kind", "unknown-truth-kind"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S14](/steps/internals/s14-truth-typing).</Note>
+
+## En une phrase
+
+S14 donne à **chaque vérité** un **type épistémique** (`TruthKind`) et un **mode de vérification** (`VerifiabilityLevel`) **avant** d'autoriser le cliquet à mordre : une vérité sans `TruthKind` est **rejetée**, et une vérité que le système ne sait pas certifier est **routée vers `/spike`** plutôt que figée dans le noyau. *Le cliquet ne mord que ce qui est certifiable ; le reste va explorer.*
+
+## Le problème que ça résout
+
+Sans cette couche, KRD risque **deux erreurs symétriques** (KRD §13.4) : **sur-contraindre** les vérités molles (l'UX, le goût) comme si elles étaient des invariants d'authentification, ou laisser des **préférences humaines polluer le noyau** comme si elles étaient des faits durs. Une vérité UX ne se prouve pas comme un contrat de paiement.
+
+KRD §13.4 pose la loi : **« Toute affirmation doit déclarer son type de vérité, son scope, son autorité, son mode de vérification, et son droit à entrer — ou non — dans le noyau. »** S14 mécanise la partie **type + vérifiabilité + droit d'entrée**.
+
+## Les idées-clés
+
+<Field name="le TruthKind (le TYPE épistémique du claim)">
+  Sept types, exactement (KRD §13.4) : **behavioral** (auth, paiement, permissions), **structural** (architecture, dépendances, schéma, contrats), **experiential** (UX, perception, clarté, confiance), **economic** (coût, conversion), **regulatory** (loi, RGPD), **statistical** (A/B, observation), **exploratory** (pas encore vérifiable). Ce n'est **pas** le `test_kind` d'un miroir : le TruthKind dit *quelle sorte de claim* c'est. La loi : **toute vérité a un type épistémique, et son miroir doit être du même type.**
+</Field>
+
+<Field name="le VerifiabilityLevel (le cliquet PEUT-IL mordre ?)">
+  Cinq niveaux (KRD §13.5) : **deterministic** (test exact, oui/non), **statistical** (intervalle, probabilité), **delayed** (vérité observable plus tard), **human_judged** (UX, stratégie, goût), **unverifiable** (pas cliquetable). Un agent auto-améliorant ne progresse vraiment que là où le signal est **objectif et non truquable**.
+</Field>
+
+<Field name="allowed_mode (la porte d'entrée du noyau)">
+  Chaque niveau porte un **mode autorisé** : `kernel`, `experiment`, `spike` ou `manual_review`. **Seul `deterministic` ouvre la porte du noyau** (`kernel`). Un signal statistique va en `experiment` ; un signal humain en `manual_review` ; un signal `delayed` ou `unverifiable` va en `/spike`. La règle est **déclarée**, jamais apprise.
+</Field>
+
+<Field name="routé vers /spike n'est PAS un échec">
+  Quand le signal n'est pas vérifiable, KRD **ne certifie pas** : la vérité **n'entre pas** dans le noyau, le cliquet reste **OFF**, et elle part vers la **zone d'exploration** (`/spike`) pour y être rendue falsifiable, puis `/harvest` plus tard. C'est l'**honnêteté** de la méthode : *« ici je ne sais pas prouver »* — pas une faute.
+</Field>
+
+<Field name="rejeté (ce qui ne peut même pas être considéré)">
+  Une vérité **sans** `TruthKind`, ou avec un `TruthKind` **hors des sept**, est **rejetée** — elle ne peut même pas être triée. Le refus revient avec un code : `missing-truth-kind` (aucun type) ou `unknown-truth-kind` (type inconnu). Rejeté n'est pas routé : c'est un claim qui n'a pas encore la forme d'une vérité.
+</Field>
+
+## Ce que ça donne à l'écran
+
+L'écran **/truth-typing** du Workbench rend, **en lecture seule**, une **table de typage** : une ligne par vérité candidate, avec sa puce `TruthKind`, sa puce `VerifiabilityLevel`, et un **badge de routage** — vert **KERNEL** (admise), ambre **/SPIKE** (non vérifiable, routée), rouge **REJECTED** (pas de type / type inconnu, avec le code). Le verdict est **calculé** par le classifieur pur, jamais déclaré.
+
+## La frontière honnête
+
+S14 ajoute **deux colonnes nullable** (`truth_kind`, `verifiability_level`) à l'enregistrement Truth, avec une contrainte `CHECK` qui épingle chaque valeur à l'énumération KRD exacte. **Additif, expand-only** : les colonnes naissent nullable, les vérités déjà figées ne sont **pas** retypées de force — le passage à `NOT NULL` (et le backfill) est un **changeset ultérieur**, une fois toutes les vérités vivantes typées. Le classifieur est **pur** et **lecture seule** : il lit une Truth, rend un verdict, **n'écrit aucune vérité** (le mur). Le `TruthScope`, l'`AuthorityGraph` et l'`ExperienceClaim` (KRD §13.6–13.8) sont leurs **propres étapes** ultérieures.
