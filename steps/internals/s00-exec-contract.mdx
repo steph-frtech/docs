@@ -71,6 +71,18 @@ npx playwright test tests/e2e/contract.spec.ts
 
 ## Méta
 
+### Déterminisme — le parse + la validation sont du code pur, pas un agent
+
+S00 obéit à la [loi determinism-first](/internals/the-wall-and-ratchet) : toute capacité qui *peut* être une fonction pure **doit** l'être (et c'est elle qui fait autorité, jamais un agent/LLM). Les trois capacités de S00 sont toutes déterministes-ables et sont implémentées en **code pur authoritatif**, chacune couverte par un **miroir de reproductibilité** (Vitest, même entrée → même sortie, sans horloge, sans aléa, sans état caché) :
+
+| Capacité | Implémentation pure (autoritative) | Miroir de reproductibilité |
+|---|---|---|
+| Parser le bloc YAML embarqué → `{version, kind, phases[], granularity[]}` | `parseContract(raw)` — fonction totale de sa seule chaîne d'entrée (`front/web/lib/contract.ts`) | `front/web/lib/contract.test.ts` : deux parses deep-equal, idempotence sur 50 runs, copie de la chaîne → même structure |
+| Valider (semver, `kind=step-contract`, 9 phases à `id` unique + `gate` ∈ {computational, human}, 5 propriétés de granularité) | `validateContract(contract)` / `isValidContract(contract)` (`front/web/lib/contract.ts`) | `front/web/lib/contract.test.ts` : accepte le contrat canonique (zéro issue), même contrat → même liste d'issues, et flag chaque violation (mauvais semver, mauvais kind, compte de phases/granularité, gate invalide, `id` dupliqué) |
+| Rendu `/contract` (projection pure de la donnée parsée) | `ContractPage` (`front/web/app/contract/page.tsx`) ne fait que projeter la sortie de `parseContract` ; la seule impureté — la lecture disque — est isolée dans `readContractFile()` à la frontière I/O | e2e `tests/e2e/contract.spec.ts` (le DOM reflète la donnée parsée) |
+
+Avant cet audit, le parse vivait **inline** dans `page.tsx`, mêlé à la lecture disque, sans test de reproductibilité autonome (seul le DOM était asservi). Le geste determinism-first a **extrait le cœur pur** dans `front/web/lib/contract.ts` (la lecture `readFileSync` reste à la frontière I/O dans le Server Component, le parse devient une fonction pure de `raw`) et ajouté le miroir Vitest `front/web/lib/contract.test.ts` (18 assertions vertes). Aucune capacité de S00 n'est irréductible : il n'y a **aucune** surface agent/LLM au runtime de cette étape.
+
 ### Le miroir Gherkin
 
 Le miroir qui prouve S00 est une journey N0 (slot Godog / Playwright de la pile gelée), matérialisée à `tests/features/S00-exec-contract.feature`. Son enregistrement de miroir est annoté en commentaire dans le fichier (`tests/features/S00-exec-contract.feature:6`) :

@@ -155,6 +155,25 @@ Le comportement de S01 est prouvé par **trois mirrors vivants** ; tous tournent
 
 <Note>**Score de mutation.** La règle KRD inclut un seuil de mutation (gremlins) dans la définition de « done ». À ce jour aucun run gremlins n'est enregistré pour `contentstore` — c'est un OpenQuestion, pas une affirmation. Les trois mirrors verts + Testcontainers sont la preuve disponible à ce stade.</Note>
 
+### Déterminisme
+
+S01 n'a **aucune** surface agent/LLM : chaque capacité est une **fonction pure et déterministe** (même entrée → même sortie, sans horloge ni aléa cachés), donc **code autoritatif**, chacune couverte par un mirror de reproductibilité.
+
+| Capacité | Déterministe ? | Implémentation autoritative | Mirror de reproductibilité |
+|---|---|---|---|
+| Hash de contenu (SHA-256 hex) | oui | `contentstore.Hash` (`store.go:54`) | `content_store_property_test.go` → `Hash_deterministic_no_store` (∀ b : `Hash(b)` stable) |
+| `Put` (idempotent : mêmes octets → même hash, une ligne) | oui | `Store.Put` + `InsertContent … ON CONFLICT DO NOTHING` | property test → `Put_deterministic` (∀ b : `Put(b)` stable) + `Put_no_overwrite` |
+| `Get` (round-trip) | oui | `Store.Get` (`store.go:73`) | property test → `Get(Put(b))==b` |
+| `SetHead` / `History` (oldest-first, `parent_hash`) | oui | `Store.SetHead` / `Store.History` (transactionnel) | mirror journey Gherkin (scénario *Edit creates a new hash, old still readable*) |
+| `hash()` front (TS) + actions `put`/`set_head` | oui | `front/web/lib/store-data.ts` (`hash`), `app/store/actions.ts` (`sha256Hex`) | **`front/web/lib/store-data.test.ts`** (Vitest) |
+
+**Équivalence cross-impl (le point clé).** L'UI calcule l'adresse de contenu en TypeScript ; le magasin Go la calcule en Go. Les deux **doivent** être identiques au bit près, sinon un `Put` depuis le Workbench atterrirait sous une adresse différente de celle du store Go. Le mirror Vitest `store-data.test.ts` **épingle cette égalité** avec des **vecteurs connus** dérivés du SHA-256 canonique des octets UTF-8 — exactement ce que produisent `printf '%s' <s> | sha256sum` **et** `contentstore.Hash([]byte(s))` :
+
+- `"hello"` → `2cf24dba…`, `"v1"` → `3bfc2695…`, `"v2"` → `fb04dcb6…`, `""` → `e3b0c442…`.
+- `"héllo"` (multi-octets) → `3c48591d…` : prouve que `Buffer.from(s,"utf8")` (TS) encode comme `[]byte(s)` (Go).
+
+`sha256Hex` (`app/store/actions.ts:41`) est la copie inline byte-identique de `hash()` (`store-data.ts:41`) ; les deux passent par `createHash("sha256").update(Buffer.from(s,"utf8")).digest("hex")`. Les vecteurs ci-dessus ont été vérifiés contre l'algorithme Go réel. Aucune capacité de S01 n'est irréductible : tout est code déterministe, rien n'est délégué à un agent.
+
 ## Méta-méta
 
 **Place dans le cliquet.** S01 est le **premier contrat de l'Archive** et un substrat de fond : le content-addressing (version = hash) et l'append-only qu'il pose servent ensuite au kernel, aux mirrors, aux ChangeSet et au DAG. C'est S01/S24 qui livrent ce content-addressing sur Postgres, à la granularité par-Layer (voir l'addendum d'ADR 0004). Une dent isolée, testée, visualisée, qui laisse une phase stable que les étapes suivantes consomment.
