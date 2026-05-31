@@ -69,7 +69,9 @@
               "steps/concept/s08-expr-dsl",
               "steps/internals/s08-expr-dsl",
               "steps/concept/s09-policy-dsl",
-              "steps/internals/s09-policy-dsl"
+              "steps/internals/s09-policy-dsl",
+              "steps/concept/s10-operation-dsl",
+              "steps/internals/s10-operation-dsl"
             ]
           }
         ]

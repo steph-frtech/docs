@@ -1,0 +1,68 @@
+---
+title: "S10 · L'Operation DSL — implémentation"
+description: "Le détail technique de l'Operation DSL : le paquet Go back/kernel/operation (les verbes typés validate/authorize/read/mutate/branch/return, l'interpréteur table-driven Interpret(op, state, deps) pur, les seams Validator/Authorizer/Reader/Mutator), le fixture miroir N2 (createOrder/happy + authz-denied), la route Workbench /operation, et la place dans le noyau KRD §24.3/§93/§95."
+keywords: ["aidos", "krd", "implémentation", "operation", "dsl", "workflow", "go", "interpret", "table-driven", "validate", "authorize", "read", "mutate", "branch", "return", "kernel.operation", "fixture", "n2", "déterminisme", "createOrder", "seam", "deps", "wall"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S10](/steps/concept/s10-operation-dsl).</Info>
+
+S10 livre **l'Operation DSL** (KRD §24.3, §93, §95) : l'exécuteur **N2** (Workflow) du noyau. Le corps d'une opération — une liste ordonnée de verbes typés `validate / authorize / read / mutate / branch / return` lus depuis son AST `kernel.operation` — tourne déterministe comme `état → commande → événements`, prouvé par un **fixture miroir**. Cette étape fait passer l'ancre `createOrder` du rouge au vert contre une impl **mock** des entités/policy/store ; elle ne compile pas encore vers Hono, ne câble pas de vraie base, et n'évalue pas de vrai AST Policy/Expr (ceux-ci sont mockés à leur *seam*).
+
+## Implémentation
+
+<Note>La couche **Implémentation** est complétée au vert (CLAUDE.md §6) — code réel, fichiers. Les couches **Méta** et **Méta-méta** ci-dessous sont écrites dès le grill.</Note>
+
+Le paquet vit dans `back/kernel/operation/` (Kernel), en pièces nettement séparées :
+
+- **les types de l'AST** (`operation.go`, `step.go`) — `Operation{Name, Input, Steps[], Emits[]}` ; `Step` est une **interface scellée** (sum type) au paquet : `ValidateStep`/`AuthorizeStep`/`ReadStep`/`MutateStep`/`BranchStep`/`ReturnStep`. Chaque type porte sa clé de dispatch `Kind() StepKind`. L'ensemble fermé des six verbes (`StepKinds()`, `IsStepKind`) est exposé pour le panneau et le décodeur — jamais inventé. `MutateOp` est l'ensemble clos `{create, clear}`.
+- **l'état** (`state.go`) — `State` est un sac de données avec les emplacements `$.input`, `$.auth` et les *slots* nommés (`$.cart`, `$.order`). `Resolve(selector)` lit un chemin `$`-racinné (la **même** sémantique que `expr`/`policy` de S08/S09) ; `Bind(slot, val)` y attache un résultat ; `resolveMap` résout récursivement les sélecteurs dans une map de données (l'AST `{ id: $.input.cartId }` devient la map concrète).
+- **l'interpréteur table-driven** (`interpret.go`, `table.go`) — `Interpret(op, state, deps) ([]string, Result, error)` parcourt `op.Steps` **dans l'ordre** : pour chaque step, `dispatch` cherche son évaluateur dans `stepTable` (la **table AST** : `kind → evaluator`), l'exécute, **ajoute ses événements en ordre de step**, et s'arrête au `return`. Une *kind* sans entrée ⇒ `ErrUnknownStepKind` (le **default explicite** : un verbe inconnu est un échec typé, jamais un saut silencieux). Une erreur de step **coupe court** et propage (un `authorize` DENY renvoie `ErrAuthorizationDenied` avec les événements émis jusque-là — vides, puisque `authorize` précède tout `mutate`).
+- **les seams** (`deps.go`) — `Deps` est l'union des quatre interfaces que les verbes à effet de bord traversent : `Validator`, `Authorizer`, `Reader`, `Mutator`. L'interpréteur ne touche **jamais** une base, un client HTTP, une horloge ou un AST Policy/Expr directement — il appelle ces interfaces, donc le fixture passe des **mocks** et le paquet reste **pur** (CLAUDE.md §6 ; le mur, §2). Les vraies impls (un Validator sur le schéma d'entité, un Authorizer sur `policy.Eval`, un Reader/Mutator sur sqlc) satisfont ces *mêmes* interfaces — jamais une édition de ce *seam*.
+- **l'ancre** (`anchor.go`) — `CreateOrder()` reconstruit l'opération §93 **mot pour mot** (aucun verbe, événement, formule de total ou status inventé). C'est une vérité SOURCE au-dessus de la ligne ; cette fonction la *reconstruit* en Go pour le miroir / la projection Workbench — la ligne autoritaire est écrite dans `kernel.operation` par le CLI `aidos` via un ChangeSet approuvé, jamais d'ici (le mur).
+
+L'AST `kernel.operation` n'a **pas** de nouvelle migration ici : la table a été créée à l'étape DSL-AST (S02 records / records DSL) ; S10 la **lit**.
+
+## Méta
+
+Le comportement de S10 est prouvé par le **fixture miroir** (la nature N2 d'un workflow), plus la reproductibilité front et l'e2e Playwright. **Aucun property ∀** n'est ajouté (c'est le *slot* rapid de la policy, S09) et **aucun Gherkin** (c'est le *slot* journey) : la forme de vérité d'un workflow est le fixture `état → commande → événements`. Forcer une autre forme ici serait un **monstre double-typé**.
+
+<Steps>
+  <Step title="Mirror fixture (N2, interprété en Go, sous la ligne)">
+    `reflects=kernel.operation/createOrder`, `test_kind=workflow`, `cert_language=fixture`, `liveness=live`, `authority=below`. Source matérialisée : `tests/kernel/createOrder_op.fixture.md` (le *lien porteur*, conceptuellement dans le schéma `mirrors`, persisté à S06 — exception bootstrap). `back/kernel/operation/operation_fixture_test.go` charge les deux lignes : **createOrder/happy** — état `{auth.user u1, cart c1 avec 2 articles 10+5}`, commande `createOrder{cartId}` ⇒ événements `[OrderCreated, CartCleared]` (ordonnés, exactement), `return.status == "pending"`, `return.total == 15`, et `authorize` appelé **avant** tout `mutate` (le log d'appels du mock le prouve) ; **createOrder/authz-denied** — panier vide ⇒ la policy refuse ⇒ `err AuthorizationDenied`, `events == []`, le `Mutator` n'est **jamais** appelé (l'ordre du pipeline est réel). C'est un **means-test vers le rouge humain** (KRD §93/§95), pas une vérité auto-graduée.
+  </Step>
+  <Step title="Mirror de la table (verbe inconnu = échec typé)">
+    `back/kernel/operation/table_test.go` épingle la table de dispatch : `dispatch` d'une *kind* inconnue ⇒ `ErrUnknownStepKind` (le default explicite) ; `Interpret` court-circuite alors sans émettre ; l'ensemble fermé des six verbes ; `Resolve`/`Bind` sur l'état ; et un `return` sur un slot non-lié ⇒ erreur typée (jamais un résultat vide silencieux).
+  </Step>
+  <Step title="Mirror de reproductibilité (Vitest, front)">
+    `front/web/lib/operation.test.ts` (6 tests) épingle le registre statique de `lib/operation.ts` (le miroir TS de `back/kernel/operation`) contre l'invariant Go : l'ancre `createOrder` mot pour mot, les six verbes en ordre, la projection du pipeline en chips, et la trace `createOrder/happy` (`[OrderCreated, CartCleared]`, status `pending`, total `15`, PASS). Même entrée ⇒ même sortie (déterminisme).
+  </Step>
+  <Step title="e2e Playwright (route /operation)">
+    `tests/e2e/operation.spec.ts` (6 tests) — la page rend les six chips ordonnés `validate → authorize → read → mutate → mutate → return` (le chip `authorize` nomme `canPlaceOrder`), la trace d'événements `OrderCreated` puis `CartCleared`, le résultat `status pending / total 15`, les six verbes, et le badge du fixture `createOrder/happy` lit **PASS**.
+  </Step>
+</Steps>
+
+**Déterminisme-first (CLAUDE.md §6/§8).** Tout ici est **code pur** — `Interpret`, `dispatch`, les évaluateurs, `Resolve`/`Bind`/`resolveMap`, la projection du pipeline. L'interpréteur n'a ni horloge ni RNG ; l'ordre des événements est le sous-ensemble ordonné des `emits` dans l'ordre des steps, donc la trace est reproductible. Le fixture Go **est** le mirror de reproductibilité côté Go ; `lib/operation.test.ts` l'est côté front. Un interpréteur de workflow qui déléguerait l'enchaînement des verbes ou l'émission des événements à un LLM serait un *determinism gap* qui bloque l'étape — la table close + les seams typés l'excluent par construction.
+
+**Complétude (CLAUDE.md §6, pas de monstre).** La vérité `kernel.operation` (la suite de verbes `createOrder`) a son miroir vivant (le fixture N2) ; le miroir reflète une vérité réelle (`Interpret` sur `createOrder`). Aucun orphelin, aucune vérité sans miroir, aucun property/journey forcé.
+
+## Méta-méta
+
+**Place dans le noyau.** S10 est la brique **workflow-comme-artefact** de KRD §24.3/§93/§95 : l'opération est une *donnée* typée du noyau (une liste de verbes), la couche **N2** (Workflow). Elle consomme S02 (la forme de la ligne `operation` / le content-address des records — réutilisé, **non réinventé**), la sémantique de sélecteur de S08 (`expr`), la Policy DSL de S09 (le verbe `authorize` y délègue, **mocké** ici à son *seam*), et la ligne de flottaison de S04 (le mur). Elle laisse une phase stable que les étapes suivantes consomment : la vraie évaluation Policy/Expr derrière `authorize`/`mutate`, et la projection `operation → handler Hono` gardée par Pact.
+
+**Le mur (appliqué à S10).** Le paquet `operation` est **pur** : il n'écrit aucune vérité, ne touche ni `kernel` ni `mirrors` ni `fitness` en écriture. Un `mutate` est un appel sur le `Mutator` injecté (un *seam* de projection, sous la ligne de flottaison), jamais une écriture directe dans un schéma de vérité. L'AST `operation` qu'il lit est une ligne SOURCE écrite uniquement par le CLI `aidos` via un ChangeSet approuvé. La route `/operation` est strictement **lecture seule** : elle projette l'AST `kernel.operation` et le *résultat* du fixture, elle ne lance aucune écriture de vérité. La clause *action-capable* de `ui-completeness` est satisfaite **par le vide** — il n'y a aucune capacité backend à lier (l'interpréteur est une bibliothèque pure ; un MCP `interpret`/`run` serait une étape ultérieure), donc aucune capacité headless cachée.
+
+**Choix de conception (réutiliser sans réinventer, ADR 0007).** L'interpréteur est **table-driven** (une table `kind → evaluator`, `stepTable` dans `table.go`), pas un `switch` éparpillé : les verbes sont des **données**. Le sélecteur `$`-racinné réutilise la sémantique déjà prouvée dans `back/kernel/expr` (S08) et `back/kernel/policy` (S09) — un seul langage de sélecteur à travers les DSL. **Aucun nouvel ADR** : S10 gèle un artefact nouveau (l'interpréteur d'Operation), il ne décale aucun contrat antérieur. Le *slot* gelé (CLAUDE.md §3) est respecté : l'Operation DSL est **interprétée en Go** avec des fixtures `état→cmd→événements` — XState reste *client-only*, aucun moteur de workflow externe ne remplace l'exécuteur de vérité.
+
+**Pas de nouvel artefact superflu (CLAUDE.md §5).** **Pas de serveur MCP** — aucune nouvelle capacité de lecture/écriture sur la base n'est exposée ici (l'interpréteur est une bibliothèque pure ; un MCP `run`/`interpret` est une OpenQuestion ultérieure, pas inventée maintenant). **Pas de hook** — aucune nouvelle règle non-bypassable au-delà du mur S04 (l'interpréteur n'écrit aucune vérité). **Pas de migration Atlas** — aucune nouvelle persistance (l'AST `operation` a été créé à l'étape DSL-AST ; S10 la **lit**). **Pas de codegen Hono**, **pas de sqlc**, **pas de Pact**, **pas de vraie évaluation Policy/Expr**. Un nouvel artefact ne fait qu'**ajouter** une garde, jamais en retirer une.
+
+**Anti-écrasement (CLAUDE.md §9).** S10 n'édite que ses propres fichiers : `back/kernel/operation/**`, ses sources de fixture `tests/kernel/createOrder_op.fixture.md`, `front/web/app/operation/page.tsx`, `front/web/lib/operation.ts(.test.ts)`, `tests/e2e/operation.spec.ts`, et l'ajout de la route `/operation` + sa traduction (`WorkbenchHeader`, `messages/{fr,en}.json`). Il **lit** la forme de l'AST `operation` et les contrats `Step`/`emits` gelés par les étapes records/DSL-AST antérieures — il ne les **altère pas**. Les *seams* `Validator/Authorizer/Reader/Mutator` introduits sont des coutures **nouvelles**, pas des éditions de coutures existantes. Tout changement d'un contrat antérieur (la forme de l'AST, la signature d'un verbe, le champ `emits`, l'enveloppe de fixture) passerait par un **ChangeSet** + un **SemanticDiff** — jamais une réécriture furtive.
+
+**Forward-dependencies (OpenQuestions, pas des `residual_issues`).**
+
+- **OQ-S10-1** — la persistance Postgres réelle du fixture miroir (le schéma `mirrors` arrive à S06 ; ici le fixture est matérialisé en `tests/kernel/createOrder_op.fixture.md` + le test Go exécutable, qui *est* la preuve red→green).
+- **OQ-S10-2** — la vraie évaluation Policy (`policy.Eval` derrière le seam `Authorizer`) et le vrai Expr `sum($.cart.items, "price")` derrière le `Mutator` ; mockés à leur *seam* ici, ce sont des étapes ultérieures.
+- **OQ-S10-3** — la projection `operation → handler Hono` gardée par Pact, et un éventuel MCP `interpret`/`run` ; étapes ultérieures. Le verbe `branch` est **déclaré** (dans la grammaire close + la table) mais l'ancre §93 ne l'exerce pas — sa sémantique reste minimale et honnête, elle grandira avec le fixture qui en aura besoin (pas de comportement inventé). Une seule opération (`createOrder`) est portée ici.
+
+<Card title="Voir le concept de l'étape" icon="lightbulb" href="/steps/concept/s10-operation-dsl">
+  Ce qu'apporte l'Operation DSL — le workflow comme suite de verbes typés, état→commande→événements, authorize qui délègue à la Policy, l'interprétation déterministe — sans le code.
+</Card>

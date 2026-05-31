@@ -1,0 +1,72 @@
+---
+title: "S10 · L'Operation DSL — un workflow comme suite de verbes typés, prouvé par un fixture état→commande→événements"
+description: "L'Operation DSL d'AIDOS : le corps d'une opération est une liste ordonnée de verbes typés — validate / authorize / read / mutate / branch / return — interprétée en Go comme `état → commande → événements`. Le workflow devient une vérité N2 du noyau, prouvée par un fixture miroir (createOrder ⇒ [OrderCreated, CartCleared])."
+keywords: ["aidos", "krd", "operation", "dsl", "workflow", "validate", "authorize", "read", "mutate", "branch", "return", "createOrder", "fixture", "état commande événements", "n2", "interpréteur", "déterminisme", "kernel.operation"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S10](/steps/internals/s10-operation-dsl).</Note>
+
+## En une phrase
+
+S10 pose **l'Operation DSL** : le corps d'une opération métier (créer une commande, par exemple) n'est plus une fonction libre et dispersée — c'est une **suite ordonnée de verbes typés** (`validate → authorize → read → mutate → mutate → return`), stockée dans le noyau, et **interprétée** en Go comme un flux déterministe `état → commande → événements`.
+
+## Le problème que ça résout
+
+« Créer une commande » se décompose toujours dans le même ordre : valider l'entrée, vérifier qu'on a le droit, lire le panier, créer la commande, vider le panier, renvoyer le résultat. Dans un projet ordinaire, cette logique vit comme du code de service libre — l'ordre des étapes est implicite, l'autorisation est noyée au milieu, et rien ne prouve que « autorisé avant de muter » est vraiment respecté.
+
+KRD §24.3 pose la règle : **un workflow est une donnée**, une liste de verbes typés, pas du code arbitraire. C'est la couche **N2** (Workflow) de la grille KRD, et sa vérité prend la forme d'un **fixture** `état → commande → événements` — pas un parcours Gherkin (N0), pas un invariant ∀ (N1), mais une trace concrète : *dans cet état, cette commande produit exactement ces événements*.
+
+## Les idées-clés
+
+<Field name="l'opération (la suite de verbes)">
+  Une opération est `{ nom, input, steps[], emits[] }`. Le cœur est `steps` : une **liste ordonnée** de verbes typés. L'interpréteur les parcourt **dans l'ordre déclaré**, du premier au `return`. L'ordre n'est pas un détail — c'est la vérité du workflow.
+</Field>
+
+<Field name="les six verbes">
+  `validate` (vérifier la forme de l'entrée) · `authorize` (déléguer à une Policy — un refus coupe court) · `read` (charger une entité dans un emplacement nommé) · `mutate` (créer/vider une entité, en émettant un événement) · `branch` (conditionnel, supporté mais non exercé ici) · `return` (nommer le résultat). Aucun autre verbe n'existe — la grammaire est close.
+</Field>
+
+<Field name="état → commande → événements (la vérité N2)">
+  L'interpréteur fait passer un **état** (un sac de données : `$.input`, `$.auth`, des emplacements nommés comme `$.cart`, `$.order`) à travers les verbes, et renvoie la **liste ordonnée des événements** émis plus le résultat du `return`. C'est la forme de vérité d'un workflow : on prouve une trace, pas une propriété générale.
+</Field>
+
+<Field name="authorize délègue à la Policy (S09)">
+  Le verbe `authorize` ne réinvente pas l'autorisation : il **délègue** à une Policy (l'arbre de règles ALLOW/DENY de S09). Un **DENY coupe court** — aucun verbe suivant ne s'exécute, aucun événement n'est émis, aucune mutation n'est tentée. C'est ce qui rend « autorisé avant de muter » *vrai*, pas seulement *intentionnel*.
+</Field>
+
+<Field name="déterministe et pur">
+  L'interpréteur n'a ni base de données, ni horloge, ni aléatoire : les verbes qui touchent le monde (valider/autoriser/lire/muter) le font **uniquement** par des interfaces injectées (les *seams*). Même opération + même état + mêmes dépendances ⇒ **toujours** la même suite d'événements. Le fixture peut donc passer des *mocks*.
+</Field>
+
+## L'opération « createOrder », bout par bout
+
+<Steps>
+  <Step title="L'opération, exprimée (KRD §93, mot pour mot)">
+    `operation "createOrder" { input: "CreateOrderInput"; steps: [ validate, authorize{canPlaceOrder}, read{Cart}, mutate{Order, create}, mutate{Cart, clear}, return{$.order} ]; emits: [ "OrderCreated", "CartCleared" ] }`.
+  </Step>
+  <Step title="Le pipeline, en chips ordonnés">
+    Six verbes dans l'ordre : `validate → authorize → read → mutate → mutate → return`. C'est exactement ce que l'interpréteur Go parcourt — et ce que le Workbench affiche.
+  </Step>
+  <Step title="La trace, cas heureux">
+    État : utilisateur `u1` connecté, panier `c1` avec deux articles (10 + 5). Commande `createOrder { cartId: "c1" }` ⇒ événements **`[OrderCreated, CartCleared]`** (ordonnés, exactement ces deux), `return.status == "pending"`, `return.total == 15` (somme des prix). Et `authorize` a tourné **avant** toute mutation.
+  </Step>
+  <Step title="La trace, autorisation refusée">
+    Panier vide ⇒ la policy refuse ⇒ erreur `AuthorizationDenied`, **aucun** événement, le `mutate` n'est **jamais** appelé. Cette ligne prouve que l'ordre du pipeline est réel, pas une coïncidence.
+  </Step>
+  <Step title="La preuve (fixture N2)">
+    Un **fixture miroir** `état → commande → événements` interprété en Go porte les deux cas. C'est le *lien porteur* : si l'intention du fixture disparaît, le test casse — pas de pourrissement silencieux en monstre.
+  </Step>
+</Steps>
+
+## Ce que ça vous permet de faire
+
+- **Versionner un workflow comme une vérité** : une opération est un artefact du noyau (une suite de verbes typés), pas une fonction de service perdue dans le code.
+- **Prouver l'ordre des étapes** : « autorisé avant de muter » devient un fait testable — un refus d'autorisation n'émet rien et ne mute rien.
+- **Rejouer une trace** : l'interprétation est déterministe ; on prouve « cet état + cette commande donnent exactement ces événements » par un simple fixture.
+- **Voir le pipeline dans le Workbench**, sur la route `/operation` : les six chips ordonnés `validate → authorize → read → mutate → mutate → return`, la trace de la commande, les événements `OrderCreated` puis `CartCleared`, le résultat `{status, total}`, et un badge **PASS/FAIL** pour le fixture `createOrder/happy`.
+
+L'Operation DSL, c'est ce qui transforme « la logique métier d'une opération » en **données du noyau** — une suite de verbes lisible, ordonnée, prouvée — au lieu de code de service dispersé.
+
+<Card title="Pour aller plus loin — l'implémentation" icon="wrench" href="/steps/internals/s10-operation-dsl">
+  Les types Go des verbes, l'interpréteur table-driven `Interpret(op, state, deps)`, les *seams* Validator/Authorizer/Reader/Mutator que le fixture mock, le fixture miroir N2 (createOrder/happy + authz-denied), et la route Workbench /operation.
+</Card>
