@@ -1,0 +1,53 @@
+---
+title: "S25 · La fusion sémantique — le miroir décide le conflit, pas le diff de texte"
+description: "Fusionner deux branches de vérité du DAG de versions est une opération SÉMANTIQUE, pas textuelle (KRD §122/§130) : le MIROIR détecte le conflit — rouge sur la COUPE FUSIONNÉE (l'agrégat récursif §109) — jamais un diff de lignes à trois voies. Une fusion que git appellerait « propre » (déltas disjoints, fast-forward) est BLOQUÉE quand sa coupe fusionnée rougit un miroir ; et deux branches touchant des lignes DISJOINTES peuvent casser le MÊME invariant émergent d'un parent partagé — un conflit que le diff de texte ne voit jamais. LE critère done : une fusion textuellement propre AVEC un miroir rouge sur la coupe fusionnée est un conflit, et elle est BLOQUÉE. Le décideur MergeSemantic(base, gauche, droite, senseurs) est pur et en lecture seule ; résoudre un conflit est un OVERRIDE (humain, au-dessus de la ligne de flottaison — ChangeSet + ADR + provenance), jamais une auto-fusion. Une fusion non mappable (pas d'ancêtre commun) est non résoluble → OpenQuestion, jamais un « propre » fabriqué. S25 livre le DÉCIDEUR + le geste /merge-semantic ; appliquer une fusion propre passe par le chemin ChangeSet S20."
+keywords: ["aidos", "krd", "fusion sémantique", "semantic merge", "merge", "coupe fusionnée", "merged cut", "conflit de fusion", "merge conflict", "le miroir décide", "pas le diff de texte", "rouge sur la coupe fusionnée", "agrégat récursif", "invariant émergent", "même invariant", "lignes disjointes", "git propre", "auto-merge", "fast-forward", "bloqué", "override", "décision humaine", "non résoluble", "OpenQuestion", "pas de propre fabriqué", "MergeSemantic", "requires_authority", "phase stable candidate", "ChangeSet", "le mur", "lecture seule", "no_merge_without_semantic_green", "KRD §122", "KRD §130", "KRD §109", "KRD §82.2"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S25](/steps/internals/s25-semantic-merge).</Note>
+
+## En une phrase
+
+S25 fait de la **fusion de deux branches de vérité** une opération **sémantique, pas textuelle** (KRD §122/§130) : on construit la **coupe fusionnée** (l'union `base + déltas de gauche + déltas de droite`) et on **rejoue les miroirs** dessus — le **miroir**, pas le diff de lignes, **décide le conflit**. Une fusion que **git appellerait « propre »** est **BLOQUÉE** dès que sa coupe fusionnée **rougit un miroir**.
+
+## Le problème que ça résout
+
+Un merge **textuel** (git/jj) à trois voies répond à une seule question : « les lignes se chevauchent-elles ? ». Mais deux changements qui ne se chevauchent **pas** peuvent **casser ensemble** un invariant qu'aucun ne cassait seul — une branche change le bouton de paiement, l'autre le champ montant, **lignes disjointes**, et pourtant les deux rouvrent le **même invariant émergent** du panier. Git fusionne « proprement » et **livre un monstre** (KRD §122). KRD refuse de faire confiance au texte : la fusion est jugée par le **miroir**, sur la **coupe fusionnée** — l'agrégat récursif (§109) qui est VERT seulement si **chaque** lien résout et **chaque** miroir (propre + composé) est vert **à la fois**. C'est la loi KRDCore `no_merge_without_semantic_green` (§82.2).
+
+## Les idées-clés
+
+<Field name="La coupe fusionnée (§122)" type="l'union base + gauche + droite">
+  La fusion construit une **phase stable candidate** : l'**union** de la sélection de `base`, des déltas de `gauche` et des déltas de `droite`. C'est une **coupe** du DAG (une version par contrainte), évaluée par le **même** oracle qu'une phase stable ordinaire (S23). Elle est **content-addressed** (S02). Elle ne devient une vraie phase stable **que si** son agrégat est VERT.
+</Field>
+
+<Field name="Le miroir décide, pas le texte (§122/§130)" type="rouge sur la coupe fusionnée">
+  On **rejoue** l'agrégat récursif (§109) sur la coupe fusionnée. **VERT** ⇒ **propre** (la fusion peut se poursuivre). **Au moins un miroir rouge** ⇒ **conflit** — même si le diff de texte était impeccable. Le diff n'a **pas de voix**.
+</Field>
+
+<Field name="LE critère done — texte propre, miroir rouge ⇒ bloqué" type="la fusion est BLOQUÉE">
+  Une fusion **textuellement propre** (déltas disjoints, git ferait un fast-forward / une auto-fusion sans hunk en conflit) **AVEC** un miroir rouge sur la coupe fusionnée est un **conflit**, et elle est **BLOQUÉE**. La cleanliness textuelle ne prime **JAMAIS** sur un miroir rouge. C'est le critère done de S25.
+</Field>
+
+<Field name="Le même invariant émergent, cassé par des lignes disjointes (§122)" type="le rouge que git ne voit jamais">
+  Deux branches qui touchent des **lignes différentes** peuvent casser le **même** invariant émergent d'un parent partagé (le panier « vide ⇒ rien de payable »). Le diff de texte ne voit **rien** ; l'agrégat récursif (§109), lui, **rougit**. C'est exactement le conflit que la fusion sémantique attrape.
+</Field>
+
+<Field name="Résoudre un conflit est un OVERRIDE (§11/§12)" type="décision humaine, jamais une auto-fusion">
+  Un conflit nomme les **miroirs en conflit** et exige une **autorité** (`requires_authority`, S16). Le résoudre est une **décision d'override** — humaine, au-dessus de la ligne de flottaison, enregistrée (ChangeSet + ADR + provenance). Ce n'est **jamais** une auto-fusion : la machine ne choisit pas le côté gagnant pour faire taire un rouge.
+</Field>
+
+<Field name="Non résoluble ⇒ OpenQuestion, jamais un « propre » fabriqué" type="l'honnêteté anti-hallucination">
+  Quand la fusion n'est pas **mappable** (pas d'ancêtre commun — les deux branches ne descendent pas de la même base, §120), le décideur rend **non résoluble → OpenQuestion**. Jamais un `propre` deviné, jamais une auto-fusion de l'inconnu.
+</Field>
+
+## Ce que S25 ne fait pas (dents ultérieures)
+
+- **Pas de verbe CLI `aidos merge`** : la fusion est un **geste** (`/merge-semantic`) sur les surfaces existantes ; coiner `aidos merge` est une dent ultérieure (on n'invente pas ses flags).
+- **Pas de recalcul de l'agrégat / de la vague de rouge** : l'agrégat récursif (S18/S19) et la vague de rouge (S22) sont **référencés** comme oracle, jamais ré-implémentés ici.
+- **Pas d'écriture de vérité** : `MergeSemantic` **décide** ; appliquer une fusion **propre** roule sur le chemin **ChangeSet S20** (propose → approbation), jamais une écriture depuis l'écran.
+- **Pas de curation quality-diversity / ArchiveCurationPolicy** : le DAG garde les deux branches en append-only, quelle que soit la fusion (S26).
+- **Pas de nouveau hook, pas de migration, pas de MCP** : la règle `no_stable_phase_with_red_mirror` est déjà tenue par le gate de phase S23 (une coupe en conflit n'est, par définition, pas une phase stable) ; on **réutilise** ce gate, on ne le duplique pas.
+
+## Le mur
+
+L'écran **/semantic-merge** est en **lecture seule** : il **projette** le verdict de `MergeSemantic` (badge de statut, miroirs en conflit, phrase en langage clair, coupe fusionnée content-addressed, autorité requise), il n'écrit **aucune** vérité. Une fusion **propre** est une **phase stable candidate** dont l'enregistrement passe par le chemin **ChangeSet S20** sous le rôle writer `aidos` — jamais l'agent, jamais l'écran. Un **conflit** est **bloqué** ; le résoudre est une décision d'override **humaine**, enregistrée.

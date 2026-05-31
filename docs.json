@@ -113,7 +113,9 @@
               "steps/concept/s23-phase-stable",
               "steps/internals/s23-phase-stable",
               "steps/concept/s24-version-dag",
-              "steps/internals/s24-version-dag"
+              "steps/internals/s24-version-dag",
+              "steps/concept/s25-semantic-merge",
+              "steps/internals/s25-semantic-merge"
             ]
           }
         ]
