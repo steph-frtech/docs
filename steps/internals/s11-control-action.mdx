@@ -1,0 +1,71 @@
+---
+title: "S11 · Le control & l'action — implémentation"
+description: "Le détail technique du control-spec + action-spec : les paquets Go back/kernel/control (Control{view,label,visible_when,enabled_when,triggers}, Validate, EvalState pur sur les Expr) et back/kernel/action (Action{on,invoke,on_success,on_error}, Validate, Plan), les tables AST content-addressed kernel.control/kernel.action (migration expand-only, mur SELECT seul), les fixtures miroirs d'état et d'événement, la propriété rapid, la route Workbench /control, et la place dans le noyau KRD §23/§24/§94."
+keywords: ["aidos", "krd", "implémentation", "control", "action", "go", "control-spec", "action-spec", "EvalState", "Plan", "Validate", "visible_when", "enabled_when", "triggers", "binds", "invoke", "on_success", "on_error", "kernel.control", "kernel.action", "fixture", "rapid", "content-addressed", "mur", "expr", "checkout-button", "checkout-submit", "createOrder", "déterminisme"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S11](/steps/concept/s11-control-action).</Info>
+
+S11 livre **le control-spec + l'action-spec** (KRD §23, §24.1, §24.2, §94) : le comportement-comme-donnée descend **jusqu'au bouton**. Un control est un *bouton-source* (`{ view, label, visible_when, enabled_when, triggers }`) prouvé par un **fixture d'état** ; une action **lie** (binds) ce bouton à une opération (`{ on click, invoke, on_success, on_error }`) prouvée par un **fixture d'événement**. `visible_when`/`enabled_when` réutilisent l'**Expr DSL** de S08 (jamais réinventé) ; `triggers`/`binds`/`invoke` référencent par version des sources connues. Le bouton rendu et son `onClick` sont une **projection ultérieure** (S38) ; S11 pose les vérités et leurs miroirs.
+
+## Implémentation
+
+<Note>La couche **Implémentation** est complétée au vert (CLAUDE.md §6) — code réel, fichiers. Les couches **Méta** et **Méta-méta** ci-dessous sont écrites dès le grill.</Note>
+
+Deux paquets frères, en pièces nettement séparées :
+
+- **`back/kernel/control/`** — `Control{View, Label, VisibleWhen expr.Expr, EnabledWhen expr.Expr, Triggers string}` (`control.go`). `Validate(c, known ActionSet)` vérifie la forme (`ErrMissingView`, `ErrMissingCondition`), que les deux conditions sont des Expr **booléennes bien typées** (`checkBoolShape` ⇒ `ErrConditionNotBool`), et que `Triggers` **résout** vers une action connue, sinon `ErrOrphanTrigger` (pas de bouton orphelin). `EvalState(c, given) (State, error)` est **pur** : il évalue `visible_when` sur la situation `given` via l'évaluateur Expr de S08 ; **seulement si visible**, il évalue `enabled_when` ; un bouton caché a `enabled=false`. `KnownActions(refs…)` construit l'ensemble des refs résolvables. L'ancre `CheckoutButton()` (`anchor.go`) reconstruit le control §24.1/§94 **mot pour mot**.
+- **`back/kernel/action/`** — `Action{On On, Invoke string, With map…, OnSuccess []Effect, OnError []Effect}` (`action.go`). `On{Kind EventKind, Control string}` ; seul `click` est un `EventKind` valide. `Validate(a, knownControls, knownOperations)` vérifie que `On.Kind` est `click` (`ErrUnknownEventKind`), que `On.Control` résout (`ErrOrphanOnControl`), et que `Invoke` résout vers une opération connue (`ErrOrphanBind` — le **bind** doit pointer vers une vraie opération). `Plan(a, ev) (PlanResult, error)` résout le bind **sans l'exécuter** : pour un `Click` sur le bon control, il renvoie l'opération invoquée, les noms d'arguments `with`, et les listes d'effets ; pour un événement étranger, `ErrEventNotForThisAction`. L'ancre `CheckoutSubmit()` (`anchor.go`) reconstruit l'action §24.2/§94 **mot pour mot** (`invoke "createOrder" with { cart: $.cart, user: $.auth.user }`, `on_success [navigate, toast]`, `on_error [toast.error]`).
+- **la migration AST** (`back/migrations/kernel_control_action_baseline.sql`) — **expand-only / append-only** : `kernel.control` et `kernel.action`, chacune une ligne **content-addressed** (`id text PK` = SHA-256 du body JSONB canonique, `body jsonb`, `version text` = le même hash, `superseded_by text NULL`, `created_at`), réutilisant le schéma de hash de S02 (`records.Hash(Canonicalize)`) — **jamais forké**. Une contrainte `CHECK (version = id)` rejette une ligne non-content-addressed. Les liens `triggers` (control→action) et `binds` (action→operation) sont des refs version-pinnées **dans** le JSONB (KRD §23/§28), pas de nouvelles tables.
+- **la canonicalisation** (`control/canonical.go`, `action/canonical.go`) — encode le body en JSONB canonique (clés triées, mirroir de S02), pour que `id == hash(body)` soit reproductible byte-pour-byte.
+
+## Méta
+
+Le comportement de S11 est prouvé par **deux fixtures miroirs** (les deux natures de vérité — état pour le control, événement pour l'action), **plus** un property invariant rapid, plus la reproductibilité front et l'e2e Playwright.
+
+<Steps>
+  <Step title="Fixture d'état du control (above the line)">
+    `back/kernel/control/control_fixture_test.go` — `reflects=kernel.control/checkout-button`, `test_kind=fixture`, `cert_language=fixture`, `authority=above`. Les trois lignes §35 : `{ cart vide }` ⇒ `visible=false` (bouton caché) ; `{ items, form invalide }` ⇒ `visible=true, enabled=false` ; `{ items, form valide }` ⇒ `enabled=true`. C'est un **means-test vers le rouge humain**, pas une vérité auto-graduée.
+  </Step>
+  <Step title="Fixture d'événement de l'action (above the line)">
+    `back/kernel/action/action_fixture_test.go` — `reflects=kernel.action/checkout-submit`, `test_kind=fixture`, `authority=above`. `TestCheckoutSubmitBindsOperation` : `Plan(Click("checkout-button"))` résout vers `invoke operation "createOrder"` — **l'action lie l'opération** (le critère vert). `TestCheckoutSubmitOnControl` épingle le `on click(checkout-button)` ; `TestPlanRejectsForeignEvent` ⇒ `ErrEventNotForThisAction` sur un clic étranger.
+  </Step>
+  <Step title="Property invariant (rapid, below the line)">
+    `control_property_test.go` : `EvalState` est **déterministe** (même `given` ⇒ même `State`) et `enabled` n'est consulté que lorsque `visible` est vrai ; un control dont `triggers` ne résout pas ⇒ `Validate` renvoie `ErrOrphanTrigger` (pas d'orphelin). `action_property_test.go` : `Plan` déterministe ; `OrphanBind`/`OrphanOnControl` rejetés.
+  </Step>
+  <Step title="Round-trip JSONB + mur (Testcontainers)">
+    `control/migration_roundtrip_test.go` + `action/migration_roundtrip_test.go` (Postgres réel) : `TestControlASTRoundTripsAsJSONB` / `TestActionASTRoundTripsAsJSONB` (l'AST sérialise et re-désérialise sans perte, `id == hash(body)`) ; `TestControlRejectsNonContentAddressedRow` (la contrainte `CHECK` refuse `version ≠ id`) ; `TestAgentRoleIsSelectOnlyOnControl` / `…OnAction` (le rôle `aidos_agent` a **SELECT seul** — INSERT/UPDATE/DELETE refusés : le mur, §2).
+  </Step>
+  <Step title="Mirror de reproductibilité (Vitest, front)">
+    `front/web/lib/control.test.ts` (11 tests) épingle le registre statique de `lib/control.ts` (le miroir TS de `back/kernel/control` + `back/kernel/action`) contre l'invariant Go : les ancres `checkout-button`/`checkout-submit` mot pour mot, `evalState` sur les trois lignes, et `planAction` qui résout `createOrder`. Même entrée ⇒ même sortie.
+  </Step>
+  <Step title="e2e Playwright (route /control)">
+    `tests/e2e/control.spec.ts` (6 tests) — la carte du control nomme `checkout-button`, ses Expr `$.cart.items.length > 0` et `$.form.valid && !$.submitting`, et son `triggers → checkout-submit` ; la carte de l'action montre le bind `checkout-submit → operation createOrder` et les effets `navigate`/`toast`/`toast.error` ; la table d'état rend `visible=false` (panier vide), `enabled=false` (form invalide), `enabled=true` (form valide) ; le badge du fixture lit **PASS**.
+  </Step>
+</Steps>
+
+**Déterminisme-first (CLAUDE.md §6/§8).** Tout ici est **code pur** — `Validate`, `EvalState`, `Plan`, la canonicalisation/hash. Aucune horloge, aucun RNG, aucune E/S : la même situation produit toujours le même état, le même clic résout toujours le même bind. Les deux fixtures Go **sont** les mirrors de reproductibilité côté Go ; `lib/control.test.ts` l'est côté front. Un évaluateur d'état de bouton ou un résolveur de bind qui passerait par un LLM serait un *determinism gap* qui bloque l'étape — les Expr typés + les refs résolues l'excluent par construction.
+
+**Complétude (CLAUDE.md §6, pas de monstre).** La vérité `kernel.control` a son miroir vivant (le fixture d'état) ; la vérité `kernel.action` a le sien (le fixture d'événement). Chaque miroir reflète une vérité réelle. Aucun control sans son fixture d'état, aucune action sans son fixture d'événement, aucun `triggers`/`binds` orphelin — donc aucun monstre.
+
+## Méta-méta
+
+**Place dans le noyau.** S11 est le **bas de la verticale** KRD §23/§24/§94 : l'intention descend jusqu'au bouton (`control`, couche N1 plan-spec) et son action (`action`, le lien vers la couche N2 Workflow). Elle consomme S02 (le content-address des records — réutilisé, **non réinventé**), l'Expr DSL de S08 (les conditions `visible_when`/`enabled_when`), l'opération `createOrder` de S10 (référencée par version via `invoke`, **non redéfinie**), et la ligne de flottaison de S04 (le mur). Elle laisse une phase stable : la projection `control + action → bouton rendu + onClick` gardée par Pact (S38), et le câblage SELECT live vers `kernel.control`/`kernel.action`.
+
+**Le mur (appliqué à S11).** Les paquets `control`/`action` sont **purs** : ils n'écrivent aucune vérité. La migration GRANTe au rôle `aidos_agent` **SELECT seul** sur `kernel.control`/`kernel.action` et REVOKE INSERT/UPDATE/DELETE/TRUNCATE ; seul le rôle privilégié `aidos` (la CLI, via un ChangeSet approuvé) écrit ces ASTs. La route `/control` est strictement **lecture seule** : elle projette les ASTs et le *résultat* du fixture. La clause *action-capable* de `ui-completeness` est satisfaite **par le vide** — il n'y a aucune capacité backend à lier (l'interpréteur est une bibliothèque pure ; le bouton rendu + son handler sont une projection S38), donc aucune capacité headless cachée.
+
+**Choix de conception (réutiliser sans réinventer, ADR 0007).** Les conditions `visible_when`/`enabled_when` réutilisent l'**Expr DSL** déjà prouvé dans `back/kernel/expr` (S08) — un seul langage de condition à travers les DSL. Le content-address des lignes AST réutilise le schéma de hash de S02. L'opération invoquée est **référencée par version**, jamais recopiée. **Aucun nouvel ADR** : S11 gèle deux artefacts nouveaux (les *kinds* `control` et `action`, leurs liens `triggers`/`binds`), il ne décale aucun contrat antérieur.
+
+**Pas de nouvel artefact superflu (CLAUDE.md §5).** **Pas de serveur MCP** — aucune nouvelle capacité de lecture/écriture sur la base n'est exposée ici (les paquets sont des bibliothèques pures ; le `store`/`mirror-runner` MCP sont des étapes antérieures/ultérieures). **Pas de hook** — aucune nouvelle règle non-bypassable au-delà du mur S04 (qui garde déjà `kernel.*` au niveau du schéma). **Pas de codegen** du bouton rendu (l'émetteur est une projection ultérieure, S38). Deux **Skills** sont ajoutés (les gestes rejouables) : `.claude/skills/view` (« déclarer/inspecter un control-spec ») et `.claude/skills/action` (« lier un control à une opération via une action-spec »). Un nouvel artefact ne fait qu'**ajouter** une garde, jamais en retirer une.
+
+**Anti-écrasement (CLAUDE.md §9).** S11 n'édite que ses propres fichiers : `back/kernel/control/**`, `back/kernel/action/**`, la nouvelle migration `kernel_control_action_baseline.sql` (expand-only, jamais d'altération d'une table antérieure), `tests/e2e/control.spec.ts`, `front/web/app/control/**`, `front/web/lib/control.ts(.test.ts)`, et l'ajout de la route `/control` + ses traductions (`WorkbenchHeader`, `messages/{fr,en}.json`). Il **lit** la forme des records (S02), l'AST Expr (S08), la forme de l'opération (S10) — sans les altérer. Tout changement d'un contrat antérieur passerait par un **ChangeSet** + un **SemanticDiff**, jamais une réécriture furtive.
+
+**Forward-dependencies (OpenQuestions, pas des `residual_issues`).**
+
+- **OQ-S11-1** — la persistance Postgres réelle des deux fixtures miroirs (le schéma `mirrors` arrive à S06 ; ici les fixtures sont des tests Go exécutables qui *sont* la preuve red→green).
+- **OQ-S11-2** — la projection `control + action → bouton rendu + onClick` gardée par Pact (S38), et le câblage SELECT live de `/control` vers `kernel.control`/`kernel.action` (la page projette aujourd'hui le registre statique `lib/control.ts`, miroir fidèle de l'AST Go).
+- **OQ-S11-3** — l'ensemble des verbes d'effet supportés (`navigate`/`toast`/`toast.error`) est l'ensemble **déclaré** par l'ancre §24.2 ; il grandira avec le fixture qui en aura besoin (jamais de verbe inventé). Un seul couple control/action (`checkout-button`/`checkout-submit`) est porté ici.
+
+<Card title="Voir le concept de l'étape" icon="lightbulb" href="/steps/concept/s11-control-action">
+  Ce qu'apporte le control + l'action — le bouton comme vérité, triggers, binds, les deux formes de fixture — sans le code.
+</Card>

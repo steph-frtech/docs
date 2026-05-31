@@ -71,7 +71,9 @@
               "steps/concept/s09-policy-dsl",
               "steps/internals/s09-policy-dsl",
               "steps/concept/s10-operation-dsl",
-              "steps/internals/s10-operation-dsl"
+              "steps/internals/s10-operation-dsl",
+              "steps/concept/s11-control-action",
+              "steps/internals/s11-control-action"
             ]
           }
         ]

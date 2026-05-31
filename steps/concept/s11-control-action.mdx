@@ -1,0 +1,70 @@
+---
+title: "S11 · Le control & l'action — un bouton comme vérité, et l'action qui le lie à une opération"
+description: "Le comportement en DSL jusqu'au bouton (KRD §24.1/§24.2/§94) : un control-spec EST un bouton-source — { view, label, visible_when, enabled_when, triggers } — prouvé par un fixture d'état (situation → visible/enabled) ; une action-spec LIE (binds) ce bouton à une opération — { on click, invoke, on_success, on_error } — prouvée par un fixture d'événement (event → invoke/effet). Le bouton checkout-button déclenche l'action checkout-submit qui invoke l'opération createOrder."
+keywords: ["aidos", "krd", "control", "action", "bouton", "control-spec", "action-spec", "visible_when", "enabled_when", "triggers", "binds", "invoke", "on_success", "on_error", "fixture d'état", "fixture d'événement", "checkout-button", "checkout-submit", "createOrder", "kernel.control", "kernel.action", "la verticale", "déterminisme"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S11](/steps/internals/s11-control-action).</Note>
+
+## En une phrase
+
+S11 fait descendre **le comportement-comme-vérité jusqu'au bouton** : un bouton n'est plus un composant rendu à la main avec ses conditions implicites — c'est un **control-spec**, une donnée typée du noyau (`{ view, label, visible_when, enabled_when, triggers }`), et l'**action-spec** est la donnée qui le **lie** (binds) à une opération métier.
+
+## Le problème que ça résout
+
+Dans un projet ordinaire, « le bouton Commander n'apparaît que si le panier n'est pas vide, n'est actif que si le formulaire est valide, et au clic appelle createOrder » vit comme du JSX dispersé : un `disabled={…}`, un `hidden={…}`, un `onClick={…}` enfouis dans un composant. L'ordre, la condition, le lien vers l'opération sont du **code libre** — rien ne prouve que le bouton se comporte comme prévu, et rien ne relie formellement ce clic à l'opération qu'il déclenche.
+
+KRD §23 (« la verticale : de l'intention au bouton et son action ») et §24 posent la règle : **le comportement est une donnée, jusqu'au bouton**. Le bouton est une vérité SOURCE du noyau (couche N1 plan-spec, KRD §94), prouvée par son miroir. Le clic qui invoke une opération est une autre vérité, elle aussi prouvée.
+
+## Les idées-clés
+
+<Field name="le control-spec (un bouton comme source)">
+  Un control est `{ view, label, visible_when, enabled_when, triggers }`. Ce n'est **pas** un composant rendu — c'est la *description typée* d'un bouton : dans quelle vue il vit, son libellé, **quand il est visible** (`visible_when`), **quand il est actif** (`enabled_when`), et **quelle action il déclenche** (`triggers`). `visible_when` et `enabled_when` sont des **Expr DSL** (la grammaire de S08), pas du code libre.
+</Field>
+
+<Field name="triggers (le lien control → action)">
+  `triggers` est le **lien** d'un bouton vers son action : `checkout-button` *triggers* `checkout-submit`. Un control dont le `triggers` ne pointe vers aucune action connue est un **orphelin** — le noyau le refuse (pas de bouton qui ne mène nulle part).
+</Field>
+
+<Field name="l'action-spec (le bind vers une opération)">
+  Une action est `{ on: click(control), invoke: operation, on_success[], on_error[] }`. Elle **lie** (binds) un bouton à une opération : au clic sur `checkout-button`, l'action `checkout-submit` **invoke** l'opération `createOrder` avec ses arguments, puis déclare ses effets de réussite (`navigate`, `toast`) et d'erreur (`toast.error`). C'est le **bind** : le lien action → operation.
+</Field>
+
+<Field name="binds (le lien action → operation)">
+  `binds` est le **lien** d'une action vers l'opération qu'elle invoque. Une action dont l'`invoke` ne résout vers aucune opération connue est refusée. L'action « lie une opération » est exactement le critère vert de l'étape : `Plan(click("checkout-button"))` doit résoudre vers `invoke operation "createOrder"`.
+</Field>
+
+<Field name="fixture d'état vs fixture d'événement (les deux formes de vérité)">
+  La vérité d'un control est un **fixture d'état** : *dans cette situation, le bouton est visible/actif ainsi*. La vérité d'une action est un **fixture d'événement** : *à cet événement, on invoke cette opération et on produit ces effets*. Deux natures, deux formes — jamais l'inverse (forcer un Gherkin ou un property ici serait un monstre).
+</Field>
+
+## L'exemple canonique
+
+Le **fixture d'état** du `checkout-button` (KRD §35) tient en trois situations :
+
+| situation (`given`) | visible | enabled |
+| --- | --- | --- |
+| `{ cart: { items: [] } }` (panier vide) | **false** | false |
+| `{ cart: { items: [x] }, form.valid: false }` | true | **false** |
+| `{ cart: { items: [x] }, form.valid: true }` | true | **true** |
+
+Un panier vide **cache** le bouton ; un panier rempli mais un formulaire invalide le montre **désactivé** ; un panier rempli et un formulaire valide l'**active**. `enabled_when` n'est consulté que lorsque `visible_when` est vrai — un bouton caché n'a pas d'état actif.
+
+Le **fixture d'événement** du `checkout-submit` :
+
+```
+on click("checkout-button")
+  -> invoke operation "createOrder" with { cart: $.cart, user: $.auth.user }
+on_success -> [ navigate("/orders/{result.id}"), toast("order.created") ]
+on_error   -> [ toast.error($.error.message) ]
+```
+
+Le critère vert : `Plan(click("checkout-button"))` **lie l'opération** `createOrder`.
+
+## Ce que ça vous apporte
+
+Quand vous développez votre application avec AIDOS, vous ne codez plus un bouton « à la main » avec des conditions implicites. Vous **déclarez** un control (quand il se montre, quand il s'active, ce qu'il déclenche) et une action (ce qu'elle invoke, ses effets), et chacun est **prouvé** par son fixture. Le bouton rendu et son `onClick` deviennent une **projection** générée à partir de ces vérités (étape ultérieure, S38) — vous n'écrivez jamais le câblage à la main, et rien ne peut diverger silencieusement de la vérité déclarée.
+
+<Card title="Voir le détail d'implémentation" icon="wrench" href="/steps/internals/s11-control-action">
+  Les paquets Go back/kernel/control + back/kernel/action, EvalState/Plan, les fixtures miroirs, la migration des tables AST, la route Workbench /control — tout le détail technique.
+</Card>
