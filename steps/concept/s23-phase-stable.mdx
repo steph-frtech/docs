@@ -1,0 +1,53 @@
+---
+title: "S23 · La phase stable — une coupe cohérente du DAG, le lockfile du noyau"
+description: "Une phase stable (KRD §43) est une COUPE cohérente dans le DAG de versions : une version choisie par contrainte telle que TOUT lien resout (S17 vert, ni périmé ni absent) ET TOUT senseur est vert, à la fois — le lockfile du noyau. « Est-ce une phase stable ? » = « tous les liens résolvent + tout est vert ? ». « Stable » est CALCULÉ, jamais déclaré. La coupe vide est STABLE par vacuité (le cas de base). UN SEUL miroir rouge — un senseur rouge OU un lien périmé/absent — rend la coupe INSTABLE et est nommé dans les reasons. Une phase stable est un NŒUD du DAG (un ChangeSet en est l'arête), content-addressed par le hash de sa coupe. aidos stable imprime le verdict en lecture seule. S23 fige la décision de coupe + aidos stable + le nœud enregistré ; les branches/merge/revert et la curation QD sont des dents ultérieures, la stabilité locale (cellule) seulement."
+keywords: ["aidos", "krd", "phase stable", "stable phase", "coupe cohérente", "coherent cut", "DAG de versions", "version DAG", "lockfile", "aidos stable", "dag.stable_phase", "IsStable", "coupe", "cut", "reasons", "lien périmé", "stale link", "absent", "senseur", "sensor", "Resolve", "content-addressed", "nœud", "node", "ChangeSet", "arête", "edge", "parent", "le mur", "lecture seule", "calculé jamais déclaré", "vacuité", "KRD §41", "KRD §42", "KRD §43", "KRD §44", "KRD §82.1"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S23](/steps/internals/s23-phase-stable).</Note>
+
+## En une phrase
+
+S23 fige la **phase stable** (KRD §43) : une **coupe cohérente** du DAG de versions — une version choisie par contrainte telle que **TOUT lien resout** (S17 vert) **ET TOUT senseur est vert**, à la fois — c'est le **lockfile du noyau**, l'état de repos entre deux objectifs. La question « est-ce une phase stable ? » a une réponse **mécanique** : « tous les liens résolvent + tout est vert ? ».
+
+## Le problème que ça résout
+
+Quand peut-on dire que le système est *cohérent* — qu'on tient un point sur lequel on peut s'appuyer ? Sans réponse **calculée**, « stable » devient une **déclaration** : quelqu'un affirme « c'est bon » et on le croit. KRD §43 refuse : une phase stable est **computée** — c'est la conjonction « chaque lien de la coupe résout (aucun ne pend) ∧ chaque senseur est vert ». Un seul miroir rouge — un senseur en échec **ou** un lien périmé/absent — et ce n'est **pas** une phase stable. La coupe **vide** est stable **par vacuité** : rien ne pend, rien n'est rouge — c'est le cas de base.
+
+## Les idées-clés
+
+<Field name="Une coupe dans le DAG (§43)" type="une version par contrainte">
+  Une phase stable **sélectionne** une version par contrainte (`contrainte → version`) — une **coupe** dans le DAG de versions. Ce n'est ni une release, ni un snapshot, ni un tag : un tag git ne fait que *cartographier* une phase stable. C'est le **lockfile** du noyau : l'ensemble exact des versions qui tiennent ensemble.
+</Field>
+
+<Field name="Cohérente = tout resout ∧ tout vert (§43)" type="les deux à la fois">
+  « Cohérente » a un sens précis : **chaque lien** de la coupe résout **vert** (S17 — ni périmé, ni absent) **ET chaque senseur** sur la coupe est **vert**. Les deux conditions, en même temps. La staleness d'un lien est décidée par le `Resolve` de S17 — réutilisé, jamais réinventé ; le vert d'un senseur est la forme de résultat S07.
+</Field>
+
+<Field name="La coupe vide est STABLE (le cas de base)" type="vacuité">
+  Aucune contrainte, aucun lien, aucun senseur : **rien ne pend, rien n'est rouge**. La coupe vide est donc stable **par vacuité**. C'est le critère de base — la première phase stable, la racine du DAG.
+</Field>
+
+<Field name="Un seul miroir rouge ⇒ INSTABLE (le critère de fait)" type="nommé dans les reasons">
+  Il suffit d'**un** miroir rouge — un senseur dont le résultat est rouge, **ou** un lien qui résout `stale`/`absent` — pour que la coupe bascule en **INSTABLE**. L'offenseur est **nommé** dans les `reasons` (l'id du senseur, ou la forme `from->to (stale|absent)` du lien). `reasons` est vide **ssi** la coupe est stable.
+</Field>
+
+<Field name="« Stable » est CALCULÉ, jamais déclaré (§8)" type="anti-Goodhart">
+  Personne ne *décrète* qu'une coupe est stable. `IsStable(cut, heads, links, sensors)` la **calcule** — fonction pure, déterministe, rejouable. Le verdict côté Go (`phases.IsStable`), côté CLI (`aidos stable`) et côté écran (/phase-stable) est **le même** : une seule source, aucune dérive.
+</Field>
+
+<Field name="Une phase est un NŒUD du DAG (§44)" type="content-addressed">
+  Une phase stable est un **nœud** du DAG ; un ChangeSet en est l'**arête** temporelle (la transition d'une phase à la suivante). Le nœud est **content-addressed** : son id == sa version == le hash de la coupe (S02 réutilisé). Changer la coupe donne un **nouveau** nœud (un nouveau hash), jamais une édition en place. Chaque nœud porte son `parent` (l'arête vers le nœud précédent).
+</Field>
+
+## Ce que S23 ne fait pas (dents ultérieures)
+
+- **Pas de branches / merge / revert du DAG** : seul le nœud de phase stable + son arête `parent`. Le merge sémantique (§122/§130) est S25.
+- **Pas de red-wave / worklist d'impact** : la staleness par lien est **consommée** de S17 ; la vague de rouge (§42) est S22. S23 est la **décision de coupe agrégée**, pas le calcul par lien.
+- **Pas de curation / quality-diversity** (§44.4) : garder/compresser/tombstone les nœuds est S26.
+- **Pas de stabilité globale / fédération** (§43 fractal) : stabilité **locale** (cellule) seulement.
+- **Pas de MCP, pas de hook** : `IsStable` est une bibliothèque pure et `aidos stable` une commande ; le MCP `dag` qui parcourt branches/reverts est ultérieur.
+
+## Le mur
+
+`aidos stable` et l'écran /phase-stable sont en **lecture seule** : ils **calculent** et **projettent** le verdict, ils n'écrivent aucune vérité. Le schéma `dag` est **au-dessus de la ligne de flottaison** — l'agent y a un accès **SELECT seulement**. **Enregistrer** un nœud de phase dans `dag.stable_phase` passe uniquement par le rôle **writer `aidos`** à l'intérieur d'un **ChangeSet** approuvé. `aidos stable` montre le verdict ; le commit-gate enregistre le nœud.

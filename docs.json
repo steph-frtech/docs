@@ -109,7 +109,9 @@
               "steps/concept/s21-semantic-diff",
               "steps/internals/s21-semantic-diff",
               "steps/concept/s22-red-wave",
-              "steps/internals/s22-red-wave"
+              "steps/internals/s22-red-wave",
+              "steps/concept/s23-phase-stable",
+              "steps/internals/s23-phase-stable"
             ]
           }
         ]
