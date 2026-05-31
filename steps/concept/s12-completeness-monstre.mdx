@@ -1,0 +1,55 @@
+---
+title: "S12 · La complétude & le monstre — le Stop qui bloque tant qu'un miroir manque"
+description: "La loi de complétude (KRD §29) cesse d'être un verdict en lecture seule (S06) et devient une PORTE non contournable au Stop : un hook Go calcule l'ensemble des monstres sur mirrors ⋈ kernel — une vérité sans miroir vivant (no_truth_without_mirror), un miroir orphelin (no_orphan_mirror) — et BLOQUE la fin de session tant qu'un monstre subsiste. Pas de monstre, ou la session ne se ferme pas."
+keywords: ["aidos", "krd", "complétude", "loi de complétude", "monstre", "no_truth_without_mirror", "no_orphan_mirror", "miroir vivant", "miroir orphelin", "Stop", "hook", "porte", "block", "pass", "BlockReason", "MONSTER", "INCOMPLETE", "la coupe", "bicéphale", "completeness_runs", "fault-injection", "déterminisme"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S12](/steps/internals/s12-completeness-monstre).</Note>
+
+## En une phrase
+
+S12 transforme **la loi de complétude** d'un *constat* (S06 disait « voici les monstres ») en une **porte mécanique** : au **Stop** — le moment où l'agent veut clore son tour — un hook recompte les monstres et **refuse de fermer la session** tant qu'il en reste un. *Pas de vérité sans miroir, pas de monstre — sinon le Stop ne passe pas.*
+
+## Le problème que ça résout
+
+S06 a rendu la loi *calculable* : on sait dire, sur une coupe de `mirrors ⋈ kernel`, qu'une couche du noyau n'a aucun miroir vivant, ou qu'un miroir reflète une cible disparue. Mais un constat qu'on peut ignorer n'est pas une loi — c'est un avis. Rien n'empêchait encore de **clore une session avec un monstre dedans** : une vérité sans preuve (un vœu), ou une preuve qui ne prouve plus rien (un miroir orphelin).
+
+KRD §29 (la loi de complétude) et §74/§77 (la ligne du Stop : `goal-check && completeness-check`, `on_fail: continue`) posent la règle : **le Stop est le dernier garde-fou**, et la complétude en est une moitié non négociable. S12 câble exactement cette moitié.
+
+## Les idées-clés
+
+<Field name="le monstre (les deux têtes manquantes)">
+  Le corps d'une vérité est **bicéphale** (KRD LIVRE XXII) : une tête d'intention dans le noyau, une tête de preuve dans le miroir. Un **monstre**, c'est une tête sans l'autre : une couche du noyau **sans miroir vivant** (`no_truth_without_mirror` — l'intention sans preuve) ou un miroir **orphelin** (`no_orphan_mirror` — la preuve sans corps, `liveness = dead`).
+</Field>
+
+<Field name="la coupe (ce que la porte regarde)">
+  « La coupe courante » est l'**état de tête** du noyau et des miroirs au moment du Stop — exactement la jointure que le détecteur de S06 consomme. La porte ne devine pas une coupe à partir d'un événement ; elle lit la tête de `mirrors ⋈ kernel` et l'adresse par contenu (une empreinte stable). Même coupe ⇒ même verdict.
+</Field>
+
+<Field name="block vs pass (deux verdicts, jamais trois)">
+  La porte n'a que **deux** issues : `block` dès qu'il existe un monstre, `pass` sur une coupe complète. Il n'y a **pas de troisième verdict**. Et une vérification qui *ne peut pas s'exécuter* (la coupe ne se charge pas) n'est pas un « passe quand même » : c'est un `INCOMPLETE` qui **bloque** (KRD §82 — l'anti-pattern `.passthrough()`).
+</Field>
+
+<Field name="le BlockReason (le refus qui nomme la porte)">
+  Un blocage sans explication serait une prison. La porte renvoie un **BlockReason** actionnable — `{ code, severity, explanation, how_to_fix[] }`, code `MONSTER` (ou `INCOMPLETE`) — qui **nomme chaque monstre**, sa raison, et **comment le réparer** (écrire le miroir manquant ; re-pointer ou retirer le miroir orphelin).
+</Field>
+
+<Field name="« done » est calculé, jamais déclaré">
+  L'agent ne peut pas *décréter* qu'il a fini. La porte est **déterministe** et hors de sa portée : tant que la coupe porte un monstre, le Stop reste bloqué. C'est l'anti-Goodhart en acte (KRD §16, CLAUDE.md §8).
+</Field>
+
+## L'exemple canonique
+
+Une coupe avec un bouton `checkout-button@v1` (kind `control`, qui requiert un miroir `fixture`) :
+
+| coupe | monstres | verdict |
+| --- | --- | --- |
+| le control + son fixture vivant | ∅ | **COMPLETE** (pass) |
+| le control, **sans** miroir | `no_truth_without_mirror(checkout-button@v1, fixture)` | **BLOCKED — MONSTER** |
+| un miroir qui reflète `@v0` disparu | `no_orphan_mirror(orphan-1, liveness=dead)` | **BLOCKED — MONSTER** |
+
+Supprimez le seul miroir vivant d'une couche → la porte bloque (`no_truth_without_mirror`). Re-pointez un miroir vers une `@version` qui n'existe plus → elle bloque (`no_orphan_mirror`). Restaurez → elle passe. C'est la **chasse au monstre** (KRD §32, §127) rendue mécanique — et le **test décisif** : *est-ce que ce contrôle se déclenche un jour ?* Oui, et on le prouve par injection de faute.
+
+## Ce que S12 n'invente pas
+
+S12 **n'ajoute aucune vérité métier** : il *applique* la loi existante (KRD §29), il ne fige aucune règle nouvelle. Il **ne ré-implémente pas** S06 (il consomme le détecteur de monstres, il ne le reforge pas). Et la moitié *goal-check* du Stop (le red set vert ∧ vert antérieur intact ∧ mutation ≥ seuil) viendra **plus tard** (S29) — S12 ne câble que la complétude.

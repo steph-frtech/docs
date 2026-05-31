@@ -73,7 +73,9 @@
               "steps/concept/s10-operation-dsl",
               "steps/internals/s10-operation-dsl",
               "steps/concept/s11-control-action",
-              "steps/internals/s11-control-action"
+              "steps/internals/s11-control-action",
+              "steps/concept/s12-completeness-monstre",
+              "steps/internals/s12-completeness-monstre"
             ]
           }
         ]

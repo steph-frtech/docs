@@ -1,0 +1,56 @@
+---
+title: "S12 · La complétude & le monstre — implémentation"
+description: "Le détail technique de la porte de complétude au Stop : le paquet pur back/kernel/mirror/completeness (Gate block iff |monsters|>0, Check, GateErrored, Cut.Hash), le binaire hook back/hooks/stop (CutSource, RunLog, CheckCompleteness, fail-closed), la table d'audit runtime.completeness_runs (Atlas, append-only, content-addressed, sous la ligne de flottaison — ADR 0014/0015), le miroir Godog + la propriété rapid + l'injection de faute, la route Workbench /completeness, et la place dans le noyau KRD §29/§74/§77/§82."
+keywords: ["aidos", "krd", "implémentation", "complétude", "monstre", "go", "Gate", "Check", "GateErrored", "Cut", "CutSource", "RunLog", "Stop", "hook", "block", "pass", "MONSTER", "INCOMPLETE", "BlockReason", "completeness_runs", "no_truth_without_mirror", "no_orphan_mirror", "fault-injection", "Testcontainers", "rapid", "Godog", "mur", "ADR 0015", "déterminisme"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S12](/steps/concept/s12-completeness-monstre).</Info>
+
+S12 livre **la porte de complétude au Stop** (KRD §29, §74/§77, LIVRE XXII §126-§127) : le verdict en lecture seule de S06 devient un **garde-fou non contournable**. Un paquet pur calcule la porte (`block` ssi un monstre subsiste), un binaire hook l'invoque au Stop et renvoie un code de sortie + un BlockReason, et un journal d'audit append-only consigne chaque évaluation. S12 **consomme** le détecteur de monstres de S06 — il ne le reforge ni ne le re-type.
+
+## Implémentation
+
+<Note>La couche **Implémentation** est complétée au vert (CLAUDE.md §6) — code réel, fichiers. Les couches **Méta** et **Méta-méta** ci-dessous sont écrites dès le grill.</Note>
+
+- **`back/kernel/mirror/completeness/`** — le cœur **pur** (aucune I/O). `Gate(monsters, cut) Decision` est l'agrégateur : `block` ssi `len(monsters) > 0`, sinon `pass` ; il renvoie l'ensemble exact des monstres (aucun *drop* silencieux), un `BlockReason{Code, Severity, Explanation, HowToFix}` (code `MONSTER`) nommant chaque monstre, et l'empreinte de coupe. `Check(cut)` enchaîne le détecteur de S06 (`records.ComputeCompleteness`) puis `Gate`. `GateErrored(cut, cause)` est le chemin **anti-passthrough** (KRD §82) : une vérification qui ne peut pas tourner renvoie `block` + code `INCOMPLETE`, jamais un passe silencieux. `Cut{Layers, Mirrors}` est la projection de tête de `mirrors ⋈ kernel` ; `Cut.Hash()` est une empreinte SHA-256 **stable et indépendante de l'ordre** des slices (clés de tri totales sur couches et miroirs).
+- **`back/hooks/stop/`** — le **binaire hook** (`package main`), adaptateur mince. `CutSource.Load(ctx) (Cut, error)` charge la coupe (seam : `fixedCut` en test, `PgCutSource` en prod lisant les têtes `superseded_by IS NULL` de `kernel.layer` et `mirrors.mirror_record` — le mur : SELECT seul). `RunLog.Record` consigne le run. `CheckCompleteness` orchestre : charger → `completeness.Check` → consigner → décider ; une coupe qui ne se charge pas devient un `INCOMPLETE` (KRD §82). `Run(stdin, stdout, …)` lit l'événement Stop, code de sortie `0 = allow / 2 = block`, écrit le BlockReason JSON sur stdout ; un événement illisible **échoue fermé** (`INCOMPLETE`).
+- **`back/migrations/completeness_runs_baseline.sql`** — la table d'audit **`runtime.completeness_runs`** (+ enfant `completeness_monster_findings`), Atlas, **expand-only / append-only**, content-addressed par `cut_hash`. `verdict` ∈ `{block, pass}` (CHECK — pas de troisième), `monster_count`, et un CHECK liant `pass ⇔ monster_count = 0`. Elle vit dans le schéma `runtime` **sous la ligne de flottaison** (ADR 0014/0015) : le rôle `aidos_agent` y a `INSERT + SELECT` mais **jamais** `UPDATE/DELETE/TRUNCATE`, et **aucun** droit d'écriture sur `kernel/mirrors/fitness` (le mur tient). Elle calque la forme de `sensor_runs` (S07) pour que les jumeaux du mur restent auditables.
+
+## Méta
+
+Le comportement de S12 est prouvé par **trois miroirs** (les natures attendues), tous rouges avant le code (le rouge **est** le `/goal`).
+
+<Steps>
+  <Step title="Miroir d'acceptation Godog (above the line)">
+    `tests/mirror/completeness_stop.feature` + `back/hooks/stop/completeness_stop_bdd_test.go` — `reflects=S12-completeness-stop-gate`, `test_kind=acceptance`, `cert_language=gherkin`, `authority=above`. Trois scénarios : une couche sans miroir vivant ⇒ `block`, code `MONSTER`, monstre `no_truth_without_mirror`, ligne `completeness_runs` `block` ; un miroir orphelin ⇒ `block`, `no_orphan_mirror` ; une coupe complète ⇒ `pass`, ensemble vide, ligne `pass`. Un **means-test vers le rouge humain**, jamais une vérité auto-graduée.
+  </Step>
+  <Step title="Propriété rapid (below the line)">
+    `back/kernel/mirror/completeness/gate_property_test.go` — `test_kind=property`, `cert_language=rapid`, `authority=below`. Les invariants porteurs : `block` ssi `|monsters| > 0` (pas de troisième verdict) ; `block ⇒ code ∈ {MONSTER, INCOMPLETE}` ∧ ensemble enregistré = ensemble d'entrée (aucun drop, KRD §82) ; `GateErrored` bloque toujours en `INCOMPLETE` ; l'empreinte de coupe est déterministe et indépendante de l'ordre. C'est le **miroir de reproductibilité** déterministe (CLAUDE.md §6).
+  </Step>
+  <Step title="Injection de faute (le test obligatoire de §5)">
+    `back/hooks/stop/fault_injection_test.go` — *un hook qui ne se déclenche jamais est mort* (KRD §32, §127). Depuis une coupe verte : supprimer le seul miroir vivant ⇒ le binaire renvoie `block` + `MONSTER` + `how_to_fix(no_truth_without_mirror)` ; re-pointer un miroir vers une `@version` disparue ⇒ `block` + `MONSTER` + `how_to_fix(no_orphan_mirror)` ; restaurer ⇒ `pass`. Plus le fail-closed (événement illisible / coupe non chargeable ⇒ `INCOMPLETE`). On pilote le **binaire entier** (`Run` sur stdin/stdout), donc la preuve est « le hook bloque », pas seulement « l'agrégateur calcule ».
+  </Step>
+  <Step title="Miroirs DB (Testcontainers) + reproductibilité front">
+    `back/hooks/stop/completeness_runs_db_test.go` (Postgres réel jetable) prouve le round-trip de `PgRunLog`, que `PgCutSource` lit la tête et que la porte bloque/passe sur de vraies lignes, que l'agent est **refusé** en `UPDATE/DELETE/TRUNCATE` sur l'audit et en `INSERT` sur `mirrors.mirror_record` (le mur), et que le CHECK rejette un troisième verdict. `front/web/lib/completeness.test.ts` (Vitest) épingle l'agrégateur front contre le Go.
+  </Step>
+</Steps>
+
+La route **`/completeness`** (`front/web/app/completeness/page.tsx`, thème ADR 0010, bilingue ADR 0011) **projette** `runtime.completeness_runs` : le verdict de la coupe courante (`COMPLETE` / `BLOCKED — MONSTER`), l'ensemble des monstres avec leur raison + `how_to_fix`, et un flux des blocages récents. **Lecture seule** assumée : la porte est tenue par le hook Go invoqué par la harness, jamais par un écran — aucune capacité headless cachée (le rerun-à-la-demande est OQ-S12-1). L'e2e `tests/e2e/completeness.spec.ts` (Playwright) prouve le rendu des deux raisons + des deux verdicts.
+
+## Méta-méta
+
+<Card title="Pourquoi une PORTE et pas un capteur de plus">
+  S07 (les sensors, PostToolUse) garde **chaque diff** ; S12 garde **la fermeture de session** (Stop). Ce sont deux moments distincts de KRD §74 : le mur de feedback par diff, et le dernier garde-fou avant de déclarer « fini ». La complétude est trop chère pour tourner à chaque frappe (elle lit la coupe entière) et trop importante pour ne tourner jamais : sa place est au Stop.
+</Card>
+
+<Card title="La porte est déterministe — l'agent n'y a pas accès">
+  « Done » n'est jamais déclaré : c'est `red→green ∧ vert antérieur intact ∧ mutation ≥ seuil ∧ aucun monstre`, calculé hors de portée de l'agent (CLAUDE.md §8). S12 rend mécanique le terme *aucun monstre* ; il interdit aussi qu'un ChangeSet atteigne `APPLIED` pendant que cette vérification est rouge (KRD §44/§98). Un second agent qui « relit » réduit la corvée — ce n'est pas une preuve ; le juge est le miroir + la porte.
+</Card>
+
+<Card title="Anti-passthrough : l'inconnu bloque">
+  Le piège classique d'un garde-fou est le `.passthrough()` : « je n'ai pas pu vérifier, donc je laisse passer ». S12 inverse la charge (KRD §82) — une coupe qui ne se charge pas, un événement illisible, une vérification en erreur sont des **échecs explicites** (`INCOMPLETE`) qui **bloquent**. Le silence n'est jamais un succès.
+</Card>
+
+<Card title="Le mur, des deux côtés">
+  S12 **lit** `kernel ⋈ mirrors` pour calculer les monstres et n'y **écrit rien** ; il n'écrit que son propre journal d'audit `runtime.completeness_runs`, sous la ligne de flottaison (ADR 0014/0015). Les tests Testcontainers le prouvent en base : l'agent est refusé en écriture sur la vérité et en réécriture de son propre audit. La porte qui garde le mur respecte le mur.
+</Card>
