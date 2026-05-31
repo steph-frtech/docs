@@ -1,0 +1,172 @@
+---
+title: "La structure du dépôt"
+description: "La carte des répertoires d'AIDOS : back/ = moteur Go (seul écrivain de la vérité), front/web = Workbench, docs/, .claude + .agents ; et la règle « la vérité ne vit pas dans des fichiers » — ce sont des schemas Postgres."
+keywords: ["aidos", "krd", "repo-structure", "back", "kernel", "mirror", "archive", "mcp", "hooks", "migrations", "gen", "Workbench", "Postgres", "sqlc"]
+---
+
+<Info>
+  Page de fondation, côté **Pour moi**. Elle donne la carte du dépôt `aidos` tel qu'il existe réellement aujourd'hui, et la règle qui surprend toujours : la **vérité** n'est pas dans l'arborescence. Pour la frontière vérité/code, voir [le mur et le cliquet](/internals/the-wall-and-ratchet) ; pour la pile, voir [la pile](/internals/the-stack).
+</Info>
+
+Le dépôt obéit à une règle non négociable : il est **additif**, jamais réorganisé. On ajoute des fichiers, des ChangeSets, des branches, des projections — on ne déplace pas un sous-système, on ne renomme pas un répertoire d'un step à l'autre. La carte ci-dessous grandit dent par dent (tooth-by-tooth) avec le build ; elle ne bouge pas sous vos pieds.
+
+## La carte des répertoires
+
+Voici l'arborescence réelle à la racine, vérifiée par `ls` :
+
+```text
+aidos/
+├── back/                  # le moteur de l'OS — module Go + Postgres (seul écrivain de la vérité)
+├── front/
+│   └── web/               # AIDOS Workbench (Next.js)
+├── docs/
+│   ├── adr/               # les décisions (0001..0009)
+│   └── plan/              # un .md par step (S00..S47)
+├── tests/                 # mirrors matérialisés + e2e Playwright
+├── .claude/               # le harness Claude Code (agents, workflows, hooks, skills, settings)
+├── .agents/               # les skills vendorisés (grill-with-docs, mintlify, tdd, …)
+├── .aidos-docs/           # le clone de travail des docs publiques Mintlify (gitignored)
+├── CLAUDE.md              # le contrat d'agent (source du *guide*)
+├── KRD.md  CONTEXT-MAP.md # le concept (Tome) + le glossaire
+├── PLAN.md  TEST_PLAN.md  # l'index des steps + des scénarios
+└── playwright.config.ts
+```
+
+### `back/` — le moteur de l'OS, seul écrivain de la vérité
+
+C'est le module Go (`module github.com/steph-frtech/aidos/back`, dans `back/go.mod`) qui contient tout le moteur. C'est aussi le **seul** composant autorisé à écrire la vérité — et encore, uniquement le CLI `aidos`, via un ChangeSet approuvé, sous un rôle Postgres dédié (voir [le mur](/internals/the-wall-and-ratchet)).
+
+```text
+back/
+├── go.mod  go.sum
+├── cmd/aidos/        # le CLI `aidos` (check·impact·stable·diff·explain·trim·goal·grill·spike·harvest·init)
+├── runtime/          # AIDOS Runtime — le harness (hooks, sensors, generators, compiler, context, …)
+├── kernel/           # AIDOS Kernel — records + AST de DSL (expr/policy/operation/control/action/entity)
+│   └── mirror/       # AIDOS Mirror — plane DANS le contexte du Kernel (bicéphale)
+├── archive/          # AIDOS Archive — content store, changesets, phases, dag, brain
+├── mcp/              # les serveurs MCP Go (un par capacité)
+├── hooks/            # les binaires de hook Go (par phase)
+├── migrations/       # les migrations Postgres (Atlas) — les schemas de vérité
+├── gen/              # le code généré par les emitters — JAMAIS édité à la main
+└── internal/         # les helpers Go partagés
+```
+
+Ce qui existe **réellement** aujourd'hui dans `back/` (le reste est scaffolté par anticipation, conformément à l'accrétion d'artefacts par step) :
+
+<AccordionGroup>
+  <Accordion title="cmd/aidos/ — encore un placeholder">
+    Le répertoire existe mais ne contient qu'un `.gitkeep` : le CLI `aidos` est planifié (step S03, `docs/plan/S03-cli-aidos.md`) et pas encore écrit. C'est une forward-dependency assumée, pas un manque.
+  </Accordion>
+  <Accordion title="kernel/ — records vivants, mirror scaffolté">
+    `kernel/records/` contient du code réel : `records.go`, `check.go`, ses tests BDD (`krdcore_records_bdd_test.go`) et property (`records_property_test.go`), plus `migration_roundtrip_test.go`. `kernel/mirror/` n'a qu'un `.gitkeep` — le plane Mirror (schema/liveness) arrive au step S06. Le `CONTEXT.md` du sous-système y vit déjà.
+  </Accordion>
+  <Accordion title="archive/contentstore/ — le content store du step S01">
+    Le sous-système le plus avancé : `store.go`, son `sqlc.yaml`, son `sql/queries.sql`, et trois familles de tests — `content_store_bdd_test.go`, `content_store_property_test.go`, `append_only_test.go`. C'est le step S01 (content-addressed, append-only).
+  </Accordion>
+  <Accordion title="mcp/ — un répertoire par serveur, la plupart scaffoltés">
+    `mcp/` contient `store/` (réel : `main.go` + `main_test.go`) et les répertoires scaffoltés pour les serveurs à venir : `mirror-runner`, `sensors`, `changeset`, `dag`, `idea-intake`, `memory`, `context`, `evolve`, `backtester`, `telemetry-reader`, `pact-verifier`. La règle (ADR 0009) : chaque op backend = un outil MCP, sans exception.
+  </Accordion>
+  <Accordion title="hooks/ — par phase, scaffoltés">
+    `hooks/` contient les répertoires `posttooluse`, `postkernelchange`, `sessionstart`, `stop` — la plupart avec un `doc.go` + `README.md` de scaffold. Le hook `PreToolUse` (le mur) arrive au step S04. Un hook qui ne fire jamais est mort : il n'est activé + fault-injecté qu'au step qui en a besoin.
+  </Accordion>
+  <Accordion title="migrations/ — les baselines de vérité">
+    `migrations/` contient deux SQL réels : `archive_baseline.sql` et `kernel_records_baseline.sql` (append-only / content-addressed, expand-contract via Atlas).
+  </Accordion>
+  <Accordion title="gen/ — généré, jamais touché">
+    `gen/archive/` contient `db.go`, `models.go`, `querier.go`, `queries.sql.go` — tous portant l'en-tête `// Code generated by sqlc. DO NOT EDIT.` (sqlc v1.27.0).
+  </Accordion>
+  <Accordion title="runtime/ et internal/ — encore vides">
+    `runtime/` ne contient que son `CONTEXT.md` ; `internal/` un `.gitkeep`. Le harness (sensors, generators, compiler…) se remplit aux steps qui le réclament.
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  Le `mirror` est un **plane à l'intérieur du contexte du Kernel** (`back/kernel/mirror/`), co-versionné — c'est le sens « bicéphale » (un corps, deux têtes : intention et preuve), décidé dans [l'ADR 0002](/internals/overview).
+</Note>
+
+### `front/web/` — le Workbench (Next.js)
+
+`front/web/` est l'IDE / cockpit AIDOS, une app Next.js (`app/` router). Aujourd'hui `app/` contient `layout.tsx`, `page.tsx`, `globals.css`, et une route par panneau déjà livré : `app/store/` (avec `StorePanel.tsx`), `app/records/`, `app/contract/`. La règle du build : **une route par step, on ne touche pas aux routes existantes**. Les composants partagés sont dans `components/` (shadcn via `components.json`), les helpers dans `lib/`, et son propre `CONTEXT.md` documente le sous-système.
+
+### `docs/` — les décisions et le plan
+
+```text
+docs/
+├── adr/    # 0001..0009 — les décisions architecturales gelées
+├── plan/   # S00-exec-contract.md … S47-adoption-release.md — un .md par step
+├── agents/
+├── deploy/
+└── implementation_contract.md
+```
+
+`docs/adr/` contient les neuf ADR réels (de `0001-aidos-is-the-os-back-engine-front-web-ui.md` à `0009-mcp-everywhere-and-per-step-artifact-accretion.md`). `docs/plan/` contient les 48 fiches de step (S00 à S47). `PLAN.md` à la racine en est l'index.
+
+### `tests/` — les mirrors matérialisés et les e2e
+
+```text
+tests/
+├── features/  S00-exec-contract.feature
+├── kernel/    krdcore_records.feature
+├── archive/   content_store.feature
+├── e2e/        contract.spec.ts · store.spec.ts (Playwright)
+└── validate-contract.mjs
+```
+
+Ces `.feature` sont des **mirrors matérialisés sur disque** (Gherkin pour Godog) ; les `.spec.ts` sont les e2e Playwright, un par flow critique. La copie disque est *dérivée* : la source autoritative est censée vivre dans le schema Postgres `mirrors` (back-fill au step S06 — c'est une exception bootstrap documentée, pas un monstre).
+
+### `.claude/` et `.agents/` — le harness
+
+`.claude/` est le harness Claude Code : `agents/` (les agents d'exécution : `step-executor.md`, `step-verifier.md`, `playwright-tester.md`, plus une bibliothèque d'experts), `workflows/` (`long-run.js` séquentiel, `test-suite.js` parallèle — l'orchestration vit dans le script JS, pas dans le contexte), `hooks/`, `skills/`, `scripts/`, et `settings.json`. `.agents/skills/` contient les skills vendorisés (`grill-with-docs`, `mintlify`, `tdd`, `improve-codebase-architecture`, …).
+
+## La vérité ne vit PAS dans des fichiers
+
+C'est la règle la plus contre-intuitive de la carte, et elle est centrale. Tout ce que vous voyez dans le dépôt — Go, `.feature`, composants Next — est **projection** : du code régénérable, une *implémentation de miroir*. La source de vérité, elle, est **Postgres**.
+
+Huit noms n'apparaissent **pas** comme répertoires de l'arborescence, parce que ce sont des **schemas Postgres** :
+
+| Schema Postgres | Tient |
+|---|---|
+| **kernel** | les AST de DSL : entités, policies, opérations, controls, actions, expr + invariants + budgets |
+| **mirrors** | les enregistrements de miroirs (`reflects, test_kind, cert_language, liveness`) **et** leur source (Gherkin, property, fixture) |
+| **ideas** | les candidate-truths (sans freeze, sans miroir) + provenance |
+| **changesets** | l'historique transactionnel (`DRAFT / APPLIED / REVERTED`, append-only) |
+| **dag** | les phases stables (nœuds) + les ChangeSets (arêtes) — branches, reverts, merges |
+| **brain** | les `MemoryItem` + embeddings (**pgvector**) |
+| **context** | le ContextGraph dérivé + `ContextGraphDecision` |
+| **fitness** | la grammaire NIVEAU 3 + waterline + définition de « réussi » (lecture seule) |
+
+<Warning>
+  Le rôle Postgres de l'agent **n'a aucun GRANT d'écriture** sur les schemas `kernel`, `mirrors` et `fitness`. C'est le second niveau de la défense en profondeur du [mur](/internals/the-wall-and-ratchet) (le premier étant le hook `PreToolUse`). L'agent écrit le code librement ; il n'écrit jamais la vérité, même s'il « en a besoin ».
+</Warning>
+
+Conséquence pratique pour qui lit l'arborescence :
+
+<Columns cols={2}>
+  <Card title="Ce qui est dans git" icon="folder-git">
+    Le code Go, les `.feature` matérialisés, les composants Next, les migrations SQL, les ADR. Régénérable, projeté depuis une source.
+  </Card>
+  <Card title="Ce qui est dans Postgres" icon="database">
+    La vérité et sa méta : kernel · mirrors · ideas · changesets · dag · brain · context · fitness. Content-addressed, append-only, hors de portée de l'agent.
+  </Card>
+</Columns>
+
+Même les `.feature` canoniques sont *stockés en base* et **matérialisés** sur disque pour le runner : la copie disque est dérivée, la base est autoritative.
+
+## Deux répertoires à ne jamais éditer à la main
+
+<Steps>
+  <Step title="back/gen/ — généré par les emitters">
+    Chaque fichier porte `// Code generated by sqlc. DO NOT EDIT.`. C'est la projection d'une source du kernel (entité → structs Go via sqlc, DDL Postgres, types TS). On régénère depuis la source ; on n'édite jamais la cible.
+  </Step>
+  <Step title="Les schemas de vérité — Postgres">
+    `kernel`, `mirrors`, `fitness` : interdits en écriture pour l'agent (hook + GRANT). La seule porte est `idée → miroir → /goal → approbation → ChangeSet appliqué par aidos`.
+  </Step>
+</Steps>
+
+## Additif, jamais réorganisé
+
+L'anti-overwrite (CLAUDE.md §9) gouverne l'arborescence comme il gouverne la vérité. Est **interdit** : réécrire un artefact antérieur sans ChangeSet, remplacer silencieusement un modèle, supprimer des vérités, éditer un fichier généré, déplacer un sous-système. Est **autorisé** : ajouter des fichiers, ajouter un ChangeSet, superséder via version, déprécier via lifecycle, ouvrir une branche, créer une nouvelle projection depuis une source. La carte ne se réorganise pas — elle accrète.
+
+<Card title="Le premier répertoire concret — S00, le contrat d'exécution" icon="play" href="/steps/internals/s00-exec-contract">
+  Comment le tout premier step pose le contrat d'exécution du harness, et où il atterrit dans cette arborescence.
+</Card>

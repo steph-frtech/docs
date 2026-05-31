@@ -1,0 +1,121 @@
+---
+title: "La méthode KRD"
+description: "Kernel-Ratchet Development — la méthode que met en œuvre AIDOS : un petit noyau de vérité, un cliquet qui interdit la régression, et un miroir qui prouve chaque comportement."
+keywords: ["aidos", "krd", "kernel-ratchet development", "noyau", "cliquet", "miroir", "mur", "complétude", "monstre", "bdd"]
+---
+
+<Note>
+  Côté concept — aucune ligne de code. KRD est la **méthode** ; AIDOS est le **produit** qui l'implémente. Pour la mécanique d'implémentation (le mur, le cliquet, la complétude vus du dedans), voir [Pour moi → Le mur et le cliquet](/internals/the-wall-and-ratchet).
+</Note>
+
+## En une phrase
+
+**KRD** (*Kernel-Ratchet Development*) part d'un constat simple : on ne demande pas à une IA de décider ce qui est *vrai*, on lui demande d'écrire le *code*. Vous maintenez un petit **noyau** (kernel) de vérité comportementale, exécutable et ancré par un humain ; l'IA fait évoluer et refactore librement un code que le noyau **cliquette** (ratchet) — jamais de régression silencieuse du comportement, liberté totale sur la structure.
+
+Chaque vérité possède son **miroir** (mirror) : sa preuve exécutable. Une vérité sans miroir n'est qu'un vœu.
+
+## Le problème que ça résout
+
+Il existe trois façons connues de coder avec une IA, et toutes échouent par le même défaut : elles confondent **« qu'est-ce qui doit être vrai ? »** avec **« comment est-ce codé ? »**.
+
+| Approche | Ce qu'elle fait | Où elle casse |
+|---|---|---|
+| **Vibe coding** | l'IA décide tout — comportement *et* structure | aucune preuve, aucun contrôle, ça part en boule de boue |
+| **Spec-Driven (SDD)** | la vérité vit dans une grosse spec en prose | la prose dérive du code, on n'arrive plus à les réconcilier |
+| **L'escalier** | tout en incrémental, une marche après l'autre | du local partout, plus aucune architecture d'ensemble |
+
+KRD sépare les deux questions une bonne fois :
+
+- **Ce qui doit être vrai** → le **noyau** : invariants, exemples canoniques, contrats de frontière, langage commun. Petit, ancré humain, change lentement et délibérément.
+- **Comment c'est fait** → le **code** : structure, implémentation, adaptateurs. Grand, écrit et refactoré librement par l'IA, change vite.
+
+Le noyau ne *génère* pas le code, il le *contraint*. On donne à l'IA une liberté maximale là où elle excelle (compléter et refactorer pour faire passer des tests) et zéro liberté là où elle se trompe (décider du vrai).
+
+<Tip>
+  KRD n'est pas anti-changement — il est **anti-régression silencieuse**. Le changement est tout l'objet ; le cliquet rend juste le changement honnête.
+</Tip>
+
+## La règle d'or — jamais du prompt directement au code
+
+C'est la règle unique de la méthode, et celle qu'AIDOS fait respecter mécaniquement :
+
+```text Le flux KRD
+Idée → Miroir BDD → Goal (red set) → Kernel/Vérité → Implémentation → Vert → Phase stable
+```
+
+On ne part jamais du code, ni d'une spec en prose. On **déplace un cran du noyau** (on pose une nouvelle vérité, avec son miroir), ce qui produit un test rouge, puis on laisse l'IA ramener le code au **vert** sous cette contrainte. L'humain bouge le cliquet ; l'agent rattrape ; le harnais arbitre.
+
+<Steps>
+  <Step title="Idée">
+    Un candidat-vérité : une intention, qui n'est encore ni gelée ni prouvée. Deux sources possibles — un humain, ou la réalité (un incident, un signal de production).
+  </Step>
+  <Step title="Miroir BDD">
+    On écrit la **preuve exécutable** de l'intention, sous forme *Given / When / Then*, **avant** tout code. C'est ça, le BDD (*Behavior-Driven Development*) : chaque comportement est décrit comme un scénario avant d'exister.
+  </Step>
+  <Step title="Goal (red set)">
+    Le miroir, qui ne reflète encore aucun code, est **rouge**. Ce rouge *est* le but : il définit précisément ce que « atteindre l'objectif » veut dire, et il signale (il passe au vert) quand on y est. Le test rouge EST le goal.
+  </Step>
+  <Step title="Kernel / Vérité">
+    Une fois approuvée par la bonne autorité, la vérité entre dans le noyau. C'est la seule porte d'entrée : pas d'idée → kernel sans passer par son miroir et son goal.
+  </Step>
+  <Step title="Implémentation">
+    L'IA écrit le code, librement, jusqu'à faire passer le miroir. `rouge → vert → refactor` (*red → green → refactor*), tranche par tranche.
+  </Step>
+  <Step title="Vert">
+    Le miroir passe au vert sans casser un seul vert existant. « Fini » est alors **calculé**, jamais déclaré : le red set est vert, l'ancien vert tient, le score de mutation atteint le seuil, et aucun monstre ne subsiste.
+  </Step>
+  <Step title="Phase stable">
+    Une coupe cohérente où tout est vert. C'est le point de départ de l'étape suivante — chaque cran ajoute une dent au cliquet sans jamais détruire les précédentes.
+  </Step>
+</Steps>
+
+## Les deux mandats
+
+KRD tient sur deux règles non négociables. AIDOS les applique à chaque étape.
+
+<Columns cols={2}>
+  <Card title="Mandat A — la preuve avant le code" icon="vial">
+    Aucune ligne de code sans un **scénario rouge** d'abord. Le miroir (BDD) *est* la spécification du comportement, pas un document à côté. On écrit le miroir, on le regarde échouer, on code jusqu'au vert, on refactore.
+  </Card>
+  <Card title="Mandat B — la vérité vit dans Postgres" icon="database">
+    Toute la vérité et sa méta vivent dans **Postgres** — content-addressed (la version est un hash), append-only (rien n'est détruit). Hors de portée de l'agent. Le code, lui, n'est qu'une **projection** régénérable.
+  </Card>
+</Columns>
+
+Le Mandat A vient de l'observation que *« un fait survit, une spec dérive »* : un test bien écrit a survécu à quatre générations de modèles, là où la spec en prose a dû être réinterprétée quatre fois. Le Mandat B en est le corollaire : si la vérité est un *fait exécutable*, elle doit vivre dans un endroit versionné et inviolable, pas dans des fichiers éparpillés.
+
+## Le vocabulaire à connaître
+
+Ces termes reviennent partout dans AIDOS. Ils ne se traduisent pas — ce sont les mots du domaine.
+
+- **Noyau (kernel)** — le petit ensemble de contraintes **exécutables** sur ce que le système doit faire. Curable par un humain, vérifiable par machine, lisible par l'IA. Il ne génère pas le code, il le contraint.
+- **Cliquet (ratchet)** — la mécanique qui fait que le comportement ne peut qu'**avancer**, jamais reculer sans une décision versionnée. Chaque contrainte gelée est un cran. L'IA refactore tant qu'elle veut ; les miroirs du noyau sont la paroi qui dit « tu n'as rien cassé ».
+- **Miroir (mirror)** — la **preuve exécutable** d'une vérité. Trois formes, une par nature de vérité : un parcours d'acceptation (Gherkin), un invariant (∀, une propriété), ou un workflow (une fixture *état → commande → événements*). Le miroir est une couche à part entière — il peut casser tout seul, ce qui est exactement ce qu'on veut.
+- **Mur (wall)** — la frontière que l'agent ne franchit **jamais** : il écrit le code librement, il n'écrit jamais la vérité (le noyau, les miroirs). C'est la même ligne vue sous trois angles — la frontière des permissions, la ligne de flottaison de l'auto-certification, et la frontière vérité/code.
+- **Loi de complétude (completeness)** — toute couche de vérité a **au moins un miroir vivant**, exécutable comme un test déterministe. Vérifiée mécaniquement : un miroir qui ne peut plus échouer, ou qui ne reflète plus rien, fait virer le système au rouge.
+- **Monstre (monster)** — l'échec de la loi de complétude. Une vérité **sans** miroir (un vœu), ou un miroir **orphelin** (qui ne reflète plus aucune vérité). La complétude existe pour interdire les monstres.
+- **Vague de rouge (RedWave)** — quand vous changez une vérité, son hash change : son miroir vire au rouge **en premier**, puis les projections qui en dépendaient. Cette vague de rouge n'est pas une panne — c'est votre liste de travail, l'ensemble exact de ce qui reste à réconcilier.
+
+## Pourquoi cette discipline
+
+Sans le mur, le jour où l'agent peut éditer le noyau aussi facilement que le code, le cliquet saute — et on retombe dans le vibe coding. La force de KRD vient précisément de la **liberté asymétrique** :
+
+|  | Liberté de l'IA | Propriétaire |
+|---|---|---|
+| **Comportement** | 0 % — verrouillé par le noyau | l'humain |
+| **Structure** | 100 % — refactor libre | l'IA |
+
+Le danger numéro un d'un système qui s'auto-améliore, c'est qu'il **note sa propre copie** (la circularité, le Goodhart). KRD ferme cette porte : le juge — le miroir + la réalité — vit au-dessus du mur, hors de portée de l'IA. L'agent peut donc tout refactorer, tout optimiser, tout réécrire ; il ne peut pas déplacer le mètre-étalon. C'est ce qui rend l'auto-évolution **ancrée** plutôt qu'une machine à s'illusionner.
+
+La peur qui pourrit le vibe coding et le SDD — *« si j'ajoute ça, qu'est-ce que j'ai cassé ? »* — disparaît : le rouge vous le dit, au bon endroit, avant le merge.
+
+## Pour aller plus loin
+
+<Columns cols={2}>
+  <Card title="Les cinq sous-systèmes" icon="layer-group" href="/concepts/five-subsystems">
+    Comment AIDOS incarne la méthode KRD : Runtime, Kernel, Mirror, Archive, Workbench.
+  </Card>
+  <Card title="Le glossaire" icon="book" href="/concepts/glossary">
+    Tout le vocabulaire de KRD et d'AIDOS, défini simplement.
+  </Card>
+</Columns>

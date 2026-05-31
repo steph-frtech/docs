@@ -1,0 +1,145 @@
+---
+title: "S00 · Contrat d'exécution — implémentation"
+description: "Le contrat d'exécution de S00 : un fichier-loi machine-lisible (un bloc YAML canonique + sa projection prose), la route Next /contract qui le parse et le rend, le miroir Gherkin, et sa place comme racine du cliquet."
+keywords: ["aidos", "krd", "implémentation", "S00", "contrat d'exécution", "step-contract", "Workbench", "Gherkin", "miroir", "cliquet", "mur"]
+---
+
+<Info>
+  Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S00](/steps/concept/s00-exec-contract).
+</Info>
+
+S00 est la **racine du plan** : aucune ligne de code-moteur, seulement la **loi** que toutes les étapes suivantes devront respecter. Cette loi est un seul fichier, lu par deux lecteurs — la machine (le harness) et l'humain (le [Workbench](/concepts/five-subsystems)). C'est le premier cran du [cliquet](/internals/the-wall-and-ratchet).
+
+## Implémentation
+
+### Un fichier, deux lecteurs
+
+Tout S00 tient dans `docs/implementation_contract.md`. Le fichier est en deux parties qui encodent **la même donnée** :
+
+1. un **bloc YAML frontmatter** (`docs/implementation_contract.md:1-77`), délimité par des lignes `---`, sous la clé racine `contract:` — c'est l'**encodage canonique**, le seul que la machine lit ;
+2. une **projection prose** en Markdown (`docs/implementation_contract.md:79-141`) — des tableaux lisibles par un humain, qui ne font que reformuler le bloc YAML.
+
+La règle « single source » est inscrite dans le fichier lui-même : la prose ne doit jamais diverger du bloc YAML, et tout changement bump le semver via un ChangeSet (`docs/implementation_contract.md:88-90`).
+
+Le bloc `contract:` porte un en-tête (`version: "1.0.0"`, `kind: step-contract`, une `description`) puis deux listes.
+
+`phases[]` — les **neuf phases** de la boucle par étape (CLAUDE.md §6). Chaque entrée a la forme :
+
+```yaml
+- id: bdd-mirror-first
+  label: "Write the BDD mirror first"
+  description: >
+    Gherkin / property / fixture, stored in the mirrors schema, materialized
+    for the runner. It is red. That red IS the /goal.
+  gate: computational
+```
+
+Le champ `gate` vaut `computational` (le harness peut trancher sans humain) ou `human` (une décision humaine est requise). Les neuf phases, dans l'ordre, sont `grill-with-docs` (human), `bdd-mirror-first` (computational), `tdd` (computational), `sensors-green` (computational), `completeness` (computational), `diagnose` (human), `ui-playwright` (computational), `improve-architecture` (human), `artifacts` (computational).
+
+`granularity[]` — les **cinq propriétés** que toute étape doit satisfaire (`id` + `label` + `description`, sans `gate`) : `minimal`, `autonomous`, `visualizable`, `non-destructive`, `chainable`.
+
+### La route Next `/contract`
+
+`front/web/app/contract/page.tsx` est un Server Component qui lit le fichier sur disque, le parse, et rend la checklist. Il n'introduit **aucune dépendance** : pas de bibliothèque YAML, juste `node:fs` + `node:path` et des regex ciblées sur un format que l'on contrôle.
+
+- Le chemin est résolu en relatif depuis `process.cwd()` vers `../../docs/implementation_contract.md` (`front/web/app/contract/page.tsx:39-43`).
+- `parseContractFile()` extrait le bloc frontmatter via `/^---\n([\s\S]*?)\n---/`, puis lit `version`, `kind`, `description` et découpe les sections `phases:` / `granularity:` (`front/web/app/contract/page.tsx:38-81`).
+- `parseItems()` découpe chaque liste sur ses points d'entrée `    - id:` et reconstruit les champs `id` / `label` / `gate` / `description` (`front/web/app/contract/page.tsx:83-106`).
+
+Le rendu (`front/web/app/contract/page.tsx:118-247`) est une page en lecture seule :
+
+- un **header** avec un badge de version (`data-testid="version-badge"`, affichant `v{version}`) et un chip `kind` ;
+- une **table des phases** : une ligne par phase (`data-testid="phase-row-<id>"`), avec son numéro, son `id` en `<code>`, son label + description, et un **chip de gate** (`data-testid="gate-chip-<id>"`) coloré selon `computational` (bleu) ou `human` (ambre) ;
+- une **grille de granularité** : une carte par propriété (`data-testid="granularity-<id>"`) ;
+- un **footer** qui rappelle que la page est une projection en lecture seule de `docs/implementation_contract.md`, et que tout changement passe par un ChangeSet + un bump semver.
+
+La page ne **réencode** jamais le contrat : elle le **parse et le projette**. Il n'y a aucun contrôle d'écriture.
+
+### Lancer et tester
+
+Le e2e Playwright est `tests/e2e/contract.spec.ts`. Il suit `playwright.config.ts` (bloc `webServer: npm run dev -w @aidos/web`, baseURL `http://localhost:3000`) et asserte cinq choses (`tests/e2e/contract.spec.ts:37-81`) :
+
+- le **badge de version** est visible et porte une chaîne semver (`/^v\d+\.\d+\.\d+$/`) ;
+- les **neuf lignes de phases** sont rendues (boucle sur `PHASE_IDS`) ;
+- chaque phase montre un **chip de gate** valant `computational` ou `human` ;
+- les **cinq propriétés de granularité** sont rendues ;
+- le titre de la page et le badge `step-contract` sont visibles.
+
+```bash
+npx playwright test tests/e2e/contract.spec.ts
+```
+
+## Méta
+
+### Le miroir Gherkin
+
+Le miroir qui prouve S00 est une journey N0 (slot Godog / Playwright de la pile gelée), matérialisée à `tests/features/S00-exec-contract.feature`. Son enregistrement de miroir est annoté en commentaire dans le fichier (`tests/features/S00-exec-contract.feature:6`) :
+
+| Champ | Valeur |
+|---|---|
+| `reflects` | `S00-exec-contract` |
+| `test_kind` | `journey` |
+| `cert_language` | `gherkin` |
+| `liveness` | `live` |
+
+Le `.feature` asserte le comportement, pas un détail d'implémentation : le fichier existe, le bloc embarqué se parse, il porte un `version` semver et un `kind: step-contract`, il liste les neuf phases (chacune avec un `id` unique et un `gate` valant `computational` ou `human`) et les cinq propriétés de granularité, et **tous les `id` sont uniques** à travers les phases et les propriétés (`tests/features/S00-exec-contract.feature:8-25`).
+
+Le côté « la Workbench rend la checklist » du miroir est porté par le e2e Playwright `tests/e2e/contract.spec.ts`, dont l'en-tête référence le même enregistrement de miroir (`tests/e2e/contract.spec.ts:4-13`).
+
+### L'histoire red→green
+
+Le miroir est écrit **avant** que le fichier et la route existent — il est donc **rouge** au premier run (rien à parser, aucune page à charger). Ce rouge **est** le `/goal` de S00. On code ensuite vers le vert : on écrit `docs/implementation_contract.md`, puis `front/web/app/contract/page.tsx`, et le miroir vire au vert. Le « done » de S00 n'est pas déclaré : c'est `set rouge → vert ∧ vert antérieur intact ∧ aucun monstre` (CLAUDE.md §8).
+
+### Le seul artefact « truth-ish » de S00
+
+`docs/implementation_contract.md` est la seule chose de S00 qui approche une vérité. Ce n'est pas (encore) un enregistrement du schema `kernel` ni `mirrors` : c'est un fichier-loi versionné, dont le miroir est vivant et lié à lui. Pas de monstre : la spec (le contrat) a sa tête-preuve (le miroir Gherkin + le e2e).
+
+### OpenQuestion — persistance du miroir différée à S06
+
+L'enregistrement du miroir dans le schema Postgres `mirrors` (`reflects=S00-exec-contract, test_kind=journey, cert_language=gherkin, liveness=live`) est **conceptuel** à S00 : le schema `mirrors` n'existe pas encore. La persistance est câblée par une étape Archive/Mirror ultérieure (**S06**). En attendant, **la copie disque est la forme matérialisée** du miroir — `tests/features/S00-exec-contract.feature` est ce qui tourne. C'est une forward-dependency par conception (CLAUDE.md §6, exception bootstrap), enregistrée comme OpenQuestion (`docs/implementation_contract.md:128-134`), pas comme un échec.
+
+## Méta-méta
+
+### S00 est la racine du cliquet
+
+S00 ne fait pas tourner le [cliquet](/internals/the-wall-and-ratchet) — il **l'établit**. Le contrat est la loi contre laquelle toutes les étapes suivantes sont vérifiées : la boucle par étape (les neuf phases) et la règle de granularité (les cinq propriétés) deviennent le standard que le harness lit et que la Workbench rend. C'est le premier cran : self-describing, additif seulement.
+
+### Le mur tient déjà
+
+S00 respecte le [mur](/internals/the-wall-and-ratchet) : l'agent n'écrit **aucun** schema de vérité (`kernel` / `mirrors` / `fitness`). Le contrat vit dans `docs/` (un fichier, pas une table de vérité), et la route `/contract` est en lecture seule. Devrait-on un jour amender la boucle ou la granularité, cela passe par un **ChangeSet** (`DRAFT → APPLIED`, append-only) plus un **SemanticDiff** sur le bloc contrat, jamais par une réécriture silencieuse en place ; le fichier est lui-même version-bumpé en semver (CLAUDE.md §9, et `docs/plan/S00-exec-contract.md:57-58`).
+
+### Les non-créations explicites de §5
+
+S00 illustre « simplicité d'abord » : à la table §5 de CLAUDE.md, la réponse est **non** partout sauf pour le fichier-loi, son miroir et la route. Sont **délibérément non créés** (`docs/plan/S00-exec-contract.md:18`) :
+
+<AccordionGroup>
+  <Accordion title="Pas de package Go">
+    Le contrat est de la **donnée**, pas de la logique-moteur. Aucune logique pure ni schéma à coder à S00.
+  </Accordion>
+  <Accordion title="Pas de migration Postgres / Atlas">
+    L'enregistrement `mirrors` est conceptuel à S00 ; la persistance est câblée par une étape Archive/Mirror ultérieure (S06). C'est l'OpenQuestion ci-dessus, pas une table inventée maintenant.
+  </Accordion>
+  <Accordion title="Pas de serveur MCP">
+    Aucune capacité backend n'est invoquée à S00. Pas d'op à exposer comme outil MCP.
+  </Accordion>
+  <Accordion title="Pas de hook Go">
+    Un hook qui ne fire jamais est mort (§5, honnêteté des hooks). Un hook doit avoir échoué un run réel avant de mériter d'exister — il n'y en a aucun ici. L'ajouter maintenant violerait Simplicité d'abord.
+  </Accordion>
+</AccordionGroup>
+
+Un nouvel artefact peut seulement **AJOUTER** un garde-fou, jamais en **RETIRER** un.
+
+### Les ADR concernés
+
+- [ADR 0001](/internals/repo-structure) — ce dépôt **est** l'OS : `back/` est le moteur, `front/web/` est la Workbench. C'est pourquoi la route `/contract` vit dans `front/web/app/`, la surface de gouvernance de l'OS, pas dans une app émise.
+- [ADR 0002](/internals/repo-structure) — le Mirror est un **plan à l'intérieur du contexte Kernel** (`back/kernel/mirror/`), bicéphale, co-versionné. Cela cadre où le miroir de S00 sera persisté quand S06 câblera le schema `mirrors`.
+- [ADR 0005](/internals/overview) — la boucle exec → verify → next vit dans un **workflow JS déterministe** (`long-run.js`), pas dans un agent orchestrateur. C'est ce workflow qui consomme le contrat : il lit `PLAN.md`, exécute chaque étape contre la loi de S00, et gate de façon déterministe.
+
+<Columns cols={2}>
+  <Card title="Le mur et le cliquet" icon="shield" href="/internals/the-wall-and-ratchet">
+    Pourquoi « done est calculé, pas déclaré », ce que l'agent n'écrit jamais, et la loi de complétude.
+  </Card>
+  <Card title="L'étape suivante — le content store" icon="database" href="/steps/internals/s01-content-store">
+    S01 ouvre la première vraie persistance Postgres (content-addressed, append-only).
+  </Card>
+</Columns>

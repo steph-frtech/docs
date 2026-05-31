@@ -1,0 +1,67 @@
+---
+title: "S01 · Le magasin de contenu"
+description: "Le magasin content-addressed append-only : on lit et écrit un objet par son hash, éditer produit un nouveau hash, rien n'est jamais détruit."
+keywords: ["aidos", "krd", "archive", "content-addressed", "append-only", "hash", "head", "history"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S01](/steps/internals/s01-content-store).</Note>
+
+## En une phrase
+
+S01 pose le **magasin de contenu** d'AIDOS : un espace de stockage où chaque objet est désigné par le hash de son propre contenu, où l'on n'écrit qu'en ajoutant (jamais en écrasant), et où modifier quelque chose ne supprime rien — cela crée simplement un nouvel objet à côté de l'ancien.
+
+## Le problème que ça résout
+
+Tout le reste d'AIDOS — le kernel, les mirrors, les ChangeSets, le DAG des versions — a besoin de reposer sur un endroit où **rien ne se perd**. Si la couche de stockage du dessous pouvait écraser ou effacer, alors aucune promesse du dessus (l'historique complet, la réversibilité, le « rien ne casse jamais silencieusement ce qui marchait ») ne tiendrait vraiment.
+
+S01 construit donc ce socle, et **seulement** ce socle : un magasin d'objets générique, content-addressed et append-only. Il ne contient encore aucune vérité (pas de kernel, pas de mirror) — c'est volontairement la brique la plus basse, celle sur laquelle l'[Archive](/concepts/five-subsystems) et toutes les couches de vérité ultérieures viendront s'appuyer.
+
+## Les idées-clés
+
+Le vocabulaire introduit ici, défini simplement.
+
+<Field name="objet">
+  La chose qu'on stocke : une suite d'octets (un contenu). Le magasin ne sait pas ce qu'elle signifie — il sait seulement la ranger et la rendre intacte.
+</Field>
+
+<Field name="hash">
+  L'empreinte du contenu d'un objet. C'est **l'adresse** de l'objet : on ne demande pas « donne-moi l'objet numéro 7 », on demande « donne-moi l'objet dont le contenu a cette empreinte ». C'est le sens de *content-addressed* : l'adresse est dérivée du contenu lui-même.
+</Field>
+
+<Field name="content-addressed">
+  La propriété centrale : l'identité d'un objet **est** son contenu. Deux contenus identiques ont le même hash ; deux contenus différents ont deux hashs différents. On ne peut pas changer un objet sans changer son adresse.
+</Field>
+
+<Field name="append-only">
+  On n'ajoute, on n'écrase jamais. Une fois un objet rangé sous son hash, il reste là, lisible, pour toujours. Modifier un contenu n'efface pas l'ancien : cela produit un **nouveau** hash, donc un **nouvel** objet, et l'ancien reste accessible.
+</Field>
+
+<Field name="head">
+  Un pointeur **mutable** : un nom stable (une clé) qui désigne « la version actuelle » de quelque chose. Le head, lui, peut bouger ; mais quand il bouge, il pointe simplement vers un autre objet déjà stocké — il ne détruit pas celui qu'il désignait avant.
+</Field>
+
+<Field name="head-move">
+  Le fait, enregistré, qu'un head soit passé d'un objet à un autre. Chaque déplacement laisse une trace.
+</Field>
+
+<Field name="history">
+  La liste, append-only, de tous les head-moves d'une clé donnée, du plus ancien au plus récent. C'est ce qui permet de relire le chemin complet d'un head sans avoir rien perdu en route.
+</Field>
+
+<Field name="Put idempotent">
+  Ranger deux fois le même contenu ne crée pas deux objets : on retrouve le même hash, et il n'y a qu'un seul exemplaire stocké. Réécrire l'identique est sans effet — c'est ce qu'on appelle *idempotent*.
+</Field>
+
+## Ce que ça vous permet de faire
+
+- **Écrire un objet et récupérer son hash.** Vous confiez un contenu au magasin ; il vous rend son adresse.
+- **Relire un objet par son hash.** Vous redemandez le contenu par son adresse, et vous le récupérez exactement tel quel.
+- **Éditer sans rien perdre.** Mettre un nouveau contenu sous un même head fait pointer ce head vers un nouvel objet (nouveau hash) — et l'ancien objet reste lisible par son propre hash.
+- **Relire un parcours complet.** La history d'un head vous montre tous ses déplacements, du plus ancien au plus récent.
+- **Ré-écrire l'identique sans risque.** Comme Put est idempotent, redéposer le même contenu ne duplique rien.
+
+Cette discipline — *content-addressed* + *append-only* + un *head* mutable qui ne fait que pointer — est exactement ce dont les couches supérieures (le [cliquet/ratchet et le mur](/internals/the-wall-and-ratchet)) ont besoin pour garantir que rien n'est jamais détruit, seulement ajouté.
+
+<Card title="Pour aller plus loin — l'implémentation" icon="wrench" href="/steps/internals/s01-content-store">
+  Le code, les mirrors et la place dans le cliquet KRD.
+</Card>

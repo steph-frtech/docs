@@ -1,0 +1,93 @@
+---
+title: "Les cinq sous-systèmes"
+description: "Runtime, Kernel, Mirror, Archive, Workbench — ce qu'est chacun en langage clair, et comment ils se tiennent les uns les autres."
+keywords: ["aidos", "krd", "runtime", "kernel", "mirror", "archive", "workbench", "sous-systèmes"]
+---
+
+<Note>
+  Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → Vue d'ensemble](/internals/overview).
+</Note>
+
+## En une phrase
+
+AIDOS se divise en **cinq sous-systèmes** : le **Kernel** tient la vérité, le **Mirror** la prouve, le **Runtime** fait respecter les règles et produit le code, l'**Archive** se souvient de tout ce qui a été tenté, et le **Workbench** est l'écran par lequel un humain gouverne l'ensemble.
+
+## Les cinq, un par un
+
+<Columns cols={2}>
+  <Card title="AIDOS Kernel — l'intention" icon="lock">
+    Le noyau de vérité : la part **figée, humaine** de l'OS. C'est l'intention — ce que le système doit garantir. L'agent IA ne l'écrit jamais ; c'est l'objet du **mur**.
+  </Card>
+  <Card title="AIDOS Mirror — la preuve" icon="microscope">
+    La preuve exécutable de chaque vérité. Pour chaque chose que le Kernel affirme, un **miroir** la prouve (un scénario, un invariant, une fixture). C'est la tête « preuve » du couple, jumelle de la tête « intention ».
+  </Card>
+  <Card title="AIDOS Runtime — le harnais" icon="gear">
+    Le moteur de l'OS : les boucles, les **hooks** (dont le **mur**), les capteurs, les générateurs de code. C'est lui qui fait respecter les règles et qui écrit les projections — jamais la vérité.
+  </Card>
+  <Card title="AIDOS Archive — la mémoire" icon="layers">
+    Le **DAG** des versions : l'historique de tout ce qui a été tenté. C'est une mémoire de type qualité-diversité, qui sert autant l'annulation manuelle que la recherche évolutive.
+  </Card>
+</Columns>
+
+<Card title="AIDOS Workbench — la salle de gouvernance" icon="layout-dashboard">
+  L'interface propre à l'OS, l'écran de gouvernance. C'est là qu'un humain voit ce qui se passe et **renvoie ses décisions** sous forme de ChangeSets approuvés. Sans le Workbench, l'autorité se contourne au lieu de décider.
+</Card>
+
+## Les idées-clés
+
+<Field name="Kernel (noyau)">
+  La vérité figée, écrite par l'humain. AIDOS l'enferme derrière le **mur** : l'agent peut écrire librement le code, jamais le Kernel. Pour changer une vérité, il faut passer par la porte officielle (une idée, un miroir, une approbation), jamais en passant.
+</Field>
+
+<Field name="Mirror (miroir)">
+  La preuve d'une vérité. Une vérité sans miroir vivant est un **monstre** ; un miroir orphelin aussi. La **loi de complétude** interdit les monstres : pas de vérité sans preuve, pas de preuve sans vérité.
+</Field>
+
+<Field name="Runtime">
+  Le harnais qui exécute la méthode KRD. Il porte les hooks, les capteurs et les générateurs, et fait respecter la séparation entre celui qui possède la vérité (l'humain) et celui qui possède l'implémentation (l'agent).
+</Field>
+
+<Field name="Archive (le DAG)">
+  Le graphe des phases stables et des ChangeSets : branches, annulations, fusions. La même structure sert la mémoire « qu'avons-nous déjà essayé » et la recherche de variantes.
+</Field>
+
+<Field name="Workbench">
+  L'écran par lequel l'humain garde la main : il y voit l'état du système et y renvoie ses décisions. C'est aussi l'interface du système, à ne pas confondre avec une application que l'OS *fabrique* pour quelqu'un d'autre.
+</Field>
+
+## Comment ils se tiennent ensemble
+
+Les cinq sous-systèmes ne sont pas cinq boîtes côte à côte : ce sont des rôles qui se contraignent les uns les autres.
+
+<Steps>
+  <Step title="Kernel et Mirror sont bicéphales">
+    Un seul corps — la vérité — avec **deux têtes** : l'intention (le Kernel) et la preuve (le Mirror). Ils sont inséparables et **co-versionnés** : on ne déplace jamais l'un sans l'autre. La loi de complétude les relie et interdit toute vérité sans miroir vivant.
+  </Step>
+  <Step title="Le Runtime tient le mur">
+    Le Runtime fait respecter le **mur** : l'agent écrit les projections (le code), jamais le Kernel, le Mirror ni la part de fitness qui définit « passé ». C'est la frontière qui rend AIDOS sûr.
+  </Step>
+  <Step title="Le miroir déclenche la vague de rouge">
+    Quand une vérité change, c'est au **Mirror** que démarre la **vague de rouge** (RedWave), qui cascade ensuite vers les projections. Le Kernel contraint le code ; il ne le génère pas — c'est le rôle du **cliquet**, qui ne laisse jamais une régression passer.
+  </Step>
+  <Step title="L'Archive bouge la vérité atomiquement">
+    Un **ChangeSet** déplace la spécification et son miroir **ensemble**, d'un seul bloc. Le DAG sert l'annulation manuelle comme la recherche évolutive — mais la promotion vers la vérité passe toujours par le Mirror, **jamais** par le DAG.
+  </Step>
+  <Step title="Le Workbench surface la gouvernance">
+    Le Workbench expose ce que les autres produisent — SemanticDiff, graphe d'autorité, dette du noyau, DAG, file de travail rouge — et **renvoie** les gestes humains sous forme de ChangeSets approuvés.
+  </Step>
+</Steps>
+
+## Ce que ça vous permet de faire
+
+- Comprendre **qui possède quoi** : l'humain possède la vérité (Kernel + Mirror), l'agent possède l'implémentation (les projections), et le mur les sépare.
+- Suivre une modification de bout en bout : une idée devient un miroir, le miroir devient rouge, le code passe au vert, et l'Archive en garde la trace dans le DAG.
+- Savoir **où regarder** : le Workbench est le seul écran où l'autorité décide ; tout le reste y remonte.
+
+<Columns cols={2}>
+  <Card title="Le vocabulaire complet" icon="book" href="/concepts/glossary">
+    Tous les termes — kernel, miroir, cliquet, mur, ChangeSet, RedWave, monstre, complétude — définis simplement.
+  </Card>
+  <Card title="Comment l'OS est bâti" icon="wrench" href="/internals/overview">
+    Le détail d'implémentation : le dépôt construit dent par dent, et chaque étape en trois couches.
+  </Card>
+</Columns>

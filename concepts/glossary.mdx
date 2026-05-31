@@ -1,0 +1,125 @@
+---
+title: "Glossaire — le langage ubiquitaire"
+description: "Les mots d'AIDOS et de la méthode KRD, définis simplement — un terme, une entrée courte."
+keywords: ["aidos", "krd", "glossaire", "langage ubiquitaire", "kernel", "miroir", "cliquet", "mur", "Postgres"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → l'aperçu interne](/internals/overview).</Note>
+
+## En une phrase
+
+AIDOS et la méthode KRD ont un **langage ubiquitaire** : les mêmes mots, employés à l'identique du concept jusqu'au code, par les humains comme par l'agent. Cette page les définit dans leur forme la plus accessible. Les termes sont gardés tels quels (kernel/noyau, mirror/miroir, cliquet, mur…) — ce sont des mots de vérité, on ne les traduit jamais.
+
+<Warning>
+Le piège le plus fréquent : **« BDD » ne veut pas dire « la base de données ».** Ici **BDD = Behavior-Driven Development**, la méthode (chaque comportement écrit en `Given / When / Then` avant le code). La base de données, elle, s'appelle toujours **Postgres**. Si vous lisez « BDD » dans AIDOS, pensez *méthode*, jamais *stockage*.
+</Warning>
+
+## Les produits et la méthode
+
+<AccordionGroup>
+  <Accordion title="AIDOS">
+    Le produit exécutable : un *AI Development Operating System*. Le système concret de ce dépôt, qui met en œuvre et fait respecter la méthode KRD. À ne pas confondre avec KRD : AIDOS est le produit, KRD est la méthode.
+  </Accordion>
+  <Accordion title="KRD (Kernel-Ratchet Development)">
+    La méthode qu'AIDOS implémente. La discipline d'un petit **noyau** de vérité exécutable ancré par l'humain, d'un code librement réécrit par l'IA que le noyau **cliquette**, et d'un **miroir** qui prouve chaque vérité. KRD est une méthodologie, jamais un produit ni un dossier.
+  </Accordion>
+  <Accordion title="Workbench">
+    L'interface de pilotage propre à AIDOS — la surface de gouvernance visuelle de l'OS, là où l'humain voit et décide. C'est l'application web de ce dépôt. À ne pas confondre avec une application qu'AIDOS *fabrique* pour un utilisateur (voir « projection émise »).
+  </Accordion>
+  <Accordion title="Runtime">
+    Le harnais d'exécution d'AIDOS : les boucles, les hooks (dont le mur), les capteurs, les générateurs, le compilateur. C'est lui qui fait respecter les règles à chaque pas — l'agent écrit le code, le Runtime tient la frontière.
+  </Accordion>
+  <Accordion title="Archive">
+    L'espace de versions de l'OS : un unique DAG qui sert à la fois d'annulation manuelle, de branches humaines et de mémoire évolutive. Append-only (rien n'est détruit), content-addressed (la version *est* une empreinte). Héberge aussi la mémoire moteur (`brain`).
+  </Accordion>
+</AccordionGroup>
+
+## Le cœur de la méthode
+
+<AccordionGroup>
+  <Accordion title="noyau / kernel">
+    Le petit ensemble de vérités *exécutables* sur ce que le système doit faire : invariants, fixtures approuvées, contrats de frontière, langage ubiquitaire. Curé par l'humain, vérifiable par machine, lu par l'IA. **Le noyau ne génère pas le code, il le contraint.** Le code est libre tant qu'il satisfait le noyau.
+  </Accordion>
+  <Accordion title="miroir / mirror">
+    La **preuve exécutable** d'une vérité. Toute vérité possède son miroir : un scénario Gherkin (parcours), un property test (invariant ∀) ou une fixture (workflow). Sans miroir, une vérité n'est qu'un vœu. Le miroir n'est pas un simple attribut « test » — c'est un plan à part entière, co-versionné avec le noyau.
+  </Accordion>
+  <Accordion title="cliquet / ratchet">
+    Le mécanisme qui fait que le comportement ne peut qu'**avancer, jamais reculer**. Chaque vérité gelée est un cran. L'IA refactore et réécrit tant qu'elle veut ; les miroirs du noyau sont la paroi qui dit « tu n'as rien cassé ». Le cliquet n'interdit pas le changement — il interdit le changement *non-versionné*.
+  </Accordion>
+  <Accordion title="mur / wall">
+    La frontière unique entre deux zones de confiance : l'agent écrit librement le code, **jamais** la vérité (le noyau, les miroirs, la fitness). Une seule porte vers le noyau : `idée → miroir → /goal → approbation humaine`. Le mur bloque, mais il explique toujours comment faire — il ne devient jamais une prison.
+  </Accordion>
+  <Accordion title="bicéphale">
+    Un corps (la vérité), deux têtes : l'**intention** (la spec du Kernel) et la **preuve** (le Mirror). Inséparables, co-versionnées, jointes par le lien `mirrors` et la loi de complétude. Le terme historique « bicaméral » est à éviter.
+  </Accordion>
+</AccordionGroup>
+
+## Les lois et les pannes à éviter
+
+<AccordionGroup>
+  <Accordion title="complétude / completeness">
+    La loi qui dit : **toute couche de vérité a au moins un miroir vivant**, exécutable comme capteur déterministe. Une couche sans miroir, ou un miroir qui ne reflète plus rien, ou un miroir non exécutable → capteur rouge. Vérifiée mécaniquement par un hook, pas laissée à la bonne foi.
+  </Accordion>
+  <Accordion title="monstre / monster">
+    L'échec que la complétude interdit : soit une vérité **sans** miroir, soit un miroir **orphelin** (qui ne reflète plus aucune vérité). Un monstre signale qu'on croit avoir une symétrie alors qu'il y a un trou.
+  </Accordion>
+  <Accordion title="vague de rouge / RedWave">
+    L'ensemble des liens devenus périmés après un changement de version. Quand vous modifiez une vérité, **son miroir vire au rouge en premier** (il ne reflète plus la bonne version), puis les projections suivent en cascade. La liste de travail à reverdir est *calculée*, pas chassée à la main.
+  </Accordion>
+  <Accordion title="phase stable">
+    Une coupe cohérente du DAG où tous les liens se résolvent et tous les capteurs sont verts en même temps. C'est l'état de repos entre deux objectifs — le « lockfile » du noyau. Chaque étape d'AIDOS laisse derrière elle une phase stable que la suivante consomme.
+  </Accordion>
+</AccordionGroup>
+
+## La vérité, son stockage, ses traces
+
+<AccordionGroup>
+  <Accordion title="Postgres (le truth-store)">
+    **La base de données.** La base de gouvernance propre à AIDOS — les schémas `kernel`, `mirrors`, `ideas`, `changesets`, `dag`, `brain`, `context`, `fitness`. Append-only et content-addressed, écrite seulement à la cadence d'une approbation humaine via un ChangeSet validé. C'est elle, et non des fichiers épars, qui détient la vérité. Quand on dit « la base », on dit Postgres — jamais « BDD ».
+  </Accordion>
+  <Accordion title="BDD (la méthode) ≠ la base de données">
+    **BDD = Behavior-Driven Development** : la méthode qui écrit chaque comportement en `Given / When / Then` *avant* le code. C'est la forme de tout miroir. Ce n'est **pas** un nom de base de données. La base, c'est **Postgres**. Ce glossaire insiste là-dessus parce que la confusion « BDD = base » est le piège classique de ce vocabulaire.
+  </Accordion>
+  <Accordion title="ChangeSet">
+    L'enveloppe transactionnelle, atomique et réversible, qui fait passer d'une phase stable à la suivante. Elle emballe ensemble la spec (Kernel) et son miroir (Mirror) pour qu'ils ne dérivent jamais. Ses seuls états sont `DRAFT | APPLIED | REVERTED` ; annuler, c'est ajouter un ChangeSet inverse, jamais effacer.
+  </Accordion>
+  <Accordion title="idée / idea">
+    Une vérité *candidate* : une proposition pas encore gelée, sans miroir, accompagnée de sa provenance (humaine ou issue d'un incident). C'est le point d'entrée légal vers le noyau — une idée devient vérité seulement en passant par son miroir et un `/goal` approuvé.
+  </Accordion>
+</AccordionGroup>
+
+## Ce qu'AIDOS fabrique, vs AIDOS lui-même
+
+<AccordionGroup>
+  <Accordion title="projection émise / emitted">
+    Le code qu'AIDOS **génère** quand quelqu'un *utilise* l'OS pour bâtir son application (web, mobile, CLI, API, base). Il vit dans l'espace de travail de cet utilisateur, produit par un générateur du Runtime. Ce **n'est pas** un dossier de ce dépôt. À distinguer nettement du Workbench.
+  </Accordion>
+  <Accordion title="Workbench vs projection émise">
+    Le **Workbench** est l'interface d'AIDOS lui-même (la gouvernance de l'OS, dans ce dépôt). Une **projection émise** est une application qu'AIDOS construit *pour vous* (chez vous). L'un est l'OS, l'autre est le produit que l'OS fabrique — ne pas appeler « frontend d'AIDOS » une application émise.
+  </Accordion>
+  <Accordion title="Doltgres (datastore de l'app émise)">
+    La base de données *à l'exécution* d'une application qu'AIDOS fabrique pour un utilisateur — git-for-data (branche / merge / diff / voyage dans le temps) sur les données du produit construit, dans le **même dialecte Postgres** que le truth-store. C'est une cible d'émission, pas le truth-store d'AIDOS (lequel reste Postgres, jamais Doltgres).
+  </Accordion>
+</AccordionGroup>
+
+## Les deux mémoires (à ne pas croiser)
+
+<AccordionGroup>
+  <Accordion title="Layer A — claude-mem">
+    La mémoire inter-session de l'agent Claude Code **qui construit AIDOS**. Une commodité de développement, pas une partie du produit, et **jamais** une vérité AIDOS. C'est la mémoire du constructeur, pas le cerveau de l'OS.
+  </Accordion>
+  <Accordion title="Layer B — le brain">
+    Le sous-système `brain` propre à AIDOS, qui mémorise au-dessus des projets des utilisateurs — sur **pgvector** dans le truth-store Postgres, derrière la MemoryFirewall. La mémoire *propose* (elle alimente le contexte), elle ne *déclare* jamais la vérité : aucun souvenir n'atteint le noyau sans passer par une idée, un miroir et un `/goal`.
+  </Accordion>
+</AccordionGroup>
+
+## Pour aller plus loin
+
+<Columns cols={2}>
+  <Card title="Le mur et le cliquet" icon="shield" href="/internals/the-wall-and-ratchet">
+    Comment AIDOS empêche, mécaniquement, l'agent d'écrire la vérité.
+  </Card>
+  <Card title="Les cinq sous-systèmes" icon="layer-group" href="/concepts/five-subsystems">
+    Runtime · Kernel · Mirror · Archive · Workbench, et qui fait quoi.
+  </Card>
+</Columns>

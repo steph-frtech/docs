@@ -1,0 +1,155 @@
+---
+title: "Comment AIDOS se construit"
+description: "La construction dent par dent : la boucle par étape (9 phases), la règle de granularité, l'exécution par workflows dynamiques et le mandat de documentation."
+keywords: ["aidos", "krd", "boucle par étape", "long-run", "step-executor", "step-verifier", "granularité", "cliquet"]
+---
+
+<Info>Page de fondation, côté détail. Elle explique la méthode de construction du dépôt — pas une étape précise. Pour le concept de la méthode, voir [La méthode KRD](/concepts/krd-method).</Info>
+
+AIDOS ne se construit pas d'un seul jet. Il s'assemble **dent par dent** : chaque étape (`S00`, `S01`, …) ajoute **une seule** capacité vérifiable, prouvée par un miroir avant d'exister, visualisée dans le Workbench, et qui ne casse jamais ce qui précède. Le cliquet (ratchet) garde l'acquis : une fois une dent posée et verte, plus aucune régression silencieuse n'est possible.
+
+Cette page décrit la mécanique réelle de cette construction : la boucle que chaque étape suit, la règle qui dit ce qu'une « étape » a le droit d'être, et le moteur d'exécution qui enchaîne les étapes sans jamais déclarer « done » à votre place.
+
+## La construction dent par dent
+
+Le plan complet vit dans `/data/dev/aidos/PLAN.md` — l'index racine que `/long-run` parcourt. Il liste aujourd'hui **S00 à S47**, chacune taguée par sous-système (**Runtime · Kernel · Mirror · Archive · Workbench**). Chaque entrée `## <id>` est parseable et porte quatre champs :
+
+<Field name="Objectif">
+La seule capacité vérifiable que l'étape ajoute.
+</Field>
+<Field name="Detail">
+Le fichier `docs/plan/<id>-<slug>.md` qui contient le brief de lancement complet que `step-executor` lit. L'index est la carte ; le fichier de plan est le territoire.
+</Field>
+<Field name="Inputs">
+Les `id` des étapes antérieures que celle-ci consomme (ses phases stables prédécesseuses), ou `(aucun)` pour S00.
+</Field>
+<Field name="Criteres de done">
+La condition de fin **calculée** de l'étape.
+</Field>
+
+Le `Inputs` est ce qui rend la chaîne réelle : S01 consomme S00, S04 consomme S01 et S03, etc. Une étape n'a le droit de partir que des phases stables laissées par celles d'avant, et elle **mocke ce qui n'existe pas encore** (jamais l'inverse). C'est cette discipline qui permet de poser S00 alors que la majorité du substrat (schémas Postgres, hooks, moteur de ChangeSet) n'existe pas encore.
+
+<Note>
+« Done » est **calculé, jamais déclaré** par l'agent : `rouge → vert ∧ vert antérieur intact ∧ score de mutation ≥ seuil ∧ aucun monstre`. Vous ne pouvez pas forcer le `done` (CLAUDE.md §8).
+</Note>
+
+## La boucle par étape — les 9 phases du contrat
+
+Chaque étape suit la même boucle, encodée comme **loi machine** dans `/data/dev/aidos/docs/implementation_contract.md`. Ce fichier porte un bloc YAML en tête qui est la source canonique ; la prose en dessous n'en est qu'une projection lisible. Le harness lit le YAML ; le Workbench le projette.
+
+Chaque phase a un `id` stable, un `label` et un **gate** :
+- `computational` — le harness évalue la phase sans revue humaine.
+- `human` — la phase demande une décision ou un jugement humain.
+
+| # | id | Label | Gate |
+|---|---|---|---|
+| 1 | `grill-with-docs` | `/grill-with-docs` l'intention d'abord | human |
+| 2 | `bdd-mirror-first` | Écrire le miroir BDD d'abord | computational |
+| 3 | `tdd` | `/tdd` pour coder | computational |
+| 4 | `sensors-green` | Capteurs verts à chaque diff | computational |
+| 5 | `completeness` | Vérification de complétude | computational |
+| 6 | `diagnose` | `/diagnose` avant de finir | human |
+| 7 | `ui-playwright` | UI : route Workbench + e2e Playwright | computational |
+| 8 | `improve-architecture` | `/improve-codebase-architecture` | human |
+| 9 | `artifacts` | Créer les artefacts nécessaires (§5) | computational |
+
+Le détail de chaque phase, tel qu'il figure dans le contrat :
+
+<Steps>
+  <Step title="grill-with-docs — affûter l'intention (human)">
+    Une intention, ≤ 5 scénarios ; aiguiser le langage ubiquitaire ; mettre à jour `CONTEXT.md` / les ADR. Vous ne démarrez pas une étape sans cela. C'est aussi la phase qui alimente cette documentation Mintlify.
+  </Step>
+  <Step title="bdd-mirror-first — le miroir rouge d'abord (computational)">
+    Gherkin / property / fixture, stocké dans le schéma `mirrors`, matérialisé pour le runner. Il est **rouge**. Ce rouge **est** le `/goal` (la cible non gameable de l'étape).
+  </Step>
+  <Step title="tdd — coder vers le vert (computational)">
+    `rouge → vert → refactor`, outside-in, **dans le seul package de cette étape**. Vous ne codez pas sans cela.
+  </Step>
+  <Step title="sensors-green — capteurs verts à chaque diff (computational)">
+    Le hook `PostToolUse` rejoue les capteurs computationnels sur l'ensemble modifié. L'auto-certification ne porte **que** sur le gate computational.
+  </Step>
+  <Step title="completeness — pas de monstre (computational)">
+    La couche a-t-elle son miroir vivant ? Pas de monstre (vérité sans miroir, miroir orphelin) ? Sinon le hook `Stop` bloque.
+  </Step>
+  <Step title="diagnose — avant de finir (human)">
+    Isoler tout capteur en échec, proposer le correctif. Vous ne finissez pas une étape de code sans `/diagnose`.
+  </Step>
+  <Step title="ui-playwright — la visualisation (computational)">
+    Ajouter la route Workbench (sans toucher aux routes existantes) + un e2e Playwright pour la visualisation. Une UI est exigée à **chaque** étape.
+  </Step>
+  <Step title="improve-architecture — avant de passer à la suite (human)">
+    `/improve-codebase-architecture`. Vous ne passez pas à l'étape suivante sans cela.
+  </Step>
+  <Step title="artifacts — l'accrétion d'artefacts (computational)">
+    Créer Skill / Hook / MCP / Migration uniquement là où la réponse de la grille §5 est oui. Un nouvel artefact ne peut qu'**ajouter** un garde-fou, jamais en retirer.
+  </Step>
+</Steps>
+
+<Note>
+La répartition des gates est le partage du travail : 6 phases `computational` (que le harness tranche seul) et 3 phases `human` (`grill-with-docs`, `diagnose`, `improve-architecture`) qui réclament un jugement. C'est cohérent avec le contrat AIDOS : l'humain possède la vérité, l'agent possède l'implémentation, le harness tient le mur.
+</Note>
+
+## La règle de granularité — ce qu'une étape a le droit d'être
+
+Le même contrat encode cinq propriétés que toute étape doit satisfaire. Elles bornent ce qui compte comme « une dent » :
+
+| id | Propriété | Règle |
+|---|---|---|
+| `minimal` | Minimal | Une seule capacité vérifiable par étape. |
+| `autonomous` | Autonome | Testable seule ; mocke ce qui n'existe pas encore — jamais l'inverse. |
+| `visualizable` | Visualisable | Une route UI Workbench + un e2e Playwright. |
+| `non-destructive` | Non destructif | Ne casse jamais silencieusement ce qui précède. |
+| `chainable` | Chaînable | Laisse une phase stable que l'étape suivante consomme. |
+
+Ces cinq propriétés sont ce que `minimal · autonomous · visualizable · non-destructive · chainable` veulent dire concrètement. `autonomous` et `chainable` sont les deux faces du `Inputs` du plan : une étape se teste seule en mockant le futur, et elle lègue une phase stable au présent. `non-destructive` est ce que le cliquet rend non négociable.
+
+## L'exécution par workflows dynamiques
+
+Il n'y a **pas** d'agent « orchestrateur ». La boucle exécuter → vérifier → étape suivante vit dans un **script JS** : l'état, le gating et la reprise sont dans le script, pas dans le contexte (CLAUDE.md §7).
+
+<Tabs>
+  <Tab title="long-run — séquentiel">
+    `/long-run` lit `PLAN.md` (`.claude/workflows/long-run.js`). Par étape : `step-executor` implémente, puis `step-verifier` valide/corrige. Le workflow **n'avance qu'après un pass** et **reprend depuis le cache** au redémarrage — l'état vit dans le script, jamais dans le contexte. Sur échec irrécupérable, il rend la main.
+  </Tab>
+  <Tab title="test-suite — parallèle">
+    `/test-suite` lit `TEST_PLAN.md` et exécute les scénarios indépendants **en parallèle** via `test-runner`, puis bloque sur les échecs (et compat-check les suggestions).
+  </Tab>
+  <Tab title="Playwright — par flux">
+    Un e2e Playwright par flux critique via `playwright-tester` + la skill `playwright-e2e`. `playwright.config.ts` porte un bloc `webServer` (`npm run dev -w @aidos/web`, baseURL `http://localhost:3000`).
+  </Tab>
+</Tabs>
+
+Tous les agents d'exécution tournent sur **Opus** (ultracode), à effort élevé : l'orchestrateur (`plan:parse`, `model: 'opus'` épinglé), `step-executor`, `step-verifier`, `test-runner`, `suggestion-compat-checker`, `playwright-tester`. Deux règles dures héritées de scars réels :
+
+- **L'executor et le verifier doivent toujours émettre leur StructuredOutput, même incomplet.** Un executor Sonnet a deux fois brûlé son budget de tour sur S01 sans jamais rapporter ; d'où le passage sur Opus.
+- **Les agents d'étape ne portent pas d'allowlist `tools:` stricte.** Une liste stricte exclurait l'outil `StructuredOutput` du workflow et les outils web dont la recherche d'outil par étape a besoin.
+
+<Warning>
+Les scripts JS ne doivent pas utiliser `Date.now()`, `Math.random()` ni `new Date()` sans argument : cela casse la reprise depuis le cache. Les dates sont passées via `args`.
+</Warning>
+
+## Le mandat de documentation Mintlify
+
+La documentation grandit dent par dent, exactement comme le kernel. **Rien n'est « done » tant que ses pages ne sont pas en ligne** sur `aidos.mintlify.app`. Chaque étape publie **deux pages** :
+
+<Columns cols={2}>
+  <Card title="Pour les futurs utilisateurs — le concept" icon="compass">
+    `steps/concept/sNN-<slug>.mdx`. Ce qu'est la capacité, pourquoi elle compte, son vocabulaire. Aucun chemin de fichier, aucun Go, aucun SQL.
+  </Card>
+  <Card title="Pour moi — le détail" icon="wrench">
+    `steps/internals/sNN-<slug>.mdx`. Toujours trois sections `##` dans cet ordre : **Implémentation** (le code réel), **Méta** (les miroirs et vérités qui le prouvent), **Méta-méta** (la place dans le cliquet KRD, le mur, la complétude, les ADR).
+  </Card>
+</Columns>
+
+Le cycle suit celui de l'étape : `/grill-with-docs` tourne au **début** (intention affûtée → page concept écrite en entier, plus la **Méta** et la **Méta-méta** de la page internals) ; au **green**, la section **Implémentation** est complétée avec le vrai code, puis poussée et vérifiée. Les docs restent ainsi honnêtes : elles ne revendiquent jamais une implémentation qui n'existe pas encore.
+
+## Où regarder ensuite
+
+<Columns cols={2}>
+  <Card title="Le mur et le cliquet" icon="shield" href="/internals/the-wall-and-ratchet">
+    Ce que l'agent n'écrit jamais (les zones de vérité), le cliquet qui interdit la régression, et la loi de complétude.
+  </Card>
+  <Card title="S00 — le contrat d'exécution" icon="list-checks" href="/steps/internals/s00-exec-contract">
+    La première dent : la boucle par étape et la règle de granularité, encodées comme checklist machine et prouvées par un miroir.
+  </Card>
+</Columns>

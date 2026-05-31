@@ -1,20 +1,50 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "AIDOS"
+description: "AI Development Operating System — construit avec la méthode KRD (Kernel-Ratchet Development)."
+keywords: ["aidos", "krd", "kernel-ratchet development", "documentation"]
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+**AIDOS** est un *AI Development Operating System* : un système qui fait écrire le code par l'IA tout en gardant la **vérité** entre des mains humaines. Il met en œuvre la méthode **KRD** (*Kernel-Ratchet Development*) : un petit noyau de vérité exécutable, du code librement réécrit par l'IA que le **cliquet** ne laisse jamais régresser, et un **miroir** qui prouve chaque vérité.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<Note>
+  Cette documentation est écrite pour **deux lecteurs**. Choisissez votre porte d'entrée — les deux racontent la même histoire, à deux profondeurs.
+</Note>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
+<Columns cols={2}>
+  <Card title="Pour les futurs utilisateurs" icon="compass" href="/concepts/what-is-aidos">
+    Le **concept**. Ce qu'est AIDOS, pourquoi la méthode KRD existe, les cinq sous-systèmes et le vocabulaire — sans une ligne de code.
+  </Card>
+  <Card title="Pour moi" icon="wrench" href="/internals/overview">
+    Le **détail**. Comment le dépôt se construit dent par dent, le mur, le cliquet, la pile gelée — et chaque étape en trois couches : Implémentation · Méta · Méta-méta.
+  </Card>
+</Columns>
+
+## Les deux mandats
+
+AIDOS repose sur deux règles non négociables :
+
+<CardGroup cols={2}>
+  <Card title="Mandat A — la preuve avant le code" icon="vial">
+    Aucune ligne de code sans un scénario rouge d'abord. Le miroir (BDD) *est* la spécification du comportement. `rouge → vert → refactor`.
+  </Card>
+  <Card title="Mandat B — la vérité vit dans Postgres" icon="database">
+    Toute la vérité et sa méta vivent dans Postgres (content-addressed, append-only), hors de portée de l'agent. Le code n'en est qu'une projection.
+  </Card>
+</CardGroup>
+
+## Comment lire les étapes
+
+AIDOS se construit étape par étape (`S00`, `S01`, …). Chaque étape ajoute **une seule** capacité vérifiable, et publie **deux pages** ici :
+
+<Steps>
+  <Step title="La page concept">
+    Dans l'onglet **Pour les futurs utilisateurs** — ce que l'étape apporte et son vocabulaire.
+  </Step>
+  <Step title="La page implémentation">
+    Dans l'onglet **Pour moi** — toujours en trois couches : **Implémentation** (le code réel), **Méta** (les miroirs et vérités qui le prouvent), **Méta-méta** (sa place dans le cliquet KRD, le mur, les ADR).
+  </Step>
+</Steps>
+
+<Card title="Commencer par le commencement" icon="play" href="/steps/concept/s00-exec-contract">
+  S00 — le contrat d'exécution : la loi que toute étape suivante doit respecter.
 </Card>

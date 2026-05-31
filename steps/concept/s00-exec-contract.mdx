@@ -1,0 +1,100 @@
+---
+title: "S00 · Le contrat d'exécution"
+description: "La loi que toute étape suivante doit respecter, rendue machine-lisible : un fichier, deux lecteurs (humain et harnais)."
+keywords: ["aidos", "krd", "contrat", "phase", "gate", "granularité", "Workbench", "Runtime"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S00](/steps/internals/s00-exec-contract).</Note>
+
+## En une phrase
+
+S00 fige, une fois pour toutes et versionnée, **la loi que chaque étape de construction d'AIDOS doit respecter** — la boucle par étape et la règle de granularité — sous la forme d'une **liste de contrôle unique, lisible à la fois par un humain et par le harnais**.
+
+## Le problème que ça résout
+
+Avant d'écrire la moindre ligne de moteur, il faut décider **comment on construit**. Sans cela, chaque étape réinvente ses propres règles, et plus rien ne garantit que l'étape 30 obéit aux mêmes exigences que l'étape 1.
+
+S00 répond à ce besoin sans tricher : c'est **la racine auto-descriptive du plan**. Elle ne contient aucun code de moteur — seulement la règle que toutes les étapes suivantes vont devoir satisfaire. Le contrat se décrit lui-même : il est la première étape, et il énonce la loi à laquelle il se soumet aussi.
+
+L'idée centrale est **« un fichier, deux lecteurs »** :
+
+- un **humain** lit la prose et comprend ce que chaque étape doit faire ;
+- le **harnais** (le Runtime d'AIDOS) lit un bloc structuré dans le même fichier et peut, lui, **vérifier** mécaniquement qu'une étape a bien suivi la loi.
+
+Le **Workbench** affiche cette même liste, pour qu'on voie d'un coup d'œil ce que toute étape doit satisfaire.
+
+## Les idées-clés
+
+<Field name="Contrat" type="loi versionnée">
+  Le texte canonique de la boucle par étape et de la règle de granularité. Il porte un numéro de version (semver) : toute évolution de la loi passe par un ChangeSet et un nouveau numéro, jamais par une réécriture silencieuse.
+</Field>
+
+<Field name="Phase" type="étape de la boucle">
+  Un maillon de la boucle que chaque étape rejoue. Il y en a neuf, chacune avec un identifiant stable et une porte (gate).
+</Field>
+
+<Field name="Gate (porte)" type="computational | human">
+  La nature de la vérification d'une phase. Une porte `computational` peut être tranchée par le harnais sans humain ; une porte `human` exige une décision ou un jugement humain.
+</Field>
+
+<Field name="Granularité" type="cinq propriétés">
+  Ce qui fait qu'une étape est « bien taillée » : minimale, autonome, visualisable, non-destructive, chaînable.
+</Field>
+
+### Les neuf phases de la boucle
+
+Chaque étape d'AIDOS rejoue la même boucle, dans cet ordre :
+
+<Steps>
+  <Step title="Grill-with-docs (porte humaine)">
+    Affûter l'intention d'abord — une intention, cinq scénarios au plus — et préciser le vocabulaire. On ne démarre pas une étape sans cela.
+  </Step>
+  <Step title="Écrire le miroir BDD d'abord (porte computational)">
+    Le comportement est prouvé en BDD avant d'exister. Le miroir est rouge en premier ; ce rouge est l'objectif (le `/goal`).
+  </Step>
+  <Step title="TDD vers le code (porte computational)">
+    rouge → vert → refactor, dans le seul package de l'étape. On ne code pas sans cela.
+  </Step>
+  <Step title="Capteurs au vert à chaque diff (porte computational)">
+    Les sensors restent verts à chaque modification.
+  </Step>
+  <Step title="Complétude (porte computational)">
+    La couche a-t-elle son miroir vivant ? Aucun monstre, aucun miroir orphelin ? Sinon le Stop bloque.
+  </Step>
+  <Step title="Diagnose avant de finir (porte humaine)">
+    Isoler tout capteur en échec et proposer la correction. On ne finit pas une étape de code sans cela.
+  </Step>
+  <Step title="UI : route Workbench + e2e Playwright (porte computational)">
+    Ajouter la visualisation (sans toucher aux routes existantes) et son test e2e. Une UI est requise à chaque étape.
+  </Step>
+  <Step title="Improve-codebase-architecture (porte humaine)">
+    On ne passe pas à l'étape suivante sans ce passage d'amélioration.
+  </Step>
+  <Step title="Créer les artefacts nécessaires (porte computational)">
+    Skill / Hook / MCP / migration — seulement là où la règle le justifie. Un nouvel artefact ne peut qu'AJOUTER un garde-fou, jamais en retirer.
+  </Step>
+</Steps>
+
+### Les cinq propriétés de granularité
+
+| Propriété | Règle |
+|---|---|
+| Minimale | Une seule capacité vérifiable par étape. |
+| Autonome | Testable seule ; on simule ce qui n'existe pas encore — jamais l'inverse. |
+| Visualisable | Une route d'UI dans le Workbench et un e2e Playwright. |
+| Non-destructive | Ne casse jamais silencieusement ce qui précède. |
+| Chaînable | Laisse une phase stable que l'étape suivante consomme. |
+
+### « Done est calculé, jamais déclaré »
+
+Le point dur du contrat : **vous ne décrétez pas qu'une étape est terminée**. La fin est *calculée* — l'ensemble rouge passé au vert, le vert antérieur intact, aucun monstre. C'est précisément pour cela que chaque phase porte une porte : les portes `computational` sont tranchées par le harnais (pas par votre parole), et seules les portes `human` réclament un jugement. Vous ne pouvez pas forcer un « done ».
+
+## Ce que ça vous permet de faire
+
+- **Vérifier toute étape contre la même loi.** Parce que le contrat est machine-lisible, le harnais lit la liste des phases et contrôle qu'une étape les a suivies.
+- **Voir la loi, pas seulement la lire.** Le Workbench projette le contrat : badge de version, puis chaque phase avec son identifiant et le type de sa porte.
+- **Faire évoluer la loi sans la trahir.** Toute modification du contrat passe par un ChangeSet et un nouveau numéro de version (semver) ; la prose et le bloc structuré ne divergent jamais — c'est le même fait, écrit deux fois.
+
+<Card title="Pour aller plus loin — l'implémentation" icon="wrench" href="/steps/internals/s00-exec-contract">
+  Le code, les mirrors et la place dans le cliquet KRD.
+</Card>

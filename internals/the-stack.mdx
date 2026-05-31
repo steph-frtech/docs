@@ -1,0 +1,117 @@
+---
+title: "La pile gelée"
+description: "La pile gelée d'AIDOS : back = Go · base = Postgres · front = Next, mappée par niveau KRD, slots mandatory vs replaceable, réutiliser plutôt que réinventer, et la séparation deux-bases (truth-store Postgres vs datastore d'app émise Doltgres)."
+keywords: ["aidos", "krd", "frozen stack", "pile gelée", "Go", "Postgres", "Next", "Godog", "rapid", "Testcontainers", "sqlc", "pgx", "Atlas", "MCP", "Doltgres", "pgvector"]
+---
+
+<Info>
+  Page de fondation, côté **Pour moi**. Elle décrit la **pile gelée** — la topologie figée d'outils sur laquelle tout le harness s'attache. Pour la frontière vérité/code que cette pile enforce, voir [le mur et le cliquet](/internals/the-wall-and-ratchet) ; pour la carte des répertoires, voir [la structure du dépôt](/internals/repo-structure).
+</Info>
+
+La pile d'AIDOS est **gelée maintenant**, pas adaptative. On a mappé une fois les gagnants de bench du Tome (les outils qui ont remporté chaque comparaison par niveau KRD) sur les trois piliers du dépôt — **back = Go · base = Postgres · front = Next** — et on a enregistré ce tableau comme topologie fixe. Le motif est mécanique : un harness complet (le mur, les sensors, les cert-runners, le version-DAG, les emitters) a besoin d'une **topologie fixe** où s'accrocher. Chaque hook, MCP server, générateur et check de complétude est écrit contre des slots **nommés** ; une pile mouvante voudrait dire un harness perpétuellement réécrit qui n'atteint jamais une phase stable. On échange de la variété requise (Ashby) contre une fondation **constructible et enforceable** — un compromis assumé.
+
+## Mandatory vs replaceable
+
+Chaque slot porte un statut. Les deux ne se traitent pas pareil :
+
+<Columns cols={2}>
+  <Card title="mandatory" icon="lock">
+    Le minimum n'est **jamais** substitué — le harness en dépend structurellement. Remplacer un slot mandatory, c'est redessiner le harness, pas éditer un slot.
+  </Card>
+  <Card title="replaceable" icon="unlock">
+    Un step peut échanger l'outil pour une **raison documentée** (un nouvel ADR), mais **dans** le même rôle, jamais sous le minimum. Le slot (le rôle) reste en place.
+  </Card>
+</Columns>
+
+La recherche d'outils par step (la `§6` de `CLAUDE.md`) ne pioche jamais que l'**option courante la plus simple (mai 2026) à l'intérieur d'un slot** : elle ne touche pas le minimum mandatory, et elle n'ajoute ni ne retire jamais un slot.
+
+## Le tableau par niveau KRD
+
+Le cœur de la pile mappe chaque niveau de preuve KRD (N0 journey → N5 infra) sur un outil figé, plus les slots transverses (accès base, migrations, MCP, hooks, etc.). Source : `CLAUDE.md` §3 et [l'ADR 0003](/internals/overview).
+
+| Rôle (niveau KRD) | Choix gelé | Statut |
+|---|---|---|
+| Journey / acceptance (N0) | **Godog** (back) + **Playwright + playwright-bdd** (front) | mandatory |
+| Invariants ∀ (N1) | **rapid** (Go) ; **fast-check** (front) | mandatory |
+| Workflow (N2) | **Operation DSL interprété en Go** + fixtures `state→cmd→events` ; XState seulement pour l'état client en Next | mandatory |
+| Contracts / entités (N3) | entités = **AST en Postgres (JSONB)** → émettent **structs Go (sqlc)**, **DDL Postgres**, **types TS** ; **Pact** entre cellules | mandatory |
+| Code / unit (N4) | **`go test`** + Go strict ; **Vitest** + TS strict (front) | mandatory |
+| Infra / adapters (N5) | **Pact provider verification** + **Testcontainers (Go)** sur un vrai Postgres | mandatory |
+| Accès base (Go) | **sqlc** (SQL→Go typé) + **pgx** | mandatory |
+| Migrations | **Atlas** (déclaratif, expand-contract) sur Postgres | replaceable |
+| Versioning / archive (truth-store) | **Postgres** (content-addressed, append-only, history tables) ; **git/jj** pour les branches de code ; **pgvector** pour les embeddings. **Dolt abandonné pour le truth-store.** | mandatory |
+| Datastore d'app émise (cible data-versioning) | **Doltgres** (Dolt en wire Postgres) — git-for-data pour les apps qu'AIDOS *construit* ; **même dialecte Postgres** (réutilise sqlc/pgx/Atlas, pas de MySQL) ; beta → fallback Postgres simple. **PAS** le truth-store de l'OS. | replaceable |
+| Memory backend (brain, S31) | **pgvector natif** sur le truth-store Postgres (HNSW + cosinus) ; service externe = adapter derrière le port S31, gated spike+ADR | mandatory |
+| Schéma source partagé | une **source (entité)** → émet Go + TS (codegen), jamais double-typée | mandatory |
+| MCP | **Go MCP SDK** (un tool = une op backend) | mandatory |
+| Hooks | **binaires Go** invoqués par `PreToolUse / PostToolUse / Stop / PostKernelChange / SessionStart` | mandatory |
+| Mutation testing | **gremlins** (Go) + **StrykerJS** (front) | replaceable |
+| Budgets (perf/sec) | **Semgrep · gosec · gitleaks · k6** | replaceable |
+| Telemetry | **OpenTelemetry** (Go) → Postgres | replaceable |
+| Arch-fitness | **go-arch-lint / depguard** (Go) + **dependency-cruiser** (front) | replaceable |
+| Caps formelles (rare, T2) | Z3 / TLA+ / Dafny / Alloy / UPPAAL — seulement si catastrophique ∧ non-échantillonnable | replaceable |
+
+<Note>
+  Les caps formelles sont la **soupape d'échappement** délibérée : on ne les atteint que si une propriété est à la fois *catastrophique* **et** *non-échantillonnable*, jamais par défaut. Cela garde les méthodes formelles lourdes hors de la boucle quotidienne tout en laissant une porte enregistrée pour le cas rare.
+</Note>
+
+## Réutiliser, ne pas réinventer
+
+Le mandat du projet est explicite : *jamais réinventer la roue ; l'implémentation est à réutiliser (outils de mai 2026)*. Le kernel stocke le comportement et les contrats comme des **AST content-addressed dans Postgres** (la source — intouchable derrière le mur), mais l'**évaluation, l'exécution et la génération de code** de ces AST **réutilisent des libs matures** plutôt que des moteurs faits-maison ([ADR 0007](/internals/overview)).
+
+<AccordionGroup>
+  <Accordion title="Évaluation du DSL Expr (S08)">
+    `visible_when`, `enabled_when`, comparaisons de policy : on compile notre AST vers un moteur d'expressions Go vetté — **CEL (`cel-go`)** ou **`expr-lang/expr`** — au lieu d'écrire un évaluateur. On possède l'AST ; le moteur l'évalue.
+  </Accordion>
+  <Accordion title="Fixtures du DSL Operation (S10)">
+    `state → cmd → events` (N2) : on exécute/vérifie avec une lib de statechart / machine à états existante. XState reste **client-only en Next**. On ne possède que le **step-interpreter** (validate / authorize / read / mutate / return) — le cœur spécifique à KRD.
+  </Accordion>
+  <Accordion title="Émission (S34/S35)">
+    entité → Go/DDL/TS : on bâtit sur **sqlc** + templates, jamais un moteur de codegen from-scratch.
+  </Accordion>
+</AccordionGroup>
+
+L'AST reste la source portable, donc la lib d'eval/exec est **swappable** — un détail d'implémentation `replaceable` sous un contrat d'AST stable. On garde la valeur spécifique à KRD (truth-as-data, le mur, la porte du miroir) et on réutilise des moteurs commodity pour le travail commodity.
+
+## La séparation deux-bases
+
+Il y a **deux bases distinctes**, et elles parlent **toutes les deux le dialecte Postgres**. Les confondre casserait le mur. C'est le point le plus subtil de la pile : *une chose qui se ressemble — du versioning de données — ne donne pas le même moteur selon le côté du mur.*
+
+<Columns cols={2}>
+  <Card title="Le truth-store de l'OS" icon="database">
+    La base de gouvernance d'AIDOS lui-même : `kernel · mirrors · ideas · changesets · dag · brain · context · fitness`. **Toujours Postgres** ([ADR 0004](/internals/overview)) — pgvector pour `brain`, sqlc/pgx/Atlas, le mur via GRANTs, écrivain unique à la cadence d'approbation humaine.
+  </Card>
+  <Card title="Le datastore d'app émise" icon="boxes-stacked">
+    La base runtime d'une **application qu'AIDOS construit** pour un utilisateur (le « BDD du résultat codé »), dans le workspace de cet utilisateur, pas dans ce dépôt. **Doltgres** comme cible d'émission data-versioning : git-for-data (branch / merge / diff / `as of` / prolly-tree).
+  </Card>
+</Columns>
+
+### Pourquoi Dolt est abandonné pour le truth-store
+
+Dolt (git-for-data) a été sérieusement considéré : il unifie nativement « base SQL » et « versioning git-style » — soit l'essentiel de ce dont les schemas `changesets`/`dag` ont besoin. Rejeté pour le truth-store : il ajoute un **second moteur de base** à côté du Postgres que le reste de la pile mandate déjà (sqlc, pgx, Atlas, Testcontainers, pgvector, telemetry sink), scindant la vérité de la base opérationnelle et doublant la surface. **Postgres absorbe le rôle de versioning de Dolt** via les history tables append-only, les versions content-addressed (version = hash) et les schemas explicites `changesets` + `dag` — la valeur du versioning est gardée sans le second moteur.
+
+Le ré-examen de mai 2026 a aussi pesé **Doltgres** (Dolt parlant le wire Postgres), qui dissoudrait l'objection « moteur différent ». Verdict : **garder Postgres pour le truth-store**, confiance haute. Doltgres ne passe pas la barre — il est en beta (pas de GA), n'a **pas de pgvector fonctionnel** (donc `brain` ne peut pas y vivre), son parser n'est pas thread-safe sous connexions pgx concurrentes (issue #2581) et il manque les primitives `pg_advisory_xact_lock` / `FOR UPDATE SKIP LOCKED` / `LOCK TABLE` nécessaires à un moteur de changeset concurrent (issue #2600). Le ré-open trigger est précis : Doltgres atteint 1.0/GA **et** ships des vecteurs pgvector-compatibles **et** ferme #2581 + #2600.
+
+### Pourquoi Doltgres est adopté pour l'app émise
+
+Le seul scénario qui a *vraiment* besoin d'une base versionnée — *de gros datasets opérationnels avec branching à l'échelle des données, time-travel et audit* — c'est la donnée du **produit émis**, pas le truth-store de l'OS. On a choisi **Doltgres plutôt que Dolt-MySQL** pour que **tout le système reste un seul dialecte (Postgres)** : l'emitter de db-projection réutilise les **mêmes sqlc + pgx + Atlas** pour les deux bases — **pas de split MySQL**, un seul modèle mental, un seul jeu de générateurs ([ADR 0006](/internals/overview)). Le slot est `replaceable` (fallback Postgres simple par app) et la beta de Doltgres est **knowingly accepted** ici, car c'est la donnée du *produit émis* — jamais un second truth-store, jamais gouverné autrement que par les mêmes mirrors/contrats que n'importe quelle projection.
+
+### Le brain est du pgvector natif
+
+Il y a aussi **deux mémoires** dans le monde AIDOS, et les confondre breacherait le mur ([ADR 0008](/internals/overview)) :
+
+- **Layer A — la mémoire du build-agent.** La mémoire cross-session de l'agent Claude Code qui *construit* AIDOS dans ce dépôt : **claude-mem**. Confort d'ergonomie dev, **pas** un composant du produit AIDOS ni une dépendance runtime de l'OS ; ses observations ne sont **jamais** de la vérité AIDOS ni des `MemoryItem` AIDOS.
+- **Layer B — le brain de l'OS (S30–S33).** Le subsystème `brain` qu'AIDOS utilise quand il opère sur des projets utilisateurs. Backé par **pgvector natif dans le truth-store Postgres unique** : `brain.memory_item` (MemoryItem + embeddings, HNSW + cosinus, recall filtré par kind/branch). **Pas de service de mémoire externe côté vérité.** Un store externe (Letta/Mem0/Zep) ne peut entrer que comme adapter `replaceable` derrière le port S31 `Store`/`Embedder`, après un spike enregistré derrière le mur, en *dumb store* seulement.
+
+## Pourquoi cette pile est dure à inverser
+
+Les slots gelés sont câblés dans le mur, les cert-runners, les emitters, la surface MCP et la boucle par step. Ré-ouvrir la pile à la pleine adaptivité plus tard voudrait dire ré-dériver le harness contre une cible mouvante, pas flipper un flag. C'est le prix assumé d'un OS dont la valeur même est d'enforcer une méthode qu'il doit lui-même pouvoir épingler.
+
+<Columns cols={2}>
+  <Card title="La structure du dépôt" icon="folder-tree" href="/internals/repo-structure">
+    Où chaque slot de la pile atterrit physiquement : `back/` (Go), `front/web/` (Next), `back/migrations/` (Atlas), `back/mcp/` (Go MCP SDK), `back/hooks/` (binaires Go).
+  </Card>
+  <Card title="Le mur et le cliquet" icon="shield-halved" href="/internals/the-wall-and-ratchet">
+    La frontière vérité/code que cette pile enforce — le hook `PreToolUse`, les GRANTs Postgres, le mutation testing, l'injection de faute.
+  </Card>
+</Columns>

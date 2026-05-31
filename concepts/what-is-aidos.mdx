@@ -1,0 +1,103 @@
+---
+title: "Qu'est-ce qu'AIDOS ?"
+description: "AIDOS est un AI Development Operating System : l'IA écrit le code, l'humain garde la vérité, le harnais fait respecter le mur."
+keywords: ["aidos", "krd", "ai development operating system", "kernel", "mirror", "ratchet", "wall", "workbench", "runtime"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → Vue d'ensemble](/internals/overview).</Note>
+
+## En une phrase
+
+**AIDOS** est un *AI Development Operating System* : un système qui laisse l'IA écrire le code librement, tout en gardant la **vérité** du logiciel — ce qui doit être vrai du comportement — entre des mains humaines et hors de portée de l'agent.
+
+## Le problème que ça résout
+
+Demander à un LLM de « coder » produit du code plausible, jamais du code dont le comportement est garanti. À chaque nouvelle génération, rien ne vous dit qu'une régression silencieuse n'a pas été introduite : l'IA réécrit, et personne ne tient le fil de ce qui devait rester vrai.
+
+AIDOS renverse la question. On ne demande pas à l'IA *quoi faire* puis on espère. On maintient un petit ensemble de comportements prouvés — le **kernel** (noyau) — et on laisse l'IA refactorer et réécrire le **code** tant que ce noyau reste satisfait. Le comportement ne régresse jamais en silence ; la structure du code, elle, est totalement libre.
+
+## La distinction à ne jamais confondre : AIDOS ≠ KRD
+
+<CardGroup cols={2}>
+  <Card title="AIDOS — le produit" icon="box">
+    Le système concret, ce dépôt. La catégorie : *AI Development Operating System*. C'est l'OS qui implémente et fait respecter la méthode.
+  </Card>
+  <Card title="KRD — la méthode" icon="compass">
+    *Kernel-Ratchet Development* : la discipline qu'AIDOS met en œuvre. Une méthodologie, pas un produit ni un répertoire.
+  </Card>
+</CardGroup>
+
+AIDOS est l'outil ; KRD est la façon de travailler. On ne les emploie jamais l'un pour l'autre. La méthode est décrite en détail dans [La méthode KRD](/concepts/krd-method).
+
+## Les idées-clés
+
+<Field name="Kernel (noyau)">
+  Le petit ensemble de vérités comportementales exécutables, figées et ancrées par l'humain. Ce qui *doit* être vrai du logiciel — pas le code qui le réalise.
+</Field>
+
+<Field name="Mirror (miroir)">
+  La preuve exécutable d'une vérité. Chaque vérité du kernel a son miroir : un scénario, un invariant ou une fixture qui passe au vert quand la vérité est tenue, et qui passe au rouge dès qu'elle est cassée.
+</Field>
+
+<Field name="Ratchet (cliquet)">
+  Le mécanisme qui empêche toute régression : une fois une vérité prouvée, le cliquet ne laisse plus jamais le comportement reculer. L'IA peut tout réécrire, mais jamais redescendre sous une vérité déjà acquise.
+</Field>
+
+<Field name="Wall (mur)">
+  La frontière qu'aucun agent ne franchit. L'IA écrit le code, jamais la vérité. Le mur refuse toute écriture de l'agent dans le kernel et les miroirs.
+</Field>
+
+## Le triptyque qui tient l'ensemble
+
+AIDOS répartit les rôles selon trois principes inséparables :
+
+<CardGroup cols={3}>
+  <Card title="L'humain possède la vérité" icon="user-check">
+    Vous décidez ce qui doit être vrai. Une vérité n'entre dans le noyau que par une porte unique : une idée, son miroir, un `/goal`, et votre approbation.
+  </Card>
+  <Card title="L'agent possède l'implémentation" icon="robot">
+    L'IA écrit, refactore et réécrit le code librement — les projections vers le web, le mobile, l'API, la base. Mais jamais la vérité.
+  </Card>
+  <Card title="Le harnais fait respecter le mur" icon="shield-halved">
+    Le harnais (le Runtime) applique mécaniquement la frontière : il refuse toute tentative de l'agent d'écrire la vérité, avec une explication actionnable.
+  </Card>
+</CardGroup>
+
+C'est une **liberté asymétrique** : liberté totale sur la structure, contrainte stricte sur le comportement.
+
+## Ce avec quoi vous interagissez
+
+AIDOS n'est pas qu'un moteur ; c'est un OS avec lequel on travaille au quotidien.
+
+<Field name="Runtime">
+  Le harnais d'exécution d'AIDOS : c'est lui qui orchestre les boucles, tient les capteurs et fait respecter le mur. C'est la part de l'OS qui *fait tourner* la discipline.
+</Field>
+
+<Field name="Workbench">
+  Le cockpit, l'IDE de gouvernance d'AIDOS — son interface visuelle propre. Vous y voyez l'état de la vérité, vous y approuvez les changements, vous y suivez ce que l'IA propose. C'est là que vos décisions humaines redescendent dans le système.
+</Field>
+
+<Field name="CLI aidos">
+  La ligne de commande de l'OS. Elle expose les gestes du quotidien : ouvrir un `/goal`, vérifier, mesurer l'impact, marquer une phase stable, expliquer un refus, et le reste.
+</Field>
+
+## Pour qui c'est
+
+AIDOS s'adresse à qui veut faire écrire du logiciel par l'IA **sans renoncer au contrôle du comportement** : quelqu'un qui sait ce qui doit être vrai de son produit, qui veut laisser l'IA porter l'effort d'implémentation, et qui exige qu'aucune régression ne passe en silence. Vous restez l'autorité sur la vérité ; l'IA fournit la vitesse sur le code.
+
+## Ce que ça vous permet de faire
+
+- Laisser l'IA écrire et réécrire le code sans craindre une régression silencieuse du comportement.
+- Garder, en clair et exécutable, l'ensemble exact des comportements qui *doivent* rester vrais — le kernel.
+- Prouver chaque vérité par un miroir, et savoir tout de suite, au rouge, ce qui s'est cassé.
+- Décider vous-même de chaque évolution de la vérité, par une porte unique et tracée — jamais en passant.
+- Suivre tout cela depuis un cockpit (le Workbench) et le piloter en ligne de commande (`aidos`).
+
+<Columns cols={2}>
+  <Card title="La méthode — KRD" icon="compass" href="/concepts/krd-method">
+    *Kernel-Ratchet Development* : les deux mandats, le cycle `rouge → vert → refactor`, le cliquet et le mur expliqués.
+  </Card>
+  <Card title="Les cinq sous-systèmes" icon="diagram-project" href="/concepts/five-subsystems">
+    Runtime · Kernel · Mirror · Archive · Workbench — comment AIDOS est découpé et ce que fait chaque part.
+  </Card>
+</Columns>

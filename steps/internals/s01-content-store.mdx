@@ -1,0 +1,176 @@
+---
+title: "S01 · Magasin de contenu — implémentation"
+description: "Le détail technique du premier contrat de l'Archive : schéma archive append-only, package Go contentstore (sqlc + pgx), serveur MCP store, route Workbench /store."
+keywords: ["aidos", "krd", "implémentation", "archive", "content-store", "postgres", "sqlc", "pgx", "mcp", "testcontainers"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S01](/steps/concept/s01-content-store).</Info>
+
+S01 pose le premier contrat de l'Archive : un magasin **content-addressed** (objet rangé sous le hash de son contenu) et **append-only** (rien n'est jamais écrasé ni détruit). C'est le substrat sur lequel s'appuieront le kernel, les mirrors, les ChangeSet et le DAG. Tout vit dans Postgres ; toute écriture passe par un seul serveur MCP.
+
+## Implémentation
+
+### Le schéma `archive` (Postgres)
+
+La DDL canonique est `back/migrations/archive_baseline.sql` — déclarative, append-only, appliquée via Atlas (expand-contract). Trois tables, une seule mutable.
+
+<Tabs>
+  <Tab title="content (immuable)">
+    PK = `hash` (SHA-256 hex). Une ligne, une fois écrite, n'est jamais mise à jour ni supprimée. `byte_size` est une colonne générée (`octet_length(data)`).
+
+    ```sql
+    -- back/migrations/archive_baseline.sql:10
+    CREATE TABLE IF NOT EXISTS archive.content (
+        hash        TEXT        NOT NULL,
+        data        BYTEA       NOT NULL,
+        byte_size   BIGINT      NOT NULL GENERATED ALWAYS AS (octet_length(data)) STORED,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT content_pkey PRIMARY KEY (hash)
+    );
+    ```
+  </Tab>
+  <Tab title="head (pointeur mutable)">
+    Pointeur nommé `key → hash`. C'est la **seule** surface mutable du schéma : on l'upsert à chaque `SetHead`.
+
+    ```sql
+    -- back/migrations/archive_baseline.sql:20
+    CREATE TABLE IF NOT EXISTS archive.head (
+        key         TEXT        NOT NULL,
+        hash        TEXT        NOT NULL REFERENCES archive.content(hash),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT head_pkey PRIMARY KEY (key)
+    );
+    ```
+  </Tab>
+  <Tab title="history (append-only)">
+    Journal de chaque déplacement de head. `parent_hash` est `NULL` pour le premier mouvement d'une clé. Un index `(key, created_at ASC)` sert les lectures oldest-first.
+
+    ```sql
+    -- back/migrations/archive_baseline.sql:29
+    CREATE TABLE IF NOT EXISTS archive.history (
+        id          BIGSERIAL   NOT NULL,
+        key         TEXT        NOT NULL,
+        hash        TEXT        NOT NULL REFERENCES archive.content(hash),
+        parent_hash TEXT        REFERENCES archive.content(hash),
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT history_pkey PRIMARY KEY (id)
+    );
+    ```
+  </Tab>
+</Tabs>
+
+Le mur est gravé **dans la base** par les GRANTs (`back/migrations/archive_baseline.sql:45`). Le rôle `aidos_agent` (créé `NOLOGIN`) reçoit :
+
+- `content` : `INSERT, SELECT` seulement — jamais `UPDATE` ni `DELETE`.
+- `history` : `INSERT, SELECT` seulement — append-only, plus `USAGE, SELECT` sur la séquence.
+- `head` : `INSERT, SELECT, UPDATE` (l'unique pointeur mutable), toujours sans `DELETE`.
+
+L'absence de GRANT destructeur **est** l'enforcement : un `UPDATE`/`DELETE` sur `content`/`history` échoue avec `permission denied` côté Postgres, pas seulement côté code applicatif.
+
+### Le package Go `contentstore`
+
+Tout dans `back/archive/contentstore/store.go`. Accès DB via **sqlc** (SQL → Go typé, code émis sous `back/gen/archive`) et **pgx** (`pgxpool`). Aucun fichier de `back/gen/` n'est édité à la main.
+
+| Méthode | Comportement | Référence |
+|---|---|---|
+| `Hash(b []byte) string` | SHA-256 hex canonique du contenu | `store.go:54` |
+| `Put(ctx, b) (string, error)` | Range `b` sous son hash, renvoie le hash. **Idempotent** | `store.go:61` |
+| `Get(ctx, hash) ([]byte, error)` | Lit les octets ; `ErrNotFound` si absent | `store.go:73` |
+| `SetHead(ctx, key, hash) error` | Déplace un head et **append** une ligne d'history, dans une transaction | `store.go:86` |
+| `GetHead(ctx, key) (string, error)` | Hash courant d'un head ; `ErrNotFound` si absent | `store.go:118` |
+| `History(ctx, key) ([]HeadMove, error)` | Mouvements d'un head, **oldest-first** | `store.go:131` |
+
+L'idempotence vient de la requête sqlc `InsertContent` (`back/archive/contentstore/sql/queries.sql:1`) : `INSERT … ON CONFLICT (hash) DO NOTHING`. Deux `Put` des mêmes octets donnent le même hash et une seule ligne.
+
+`SetHead` est transactionnel (`withTx`, `store.go:157`) : il lit le head précédent (qui devient `parent_hash`, `nil` au premier coup), upsert le pointeur via `UpsertHead` puis insère la ligne d'history — tout ou rien.
+
+```go
+// back/archive/contentstore/store.go:61
+func (s *Store) Put(ctx context.Context, b []byte) (string, error) {
+	h := Hash(b)
+	if err := s.queries.InsertContent(ctx, archivegen.InsertContentParams{
+		Hash: h,
+		Data: b,
+	}); err != nil {
+		return "", fmt.Errorf("contentstore: put: %w", err)
+	}
+	return h, nil
+}
+```
+
+Deux méthodes de lecture supplémentaires alimentent la projection Workbench : `ListContent` et `ListHeads` (`store.go:147`, `store.go:152`).
+
+### Le serveur MCP `store`
+
+`back/mcp/store/main.go` est l'unique porte de capacité au-dessus du magasin (ADR 0009 : tout op backend = un outil MCP). Transport stdio, DSN via `AIDOS_ARCHIVE_DSN`. Cinq outils, un par op backend :
+
+| Outil MCP | Op | Référence |
+|---|---|---|
+| `store_put` | `Put` — octets en base64, renvoie le hash | `main.go:130` |
+| `store_get` | `Get` — lit par hash, renvoie base64 | `main.go:131` |
+| `store_set_head` | `SetHead` — déplace un head, append history | `main.go:132` |
+| `store_get_head` | `GetHead` — résout un head vers son hash courant | `main.go:133` |
+| `store_history` | `History` — mouvements oldest-first | `main.go:134` |
+
+Les octets transitent en base64 (`data_base64`) pour rester transport-safe. Le serveur est construit avec le Go MCP SDK (`mcp.NewServer` + `mcp.AddTool`, `main.go:128`).
+
+### La route Workbench `/store`
+
+`front/web/app/store/page.tsx` est un panneau **lecture seule** (`export const dynamic = "force-dynamic"`) : il lit le schéma `archive` vif à chaque requête et n'écrit jamais de vérité. `StorePanel.tsx` rend à gauche la liste des objets par hash, à droite le corps courant du head sélectionné + son history oldest-first (badges `data-testid` pour les e2e). Un badge `LIVE · Postgres` / `demo fixture` indique la source ; le footer rappelle que les écritures passent par le serveur MCP `store`, jamais par le panneau.
+
+### Lancer / tester
+
+Les tests utilisent **Testcontainers** (vrai Postgres `postgres:16-alpine`), pas de mock. Le helper `startPostgres` (`back/archive/contentstore/testhelper_test.go:17`) démarre un conteneur jetable, applique `archive_baseline.sql`, et attend le log de readiness (occurrence 2).
+
+```bash
+go test ./back/archive/contentstore/...
+```
+
+## Méta
+
+Le comportement de S01 est prouvé par **trois mirrors vivants** ; tous tournent sur un vrai Postgres (Testcontainers), pas sur un mock — la « réalité » fait partie du *done*.
+
+<Steps>
+  <Step title="Mirror journey (Gherkin / Godog)">
+    `tests/archive/content_store.feature` — `reflects=S01-content-store`, `test_kind=journey`, `cert_language=gherkin`, `liveness=live`. Trois scénarios, exécutés par Godog dans `content_store_bdd_test.go` :
+
+    1. **Write then read** — `Put("hello")` rend un hash, et `Get` de ce hash rend exactement `"hello"`.
+    2. **Idempotent Put** — deux `Put` des mêmes octets rendent le même hash et **une seule** ligne `content`.
+    3. **Edit creates a new hash, old still readable** — `Put("v2")` sous le head `doc` (après `v1`) ; le head pointe sur `hash("v2")`, `hash("v1")` se relit encore en `"v1"`, et l'history liste les deux mouvements oldest-first (le second a `parent_hash = hash("v1")`).
+  </Step>
+  <Step title="Mirror invariant (property / rapid)">
+    `content_store_property_test.go` — `reflects=S01-content-store-invariant`, `test_kind=invariant`, `cert_language=rapid`, `liveness=live`. Quatre propriétés `∀` sur des slices d'octets générés :
+
+    - `Get(Put(b)) == b` (round-trip).
+    - `Put(b)` déterministe (même `b` ⇒ même hash).
+    - **Pas d'écrasement** : après `Put(b2)`, `b1` reste lisible intact.
+    - `Hash(b)` déterministe, sans toucher au magasin.
+  </Step>
+  <Step title="Mirror invariant du mur (append-only, in-database)">
+    `append_only_test.go` — `reflects=S01-content-store-append-only`, `test_kind=invariant`, `liveness=live`. Il connecte un pool sous le rôle restreint `aidos_agent` et prouve que l'`INSERT` passe mais que `UPDATE`/`DELETE` sur `content` et `history` sont rejetés avec `permission denied`. Le mur est ainsi prouvé par la base, pas seulement par le code.
+  </Step>
+</Steps>
+
+**red → green.** Au départ, ni le schéma, ni le package, ni le serveur MCP, ni la route n'existaient (`back/mcp/store` et `/store` étaient vides) : les trois mirrors étaient rouges. Ils passent au vert une fois la migration appliquée, `contentstore` codé et les GRANTs en place. Le contrat n'est pas encore matérialisé dans le schéma Postgres `mirrors` (il n'existe qu'à partir de S06) : ici les mirrors sont **matérialisés en fichiers + tests exécutables**, exactement comme l'autorise l'exception bootstrap.
+
+<Note>**Score de mutation.** La règle KRD inclut un seuil de mutation (gremlins) dans la définition de « done ». À ce jour aucun run gremlins n'est enregistré pour `contentstore` — c'est un OpenQuestion, pas une affirmation. Les trois mirrors verts + Testcontainers sont la preuve disponible à ce stade.</Note>
+
+## Méta-méta
+
+**Place dans le cliquet.** S01 est le **premier contrat de l'Archive** et un substrat de fond : le content-addressing (version = hash) et l'append-only qu'il pose servent ensuite au kernel, aux mirrors, aux ChangeSet et au DAG. C'est S01/S24 qui livrent ce content-addressing sur Postgres, à la granularité par-Layer (voir l'addendum d'ADR 0004). Une dent isolée, testée, visualisée, qui laisse une phase stable que les étapes suivantes consomment.
+
+**Le mur.** L'Archive est **sous la ligne** (ce n'est pas de la vérité : c'est l'espace de versions). Mais « sous la ligne » ne veut pas dire « écriture libre » : toute écriture passe par le serveur MCP `store` (ADR 0009, « tout op backend = un outil MCP »), et le mur in-database (GRANTs du rôle `aidos_agent`) interdit déjà toute écriture destructrice. Le panneau `/store` est strictement lecture seule.
+
+**ADR concernés.**
+
+- **ADR 0004** — la vérité (et son substrat de versions) vit dans Postgres, append-only et content-addressed, **jamais dans Dolt**. L'addendum re-rejette Doltgres pour le truth-store (beta, pas de pgvector, parser non thread-safe). S01 incarne directement ce choix : un seul moteur, des tables append-only, version = hash.
+- **ADR 0006** — Doltgres est réservé au **datastore des apps émises**, jamais au truth-store ; S01 (truth-store) reste donc sur Postgres, inchangé.
+- **ADR 0009** — chaque op du magasin est exposée comme un outil MCP, sans exception.
+
+**Migrations & changements.** La DDL est appliquée en **expand-contract, append-only** via Atlas. Tout changement futur de ce contrat (forme d'une table, sémantique d'un head) passe par un **ChangeSet** accompagné d'un **SemanticDiff** — jamais une réécriture silencieuse (CLAUDE.md §9).
+
+**Forward-dependency (OpenQuestion).** La persistance des mirrors dans le schéma Postgres `mirrors` est différée à **S06** ; jusque-là les mirrors de S01 vivent en fichiers exécutables. C'est une dépendance avant par conception, pas un `residual_issue`.
+
+<Card title="Voir le concept de l'étape" icon="lightbulb" href="/steps/concept/s01-content-store">
+  Ce qu'apporte le magasin de contenu, sans le code.
+</Card>

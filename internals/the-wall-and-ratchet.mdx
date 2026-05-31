@@ -1,0 +1,131 @@
+---
+title: "Le mur et le cliquet"
+description: "Le mur (ce que l'agent n'écrit jamais), la défense en profondeur à deux niveaux, le cliquet (« done est calculé, pas déclaré »), la loi de complétude et l'anti-Goodhart."
+keywords: ["aidos", "krd", "mur", "wall", "cliquet", "ratchet", "completeness", "complétude", "monstre", "goodhart", "Postgres", "BlockReason"]
+---
+
+<Info>
+  Page de fondation, côté **Pour moi**. Elle décrit les deux primitifs qui rendent l'autonomie de l'agent sûre par construction : le **mur** (la frontière qu'il ne franchit jamais) et le **cliquet** (la régression qu'il ne peut pas commettre). Pour le vocabulaire accessible, voir [le glossaire](/concepts/glossary) ; pour la méthode, voir [la méthode KRD](/concepts/krd-method).
+</Info>
+
+AIDOS donne à l'IA une liberté maximale là où elle excelle — compléter et refactorer du code pour faire passer des tests donnés — et **zéro** liberté là où elle ment : décider de ce qui est vrai. Deux mécanismes tiennent cette frontière. Le **mur** dit *ce que l'agent ne peut pas écrire*. Le **cliquet** (ratchet) dit *ce que l'agent ne peut pas casser*. Aucun des deux n'est une recommandation : les deux sont mécaniques, et l'agent ne peut pas les contourner.
+
+## Le mur — ce que l'agent n'écrit jamais
+
+Le noyau (kernel) et le code vivent dans **deux zones de confiance différentes**, avec des droits d'écriture différents. L'agent écrit le **code** librement (`back/gen`, les projections, les adaptateurs `front/web`). L'agent n'écrit **jamais** la **vérité**.
+
+La frontière de permissions, la ligne de flottaison de l'auto-certification et la frontière vérité/code sont **la même ligne**, vue sous trois angles :
+
+| Visage | Ce qu'il dit |
+|---|---|
+| **Permissions** | l'agent écrit le code, jamais la vérité |
+| **Ligne de flottaison** | en dessous, l'IA s'auto-certifie (le computational) ; au-dessus, l'humain tranche (le sens) |
+| **Frontière vérité/code** | le figé d'un côté, le fluide de l'autre |
+
+### Les zones interdites en écriture
+
+La vérité ne vit pas dans des fichiers : ce sont des **schemas Postgres** (voir [l'ADR 0004](/internals/overview) et la pile gelée). Sont **interdits en écriture** pour le rôle de l'agent :
+
+- les schemas **`kernel`** (les AST de DSL : entités, policies, opérations, controls, actions, expr + invariants + budgets) et **`mirrors`** (les enregistrements de miroirs *et* leur source : texte Gherkin, specs de property, données de fixture) — c'est-à-dire tout ce qui est **au-dessus** de la ligne de flottaison ;
+- le schema **`fitness`** (la grammaire NIVEAU 3 + la waterline + la définition de « réussi », en lecture seule) — le niveau méta-méta, **inviolable**.
+
+> Le jour où l'agent peut éditer le noyau aussi facilement que le code, le cliquet saute — retour au vibe coding. Le mur existe pour que ce jour n'arrive jamais.
+
+### La défense en profondeur — deux niveaux
+
+Le mur est enforced **deux fois**. Chacune des deux couches suffirait seule ; les deux ensemble signifient qu'un bug de hook ne peut pas accorder l'écriture en base, et qu'un GRANT manquant produit quand même un message clair.
+
+<Steps>
+  <Step title="Niveau 1 — le hook PreToolUse (binaire Go)">
+    Avant chaque écriture, un hook Go refuse toute tentative d'écriture de l'agent dans les zones de vérité. Il ne se contente pas de bloquer : il renvoie un **`BlockReason`** actionnable, structuré en quatre champs — `code`, `severity`, `explanation`, et `how_to_fix[]` (la liste des gestes pour débloquer). Le mur doit bloquer **sans devenir une prison** : chaque blocage explique quoi faire.
+  </Step>
+  <Step title="Niveau 2 — les GRANTs Postgres">
+    Le rôle de base (DB role) de l'agent n'a **aucun** GRANT d'écriture sur les tables de vérité. Seul le CLI `aidos` — via un **ChangeSet approuvé**, sous un rôle dédié — écrit la vérité. Même si le hook avait un trou, la base refuserait l'écriture au niveau du moteur.
+  </Step>
+</Steps>
+
+### La seule porte vers le noyau
+
+Il n'existe **aucun** autre chemin à travers le mur. Pour changer une vérité, l'agent ne l'écrit jamais en passant : il crée une **idea** (candidate-truth), écrit son **miroir** (qui est rouge — ce rouge *est* le goal), et ouvre un **`/goal`** pour approbation humaine. Le ChangeSet approuvé est ce que le CLI applique.
+
+```text
+idée  →  miroir (rouge)  →  /goal  →  approbation humaine  →  ChangeSet appliqué par `aidos`
+```
+
+## Le cliquet — ce que l'agent ne casse jamais
+
+Le **cliquet** (ratchet) est la garantie que le comportement ne peut qu'**avancer**, jamais reculer. Chaque vérité gelée est un cran. L'IA refactore, réécrit, optimise — les miroirs du noyau sont la paroi qui dit « tu n'as rien cassé ».
+
+Le cliquet **n'interdit pas le changement** ; il interdit le changement *non-versionné*. Une déviation d'une contrainte sans bump de version est une **régression** (rouge, interdite). La même déviation *avec* bump (+ ADR + approbation humaine) est une **évolution** (la RedWave / vague de rouge est attendue — c'est la worklist). La version est le sceau qui distingue l'évolution légitime de la régression silencieuse.
+
+### « Done est calculé, pas déclaré »
+
+L'agent ne peut pas se déclarer « fini ». La Definition of Done est **calculée** par le hook `Stop`, jamais cochée à la main. Un step n'est « done » que si **les quatre** conditions tiennent simultanément :
+
+<AccordionGroup>
+  <Accordion title="Le set rouge est devenu vert">
+    Le red set du `/goal` (les miroirs écrits avant le code) passe désormais au vert.
+  </Accordion>
+  <Accordion title="Le vert antérieur est intact">
+    Aucun miroir déjà vert ne vire au rouge — on ne casse jamais le vert acquis.
+  </Accordion>
+  <Accordion title="Le score de mutation atteint le seuil">
+    Le mutation testing mesure le serrage du noyau ; le score doit dépasser le seuil déclaré (c'est le densimètre contre le « tests verts, système pourri »).
+  </Accordion>
+  <Accordion title="Aucun monstre">
+    La loi de complétude est satisfaite — tout miroir est vivant, aucun monstre (voir ci-dessous).
+  </Accordion>
+</AccordionGroup>
+
+> « Fini » = set rouge→vert **∧** vert intact **∧** mutation ≥ seuil **∧** tout miroir vivant — **pas** l'auto-confiance de l'agent. Le juge est déterministe (le miroir + la réalité). Un second agent qui valide un premier réduit la corvée ; ce n'est **pas** une preuve.
+
+## La loi de complétude — pas de monstre
+
+AIDOS est **bicéphale**, pas bicaméral : un seul corps (la vérité), deux têtes (l'**intention** = la spec, et la **preuve** = le miroir). Les deux têtes ne sont ni symétriques ni séparables — une tête ne peut pas vivre détachée du corps.
+
+> **La loi de complétude.** Toute couche du plan spec a au moins un miroir vivant, exécutable comme sensor déterministe. Une couche spec sans miroir, ou un miroir orphelin (qui ne reflète plus rien), ou un miroir dont le langage n'est pas exécutable → sensor rouge.
+
+L'échec a un nom : le **monstre** (monster).
+
+<Columns cols={2}>
+  <Card title="Spec sans miroir" icon="ghost">
+    Un corps sans tête. Une vérité gelée sans preuve exécutable n'est pas une vérité — c'est un **vœu**. Interdit.
+  </Card>
+  <Card title="Miroir orphelin" icon="ghost">
+    Une tête sans corps. Un miroir qui ne reflète plus rien (ou dont le langage n'est pas un sensor déterministe) est **mort**, donc rouge. Interdit.
+  </Card>
+</Columns>
+
+La chasse au monstre est l'**injection de faute** : on casse exprès une source, on vérifie que sa tête-preuve réagit (vire au rouge). Une tête qui ne réagit pas est morte. Cette boucle se referme proprement, sans régression infinie, parce qu'à la fin c'est de la mutation / fault-injection **déterministe** — pas un autre LLM-judge. Un miroir qui ne fire jamais n'est pas « un test qui passe » : c'est un détecteur mort.
+
+## L'anti-Goodhart — qui tient le mètre-étalon
+
+Le seul vrai danger d'un système qui s'auto-améliore est qu'**il note sa propre copie** : c'est Goodhart, c'est l'overfitting, c'est la circularité. Une boucle d'amélioration a besoin d'une fonction de fitness qu'elle **ne peut pas éditer**. Le noyau ancré humain + la boucle externe (la réalité) sont exactement cet ancrage non-gameable.
+
+Deux règles ferment la boucle :
+
+- **Jamais de truth-test.** L'agent a le droit d'écrire des **tests-moyens** (des sous-buts vers le rouge humain) ; il n'a **jamais** le droit d'écrire des **tests-vérité** — de nouveaux invariants qu'il satisferait ensuite (la circularité). On n'écrit pas le test qu'on se donnerait à soi-même pour réussir.
+- **La méta-loop ajoute, ne retire jamais.** Un nouvel artefact (sensor, hook, topologie, `kind`) peut **AJOUTER** un garde-fou ; il ne peut **JAMAIS RETIRER** un garde-fou existant (le mur, un détecteur, la fitness, la waterline). Vérifié mécaniquement par l'injection de faute à chaque session : on plante une violation connue et on asserte que le détecteur fire ; on asserte que le mur refuse toujours l'écriture du noyau par l'IA ; on asserte que la fitness n'a pas bougé.
+
+Tout est **versionné dans Postgres** : un override n'est pas une édition, c'est une **décision enregistrée** (ChangeSet + ADR + provenance). Les seuils et les poids sont **déclarés** (au-dessus de la ligne), jamais appris.
+
+## Les cinq garde-fous mécaniques
+
+Le mur et le cliquet sont deux des cinq garde-fous, tous implémentés comme **hooks** (binaires Go invoqués par le harness) :
+
+| # | Garde-fou | Hook | Ce qu'il garantit |
+|---|---|---|---|
+| 1 | Le **mur** | `PreToolUse` (deny `kernel` / `mirrors` / `fitness`) | l'IA n'écrit jamais la vérité ni la grammaire |
+| 2 | Les **sensors** | `PostToolUse` (à chaque diff) | le code est vérifié contre le noyau en continu ; auto-certification sur le computational seulement |
+| 3 | L'**arrêt non-gameable + complétude** | `Stop` (goal-check && completeness-check) | « fini » = set rouge→vert ∧ vert intact ∧ mutation ≥ seuil ∧ tout miroir vivant |
+| 4 | L'**injection de faute** | `SessionStart` (harness-self-test) | un détecteur qui ne fire pas est mort ; le mur tient ; la fitness n'a pas bougé |
+| 5 | La **fitness out-of-sample / réalité** | (boucles d'évolution) | la performance se juge sur des données jamais vues ; la prod est le juge final |
+
+<Columns cols={2}>
+  <Card title="La pile gelée" icon="layer-group" href="/internals/the-stack">
+    Où vivent le hook `PreToolUse`, les GRANTs Postgres, le mutation testing et l'injection de faute dans la pile Go · Postgres · Next.
+  </Card>
+  <Card title="Comment le dépôt se construit" icon="wrench" href="/internals/overview">
+    La boucle par step, l'ancrage de la vérité dans Postgres (ADR 0004), et où chaque garde-fou s'active.
+  </Card>
+</Columns>
