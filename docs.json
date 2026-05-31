@@ -115,7 +115,9 @@
               "steps/concept/s24-version-dag",
               "steps/internals/s24-version-dag",
               "steps/concept/s25-semantic-merge",
-              "steps/internals/s25-semantic-merge"
+              "steps/internals/s25-semantic-merge",
+              "steps/concept/s26-curation-qd",
+              "steps/internals/s26-curation-qd"
             ]
           }
         ]

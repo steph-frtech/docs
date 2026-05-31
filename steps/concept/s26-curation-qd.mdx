@@ -1,0 +1,53 @@
+---
+title: "S26 · La curation d'archive + les niches QD — garder une mémoire vivante, pas une décharge"
+description: "L'ArchiveCurationPolicy (KRD §44.4) garde le DAG de versions comme une MÉMOIRE VIVANTE plutôt qu'une décharge infinie, en classant chaque nœud dans UNE de trois bandes DÉCLARÉES — keep (phases stables, branches liées à un incident, élites de Pareto, variantes à haute nouveauté), compress (variantes échouées après 30 jours, comportements dupliqués), tombstone (branches unsafe, expériences obsolètes). L'histoire critique n'est JAMAIS détruite : un tombstone MARQUE le nœud (append-only), un compress le RÉSUME — aucun n'efface. Les niches qualité-diversité (KRD §62, algorithme ②, MAP-Elites) gardent UNE élite par niche comportementale (un front de Pareto de cellules, pas un champion global) : une variante n'entre dans une niche QUE SI elle a un miroir VERT — le Juge est le miroir déterministe, jamais un LLM qui note sa propre copie, jamais la CellVitality (§66.2, diagnostique). Un champion ne remplace l'élite que s'il la bat sur la MÊME fitness ancrée. S26 livre la DÉCISION de curation + la SÉLECTION QD sur une archive déjà peuplée — pas la génération de variantes, pas la définition de la fitness (consommée), pas le moteur de compaction."
+keywords: ["aidos", "krd", "curation", "ArchiveCurationPolicy", "mémoire vivante", "décharge", "keep", "compress", "tombstone", "garder", "résumer", "marquer", "append-only", "histoire critique jamais détruite", "phase stable", "branche liée à un incident", "élite de Pareto", "haute nouveauté", "variante échouée", "30 jours", "comportement dupliqué", "branche unsafe", "expérience obsolète", "quality-diversity", "qualité-diversité", "MAP-Elites", "niche", "niche comportementale", "une élite par niche", "front de Pareto", "pas un champion global", "stepping stone", "fitness ancrée", "miroir vert", "le Juge est le miroir", "pas de promotion sans miroir vert", "anti-Goodhart", "CellVitality", "le mur", "lecture seule", "ChangeSet", "KRD §44.4", "KRD §62", "KRD §66.2", "KRD §123"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S26](/steps/internals/s26-curation-qd).</Note>
+
+## En une phrase
+
+S26 fait du DAG de versions une **mémoire vivante** plutôt qu'une **décharge** : l'**ArchiveCurationPolicy** (KRD §44.4) classe chaque nœud **keep / compress / tombstone**, et les **niches qualité-diversité** (KRD §62, MAP-Elites) gardent **une élite par niche** — mais une variante n'entre dans une niche **que si elle a un miroir vert**.
+
+## Le problème que ça résout
+
+Un DAG de versions qui n'oublie **rien** devient une **décharge** : des milliers de branches échouées, d'expériences mortes, de doublons, où l'on ne retrouve plus la mémoire utile. Mais **supprimer** est dangereux — on peut jeter un **stepping stone** (un ancêtre qui aurait semé un saut futur) ou détruire de l'**histoire critique**. KRD §44.4 tranche : on ne **supprime** jamais, on **classe**. Trois bandes **déclarées** (pas apprises) : **keep** (ce qui doit vivre), **compress** (ce qu'on résume sans jeter), **tombstone** (ce qu'on marque comme dangereux/obsolète sans détruire). Et pour que l'archive reste **diversité** et pas seulement « le meilleur courant », la sélection **quality-diversity** (KRD §62) garde **une élite par niche comportementale** — avec une garde-barrière absolue : **pas de promotion sans miroir vert**.
+
+## Les idées-clés
+
+<Field name="Trois bandes déclarées (§44.4)" type="keep / compress / tombstone">
+  Chaque nœud tombe dans **une** bande, par des prédicats **déclarés** sur ses métadonnées (jamais un seuil appris) : **keep** = phases stables ∪ branches liées à un incident ∪ élites de Pareto ∪ variantes à haute nouveauté ; **compress** = variantes échouées après 30 jours ∪ comportements dupliqués ; **tombstone** = branches unsafe ∪ expériences obsolètes.
+</Field>
+
+<Field name="L'histoire critique n'est JAMAIS détruite (§44.4 / §12)" type="marquer/résumer, jamais effacer">
+  Un **tombstone** **marque** le nœud — il reste dans le DAG, signalé, jamais supprimé (append-only). Un **compress** le **résume**/compacte — il ne le **jette** pas non plus. Il n'y a **aucun** `DELETE`/`DROP` sur un nœud du DAG. La curation est un **conservateur**, pas un ramasse-miettes.
+</Field>
+
+<Field name="La précédence de sûreté" type="tombstone > keep > compress, keep par défaut">
+  Un nœud **unsafe** ou **obsolète** est **tombstone** même s'il serait par ailleurs keep-worthy (une branche unsafe n'est **jamais** gardée en silence). Un nœud keep-worthy (phase stable, élite, lié à un incident, haute nouveauté) est **keep** même s'il est aussi vieux/échoué/dupliqué (l'histoire critique n'est jamais compressée). Le reste tombe en **compress** ; en cas de doute, on **keep** (on ne jette jamais par défaut).
+</Field>
+
+<Field name="Une élite par niche (§62, MAP-Elites)" type="un front de Pareto de cellules, pas un champion global">
+  La niche est un **descripteur comportemental déclaré** (l'ensemble des miroirs qu'une variante reflète + sa bande d'autorité — **pas** un embedding appris). MAP-Elites garde **une** élite par niche : un **front de Pareto de cellules**, jamais un seul champion global. C'est pourquoi l'archive est **diversité**, pas juste « le meilleur ».
+</Field>
+
+<Field name="Pas de promotion sans miroir vert (§62 / §123)" type="le Juge est le miroir déterministe">
+  La pierre angulaire : une variante n'entre dans une niche **que si elle a un miroir VERT**. Le **Juge** est le **miroir déterministe** — jamais un LLM qui note sa propre copie, jamais la **CellVitality** (§66.2, qui est **diagnostique**, jamais une fitness de promotion). Une variante à miroir **rouge** n'est **jamais** promue, **quelle que soit** sa fitness.
+</Field>
+
+<Field name="Un champion ne gagne que sur la même fitness ancrée (§62)" type="anti-Goodhart">
+  Parmi les candidats **verts** d'une niche, l'élite est celui à la **fitness ancrée maximale** (miroir rouge→vert ∧ senseurs computationnels ∧ hors-échantillon) — une fitness **consommée** des étapes précédentes, **jamais inventée ici**. Un champion ne remplace l'élite que s'il la **bat sur cette même fitness**.
+</Field>
+
+## Ce que S26 ne fait pas (dents ultérieures)
+
+- **Pas de génération de variantes / self-play / novelty / POET** (KRD §62, §66) : ça **produit** des candidats ; S26 ne fait que **accepter/garder/ranger** ceux d'une archive déjà peuplée. Le geste `/evolve` (la boucle moyenne) est une dent ultérieure.
+- **Pas de définition de la fitness** : la fitness ancrée est **consommée** des étapes fitness/senseurs précédentes, jamais coinée ici.
+- **Pas de mécanique de branche/merge/revert** : les nœuds de phase stable (S23) et les arêtes ChangeSet (S20) sont **consommés**.
+- **Pas de moteur de compaction** : `compress` produit la **décision**, pas l'artefact compacté.
+- **Pas de nouveau MCP, hook ou Skill** : le mur garde déjà `dag.*` ; enregistrer une décision passe par le MCP changeset S20 + le rôle writer `aidos`.
+
+## Le mur
+
+L'écran **/archive-curation** est en **lecture seule** : il **projette** les verdicts (le registre keep/compress/tombstone + la grille MAP-Elites, avec une **cellule vide** pour une niche dont les seuls candidats sont rouges), il n'écrit **aucune** vérité. `dag` est **au-dessus de la ligne de flottaison** : l'agent est **SELECT-only** sur `dag.curation_decision` / `dag.niche_elite` ; enregistrer une décision ou une élite passe par le chemin **ChangeSet S20** sous le rôle writer `aidos` — jamais l'agent, jamais l'écran. Une élite est une **nouvelle ligne** (append-only), jamais un `UPDATE`.
