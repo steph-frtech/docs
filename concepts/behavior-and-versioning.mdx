@@ -188,6 +188,30 @@ flowchart LR
   La vague de rouge n'est pas une panne. C'est exactement votre liste de travail : l'ensemble précis de ce qui reste à réconcilier pour que le changement soit honnête. Quand tout repasse au vert, le travail est fini — calculé, jamais déclaré.
 </Tip>
 
+## Les poids du lien et le seuil d'activation — pondérée, jamais aveugle
+
+La vague de rouge n'est pas binaire : elle est **pondérée et seuillée**. Tout changement ne rougit pas tout. Chaque lien `composes` porte un **poids**, et chaque parent porte un **seuil d'activation** :
+
+| Poids du lien | Sens | Effet sur la vague |
+|---|---|---|
+| `cosmetic` | n'engage pas l'invariant du parent (un libellé, un `help-link`) | ne rougit **pas** le parent |
+| `load-bearing` | porte un invariant du parent | rougit le parent, ou compte vers son seuil |
+| `critical` | indispensable | rougit, et exige une **preuve** (`weight_evidence`) |
+
+Le parent ne **rouvre** (rougit) son invariant émergent que si la vague touche une sous-vérité **porteuse**, ou si l'**activation cumulée** des enfants changés **dépasse son seuil**. Bouger un `help-link` (cosmetic) ne réveille pas la fitness du checkout ; bouger le `checkout-button` (load-bearing), si.
+
+```mermaid
+flowchart TD
+  P["Parent — invariant émergent + seuil"]
+  H["help-link"] -->|"cosmetic : ne rougit pas"| P
+  PR["promo-field"] -->|"load-bearing"| P
+  CB["checkout-button — changé"] -->|"load-bearing : rougit le parent"| P
+```
+
+<Warning>
+**Les poids sont DÉCLARÉS, jamais APPRIS.** C'est la frontière qui sépare KRD d'un système qui « apprend tout seul » au mauvais sens. On **emprunte la topologie pondérée** d'un réseau — mais on **refuse le réseau de neurones dans le jugement** : aucun poids n'est entraîné, ajusté par gradient, ni déduit de données. Un poids vit **au-dessus de la ligne de flottaison** (vérité humaine), versionné comme le reste ; le `critical` exige même une preuve. C'est le pendant, côté propagation, de la règle « poids/seuils déclarés, jamais appris », et le complément de la [fitness non-éditable](/concepts/living-system) : le système fait **évoluer l'implémentation** librement, **jamais ses critères de succès**.
+</Warning>
+
 ## La phase stable = une coupe cohérente verte
 
 Une **phase stable** est une sélection d'une version par contrainte telle que *tout* lien (vertical **et** horizontal) se résout dans cette sélection, **et** tous les sensors sont verts simultanément. C'est le **lockfile du noyau** : un cut consistant où aucun lien ne pend, où tout est vert. « Est-ce une phase stable ? » est une question mécanique : *tous les liens résolus + tout vert ?*
