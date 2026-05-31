@@ -1,0 +1,53 @@
+---
+title: "S13 · Le BlockReason — implémentation"
+description: "Le détail technique du BlockReason : le paquet pur back/runtime/blockreason (le type BlockReason, l'énumération close Code, For/Lookup/Render), le câblage de la commande `aidos explain <CODE>` dans back/cmd/aidos, le miroir Godog + la propriété rapid (chemin de résolution jamais vide, round-trip de Render), la route Workbench /why-blocked, le repli DRAFT du code hérité AGENT_WRITE_ABOVE_WATERLINE de S04, et la place dans le noyau KRD §44.5/§82.1."
+keywords: ["aidos", "krd", "implémentation", "BlockReason", "go", "Code", "For", "Lookup", "Render", "aidos explain", "MISSING_MIRROR", "MISSING_AUTHORITY", "OUT_OF_SCOPE", "AGENT_WRITE_ABOVE_WATERLINE", "how_to_fix", "severity", "blocking", "rapid", "Godog", "prison", "ChangeSet", "SemanticDiff", "déterminisme", "ligne de flottaison"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S13](/steps/concept/s13-blockreason).</Info>
+
+S13 livre **le BlockReason** (KRD §44.5, §82.1) : la forme actionnable d'un refus, un **type unique** réutilisé à chaque site de blocage, et la commande **`aidos explain`** qui le rend. S13 n'érige pas de mur (S04 l'a fait) ; il donne au mur — et à tout autre refus — un vocabulaire commun. C'est de la **plomberie Runtime sous la ligne de flottaison** : aucune vérité écrite.
+
+## Implémentation
+
+<Note>La couche **Implémentation** est complétée au vert (CLAUDE.md §6) — code réel, fichiers. Les couches **Méta** et **Méta-méta** ci-dessous sont écrites dès le grill.</Note>
+
+- **`back/runtime/blockreason/`** — le cœur **pur** (aucune I/O). `BlockReason{Code, Severity, Explanation, HowToFix []string}` est la forme (KRD §44.5). `Code` est une **énumération close** : `MISSING_MIRROR`, `MISSING_AUTHORITY`, `OUT_OF_SCOPE` (S13) + `AGENT_WRITE_ABOVE_WATERLINE` (hérité de S04). `Severity` est close aussi (`blocking`). Un registre `reasons map[Code]BlockReason` mappe chaque code vers son refus canonique, avec un `how_to_fix` **toujours non vide** (les jetons KRD §44.5 : `write_mirror`, `assign_authority`, `rerun aidos check`). `Codes()` énumère en ordre canonique ; `Lookup(code) (BlockReason, bool)` n'invente rien (code inconnu ⇒ `false`) ; `For(code)` est le constructeur déterministe ; `Render(br) string` est le **rendu unique** partagé par la CLI et l'écran (code, severity, explanation, puis `how_to_fix` numéroté).
+- **`back/cmd/aidos/explain.go`** — le câblage de la commande `explain`. `runExplain(args, stdout) int` : sans opérande, replie sur le contrat déclaré S03 (la projection /cli reste inchangée) ; `aidos explain <CODE>` rend `blockreason.Render` ; un code inconnu est une **erreur d'usage** (sortie 2) listant les codes connus — jamais une prison silencieuse. Le dispatcher `main.go` route `explain` vers `runExplain` ; les autres verbes (check/impact/stable/diff) gardent leur stub S03. Surface stdlib-flag positionnelle, aucun second framework CLI introduit (ADR 0013).
+- **`back/runtime/CONTEXT.md`** — l'entrée glossaire BlockReason affûtée : l'énumération close, les jetons `how_to_fix`, le repli S04, la frontière OUT_OF_SCOPE / TruthScope (OQ-S13-scope).
+
+## Méta
+
+Le comportement de S13 est prouvé par **deux miroirs** (une nature chacun), tous rouges avant le code (le rouge **est** le `/goal`).
+
+<Steps>
+  <Step title="Miroir d'acceptation Godog (le parcours)">
+    `tests/runtime/blockreason_explain.feature` + `back/cmd/aidos/explain_bdd_test.go` — `reflects=runtime.blockreason`, `test_kind=acceptance`, `cert_language=gherkin`, `authority=below`. Un Scenario Outline rend chacun de MISSING_MIRROR / MISSING_AUTHORITY / OUT_OF_SCOPE avec code, sévérité non vide, explication, et **au moins une** étape `how_to_fix` ; des scénarios ciblés pinnent `write_mirror` + `rerun aidos check` (MISSING_MIRROR), `assign_authority` (MISSING_AUTHORITY), le scope owner (OUT_OF_SCOPE) ; et un code inconnu sort en **2**. Un **means-test vers le rouge humain**, jamais une vérité auto-graduée.
+  </Step>
+  <Step title="Propriété rapid (l'invariant ∀)">
+    `back/runtime/blockreason/blockreason_property_test.go` — `test_kind=property`, `cert_language=rapid`, `authority=below`. Les invariants porteurs : pour **chaque** valeur de `Code`, le BlockReason a une sévérité + une explication non vides et un `how_to_fix` de longueur ≥ 1 — **aucun code ne s'explique avec un chemin vide** (ce serait la prison) ; `Render` **round-trip** chaque champ (code, severity, explanation, chaque étape) sans rien inventer ; `For` est déterministe (même code ⇒ même rendu). C'est le **miroir de reproductibilité** déterministe (CLAUDE.md §6).
+  </Step>
+  <Step title="Miroir de reproductibilité front (fast-check)">
+    `front/web/lib/why-blocked.test.ts` — la projection `lib/why-blocked.ts` calque le paquet Go ; 8 tests fast-check pinnent le même invariant prison-interdite, les jetons canoniques, et que `lookupBlockReason` n'invente rien. Une source, pas de dérive entre Go et TS.
+  </Step>
+</Steps>
+
+La route Workbench **`/why-blocked`** (`front/web/app/why-blocked/page.tsx` + `components/WhyBlockedExplorer.tsx`, themée ADR 0010, bilingue ADR 0011) rend un BlockReason **exactement** comme `aidos explain` : badge de code, sévérité, explication, `how_to_fix` numéroté, avec un sélecteur de code. Lecture seule (ui-completeness CLAUDE.md §7) : elle **projette** un refus produit ailleurs, n'érige aucun mur, ne déclenche aucune opération. `tests/e2e/why-blocked.spec.ts` (4 scénarios, vert) prouve le rendu + la bascule de code.
+
+## Méta-méta
+
+<Field name="déterminisme-d'abord (la loi de §6/§8)">
+  `For` et `Render` sont des **fonctions pures totales** — aucune horloge, aucun rng, aucune I/O — donc même code ⇒ même BlockReason ⇒ même rendu. Le BlockReason n'est jamais généré par un LLM : c'est une table déclarée, prouvée par les miroirs de reproductibilité. Un agent qui « expliquerait » un blocage à la volée serait un **écart de déterminisme** ; ici c'est du code, et le code fait foi.
+</Field>
+
+<Field name="sous la ligne de flottaison (le mur tient)">
+  Un BlockReason n'écrit aucune vérité : il vit dans `back/runtime`, pas dans `kernel/mirrors/fitness`. S13 ne touche aucune zone au-dessus de la ligne. Le code `AGENT_WRITE_ABOVE_WATERLINE` est **hérité** de S04 ; le replier dans ce paquet unique (puis faire importer ce paquet par le mur) est un changement de l'interface de S04 — enregistré comme **ChangeSet DRAFT + SemanticDiff** (`docs/plan/S13-changeset-s04-foldin.md`, `change_type: refine`), **jamais** une réécriture silencieuse (CLAUDE.md §9). S04 reste intact à ce step.
+</Field>
+
+<Field name="l'honnêteté anti-invention (la frontière OQ)">
+  Le propriétaire concret d'un périmètre pour OUT_OF_SCOPE vient d'un **vrai** TruthScope — qui arrive à **S14**. Tant qu'aucun enregistrement réel ne le fournit, le chemin de résolution nomme le **rôle** (scope owner) génériquement, **jamais un nom fabriqué** (OQ-S13-scope). Aucun code inventé au-delà des trois requis + l'hérité (pas de truth-test, KRD §16 / CLAUDE.md §8).
+</Field>
+
+<Field name="la place dans le noyau">
+  S13 câble exactement KRD §44.5 (« Un blocage KRD doit toujours fournir un chemin de résolution ») et §82.1 (`aidos explain` = « explique les blocages »). Il prépare les sites de refus à venir : la complétude (S12, déjà) émet déjà un BlockReason ; scope (S14) et autorité (S15) émettront MISSING_AUTHORITY / OUT_OF_SCOPE depuis ce paquet ; le compilateur (S45) lira `aidos explain` pour rendre tout refus de loi KRD.
+</Field>

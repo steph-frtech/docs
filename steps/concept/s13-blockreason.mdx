@@ -1,0 +1,47 @@
+---
+title: "S13 · Le BlockReason — un refus qui nomme toujours la porte de sortie"
+description: "Tout blocage KRD devient actionnable : un type BlockReason unique — code, severity, explanation, how_to_fix[] — partagé par chaque site de refus, et une commande `aidos explain <CODE>` qui rend le chemin de résolution. Un mur sans BlockReason devient une prison (KRD §44.5)."
+keywords: ["aidos", "krd", "BlockReason", "refus", "blocage", "actionnable", "code", "severity", "explanation", "how_to_fix", "MISSING_MIRROR", "MISSING_AUTHORITY", "OUT_OF_SCOPE", "AGENT_WRITE_ABOVE_WATERLINE", "aidos explain", "prison", "chemin de résolution", "ligne de flottaison", "déterminisme"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S13](/steps/internals/s13-blockreason).</Note>
+
+## En une phrase
+
+S13 donne à **chaque refus** d'AIDOS un même vocabulaire actionnable : un **BlockReason** — un code machine, une sévérité, une explication humaine, et un **chemin de résolution** `how_to_fix` jamais vide — et une commande **`aidos explain <CODE>`** qui le rend. *Le mur bloque ; le BlockReason nomme la porte de sortie.*
+
+## Le problème que ça résout
+
+Un mur qui bloque sans dire quoi faire est une **prison** (KRD §44.5, anti-pattern §3516). S04 a posé le mur — il refuse une écriture au-dessus de la ligne de flottaison. S06/S12 ont posé la complétude — elle refuse un monstre. Mais chaque site de refus risquait d'inventer son propre format de message, son propre niveau de détail, ses propres mots. Un agent (ou un humain) face à un blocage hétérogène ne sait pas **comment en sortir**.
+
+KRD §44.5 pose la règle : **« Un blocage KRD doit toujours fournir un chemin de résolution. »** S13 en fait un **type unique**, réutilisé partout, et une **commande** qui le lit.
+
+## Les idées-clés
+
+<Field name="le BlockReason (la forme du refus)">
+  Quatre champs, toujours : un **code** (machine, stable), une **severity** (`blocking`), une **explanation** (en français, pour l'humain), et un **how_to_fix** — une liste d'étapes **non vide**. La règle d'or : *aucun code ne s'explique avec un chemin vide* — ce serait recréer la prison.
+</Field>
+
+<Field name="les trois codes (plus celui hérité)">
+  S13 livre trois codes canoniques — **MISSING_MIRROR** (une vérité sans miroir vivant), **MISSING_AUTHORITY** (un changement sans l'autorité requise), **OUT_OF_SCOPE** (une écriture hors du périmètre déclaré) — et **replie** le code déjà en service depuis S04, **AGENT_WRITE_ABOVE_WATERLINE** (le refus du mur). L'énumération est **close** : aucun code n'est inventé sans un rouge humain.
+</Field>
+
+<Field name="aidos explain (la commande qui rend la porte)">
+  `aidos explain <CODE>` rend un BlockReason en texte lisible : le code, la sévérité, l'explication, puis le `how_to_fix` numéroté. C'est la commande nommée par KRD §82.1 (« explique les blocages »). Un code inconnu n'est pas un faux-passe : c'est une erreur d'usage (sortie 2) qui liste les codes connus — jamais une prison silencieuse.
+</Field>
+
+<Field name="le chemin de résolution (how_to_fix)">
+  Chaque code pointe vers une vraie porte. **MISSING_MIRROR** → `write_mirror`, faire approuver l'autorité, `rerun aidos check`. **MISSING_AUTHORITY** → `assign_authority`. **OUT_OF_SCOPE** → router le changement vers la cible in-scope (ou son propriétaire / owner). Les jetons (`write_mirror`, `assign_authority`, `rerun aidos check`) sont ceux de l'exemple KRD §44.5.
+</Field>
+
+<Field name="sous la ligne de flottaison (ce que ce n'est PAS)">
+  Un BlockReason est de la **plomberie Runtime** : il n'écrit aucune vérité, ce n'est **pas** une vérité du noyau. S13 n'érige **pas** de nouveau mur (S04 l'a fait) ; il donne au mur — et à tout autre refus — un vocabulaire commun. Descriptif, pas normatif.
+</Field>
+
+## Ce que ça donne à l'écran
+
+L'écran **/why-blocked** du Workbench rend un BlockReason **exactement** comme `aidos explain` : le code en badge, la sévérité, l'explication en prose, le `how_to_fix` numéroté — avec un sélecteur pour basculer entre les codes canoniques. Lecture seule : il **projette** un refus, il n'en déclenche aucun (le blocage est produit ailleurs, au moment du refus).
+
+## La frontière honnête
+
+Le propriétaire (owner) exact d'un périmètre pour **OUT_OF_SCOPE** vient d'un **vrai** enregistrement de scope — le `TruthScope` arrive à **S14**. Tant qu'aucun enregistrement réel ne le fournit, le chemin de résolution nomme le **rôle** (le scope owner) de façon générique, **jamais un nom fabriqué** (question ouverte OQ-S13-scope). De même, faire **importer** ce type unique par le mur de S04 est un changement de son interface : enregistré comme **ChangeSet DRAFT** + SemanticDiff, jamais une réécriture silencieuse.

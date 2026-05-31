@@ -75,7 +75,9 @@
               "steps/concept/s11-control-action",
               "steps/internals/s11-control-action",
               "steps/concept/s12-completeness-monstre",
-              "steps/internals/s12-completeness-monstre"
+              "steps/internals/s12-completeness-monstre",
+              "steps/concept/s13-blockreason",
+              "steps/internals/s13-blockreason"
             ]
           }
         ]
