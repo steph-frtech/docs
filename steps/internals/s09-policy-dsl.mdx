@@ -1,0 +1,71 @@
+---
+title: "S09 · La Policy DSL — implémentation"
+description: "Le détail technique de la Policy DSL : le paquet Go back/kernel/policy (l'arbre de règles typé all/any/not + eq/gt/lt + exists/matches, Eval pur et total portant la loi ALLOW/DENY, Canonicalize content-addressé), la table kernel.policy (append-only, SELECT-only pour l'agent), le property miroir rapid + le fixture, la route Workbench /policy, et la place dans le noyau KRD §24.4/§93."
+keywords: ["aidos", "krd", "implémentation", "policy", "dsl", "autorisation", "go", "eval", "holds", "allow", "deny", "kernel.policy", "content-addressed", "rapid", "property", "fixture", "déterminisme", "canPlaceOrder", "atlas", "grant", "wall", "sélecteur"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S09](/steps/concept/s09-policy-dsl).</Info>
+
+S09 livre **la Policy DSL** (KRD §24.4, §93) : un arbre de règles `ALLOW`/`DENY` content-addressé — combinateurs `all`/`any`/`not`, comparaisons `eq`/`gt`/`lt`, prédicats `exists`/`matches` sur un sélecteur `$`-racinné, scopes `RESOURCE`/`OPERATION`/`ENTITY`/`FIELD` — plus un évaluateur **pur et total**. Il existe pour qu'une autorisation soit un **artefact versionnable du noyau**, jamais du code libre. Cette étape livre la forme de l'arbre + l'évaluateur + son property miroir ; elle ne câble pas la policy dans l'Operation DSL (`authorize`), ni le codegen, ni l'enforcement runtime (étapes ultérieures).
+
+## Implémentation
+
+<Note>La couche **Implémentation** est complétée au vert (CLAUDE.md §6) — code réel, fichiers, schéma. Les couches **Méta** et **Méta-méta** ci-dessous sont écrites dès le grill.</Note>
+
+Le paquet vit dans `back/kernel/policy/` (Kernel), en cinq pièces nettement séparées :
+
+- **l'AST typé** (`policy.go`) — `Policy{Name, Scope, Target, Rule, Effect}` ; `Rule` est une **interface scellée** (sum type) au paquet : les combinateurs `AllNode`/`AnyNode`/`NotNode`, les feuilles `CompareNode` (`eq`/`gt`/`lt`), et les prédicats `ExistsNode`/`MatchesNode`. Les opérandes d'une comparaison sont un `SelectorOperand` (`$`-racinné) ou un `LiteralOperand`. Les ensembles fermés `Scope` (4 valeurs) et `RuleKind` (8 valeurs) sont exposés (`IsScope`, `IsRuleKind`) pour le panneau et le miroir — jamais inventés.
+- **l'évaluateur pur** (`eval.go`) — `Eval(policy, Ctx) (Decision, error)` applique la **loi de combinaison** via la porte de l'effet : `ALLOW` ⇒ autorise *si* la règle tient, sinon `DENY` ; `DENY` ⇒ bloque *si* la règle tient, sinon `ALLOW` (s'abstient). Le cœur récursif est `Holds(rule, Ctx) bool` : `all` = ∧, `any` = ∨, `not` = involution. **Total** : un sélecteur pendant ou un type mismatch fait que la feuille « ne tient pas », jamais une erreur ni un panic.
+- **le sélecteur réutilisé** — `resolveSelector` reprend **la même** sémantique de chemin `$`-racinné que l'`expr.resolveRef` de S08 (`.length` ⇒ taille d'une collection). On ne réinvente pas un moteur JSON-path : ce serait une évasion vers du code libre que §24 interdit (ADR 0007).
+- **la sérialisation canonique** (`canonical.go`) — `Canonicalize(Policy) ([]byte, error)` émet le JSONB déterministe (clés triées à chaque niveau, listes ordonnées, pas d'espace superflu), source de hash du content-address, **réutilisant** le schéma de `records.Hash` (un seul espace d'adresses, byte-pour-byte identique côté Go et côté front).
+- **`Parse` + l'ancre** (`parse.go`, `anchor.go`) — `Parse(jsonb) (Policy, error)` décode/valide (scopes, effets, *kinds* inconnues, sélecteurs malformés ⇒ **erreur typée**, jamais un panic) et garantit le round-trip ; `CanPlaceOrder()` reconstruit l'ancre §93 **mot pour mot** (aucune règle inventée).
+
+La table `kernel.policy` (migration Atlas `kernel_policy_baseline.sql`, expand-only/append-only) est **content-addressée** : `id` = `version` = hash SHA-256 du JSONB canonique, contrainte `CHECK (version = id)` en base ; `superseded_by` déplace la tête sans `UPDATE` destructif. Le rôle agent y a **SELECT seul** (`REVOKE INSERT, UPDATE, DELETE, TRUNCATE`) ; seul le rôle écrivain `aidos` insère, via un ChangeSet approuvé.
+
+## Méta
+
+Le comportement de S09 est prouvé par le **property miroir** (la nature ∀ d'une policy), plus un fixture concret, la reproductibilité front et l'e2e Playwright. **Aucun journey Gherkin** n'est ajouté : la nature d'une policy est l'invariant ∀, pas un parcours ; forcer une acceptance ici serait un **monstre double-typé** (la loi de complétude l'interdit).
+
+<Steps>
+  <Step title="Mirror property (rapid, ∀, au-dessus de la ligne)">
+    `reflects=kernel.policy/canPlaceOrder`, `test_kind=property`, `cert_language=rapid`, `liveness=live`, `authority=above`. Cinq invariants : (1) `Eval(canPlaceOrder, ctx) == ALLOW ⇔` les trois conditions §93 (auth.user existe ∧ cart.userId == auth.user.id ∧ cart.items.length > 0), cross-checkées contre un **oracle** écrit à la main (pas l'évaluateur lui-même) ; (2) la contraposée ⇒ `DENY` ; (3) la loi de combinaison sur des arbres générés — n'importe quelle feuille en échec sous une porte ALLOW ⇒ `DENY`, toutes tenant ⇒ `ALLOW` ; (4) `not(not(r)) ≡ r` (involution) ; (5) content-address : `id == version == Hash(Canonicalize(policy))`, et un changement d'octet ⇒ un id **différent** (nouvelle version, jamais une mutation en place).
+  </Step>
+  <Step title="Mirror fixture (N2, interprété en Go)">
+    `back/kernel/policy/policy_fixture_test.go` + source matérialisée `tests/kernel/policy_eval.fixture.md`. Quatre lignes `state → command → events` : le contexte autorisé ⇒ `ALLOW` ; pas d'auth / panier vide / panier d'un autre ⇒ `DENY`. Chaque ligne casse exactement une des trois conditions, prouvant « n'importe quel DENY bloque » au niveau des feuilles. C'est un **means-test vers le rouge humain** (KRD §93), pas une vérité auto-graduée.
+  </Step>
+  <Step title="Mirror d'intégration (Testcontainers + vrai Postgres)">
+    Sur un Postgres réel avec la migration appliquée : l'AST round-trip en JSONB content-addressé (`id == version == Hash`) ; le `CHECK (version = id)` refuse une ligne non-content-addressée ; le rôle `aidos_agent` a **SELECT seul** — chaque `INSERT/UPDATE/DELETE` est rejeté en *permission denied* (le mur, §2).
+  </Step>
+  <Step title="Mirror de reproductibilité (Vitest + fast-check, front)">
+    `front/web/lib/policy.test.ts` (12 tests) épingle le registre statique de `lib/policy.ts` contre l'invariant Go : l'ensemble des 8 *kinds* de règle + 4 scopes, l'ancre `canPlaceOrder` mot pour mot, les verdicts ALLOW/DENY, la loi de combinaison, l'involution de `not`, et le déterminisme. Le `canonicalize` TS produit le **même hash** que Go (`e2fbac3f…`), donc le panneau affiche le vrai content-address.
+  </Step>
+  <Step title="e2e Playwright (route /policy)">
+    `tests/e2e/policy.spec.ts` (7 tests) — la page rend l'arbre `canPlaceOrder` avec ses trois feuilles nommées + l'effet ALLOW, le badge d'autorité au-dessus de la ligne + l'id content-addressé (64 hex), les 4 scopes + 8 *kinds*, et la décision ALLOW (contexte autorisé) / DENY (auth manquante, panier vide).
+  </Step>
+</Steps>
+
+**Déterminisme-first (CLAUDE.md §6/§8).** Tout ici est une **fonction pure** — `Holds`, `Eval`, `Canonicalize`, `Parse` — donc tout est code, jamais un agent. L'évaluateur n'a ni horloge ni RNG ; la décision est totale et reproductible. Le property rapid (invariant 1+5) **est** le mirror de reproductibilité côté Go ; `lib/policy.test.ts` l'est côté front. Un évaluateur d'autorisation qui déléguerait sa décision à un LLM serait un *determinism gap* qui bloque l'étape — l'arbre clos l'exclut par construction.
+
+**Complétude (CLAUDE.md §6, pas de monstre).** La vérité `kernel.policy` (l'arbre de règles) a son miroir vivant (property + fixture) ; le miroir reflète une vérité réelle (`Eval` sur `canPlaceOrder`). Aucun orphelin, aucune vérité sans miroir, aucun journey forcé.
+
+## Méta-méta
+
+**Place dans le noyau.** S09 est la brique **autorisation-comme-artefact** de KRD §24.4/§93 : la policy est une *donnée* typée du noyau, une couche **SOURCE** au-dessus de la ligne de flottaison, au même titre qu'une entité (S02) ou une expression (S08). Elle consomme S02 (le schéma de canonicalisation / content-address des `records` — réutilisé, **non réinventé**), la sémantique de sélecteur de S08, et la ligne de flottaison + les GRANTs de S04 (le mur). Elle laisse une phase stable que les étapes suivantes consomment : le câblage `authorize { policy }` dans l'Operation DSL (S10), et la projection `policy → garde Go/TS` (codegen ultérieur).
+
+**Le mur (appliqué à S09).** Le paquet `policy` est **pur** : il n'écrit aucune vérité, ne touche ni `kernel` ni `mirrors` ni `fitness` en écriture. La table `kernel.policy` est de la **vérité au-dessus de la ligne** : le rôle agent a `SELECT` seul (`REVOKE INSERT/UPDATE/DELETE/TRUNCATE`), seul `aidos` insère via ChangeSet. Le GRANT n'est **pas inventé** : il suit le précédent S02 (kernel records) et S08 (kernel.expr). La route `/policy` est strictement **lecture seule** : elle projette `kernel.policy`, elle ne la réécrit pas. La clause *action-capable* de `ui-completeness` est satisfaite **par le vide** — il n'y a aucune capacité backend à lier (l'évaluation est une bibliothèque pure ; un MCP `authorize` serait une étape ultérieure), donc aucune capacité headless cachée.
+
+**Choix de conception (réutiliser sans réinventer, ADR 0007).** Le sélecteur `exists`/`matches` et les opérandes réutilisent la sémantique de chemin `$`-racinné déjà prouvée dans `back/kernel/expr` ; on **n'embarque pas** de moteur JSON-path général (une évasion vers du code libre que §24 interdit). Le hash réutilise `records.Hash`/`Canonicalize`. **Aucun nouvel ADR** : S09 gèle un artefact nouveau (l'arbre de règles + la loi ALLOW/DENY), il ne décale aucun contrat antérieur — donc aucun vrai choix de librairie n'a été fait (le seul candidat, un JSON-path tiers, a été écarté au profit de la réutilisation interne, plus simple et plus sûre).
+
+**Pas de nouvel artefact superflu (CLAUDE.md §5).** **Pas de serveur MCP** — l'évaluation est une bibliothèque pure, pas une op exposant une capacité (un MCP `authorize` est une OpenQuestion ultérieure, pas inventée maintenant). **Pas de hook** — aucune nouvelle règle non-bypassable au-delà du mur S04 + des GRANTs. **Pas de Skill**, **pas de codegen**, **pas de câblage Operation DSL** ici. Un nouvel artefact ne fait qu'**ajouter** une garde, jamais en retirer une.
+
+**Anti-écrasement (CLAUDE.md §9).** S09 n'édite que ses propres fichiers : `back/kernel/policy/**`, la migration `back/migrations/kernel_policy_baseline.sql`, ses mirrors `tests/kernel/policy_eval.fixture.md`, `front/web/app/policy/**`, `front/web/lib/policy.ts(.test.ts)`, `tests/e2e/policy.spec.ts`, et l'ajout de la route `/policy` + sa traduction (`WorkbenchHeader`, `messages/{fr,en}.json`). La migration est **expand-only/append-only** — elle ne touche ni table ni GRANT antérieurs (S01 archive, S02 records, S04 wall, S05/S07 runs, S08 expr intacts). Tout changement d'un contrat gelé ici (les sortes de nœud, la loi ALLOW/DENY, l'ancre `canPlaceOrder`, le GRANT) passerait par un **ChangeSet** + un **SemanticDiff** — jamais une réécriture furtive.
+
+**Forward-dependencies (OpenQuestions, pas des `residual_issues`).**
+
+- **OQ-S09-1** — la persistance Postgres réelle du property/fixture miroir (le schéma `mirrors` arrive à S06 ; ici le fixture est matérialisé en `tests/kernel/policy_eval.fixture.md` + tests Go exécutables, qui *sont* la preuve red→green).
+- **OQ-S09-2** — le câblage `authorize { policy: "canPlaceOrder" }` dans l'Operation DSL (S10) qui *consomme* la policy ; hors périmètre ici.
+- **OQ-S09-3** — la projection `policy → garde Go/TS` (codegen) et un éventuel MCP `authorize` pour l'évaluation à la demande ; étapes ultérieures. Les scopes `RESOURCE`/`ENTITY`/`FIELD` sont **déclarés** (l'ensemble fermé) mais seul `OPERATION` est exercé par l'ancre §93 — les autres seront éprouvés quand une policy réelle les portera (pas de règle inventée).
+
+<Card title="Voir le concept de l'étape" icon="lightbulb" href="/steps/concept/s09-policy-dsl">
+  Ce qu'apporte la Policy DSL — l'autorisation comme artefact, l'arbre de règles ALLOW/DENY, la loi de combinaison, l'évaluation déterministe — sans le code.
+</Card>

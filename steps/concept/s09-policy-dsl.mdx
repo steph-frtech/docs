@@ -1,0 +1,72 @@
+---
+title: "S09 · La Policy DSL — l'autorisation comme arbre de règles, jamais du code libre"
+description: "La Policy DSL d'AIDOS : un arbre de règles ALLOW/DENY (∀) — combinateurs all/any/not, comparaisons eq/gt/lt, prédicats exists/matches sur un sélecteur $-racinné, scopes RESOURCE/OPERATION/ENTITY/FIELD — évalué par une fonction pure. L'autorisation devient un artefact versionnable du noyau, prouvé par un property miroir (rapid)."
+keywords: ["aidos", "krd", "policy", "dsl", "autorisation", "allow", "deny", "all", "any", "not", "exists", "matches", "scope", "canPlaceOrder", "arbre de règles", "déterminisme", "kernel.policy", "content-addressed"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S09](/steps/internals/s09-policy-dsl).</Note>
+
+## En une phrase
+
+S09 pose **la Policy DSL** : la règle qui décide si une opération est **autorisée** n'est plus un `if` éparpillé dans le code — c'est un **arbre de règles ALLOW/DENY**, fait de combinateurs et de comparaisons sur des chemins de données, stocké dans le noyau, adressé par son hash, et évalué par une fonction **pure et totale**.
+
+## Le problème que ça résout
+
+« Peut-on passer cette commande ? » — la réponse dépend de trois conditions : un utilisateur connecté, un panier qui lui appartient, et au moins un article. Dans un projet ordinaire, cette autorisation vit comme du code dispersé (`if (user && cart.userId === user.id && cart.items.length > 0)`) — libre, non versionné, impossible à auditer ou à rejouer. C'est exactement ce que KRD interdit.
+
+KRD §24.4 pose la règle : **l'autorisation est un arbre récursif de règles**, pas du code. Une policy est une *donnée typée* du noyau (une couche SOURCE, au-dessus de la ligne de flottaison, hors de portée de l'IA), comme une entité ou une expression. S09 rend cette idée exécutable : un mini-langage de règles, fermé, qui ne sait faire qu'une chose — répondre **ALLOW** ou **DENY**.
+
+## Les idées-clés
+
+<Field name="l'arbre de règles (la policy)">
+  Une policy est `{ nom, scope, règle, effet }`. La **règle** est un **arbre** : des combinateurs (`all` = toutes tiennent, `any` = au moins une tient, `not` = négation) au-dessus de feuilles de comparaison (`eq`, `gt`, `lt`) et de prédicats (`exists`, `matches`). Aucune autre sorte n'existe — la grammaire est close.
+</Field>
+
+<Field name="le scope (OÙ la policy s'applique)">
+  Le **scope** dit sur quoi porte la policy : `RESOURCE`, `OPERATION`, `ENTITY` ou `FIELD`, avec une cible nommée. L'exemple ancre porte sur `OPERATION "createOrder"` — l'autorisation de l'opération de création de commande.
+</Field>
+
+<Field name="le sélecteur ($-racinné)">
+  Une comparaison ou un prédicat lit la donnée par un chemin `$`-racinné : `$.auth.user`, `$.cart.userId`, `$.cart.items.length`. C'est **la même sémantique** que les `ref` de l'Expr DSL (S08) — `.length` sur une liste donne sa taille. On réutilise, on ne réinvente pas.
+</Field>
+
+<Field name="l'effet et la loi de combinaison (tout ALLOW passe, n'importe quel DENY bloque)">
+  L'**effet** `ALLOW`/`DENY` transforme la vérité de la règle en **décision**. Pour une policy à effet `ALLOW`, c'est une **porte** : elle autorise *si* sa règle tient, sinon elle bloque. La loi de KRD §93 — « tout ALLOW passe, n'importe quel DENY bloque » — gouverne un *ensemble* de policies : il faut que tous les ALLOW tiennent et qu'aucun DENY ne se déclenche.
+</Field>
+
+<Field name="évaluation pure, déterministe et totale">
+  `Eval(policy, contexte)` est une fonction **pure** : aucune E/S, aucune horloge. Elle est **totale** — un sélecteur qui ne résout pas ou un type qui ne colle pas fait simplement que la feuille « ne tient pas », jamais une erreur ni un plantage. Même policy + même contexte ⇒ **toujours** la même décision.
+</Field>
+
+## La policy « canPlaceOrder », bout par bout
+
+<Steps>
+  <Step title="La policy, exprimée (KRD §93, mot pour mot)">
+    `policy "canPlaceOrder" { scope: OPERATION "createOrder"; rule: all([ exists($.auth.user), eq($.cart.userId, $.auth.user.id), gt($.cart.items.length, 0) ]); effect: ALLOW }`.
+  </Step>
+  <Step title="La règle, en arbre">
+    Un nœud `all` au-dessus de trois feuilles : `exists($.auth.user)`, `eq($.cart.userId, $.auth.user.id)`, `gt($.cart.items.length, 0)`. Les trois doivent tenir.
+  </Step>
+  <Step title="La décision, contexte autorisé">
+    Utilisateur connecté `u1`, panier de `u1` avec un article ⇒ les trois feuilles tiennent ⇒ **ALLOW**.
+  </Step>
+  <Step title="La décision, contexte refusé">
+    Pas d'utilisateur connecté **ou** panier vide **ou** panier d'un autre utilisateur ⇒ au moins une feuille échoue ⇒ **DENY**. Une seule vérité, deux contextes.
+  </Step>
+  <Step title="La preuve ∀">
+    Un **property miroir** (rapid) génère des milliers de contextes et prouve : `ALLOW` **si et seulement si** les trois conditions tiennent ; sinon `DENY`. La décision n'est jamais inventée, elle est *prouvée* sur tout l'espace.
+  </Step>
+</Steps>
+
+## Ce que ça vous permet de faire
+
+- **Versionner l'autorisation comme une vérité** : une policy est un artefact du noyau, adressé par son hash, append-only — pas un `if` perdu dans un contrôleur.
+- **Auditer et rejouer** : l'évaluation est déterministe et totale, donc on prouve « cette autorisation donnait ALLOW dans ce contexte » par un simple test.
+- **Composer des règles** : `all`/`any`/`not` au-dessus de comparaisons donnent des arbres aussi fins qu'il faut, sans jamais ouvrir la porte à du code arbitraire.
+- **Voir la policy dans le Workbench**, sur la route `/policy` : l'arbre `canPlaceOrder` avec ses trois feuilles, son scope/effet, son adresse de contenu, et un panneau « essayer un contexte » qui montre la décision ALLOW/DENY en direct.
+
+La Policy DSL, c'est ce qui transforme « qui a le droit de faire quoi » en **données du noyau** — lisibles, prouvées, versionnées — au lieu de code d'autorisation dispersé.
+
+<Card title="Pour aller plus loin — l'implémentation" icon="wrench" href="/steps/internals/s09-policy-dsl">
+  Les types Go de l'arbre de règles, l'`Eval` pur et total qui porte la loi de combinaison, la table content-addressée `kernel.policy`, et le property miroir rapid (DENY-precedence, totalité, involution de `not`).
+</Card>
