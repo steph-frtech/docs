@@ -1,0 +1,45 @@
+---
+title: "S20 · Le ChangeSet — une enveloppe atomique et réversible ; un APPLIED est immuable ; un revert est un inverse ajouté au journal"
+description: "Un ChangeSet est l'enveloppe transactionnelle atomique et réversible qui déplace le noyau d'une phase stable à la suivante. Elle enveloppe spec (Kernel) et miroir (Mirror) ensemble dans un seul corps pour qu'ils ne dérivent jamais. Ses seuls états sont DRAFT | APPLIED | REVERTED — il n'y a PAS de FAILED. Un ChangeSet APPLIED est immuable ; un revert est un nouveau ChangeSet inverse ajouté au journal (append-only — un revert crée de l'information, il ne détruit jamais la source). Le passage DRAFT→APPLIED n'est admis que si la loi de complétude tient. S20 fige cette enveloppe de KRD §44/§98/§44.1."
+keywords: ["aidos", "krd", "changeset", "enveloppe", "DRAFT", "APPLIED", "REVERTED", "immuable", "revert", "inverse", "append-only", "loi de complétude", "completeness", "monstre", "spec_delta", "mirror_delta", "atomique", "phase stable", "INCOMPLETE_CHANGESET", "APPLIED_IS_IMMUTABLE", "BlockReason", "content-addressed", "discard", "pas de FAILED", "KRD §44", "KRD §98", "KRD §44.1", "ADR 0019"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S20](/steps/internals/s20-changeset).</Note>
+
+## En une phrase
+
+S20 fige le **ChangeSet** : l'**enveloppe transactionnelle atomique et réversible** qui déplace le noyau d'une **phase stable** à la suivante, enveloppant le `spec_delta` (Kernel) et le `mirror_delta` (Mirror) **ensemble** dans un seul corps pour qu'ils ne **dérivent jamais**. Ses seuls états sont `DRAFT | APPLIED | REVERTED` — un `APPLIED` est **immuable**, et un **revert** est un **nouveau ChangeSet inverse** ajouté au journal (append-only).
+
+## Le problème que ça résout
+
+Comment une mutation est-elle appliquée, et comment la défait-on ? La réponse naïve — un commit git, un `UPDATE` en place, un `git revert` qui réécrit l'historique — laisse deux portes ouvertes au désastre. D'abord, la **dérive spec/miroir** : si on peut appliquer un changement de spécification **sans** son miroir, on crée un **monstre** (une vérité sans sa preuve). Ensuite, la **destruction d'information** : un revert qui efface la mutation d'origine perd la trace de ce qui s'est passé. KRD §44/§98 répond par une enveloppe qui **lie les deux plans** et qui ne sait que **croître**.
+
+## Les idées-clés
+
+<Field name="l'enveloppe atomique — spec ET miroir, jamais l'un sans l'autre">
+  Un ChangeSet porte le `spec_delta` (le plan Kernel) **et** le `mirror_delta` (le plan Mirror) dans **un seul corps** adressé par contenu. Les deux ne peuvent pas être stockés séparément : c'est structurellement impossible de faire dériver la spec de son miroir.
+</Field>
+
+<Field name="les trois états — DRAFT | APPLIED | REVERTED (pas de FAILED)">
+  Un ChangeSet naît `DRAFT` (ouvert, modifiable). Il passe à `APPLIED` (commité, **immuable**) une fois la complétude vérifiée. Il devient `REVERTED` quand son inverse est lui-même appliqué. Il n'y a **pas** de quatrième état : sur une erreur dure, un `DRAFT` est **supprimé** (discard), jamais marqué « échoué ».
+</Field>
+
+<Field name="la porte de commit — admis seulement si complet">
+  Le passage `DRAFT → APPLIED` est **refusé** si la **loi de complétude** ne tient pas — c'est-à-dire si un `spec_delta` n'a pas son `mirror_delta` dans la même enveloppe. Le refus est un **BlockReason** actionnable : `code: INCOMPLETE_CHANGESET`, `how_to_fix: [add_mirror_for_spec_delta]`. *Un spec sans son miroir est un monstre.*
+</Field>
+
+<Field name="APPLIED est immuable">
+  Une fois `APPLIED`, l'enveloppe ne peut **plus** être éditée en place. Toute tentative d'édition est refusée par `APPLIED_IS_IMMUTABLE`. La seule écriture légale sur la lignée d'une enveloppe appliquée est d'**ajouter** un ChangeSet inverse.
+</Field>
+
+<Field name="le revert — un inverse ajouté, jamais une destruction">
+  Reverter une enveloppe `APPLIED` ne la modifie **pas** : ça crée un **nouveau** `DRAFT` dont les deltas sont la **négation** des siens (`add` ⇄ `remove`) et dont `reverts` pointe vers la source. La source reste `APPLIED`. Quand cet inverse est à son tour appliqué, la source est **estampillée** `REVERTED` (pas effacée). Le journal ne fait que **croître** — *un revert crée de l'information.*
+</Field>
+
+## Ce que S20 n'est PAS
+
+S20 livre l'**enveloppe** — pas le **graphe**. Les branches, les merges et les nœuds de phase stable sont le `dag`, une étape **ultérieure** (le ChangeSet n'est ici qu'une seule arête, avec un `parent_phase`). Ce n'est **pas** la vague rouge : la propagation d'un changement sur les projections est une étape runtime ultérieure. Ce n'est **pas** non plus le SemanticDiff (la classification add/refine/override/…) — S20 prouve l'**enveloppe**, pas le diff. La prédicat de complétude est **injecté** ici (minimal : « un spec_delta exige un mirror_delta ») ; il ne lit pas encore les schémas kernel/mirrors.
+
+## À voir dans le Workbench
+
+La route **`/changeset`** rend l'exemple §98 « add order discount » : la **carte d'enveloppe** affiche le `spec_delta` et le `mirror_delta` **côte à côte** (visible : ils ne peuvent dériver), un badge d'état (`DRAFT`/`APPLIED`/`REVERTED`), l'`applied_at`, et la **lignée de revert**. Une **table de cycle de vie** joue chaque ligne : `open → DRAFT` ; `apply` d'une enveloppe complète → `APPLIED` avec `applied_at` (*le critère de done*) ; `apply` d'une enveloppe sans miroir → **ROUGE** `INCOMPLETE_CHANGESET` + `how_to_fix` ; `edit` d'un `APPLIED` → **ROUGE** `APPLIED_IS_IMMUTABLE` (*le critère de done*) ; `revert` → nouveau `DRAFT` inverse, la source `cs-A` toujours présente et estampillée `REVERTED`, liée à l'inverse `cs-B`. **Lecture seule** (le mur) : une vraie écriture passe par propose → ChangeSet → approbation.
