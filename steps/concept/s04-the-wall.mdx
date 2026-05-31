@@ -1,0 +1,54 @@
+---
+title: "S04 · Le mur — l'agent n'écrit jamais la vérité"
+description: "Le mur d'AIDOS : la frontière de permission qui interdit à l'agent d'écrire au-dessus de la ligne de flottaison (kernel / mirrors / fitness). Défense en profondeur — un hook PreToolUse (niveau 1) + des GRANTs Postgres (niveau 2) — et tout refus revient en BlockReason actionnable."
+keywords: ["aidos", "krd", "mur", "wall", "ligne de flottaison", "waterline", "blockreason", "pretooluse", "grants", "postgres", "kernel", "mirrors", "fitness", "défense en profondeur"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S04](/steps/internals/s04-the-wall).</Note>
+
+## En une phrase
+
+S04 dresse **le mur** : la frontière unique de permission qui sépare ce que l'agent peut écrire (les **projections**, sous la ligne de flottaison) de ce qu'il ne peut **jamais** écrire (la **vérité** — `kernel`, `mirrors`, `fitness` — au-dessus). Toute tentative d'écriture au-dessus de la ligne est **refusée**, avec un message actionnable qui nomme la porte.
+
+## Le problème que ça résout
+
+Un agent qui code librement finira, tôt ou tard, par « corriger » une vérité au passage : réécrire un mirror qui le gêne, ajuster une règle du noyau pour faire passer son test. Ce serait la **circularité** que KRD interdit — l'agent qui écrit à la fois la preuve et ce qu'elle prouve. Le mur rend cette dérive **mécaniquement impossible**, pas seulement déconseillée.
+
+La règle KRD : **l'humain possède la vérité, l'agent possède l'implémentation, le harnais fait respecter le mur.** S04 est le moment où « fait respecter » cesse d'être une intention et devient une barrière physique — à deux niveaux, pour qu'aucune brèche d'un côté ne suffise à passer.
+
+## Les idées-clés
+
+Le vocabulaire introduit ici, défini simplement.
+
+<Field name="le mur (the wall)">
+  L'**unique frontière de permission** que le Runtime fait respecter : l'agent écrit les projections, jamais le noyau, le plan des miroirs, ou la fitness. Le Runtime la fait respecter, mais ne la possède pas et ne l'écrit pas.
+</Field>
+
+<Field name="ligne de flottaison (waterline)">
+  La frontière déclarée entre le **dessus** (la vérité, gelée : `kernel`, `mirrors`, `fitness`) et le **dessous** (les projections, libres : le code émis, les adaptateurs). L'agent écrit en dessous, jamais au-dessus.
+</Field>
+
+<Field name="défense en profondeur">
+  Deux niveaux indépendants. **Niveau 1** : un hook `PreToolUse` refuse l'écriture *avant* qu'elle ait lieu. **Niveau 2** : les permissions Postgres (GRANTs) — le rôle de l'agent n'a aucun droit d'écriture sur les schémas de vérité. Même si le niveau 1 est contourné, le niveau 2 tient.
+</Field>
+
+<Field name="BlockReason">
+  Un **refus actionnable** : un code (`AGENT_WRITE_ABOVE_WATERLINE`), une sévérité, une explication, et un `how_to_fix` — la marche à suivre. *« Un mur sans BlockReason devient une prison. »* Le refus du mur nomme toujours la porte.
+</Field>
+
+<Field name="la seule porte vers le noyau">
+  On ne réécrit jamais la vérité au passage. Le seul chemin : **idea → mirror → /goal → approbation**. Le ChangeSet approuvé est appliqué par un rôle privilégié (`aidos`), jamais par l'agent.
+</Field>
+
+## Ce que ça vous permet de faire
+
+- **Travailler en confiance** : l'agent peut écrire, refactorer, régénérer tout le code sous la ligne — il ne peut pas, par construction, altérer une vérité ou un miroir.
+- **Comprendre chaque refus** : quand une écriture est bloquée, le `BlockReason` dit *pourquoi* et *comment* débloquer — pas une erreur opaque, une marche à suivre.
+- **Voir la frontière** dans le Workbench, sur la route `/wall` : la ligne de flottaison (kernel/mirrors/fitness au-dessus, projections en dessous) et un flux des événements de blocage.
+- **Faire évoluer la vérité proprement** : par la porte (idea → mirror → /goal → approbation), jamais par une écriture furtive.
+
+Le mur, c'est ce qui rend AIDOS **sûr de laisser un agent coder** : il a toute liberté là où il doit l'avoir, et zéro pouvoir là où il ne doit pas en avoir.
+
+<Card title="Pour aller plus loin — l'implémentation" icon="wrench" href="/steps/internals/s04-the-wall">
+  Le classificateur de ligne de flottaison (fonction pure), le hook PreToolUse, les GRANTs Postgres, et les mirrors (Godog + property + fault-injection).
+</Card>

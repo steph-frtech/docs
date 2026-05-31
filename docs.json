@@ -57,7 +57,9 @@
               "steps/concept/s02-krdcore-records",
               "steps/internals/s02-krdcore-records",
               "steps/concept/s03-cli-aidos",
-              "steps/internals/s03-cli-aidos"
+              "steps/internals/s03-cli-aidos",
+              "steps/concept/s04-the-wall",
+              "steps/internals/s04-the-wall"
             ]
           }
         ]

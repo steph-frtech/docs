@@ -1,0 +1,101 @@
+---
+title: "S04 · Le mur — implémentation"
+description: "Le détail technique du mur : le classificateur de ligne de flottaison (fonction pure totale) + le hook PreToolUse Go (niveau 1), les GRANTs Postgres via Atlas (niveau 2), le BlockReason actionnable, les mirrors (Godog journey + property rapid + fault-injection Testcontainers), la route Workbench /wall, et la place dans le cliquet KRD."
+keywords: ["aidos", "krd", "implémentation", "mur", "wall", "waterline", "pretooluse", "hook", "go", "grants", "postgres", "atlas", "testcontainers", "rapid", "godog", "blockreason", "adr-0002"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S04](/steps/concept/s04-the-wall).</Info>
+
+S04 érige **le mur** en défense en profondeur : un hook `PreToolUse` (Go) qui refuse toute écriture agent au-dessus de la ligne de flottaison (`kernel` / `mirrors` / `fitness`) avec un `BlockReason` actionnable, adossé à des **GRANTs Postgres** qui ne donnent au rôle DB de l'agent aucun droit d'écriture sur ces schémas. Deux niveaux indépendants : si l'un saute, l'autre tient.
+
+## Implémentation
+
+### Le package Go `back/hooks/pretooluse`
+
+Tout dans `back/hooks/pretooluse/`, **pur** au cœur — la seule I/O est la frontière `main` (stdin/stdout).
+
+| Élément | Comportement | Référence |
+|---|---|---|
+| `Classify(target string) Decision` | la fonction **pure totale** au cœur du mur : deny **ssi** la cible est au-dessus de la ligne, allow sinon | `wall.go` |
+| `Verdict` | exactement deux valeurs — `allow` / `deny` ; pas de troisième | `wall.go` |
+| `BlockReason{Code, Severity, Explanation, HowToFix[]}` | le refus actionnable partagé ; code `AGENT_WRITE_ABOVE_WATERLINE` | `wall.go` |
+| `Event` | l'événement PreToolUse décodé (forme plate `path`/`schema`, ou Claude Code `tool_input.file_path`) | `main.go` |
+| `DecodeEvent` / `Evaluate` | décode (pur, normalise la forme imbriquée) puis classe | `main.go` |
+| `Run(stdin, stdout) int` | l'entrypoint binaire : lit l'événement, classe, retourne le code de sortie (0 = allow, 2 = deny) ; **fail-closed** sur un événement illisible | `main.go` |
+
+Le classificateur reconnaît une cible **au-dessus de la ligne** sous trois formes : un nom de schéma (`kernel`), une table qualifiée (`kernel.truth`), ou un chemin sur disque qui *est* de la vérité (`back/kernel/**`, qui par **ADR 0002** couvre `back/kernel/mirror/**`, et `back/migrations/**`). Tout le reste — `back/gen/**`, `front/web/**`, `archive`/`changesets`/`dag`/`ideas`/`provenance`, la doc — est **autorisé**.
+
+```go
+// back/hooks/pretooluse/wall.go — le cœur du mur, pur et total
+func Classify(target string) Decision {
+	t := strings.TrimPrefix(strings.TrimSpace(target), "/")
+	if isAboveWaterline(t) {
+		return Decision{Verdict: VerdictDeny, BlockReason: aboveWaterlineBlockReason(target)}
+	}
+	return Decision{Verdict: VerdictAllow}
+}
+```
+
+Le `BlockReason` d'un refus nomme **toujours** la seule porte vers le noyau : *idea → mirror → /goal → approbation*, le ChangeSet approuvé étant appliqué par le rôle `aidos`.
+
+### Niveau 2 — les GRANTs Postgres (`back/migrations/wall_grants_baseline.sql`)
+
+Migration Atlas, expand-only, append-only (ne touche aucune table antérieure). Elle crée le schéma `fitness` (le NIVEAU 3 lecture-seule : grammaire de fitness + waterline + définition de « passé »), puis pose les permissions :
+
+- le rôle agent (`aidos_agent`) reçoit `USAGE` + `SELECT` sur `kernel`/`mirrors`/`fitness`, et **jamais** `INSERT/UPDATE/DELETE/TRUNCATE` — avec un `REVOKE` ceinture-et-bretelles et des `ALTER DEFAULT PRIVILEGES` pour que toute table **future** y reste SELECT-only ;
+- le rôle écrivain `aidos` reçoit l'écriture complète — c'est la seule porte vers la vérité.
+
+C'est le filet **fail-closed** : même si le niveau 1 (le hook) est contourné, l'agent frappe un mur de permissions à la base.
+
+### La route Workbench `/wall`
+
+`front/web/app/wall/page.tsx` — un panneau **lecture seule** : la ligne de flottaison (kernel/mirrors/fitness au-dessus, projections en dessous), les zones gardées, et un flux d'événements de blocage (`BlockReason` : code, sévérité, explication, how_to_fix). La source de données est `front/web/lib/wall.ts`, un registre statique déclaré qui **miroite `wall.go`** (les zones + un BlockReason représentatif), couvert par `lib/wall.test.ts`. Le composant `WallTeach` rend l'écran **auto-pédagogique** (tutoriel + exemple). Thémé tokens ADR 0010, bilingue next-intl (ADR 0011, FR par défaut).
+
+## Méta
+
+Le comportement de S04 est prouvé par **quatre mirrors vivants** côté back, plus un e2e Playwright côté front.
+
+<Steps>
+  <Step title="Mirror acceptation (Gherkin / Godog)">
+    `tests/runtime/wall.feature` — `reflects=runtime.wall`, `test_kind=acceptance`, `cert_language=gherkin`, `liveness=live`, `authority=below`. Le journey : *écriture kernel refusée avec `AGENT_WRITE_ABOVE_WATERLINE` + how_to_fix non vide* ; un `Scenario Outline` sur `kernel`/`mirrors`/`fitness` ; une projection sous la ligne (`back/gen/`) autorisée. Exécuté par `wall_bdd_test.go`.
+  </Step>
+  <Step title="Mirror invariant (property / rapid)">
+    `wall_property_test.go` — `test_kind=property`, `cert_language=rapid`, `liveness=live`. L'invariant ∀ : pour **toute** chaîne cible, `Classify` est déterministe, ne rend jamais de troisième verdict, et deny **ssi** la cible est au-dessus de la ligne ; tout deny ⇒ code `AGENT_WRITE_ABOVE_WATERLINE` avec un `how_to_fix` non vide.
+  </Step>
+  <Step title="Fault-injection DB (Testcontainers, niveau 2)">
+    `wall_grant_injection_test.go` — sur un vrai Postgres jetable, applique les baselines S02 + S04, puis : un `INSERT` du rôle `aidos_agent` dans `kernel.truth` / `mirrors.mirror` / `fitness.waterline` ⇒ **permission denied** ; le même `INSERT` du rôle `aidos` ⇒ **succès**. C'est la preuve des GRANTs, pas seulement du hook.
+  </Step>
+  <Step title="e2e Playwright (route /wall)">
+    `tests/e2e/wall.spec.ts` — la ligne de flottaison montre kernel/mirrors/fitness au-dessus, un événement de blocage `AGENT_WRITE_ABOVE_WATERLINE` est visible, et son how_to_fix nomme la porte *idea → mirror → /goal*. 6 tests, tous verts.
+  </Step>
+</Steps>
+
+**Hook-honesty (CLAUDE.md §5) — un hook qui ne tire jamais est mort.** Les deux niveaux sont prouvés par injection de faute : retirer un `REVOKE` de la migration fait passer le test agent-deny **rouge** (`WALL BREACH …`) ; restauré, vert. Pointer le classificateur sur une vraie écriture kernel → deny ; déplacer la cible sous la ligne → allow.
+
+**Déterminisme-first.** `Classify` est une **fonction pure totale** de sa chaîne cible — pas d'horloge, pas d'aléatoire, pas d'I/O — donc même cible ⇒ même verdict ; le property rapid en est le mirror de reproductibilité. Aucune décision n'est déléguée à un agent : un mur dont la règle serait jugée par un LLM serait un *determinism gap*.
+
+## Méta-méta
+
+**Place dans le cliquet.** S04 est le **mécanisme** du mur KRD (LIVRE II §6–8 : le mur = permissions = ligne de flottaison = frontière vérité/code). Il consomme S01 (les rôles + le Postgres de base) et S03 (l'entrypoint CLI, dont `aidos explain` rendra ces BlockReason à S13) sans toucher leur contrat. Il laisse une phase stable que les étapes suivantes consomment : les **sensors** PostToolUse (S07) réutilisent la forme du hook + du `BlockReason` ; S13 donne au mur sa voix (`aidos explain`).
+
+**Le mur (appliqué à lui-même).** S04 **n'écrit aucune vérité** : le hook classe et refuse, il n'écrit rien ; la migration pose des permissions, pas des vérités. La route `/wall` est strictement lecture seule — le mur est *appliqué* ici, jamais *opéré* depuis un écran. La clause *action-capable* de `ui-completeness` est satisfaite **par le vide** : il n'y a aucune capacité backend à lier (le hook est invoqué par le harnais, pas appelé comme outil) — donc aucune capacité headless cachée.
+
+**ADR concernés.**
+
+- **ADR 0002** — le plan Mirror est nesté sous le Kernel ; le mur refuse `/kernel/**`, ce qui couvre désormais `/kernel/mirror/**`. Le classificateur encode exactement cette frontière.
+- **ADR 0012** — les GRANTs sont une migration Atlas versionnée (expand-contract, append-only), miroitée byte-pour-byte dans `migrations/atlas_migrations/` + `atlas.sum`.
+- **ADR 0010 / 0011** — la route `/wall` est thémée (tokens) et bilingue (next-intl, FR par défaut).
+
+**Pas de nouvel artefact superflu (CLAUDE.md §5).** Pas de serveur MCP (le hook est invoqué par le harnais, aucune nouvelle capacité backend exposée), pas de Skill (aucun geste rejouable encore), pas d'émission de structs Go depuis les ASTs kernel. Un nouvel artefact ne fait qu'**ajouter** une garde, jamais en retirer une.
+
+**Anti-écrasement.** S04 n'édite que ses propres fichiers (`back/hooks/pretooluse/*`, `back/migrations/wall_grants_baseline.sql` + l'entrée versionnée, son mirror `tests/runtime/wall.feature`, `front/web/app/wall/*`, `front/web/lib/wall.*`, `tests/e2e/wall.spec.ts`) ; les seuls fichiers partagés touchés sont **additifs** : `WorkbenchHeader.tsx` (lien de nav `/wall`) et `messages/{fr,en}.json` (namespace `wall`, parité 235/235). Aucun contrat antérieur réécrit.
+
+**Forward-dependencies (OpenQuestions, pas des `residual_issues`).**
+
+- La persistance du mirror dans le schéma Postgres `mirrors` est différée à **S06** ; jusque-là le mirror vit en fichier exécutable (exception bootstrap, §6).
+- Le câblage *live* du hook dans `hooks.yaml` + le rendu de ces BlockReason par `aidos explain` arrivent à **S07/S13** ; à S04 le hook est complet, testé et fault-injecté, mais branché par le harnais des étapes suivantes.
+- La forme d'événement couverte est la forme Claude Code + la forme plate ; d'autres formes d'outils d'écriture s'ajouteront, additivement, quand un outil concret les exige.
+
+<Card title="Voir le concept de l'étape" icon="lightbulb" href="/steps/concept/s04-the-wall">
+  Ce qu'apporte le mur — la frontière de permission, le BlockReason, la seule porte vers le noyau — sans le code.
+</Card>
