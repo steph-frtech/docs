@@ -1,0 +1,67 @@
+---
+title: "S06 · Le miroir, preuve vivante typée — implémentation"
+description: "Le détail technique de la loi de complétude : l'enregistrement Mirror typé (les cinq champs KRD §34), les deux prédicats purs (no_truth_without_mirror, no_orphan_mirror) calculés sur mirrors ⋈ kernel, le profil enregistré lu dans KRD §90, la migration mirrors.mirror_record (append-only, content-addressed, aucun GRANT d'écriture à l'agent), les mirrors (Godog + property rapid + Testcontainers), la route Workbench /mirror-health, et la place dans le cliquet KRD."
+keywords: ["aidos", "krd", "implémentation", "miroir", "complétude", "completeness", "monstre", "no_truth_without_mirror", "no_orphan_mirror", "go", "postgres", "append-only", "content-addressed", "rapid", "godog", "testcontainers", "reflects", "test_kind", "cert_language", "authority", "liveness"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S06](/steps/concept/s06-mirror-completeness).</Info>
+
+S06 donne au miroir un **enregistrement typé** (les cinq champs de KRD §34) et rend la **loi de complétude** mécanique : deux prédicats **purs** calculés sur `mirrors ⋈ kernel` rendent l'**ensemble des monstres**. Une vérité sans miroir vivant (`no_truth_without_mirror`) ou un miroir orphelin (`no_orphan_mirror`) rougit le verdict. Le paquet est **pur** — il **lit** la vérité, il n'écrit rien (le mur tient).
+
+## Implémentation
+
+### Le cœur de complétude — fonctions pures totales (`back/kernel/mirror/records/records.go`)
+
+Le cœur n'est pas l'exécution des miroirs (de l'I/O), c'est le **calcul** de l'ensemble des monstres — déterministe, pur, total. Determinism-first (CLAUDE.md §6) : ce calcul **doit** être du code, jamais un agent. C'est une **différence d'ensembles**, pas un jugement.
+
+| Élément | Comportement |
+|---|---|
+| `Mirror{Reflects, TestKind, CertLanguage, Authority, Liveness, ContentHash}` | l'enregistrement typé — les cinq champs KRD §34 + l'adresse de contenu |
+| `Layer{LayerID, Version, Kind}` | le read-model minimal d'une couche du noyau (son `kind` décide les `test_kind` requis) |
+| `CertLanguage.IsExecutable()` | un `cert_language` exécutable comme sensor déterministe ; `prose` ne l'est pas (KRD §805) |
+| `Mirror.IsLiving()` | `alive` **ET** `cert_language` exécutable — sinon le miroir ne compte pas |
+| `RequiredTestKinds(kind)` | le profil **enregistré** (KRD §90) : chaque `kind` déclare son/ses `test_kind` requis — lu, jamais inventé |
+| `NoOrphanMirror(mirrors, layers)` | tout miroir dont la cible `reflects` est absente de la coupe ; trié par `MirrorID` |
+| `NoTruthWithoutMirror(mirrors, layers)` | toute couche sans miroir **vivant** de chaque `test_kind` requis ; trié par `(LayerID, MissingTestKind)` |
+| `ComputeCompleteness(mirrors, layers)` | la loi entière : l'ensemble des monstres + le verdict (`COMPLETE` ssi vide) |
+
+Les prédicats **rendent l'ensemble des monstres** — jamais un booléen qu'ils satisferaient ensuite (anti-Goodhart, CLAUDE.md §8). Le tri rend la sortie reproductible ; le miroir de reproductibilité (property rapid) le prouve : même entrée → même sortie.
+
+### Le profil enregistré — lu dans le Tome, jamais inventé (KRD §90)
+
+Quel `test_kind` un `kind` de couche requiert-il ? La réponse n'est **pas** devinée : elle est lue verbatim du registre des couches (KRD §90) — `entity → schema`, `policy → property`, `operation → fixture`, `view → e2e`, `control → fixture`, `action → fixture`, `api → contract`, `db → snapshot`, `types → schema`, `ui-web/ui-mobile → unit`. Et la grammaire inviolable (KRD §91) impose `source_requires.mirror.lang = executable_deterministic` : un miroir non exécutable ne satisfait pas une source. C'est cette règle que `IsExecutable` encode.
+
+### La migration `mirror_record` (`back/migrations/mirror_record_baseline.sql`)
+
+Une table **append-only, adressée par contenu** : une ligne immuable par miroir typé — `(id, reflects_layer_id, reflects_version, test_kind, cert_language, authority, liveness, content_hash, version, superseded_by, created_at)`. Les `CHECK` ferment le typage : `test_kind`, `cert_language`, `authority`, `liveness` sont des ensembles clos, et `id = version = content_hash` (adressage par contenu garanti en base). Re-pointer un miroir **ajoute** une ligne et **ferme** le `superseded_by` de l'ancienne tête — jamais une mutation en place. Le rôle `aidos_agent` reçoit **SELECT seulement** ; `INSERT/UPDATE/DELETE/TRUNCATE` lui sont **refusés** (le mur, CLAUDE.md §2). Seul le rôle `aidos` (via un ChangeSet approuvé) écrit la vérité. La table laisse intacte la table générique `mirrors.mirror` de S02 ; elle est la **projection typée** que la jointure de complétude lit comme des colonnes.
+
+### Les mirrors (la preuve, écrite rouge d'abord)
+
+| Miroir | Forme | Ce qu'il prouve |
+|---|---|---|
+| `tests/mirror/completeness.feature` + `completeness_bdd_test.go` | **Godog** (N0) | les quatre scénarios : couche sans miroir → rouge ; miroir orphelin (liveness=dead) → rouge ; miroir vivant exécutable reflétant → vert ; `cert_language` non exécutable ne compte pas → rouge |
+| `records_property_test.go` | **rapid** (N1) | reproductibilité (même entrée → même sortie) ; le verdict colle toujours à l'ensemble des monstres ; un non-exécutable ne compte jamais ; un orphelin est toujours un monstre |
+| `records_test.go` | **go test** (N4) | les arêtes porteuses cas par cas + le contrat du profil enregistré (KRD §90) |
+| `records_db_test.go` | **Testcontainers** (N5) | contre un vrai Postgres : la jointure calcule le bon ensemble de monstres ; l'agent est refusé en écriture (le mur) ; le `CHECK` d'adressage par contenu rejette une ligne incohérente ; la tête bouge par **ajout + fermeture**, jamais par mutation |
+
+### La route Workbench `/mirror-health` (`front/web/app/mirror-health/`)
+
+Server Component, tokens ADR 0010, bilingue ADR 0011. Inventaire des miroirs typé par les cinq champs, bestiaire (ensemble des monstres) surligné par raison, verdict de complétude (`COMPLETE` / `RED — MONSTER`). **Action-capable** : deux contrôles calculent la loi sur une coupe déclarée (coupe « monstre » → rouge ; coupe « complète » → vert) via la Server Action `computeHealth` — la capacité est joignable **et** exécutable depuis l'écran (pas de capacité headless). Le cœur TS (`lib/mirror-health.ts`) est un **port pur** du cœur Go, prouvé champ par champ par `lib/mirror-health.test.ts` (fast-check) — les deux têtes de la loi (runner Go + panneau TS) ne dérivent jamais. Tutoriel + exemple : l'écran est auto-pédagogique. Un e2e Playwright (`tests/e2e/mirror-health.spec.ts`) prouve les deux verdicts à l'écran.
+
+## Méta
+
+**Pourquoi un cœur pur séparé de toute I/O ?** Parce que la loi de complétude — « y a-t-il un monstre ? » — est exactement le genre de calcul que le mandat *determinism-first* exige en code : une jointure et une différence d'ensembles, totale, reproductible, sans jugement. Lire les couches et les miroirs depuis Postgres est de l'I/O ; mais *décider* si la symétrie tient est une fonction pure de ses entrées. On isole donc le verdict (pur, prouvé par property test) de la lecture (le `SELECT`, I/O). La complétude n'est jamais « un agent qui regarde s'il manque un test » — c'est un diff d'ensembles couches/miroirs.
+
+**Pourquoi rendre l'ensemble des monstres et non un booléen ?** Parce qu'un booléen `complete: true/false` serait un test que l'agent pourrait apprendre à satisfaire (Goodhart). En rendant **l'ensemble des monstres**, le prédicat décrit *quoi* est cassé et *pourquoi* — il informe la réparation au lieu de cacher le trou. Le verdict est **calculé** à partir de l'ensemble, jamais déclaré à côté.
+
+**Pourquoi lire le profil dans KRD §90 et ne pas l'inventer ?** Parce que « quel `test_kind` un `control` requiert-il » est une **vérité enregistrée**, pas une opinion de l'agent. L'inventer serait fabriquer une règle métier — interdit par les règles d'honnêteté (CLAUDE.md §8). Le profil est une table déclarée, copiée du Tome, en lecture seule.
+
+## Méta-méta
+
+La complétude est l'une des **lois auto-vérifiantes** d'AIDOS : la loi qui interdit les monstres est elle-même prouvée par un miroir (le Godog des quatre scénarios) qui **est** un enregistrement de miroir — `reflects=S06-mirror-completeness, test_kind=acceptance, cert_language=gherkin, liveness=alive`. Si ce miroir manquait, la loi de complétude le signalerait comme un monstre : la loi se tient dans son propre champ d'application. C'est le serpent qui se mord la queue dans le bon sens — le harnais qui vérifie qu'il a une preuve de ce qu'il vérifie.
+
+Et le mur tient des deux côtés : ce paquet **lit** `kernel` et `mirrors` pour calculer le verdict et **n'écrit rien**. Il ne peut pas se rendre vert en écrivant un miroir — il n'a pas le GRANT. Le seul chemin pour combler un monstre est `idea → mirror → /goal → approbation`, puis une écriture par le rôle `aidos` via un ChangeSet. La loi qui détecte le trou ne peut pas le boucher elle-même : elle ne fait que le **nommer**.
+
+## La place dans le cliquet KRD
+
+S06 livre la **preuve typée vivante** + le **verdict en lecture seule**. Il ne bloque encore rien. La prochaine étape sûre (S12) branche `ComputeCompleteness` sur un **hook au `Stop`** : tant qu'un monstre existe, la session ne se ferme pas, et un ChangeSet ne peut pas atteindre `APPLIED` en laissant un orphelin derrière lui. La loi passe alors de constat à barrière non contournable — KRD §29 / §127.

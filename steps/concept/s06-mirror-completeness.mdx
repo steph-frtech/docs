@@ -1,0 +1,72 @@
+---
+title: "S06 · Le miroir, preuve vivante typée — la loi de complétude"
+description: "Le miroir d'AIDOS reçoit un enregistrement typé (reflects, test_kind, cert_language, authority, liveness) et la loi de complétude devient mécanique : aucune vérité sans miroir vivant, aucun miroir orphelin. Une vérité sans miroir, ou un miroir qui ne reflète rien, est un monstre — et un monstre est rouge."
+keywords: ["aidos", "krd", "miroir", "mirror", "complétude", "completeness", "monstre", "monster", "bicéphale", "reflects", "test_kind", "cert_language", "authority", "liveness", "vivant", "mort", "orphelin", "no_truth_without_mirror", "no_orphan_mirror"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S06](/steps/internals/s06-mirror-completeness).</Note>
+
+## En une phrase
+
+S06 donne au **miroir** un enregistrement **typé** — cinq champs qui disent ce qu'il prouve et comment — et rend la **loi de complétude** vérifiable par une machine : **aucune vérité sans miroir vivant**, **aucun miroir orphelin**. Le corps bicéphale devient contrôlable.
+
+## Le problème que ça résout
+
+Une vérité (une couche du noyau) et sa preuve (le miroir) sont **un seul corps à deux têtes** : l'intention dans le Kernel, la preuve dans le Mirror. Mais rien, jusqu'ici, n'empêche la symétrie de se rompre :
+
+- une couche est déclarée mais **personne ne la prouve** — on croit avoir une garantie, on a un trou ;
+- un miroir reflète une couche qui **n'existe plus** (sa version a été supersédée) — il tourne dans le vide, il prouve un fantôme.
+
+Les deux sont des **monstres** (KRD LIVRE XXII) : un corps sans tête, ou une tête sans corps. S06 transforme l'interdiction de ces monstres en **calcul** : on joint l'ensemble des miroirs au noyau, et on rend l'**ensemble des monstres**. S'il est vide, le verdict est `COMPLETE` ; sinon, `RED — MONSTER`.
+
+## Les idées-clés
+
+<Field name="bicéphale (bicephalous)">
+  Un seul corps — la vérité — avec deux têtes : l'**intention** (la couche dans le Kernel) et la **preuve** (le miroir). Inséparables. Une tête ne vit pas détachée du corps.
+</Field>
+
+<Field name="reflects (reflète)">
+  Le lien `mirrors` : la couche du noyau qu'un miroir prouve, **à une version précise**. C'est ce qui ancre le miroir à un corps réel.
+</Field>
+
+<Field name="test_kind">
+  La **nature** de la preuve : `acceptance`, `e2e`, `property`, `fixture`, `contract`, `schema`, `unit`, `snapshot`, `meter`. Chaque `kind` de couche **requiert** un (ou des) `test_kind` — lu dans le profil enregistré (KRD §90), jamais inventé.
+</Field>
+
+<Field name="cert_language (langage de certification)">
+  La **langue** du miroir : `gherkin`, `xstate`, `fast-check`, `rapid`, `zod`, `pact`, `type-check`, `k6`, `fixture`… Un langage qui ne s'exécute pas comme **sensor déterministe** (de la prose, un juge-LLM seul) **ne compte pas** pour la complétude (KRD §805).
+</Field>
+
+<Field name="authority (autorité)">
+  Où le miroir se tient sur la ligne de flottaison : `above` (humain — *test-as-goal*, le miroir qui définit la vérité) ou `below` (IA — *test-as-means*, le test intérieur de l'agent).
+</Field>
+
+<Field name="liveness (vivacité)">
+  `alive` ou `dead`. Un miroir est **vivant** s'il reflète une couche réelle @version **et** s'exécute comme un sensor. Un miroir orphelin, ou non exécutable, est **mort** — donc rouge.
+</Field>
+
+<Field name="le reflet est un-à-plusieurs">
+  Une couche peut avoir **plusieurs** miroirs (une `operation` a une fixture *et* un contrat *et* des property tests). La loi : **au moins un miroir vivant par couche, et chaque `test_kind` requis présent.** Sinon on croit à une symétrie et on a un trou.
+</Field>
+
+<Field name="no_truth_without_mirror">
+  Toute couche du noyau a au moins un miroir vivant de chaque `test_kind` requis. Une couche sans cela est un monstre.
+</Field>
+
+<Field name="no_orphan_mirror">
+  Tout miroir reflète une couche réelle @version. Un miroir qui ne reflète plus rien est un monstre (et il est mort).
+</Field>
+
+## Ce que ça change pour vous
+
+Quand vous regardez l'écran **Santé du miroir** (`/mirror-health`), vous voyez d'un coup d'œil :
+
+1. l'**inventaire** de vos miroirs, typé par les cinq champs ;
+2. le **bestiaire** — l'ensemble des monstres, surligné, avec la raison (vérité sans preuve, ou miroir orphelin) ;
+3. le **verdict de complétude** pour la coupe courante : `COMPLETE` ou `RED — MONSTER`.
+
+La promesse KRD est simple : **vous ne pouvez pas déclarer une vérité et oublier de la prouver**, et **un miroir ne peut pas survivre à la couche qu'il prouvait**. La complétude le rend mécanique.
+
+## La place dans le cliquet KRD
+
+S06 **type** et **rend prouvable** le concept de miroir qui existait déjà dans le Tome ; il n'ajoute **aucune** nouvelle règle métier. Il calcule un **verdict en lecture seule** — il ne bloque encore rien. L'étape suivante (S12) branche ce verdict sur un **hook au `Stop`** : tant qu'un monstre existe, la session ne se ferme pas. La loi passe alors de constat à barrière.
