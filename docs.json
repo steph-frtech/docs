@@ -93,7 +93,9 @@
               "steps/concept/s14-truth-typing",
               "steps/internals/s14-truth-typing",
               "steps/concept/s15-truth-scope",
-              "steps/internals/s15-truth-scope"
+              "steps/internals/s15-truth-scope",
+              "steps/concept/s16-authority-graph",
+              "steps/internals/s16-authority-graph"
             ]
           }
         ]

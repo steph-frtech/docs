@@ -1,0 +1,45 @@
+---
+title: "S16 · AuthorityGraph — remplacer « l'humain » par une autorité explicite"
+description: "« L'humain » n'existe pas : il y a produit, juridique, sécurité, design, métier, ops. S16 lie chaque vérité above-the-line à un propriétaire d'autorité explicite — un AuthorityGraph { domain, truth_kind, approvers, veto, escalation } — et décide son admission : admitted | blocked | escalated. Une vérité réglementaire sans approbation juridique est bloquée (KRD §13.8)."
+keywords: ["aidos", "krd", "AuthorityGraph", "autorité", "approver", "approbation", "veto", "escalation", "escalade", "admission", "admitted", "blocked", "escalated", "MISSING_AUTHORITY_APPROVAL", "VETOED", "obtain_legal_approval", "BlockReason", "qualifieur de vérité", "domain", "truth_kind", "regulatory", "legal", "product_owner", "security", "architecture_board", "kernel", "propriétaire d'autorité"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S16](/steps/internals/s16-authority-graph).</Note>
+
+## En une phrase
+
+S16 remplace **« l'humain »** abstrait par une **autorité explicite** : chaque vérité above-the-line est liée à un **AuthorityGraph** — qui **approuve** (`approvers`), qui peut opposer un **veto**, vers qui **escalader** (`escalation`) — clé par `{ domain, truth_kind }`, et son **admission** est **décidée** : `admitted | blocked | escalated`. La règle (KRD §13.8) : **« Toute vérité above-the-line doit avoir un propriétaire d'autorité explicite. »**
+
+## Le problème que ça résout
+
+Dans une organisation réelle, **« l'humain » n'existe pas** : il y a **produit**, **juridique**, **sécurité**, **design**, **métier**, **ops**, **finance**, **support**. Une **règle réglementaire**, une **règle UX**, une **politique de sécurité** et une **décision produit** ne sont **pas** approuvées par la même autorité. Sans autorité nommée, KRD admettrait une vérité réglementaire **sans** l'aval du juridique — exactement le silence qu'un système auto-améliorant ne doit jamais s'autoriser. S16 mécanise **qui approuve quoi**, et fait de l'admission une **décision** typée, pas une convention.
+
+## Les idées-clés
+
+<Field name="l'AuthorityGraph (le QUI d'une vérité)">
+  Cinq champs, exactement (KRD §13.8) : **domain** (le périmètre, p. ex. `checkout`), **truth_kind** (l'un des sept types épistémiques de §13.4, p. ex. `regulatory`), **approvers** (les rôles qui doivent **tous** approuver), **veto** (les rôles qui **bloquent** quel que soit le nombre d'approbateurs), **escalation** (vers qui **escalader** une approbation partielle). L'AuthorityGraph est **l'un des quatre qualifieurs** d'une vérité (KRD §13.6 : `TruthKind` / `TruthScope` / `VerifiabilityLevel` / `AuthorityGraph`) — il **qualifie** une vérité, il **n'est pas** une vérité lui-même.
+</Field>
+
+<Field name="l'admission (admitted | blocked | escalated)">
+  Étant donné une vérité clé par `{domain, truth_kind}` et l'ensemble des rôles ayant **statué** (approbation ou veto accordé), le décideur rend **exactement une** des trois décisions : **admitted** (tous les approbateurs présents, pas de veto), **blocked** (aucun approbateur, ou un veto présent), **escalated** (approbation partielle, pas de veto). La décision est **calculée**, jamais déclarée.
+</Field>
+
+<Field name="le veto domine (la précédence)">
+  Un **veto** accordé **bloque** l'admission **quel que soit** le nombre d'approbateurs : même approuvée par `legal` et `product_owner`, une règle frappée d'un veto `security` reste **blocked / VETOED**. Un veto n'est **jamais** contourné. C'est la première règle de précédence (ADR 0016) : on regarde le veto **avant** de compter les approbations.
+</Field>
+
+<Field name="le blocage est actionnable (le BlockReason)">
+  Une vérité réglementaire **sans aucune approbation** est **blocked** avec le code `MISSING_AUTHORITY_APPROVAL` et un `how_to_fix` qui **nomme la porte** : `assign_authority` puis `obtain_legal_approval` (KRD §44.5 : « tout refus doit être actionnable »). Le mur **bloque sans devenir une prison**. C'est le **critère de done** de S16 : *une vérité réglementaire sans approbation juridique est bloquée*.
+</Field>
+
+<Field name="hors scope ici (les dents suivantes)">
+  S16 livre **la forme typée** + **le décideur pur** + **son miroir** + **l'écran**. Il **ne** branche **pas** encore `Decide` dans la **garde d'admission** du flux `/goal` (une projection ultérieure) ; il n'invente **aucun** nouveau `truth_kind` au-delà des sept de §13.4 ni aucune sémantique d'escalade que le grill n'a pas figée. Ici on pose le socle ; le câblage dans le `/goal` est la dent suivante.
+</Field>
+
+## Ce que ça donne à l'écran
+
+L'écran **/authorities** du Workbench rend, **en lecture seule**, la **carte du graphe** `checkout-regulatory` (domaine, truth_kind, et les trois listes de rôles `approvers` / `veto` / `escalation`) **et** une **table d'admission** : une ligne par admission candidate, avec les rôles ayant statué et un **badge de décision** calculé par le décideur pur — vert **ADMITTED**, rouge **BLOCKED** (avec le code `MISSING_AUTHORITY_APPROVAL` ou `VETOED` + le `how_to_fix`), ambre **ESCALATED** (avec les rôles d'escalade). La ligne réglementaire sans approbation s'affiche **rouge**. La décision est **calculée**, jamais déclarée.
+
+## La frontière honnête
+
+S16 crée **une nouvelle table** `kernel.authority_graph` — **content-addressed, append-only**, réutilisant le substrat d'enregistrement S02 (le graphe **réside dans** le corps content-addressed, donc `id == version == Hash(Canonicalize(body))`, et **changer** une autorité produit **une nouvelle version** — un `SemanticDiff` de type `reauthorize`, KRD §44.1, jamais une mutation en place). Le décideur est **pur** et **lecture seule** : il lit un graphe + une vérité + les rôles ayant statué, rend une décision, **n'écrit aucune vérité** (le mur). Les rôles (`legal`, `product_owner`, `security`, `architecture_board`), le `truth_kind` et la forme du graphe sont **verbatim** de KRD §13.8 / §13.4 — aucun rôle, type ni branche de décision inventé.

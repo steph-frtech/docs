@@ -1,0 +1,55 @@
+---
+title: "S16 · AuthorityGraph — implémentation"
+description: "Le détail technique de l'AuthorityGraph : le paquet pur back/kernel/authority (l'AST { domain, truth_kind, approvers, veto, escalation } verbatim §13.8, la garde Validate, le décideur pur Decide → admitted | blocked | escalated + BlockReason §44.5, la précédence ADR 0016 où le veto domine), la migration Atlas additive (table content-addressed kernel.authority_graph, SELECT-only), le miroir fixture d'admission + le miroir de propriété rapid, le miroir de reproductibilité front fast-check, la route Workbench /authorities, et la place dans le noyau KRD §13.6–13.8 / §44.1 / §44.5."
+keywords: ["aidos", "krd", "implémentation", "AuthorityGraph", "go", "Decide", "Validate", "AdmissionDecision", "Role", "TruthKind", "approvers", "veto", "escalation", "MISSING_AUTHORITY_APPROVAL", "VETOED", "obtain_legal_approval", "BlockReason", "Atlas", "migration", "kernel.authority_graph", "content-addressed", "append-only", "fixture", "rapid", "fast-check", "Testcontainers", "déterminisme", "ligne de flottaison", "reauthorize", "ADR 0016"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S16](/steps/concept/s16-authority-graph).</Info>
+
+S16 livre **l'autorité explicite du vrai** (KRD §13.8) : un **AST typé** `AuthorityGraph`, une **garde pure** `Validate`, et un **décideur pur** `Decide` qui rend `admitted | blocked | escalated` plus un `BlockReason` actionnable (§44.5) quand il bloque, plus la table de persistance content-addressed. La **règle** « toute vérité above-the-line doit avoir un propriétaire d'autorité explicite » est celle de l'humain (KRD §13.8) ; ce step ne fait que l'**appliquer**. Aucune vérité écrite (le mur).
+
+## Implémentation
+
+<Note>La couche **Implémentation** est complétée au vert (CLAUDE.md §6) — code réel, fichiers. Les couches **Méta** et **Méta-méta** ci-dessous sont écrites dès le grill.</Note>
+
+- **`back/kernel/authority/authority.go`** — le cœur **pur** (aucune I/O, aucune horloge, aucun rng). L'AST est **verbatim** de KRD §13.8 : `AuthorityGraph{ Domain, TruthKind, Approvers []Role, Veto []Role, Escalation []Role }`. `TruthKind` **délègue** l'appartenance à `truthtyping.IsKnownKind` (le **seul** propriétaire des sept kinds §13.4 — aucune énumération dupliquée). `Role` est un identifiant **ouvert** (une org nomme ses propres rôles), seule la **forme** est contrainte (`IsWellFormed` refuse le vide/blanc). `Validate(g)` rejette : `domain` vide, `truth_kind` hors énum §13.4, `approvers` **vide** (un graphe sans approbateur ne pourrait jamais admettre — un monstre), un rôle malformé, et un rôle présent **à la fois** dans `approvers` et `veto` (un graphe auto-contradictoire). `Decide(g, truth, granted) AdmissionDecision` applique la **précédence ADR 0016** (premier match gagne) : (1) **veto domine** — un rôle de veto présent dans `granted` ⇒ `blocked` / `VETOED` ; (2) **aucun approbateur** accordé ⇒ `blocked` / `MISSING_AUTHORITY_APPROVAL` (le cas done) ; (3) **tous** les approbateurs présents ⇒ `admitted` ; (4) **partiel** (≥1 mais pas tous), pas de veto ⇒ `escalated` (vers `g.Escalation`). `SerializeGraphBody` rend un corps `kernel.truth` portant le graphe, pour le tie-in content-addressed.
+- **`back/migrations/kernel_authority_graph_baseline.sql`** — la migration **Atlas additive, expand-only**. Elle `CREATE TABLE IF NOT EXISTS kernel.authority_graph` — une table **content-addressed append-only** (mêmes colonnes `id / body / version / superseded_by / created_at` que le substrat S02, sans le forker). Les clés `{domain, truth_kind}` et les listes de rôles vivent **dans** le corps JSONB (une source unique, pas de colonne projetée ici). Côté **mur** : le rôle agent reçoit **SELECT-only** sur la table et se voit **REVOKE** tout écriture — la nouvelle table n'ouvre **aucune** porte d'écriture ; seul le rôle `aidos` écrit la vérité via un ChangeSet approuvé. Elle **n'altère ni ne dépose** aucune table antérieure (S02 intact).
+- **`docs/adr/0016-s16-authority-graph-precedence.md`** — l'ADR qui fige la **précédence** d'admission (veto domine ; pas d'approbateur ⇒ blocked/MISSING_AUTHORITY_APPROVAL ; tous ⇒ admitted ; partiel ⇒ escalated) et les codes locaux `MISSING_AUTHORITY_APPROVAL` / `VETOED`.
+
+## Méta
+
+Le comportement de S16 est prouvé par **deux miroirs** (chacun de la bonne nature), tous rouges avant le code (le rouge **est** le `/goal`). **Aucun parcours Gherkin** n'est ajouté : la nature de la décision d'admission est la **fixture** (état `{graph, truth, granted}` → décision) plus l'**invariant ∀** du décideur — forcer un parcours d'acceptation ici serait un **monstre double-typé** (CLAUDE.md §3).
+
+<Steps>
+  <Step title="Fixture d'admission (le miroir canonique, N2, authority: above)">
+    `back/kernel/authority/authority_fixture_test.go`, source matérialisée `tests/kernel/checkout-regulatory_authority.fixture.md` — `reflects=kernel.authority_graph "checkout-regulatory"`, `test_kind=fixture`, `cert_language=fixture`, `authority=above`. C'est le **vrai** rouge de KRD §13.8. Le graphe est le `checkout-regulatory` de §13.8 **verbatim** (`approvers: [legal, product_owner]`, `veto: [security]`, `escalation: [architecture_board]`). Quatre lignes : (1) **aucune approbation** ⇒ `blocked`, `block_reason.code == MISSING_AUTHORITY_APPROVAL`, `how_to_fix` contient `obtain_legal_approval` — **LE critère de done** ; (2) `{legal, product_owner}` ⇒ `admitted` ; (3) `{legal, product_owner}` + veto `{security}` ⇒ `blocked` / `VETOED` (le veto domine) ; (4) `{product_owner}` seul ⇒ `escalated` vers `architecture_board`. La fixture est le **lien porteur** : le test la charge ; si elle disparaît, le test casse (pas de pourrissement silencieux en monstre).
+  </Step>
+  <Step title="Propriété rapid (l'invariant ∀, N1, authority: below)">
+    `back/kernel/authority/authority_property_test.go` — `reflects=kernel.authority`, `test_kind=property`, `cert_language=rapid`. Les invariants : `Decide` est **totale** (toujours l'une des trois décisions) et **déterministe** (même entrée ⇒ même verdict) ; **aucune admission sans autorité** (un approbateur requis manquant ⇒ jamais `admitted`) ; **le veto domine** (un rôle de veto accordé ⇒ `blocked` / `VETOED` quel que soit le nombre d'approbateurs) ; un `truth_kind` **hors énum** §13.4 ⇒ `Validate` rend une erreur ; un chevauchement `approvers`/`veto` et une liste `approvers` vide ⇒ `Validate` rend une erreur ; et le **tie-in content-addressed** — un graphe sérialisé round-trip comme `id == version == Hash(Canonicalize(body))`, et **changer** une liste de rôles produit une **version différente** (une nouvelle ligne, jamais une mutation en place — `reauthorize`).
+  </Step>
+  <Step title="Miroir de reproductibilité front (fast-check)">
+    `front/web/lib/authority.test.ts` — la projection `lib/authority.ts` calque le paquet Go (même AST §13.8, même précédence ADR 0016, mêmes codes). 10 tests fast-check pinnent les quatre lignes de la fixture, la dominance du veto, l'absence d'admission sans autorité, la totalité, le déterminisme, et le rejet d'un `truth_kind` hors énum. Une source, pas de dérive entre Go et TS.
+  </Step>
+</Steps>
+
+La persistance est prouvée bout-en-bout par **Testcontainers** (`back/kernel/authority/migration_roundtrip_test.go`) : sur un vrai Postgres avec la baseline S02 + la migration S16 appliquées, un graphe sérialisé **round-trip** dans le corps jsonb à l'identique ; et le rôle agent **peut** `SELECT` la table mais **ne peut pas** `INSERT` (le mur — la nouvelle table n'ouvre aucune porte d'écriture). Le `migrate lint` Atlas Pro n'est pas disponible — la convention AIDOS prouve les migrations via Testcontainers au `go test`.
+
+La route Workbench **`/authorities`** (`front/web/app/authorities/page.tsx` + `components/AuthorityGraphCard.tsx` + `components/AuthoritiesTable.tsx`, themée ADR 0010, bilingue ADR 0011) rend la **carte du graphe** + une **table d'admission** : badge de décision calculé par le décideur pur — vert **ADMITTED**, rouge **BLOCKED** (code + `how_to_fix`), ambre **ESCALATED** (rôles d'escalade). Lecture seule (ui-completeness CLAUDE.md §7) : elle **projette** la décision, n'écrit aucune vérité — un `reauthorize` passerait par propose → ChangeSet → approbation. `tests/e2e/authorities.spec.ts` (6 scénarios, vert) prouve la carte + les quatre décisions + tutoriel + exemple.
+
+## Méta-méta
+
+<Field name="déterminisme-d'abord (la loi de §6/§8)">
+  `Decide` et `Validate` sont des **fonctions pures totales** — aucune horloge, aucun rng, aucune I/O — donc même `{graph, truth, granted}` ⇒ même décision. Les rôles ayant statué sont **lus** dans l'ensemble passé, jamais récupérés. L'admission n'est **jamais** jugée par un LLM : c'est un comptage déterministe (le veto présent ? tous les approbateurs présents ?) sur des listes déclarées, prouvé par les miroirs de reproductibilité (rapid + fast-check). Un agent qui « déciderait » de l'admission à la volée serait un **écart de déterminisme** ; ici c'est du code, et le code fait foi.
+</Field>
+
+<Field name="sous la ligne de flottaison (le mur tient)">
+  Le décideur **lit** un graphe + une vérité + les rôles ayant statué et rend une décision ; il n'écrit **aucune** vérité. La migration est **additive** et **REVOKE** toute écriture au rôle agent : SELECT-only sur `kernel.authority_graph`. Tout `reauthorize` d'une autorité figée passera par un **ChangeSet** (`DRAFT → APPLIED`, gated complétude) portant un **SemanticDiff** de type `reauthorize` (KRD §44.1) — **jamais** une édition en place (CLAUDE.md §9). S02 (le substrat record) et S04 (le mur) restent intacts.
+</Field>
+
+<Field name="l'honnêteté anti-invention (les codes locaux, les rôles verbatim)">
+  Les rôles (`legal`, `product_owner`, `security`, `architecture_board`), le `domain` (`checkout`) et le `truth_kind` (`regulatory`) sont **exactement** ceux de KRD §13.8 — aucun rôle, type ni branche de décision inventé. Les sept `truth_kind` sont **délégués** à `truthtyping` (le propriétaire de l'énum §13.4), jamais redéclarés. Les codes `MISSING_AUTHORITY_APPROVAL` / `VETOED` sont **locaux à S16** : ce **ne sont pas** des membres de l'énumération close `runtime/blockreason.Code` (figée à S13, où `MISSING_AUTHORITY` couvre déjà les sites mur/complétude) — on n'invente jamais un membre là (CLAUDE.md §9). La précédence (veto domine) est **déclarée** (ADR 0016 + la fixture), jamais apprise (CLAUDE.md §8).
+</Field>
+
+<Field name="la place dans le noyau">
+  S16 mécanise KRD §13.8 (« remplacer l'humain par une autorité explicite ») — le quatrième des quatre qualifieurs (§13.6), après le `TruthScope` de S15. Il prépare la suite : brancher `Decide` dans la **garde d'admission** du flux `/goal` (bloquer à l'écriture une vérité réglementaire sans aval juridique) ; alimenter le `ContextGraphDecision` (§119.2, la dimension `authority` de la réutilisation) ; et le couplage aux versioned-links / phases stables (S17+).
+</Field>
