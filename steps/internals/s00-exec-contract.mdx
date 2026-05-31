@@ -73,7 +73,7 @@ npx playwright test tests/e2e/contract.spec.ts
 
 ### Déterminisme — le parse + la validation sont du code pur, pas un agent
 
-S00 obéit à la [loi determinism-first](/internals/the-wall-and-ratchet) : toute capacité qui *peut* être une fonction pure **doit** l'être (et c'est elle qui fait autorité, jamais un agent/LLM). Les trois capacités de S00 sont toutes déterministes-ables et sont implémentées en **code pur authoritatif**, chacune couverte par un **miroir de reproductibilité** (Vitest, même entrée → même sortie, sans horloge, sans aléa, sans état caché) :
+S00 obéit à la [loi determinism-first](/internals/the-wall-and-ratchet) : toute capacité qui *peut* être une fonction pure **doit** l'être (et c'est elle qui fait autorité, jamais un agent/LLM). Les **trois plans** tiennent : l'outillage qui *code* S00 (parse, hash, comparaison) sont des algorithmes, pas des agents — on ne prend jamais le LLM par facilité, seulement faute de solution déterministe. Les trois capacités de S00 sont toutes déterministes-ables et sont implémentées en **code pur authoritatif**, chacune couverte par un **miroir de reproductibilité** (Vitest, même entrée → même sortie, sans horloge, sans aléa, sans état caché) :
 
 | Capacité | Implémentation pure (autoritative) | Miroir de reproductibilité |
 |---|---|---|
