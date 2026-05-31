@@ -1,0 +1,47 @@
+---
+title: "S17 · Les liens versionnés — implémentation"
+description: "Le détail technique des liens versionnés : le paquet pur back/kernel/links (l'AST Link { kind ∈ six-set fermé, from/to refs épinglées id@version }, la garde Validate, le Resolve pur (link, heads) → green | stale | absent), la migration Atlas additive (table content-addressed kernel.link, refs DANS le JSONB et non en FK, SELECT-only), le miroir fixture de péremption + le miroir de propriété rapid, le miroir de reproductibilité front fast-check, la route Workbench /link-graph, et la place dans le noyau KRD §41–§43 / §28."
+keywords: ["aidos", "krd", "implémentation", "links", "go", "Link", "Validate", "Resolve", "Ref", "LinkStatus", "Heads", "green", "stale", "absent", "id@version", "épinglé", "Atlas", "migration", "kernel.link", "content-addressed", "append-only", "fixture", "rapid", "fast-check", "Testcontainers", "déterminisme", "vague de rouge", "red wave", "KRD §41", "KRD §42"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S17](/steps/concept/s17-links).</Info>
+
+S17 livre le **substrat des liens versionnés** (KRD §41) : un **AST typé** `Link` (un `kind` dans un ensemble **fermé** de six, des refs `from`/`to` **épinglées** `id@version`), une **garde pure** `Validate`, et un **Resolve pur** `(link, heads) → green | stale | absent`, plus la table de persistance content-addressed. La **règle** « tout lien pointe vers une version, et un lien vers une version absente est rouge » est celle de l'humain (KRD §41–§42) ; ce step ne fait que l'**appliquer**. Aucune vérité écrite (le mur).
+
+## Implémentation
+
+<Note>La couche **Implémentation** est complétée au vert (CLAUDE.md §6) — code réel, fichiers. Les couches **Méta** et **Méta-méta** ci-dessous sont écrites dès le grill.</Note>
+
+- **`back/kernel/links/links.go`** — le cœur **pur** (aucune I/O, aucune horloge, aucun rng). L'AST : `Link{ Kind, From Ref, To Ref }` où `Ref{ ID, Version }` est une référence **épinglée** (`IsPinned` = `ID` **et** `Version` non vides). `Kind` est un **ensemble fermé** de six (`KindProjectsTo`, `KindDerivesFrom`, `KindContractsWith`, `KindTriggers`, `KindBinds`, `KindMirrors`) ; `IsKnownKind` garde l'appartenance, `Kinds()` rend l'ordre canonique. `Validate(l)` rejette : un `kind` hors des six (`ErrUnknownKind`), un `from` non épinglé (`ErrUnpinnedFrom`), un `to` non épinglé (`ErrUnpinnedTo` — un lien non épinglé ne peut être résolu, c'est un monstre). `Resolve(l, heads Heads) LinkStatus` est **total**, **déterministe** et **ne panique jamais** : `absent` si `heads` n'a **aucune** entrée pour `l.To.ID` (le critère de done) ; sinon `green` si la tête `== l.To.Version` ; sinon `stale`. `Heads` est un `map[targetId]headVersion` **passé en argument** — d'où vient la tête (la résolution DAG) est la propriété d'un step ultérieur, donc `Resolve` reste pur. `SerializeLinkBody` rend un corps `kernel.link` portant le lien (`{kind:"link", link_kind, from, to}`) pour le tie-in content-addressed.
+- **`back/migrations/kernel_link_baseline.sql`** — la migration **Atlas additive, expand-only**. Elle `CREATE TABLE IF NOT EXISTS kernel.link` — une table **content-addressed append-only** (mêmes colonnes `id / body / version / superseded_by / created_at` que le substrat S02, sans le forker). **Choix décisif** : les refs `from`/`to` vivent **dans** le corps JSONB, **délibérément pas en clés étrangères** — un lien **stale** ou **absent** doit rester **inspectable** pour que la vague de rouge le montre rouge ; une FK vers la ligne cible **interdirait** la cible dangling, l'exact opposé de ce dont §42 a besoin. Côté **mur** : le rôle agent reçoit **SELECT-only** et se voit **REVOKE** tout écriture — aucune porte d'écriture ouverte ; seul le rôle `aidos` écrit via un ChangeSet approuvé. Elle **n'altère ni ne dépose** aucune table antérieure (S02 / `kernel.authority_graph` S16 intacts).
+
+## Méta
+
+Le comportement de S17 est prouvé par **deux miroirs** (chacun de la bonne nature), tous rouges avant le code (le rouge **est** le `/goal`). **Aucun parcours Gherkin** n'est ajouté : la nature de la péremption d'un lien est la **fixture** (état `heads` → commande `link` → événement `statut`) plus l'**invariant ∀** du `Resolve`/`Validate` — forcer un parcours d'acceptation ici serait un **monstre double-typé** (CLAUDE.md §3).
+
+<Steps>
+  <Step title="Fixture de péremption (le miroir canonique, N2, authority: above)">
+    `back/kernel/links/links_fixture_test.go`, source matérialisée `tests/kernel/links_resolve.fixture.md` — `reflects=kernel.links.Resolve`, `test_kind=fixture`, `cert_language=fixture`, `authority=above`. C'est le **vrai** rouge de KRD §41–§42. Cinq lignes, exemples **réutilisés** de S11 : (1) `heads={createOrder:v3}` + lien `binds checkout-submit@v1 → createOrder@v3` ⇒ **green** (épinglé à la tête) ; (2) même `heads` + `→ createOrder@v2` ⇒ **stale** (version non-tête) ; (3) `heads={}` + `→ createOrder@v3` ⇒ **absent** — **LE critère de done** (un lien vers une version absente est rouge) ; (4) un `to` **non épinglé** (`checkout-button-fixture` sans version) ⇒ `Validate` **rejette** (un lien non épinglé est un monstre) ; (5) un kind **inconnu** (`depends_on`) ⇒ `Validate` **rejette** (ensemble fermé). La fixture est le **lien porteur** : le test la charge ; si elle disparaît, le test casse (pas de pourrissement silencieux en monstre).
+  </Step>
+  <Step title="Propriété rapid (l'invariant ∀, N1, authority: below)">
+    `back/kernel/links/links_property_test.go` — `reflects=kernel.links`, `test_kind=property`, `cert_language=rapid`. Les invariants : `Validate` accepte **ssi** `kind ∈` les six **∧** `from`/`to` sont des refs épinglées `id@version` ; `Resolve` est **déterministe** et `statut ∈ {green, stale, absent}` ; `Resolve == green` **ssi** `heads[to.id]` existe **∧** `== to.version` ; une **tête manquante** ⇒ **toujours** `absent` (un lien vers une version absente est **toujours** rouge) ; `Resolve` **ne panique jamais** ; et le **tie-in content-addressed** (S02) — un lien sérialisé round-trip comme `id == version == Hash(Canonicalize(body))`, et **changer** la version épinglée `to` produit une **version différente** (une nouvelle ligne, jamais une mutation en place).
+  </Step>
+  <Step title="Miroir de persistance (Testcontainers)">
+    `back/kernel/links/migration_roundtrip_test.go` — sur un vrai Postgres : `kernel.link` existe comme table content-addressed append-only ; un lien sérialisé **round-trip** dans le corps `jsonb` et se relit identique (refs `from`/`to` intactes) ; la migration est **expand-only** (S02 intact) ; le rôle agent garde **SELECT-only** — l'`INSERT` agent est **refusé** (le mur). C'est la preuve bout-en-bout que la migration s'applique (convention AIDOS : prouver les migrations par Testcontainers sur `go test`).
+  </Step>
+  <Step title="Miroir de reproductibilité front (fast-check)">
+    `front/web/lib/links.test.ts` — le jumeau front du miroir rapid : la projection `lib/links.ts` (`resolve`/`validate`) résout **exactement** comme le `Resolve`/`Validate` Go (green⇔tête, tête manquante⇒absent, totalité, déterminisme, validation kind-fermé/épinglé, ne lance jamais), plus le graphe d'exemple (les six kinds présents, l'arête `binds` verte sous têtes présentes, **absente / rouge** sous cible absente — le critère de done).
+  </Step>
+</Steps>
+
+## La route Workbench
+
+`front/web/app/link-graph/page.tsx` → **`/link-graph`** : Server Component (intro + tutoriel + exemple), graphe rendu par le client `components/LinkGraph.tsx` qui joue le `resolve` **pur** par arête contre les têtes basculables — aucune I/O, aucune horloge, aucun rng. **Lecture seule** (le mur) : le bouton ne change que le **snapshot** `heads` contre lequel le résolveur tourne, il n'écrit aucune vérité. Thémée (ADR 0010), bilingue (ADR 0011, `next-intl`). E2e `tests/e2e/link-graph.spec.ts` : les six kinds présents, l'arête `binds` verte, et — après bascule — **absente / ROUGE** (le critère de done visible à l'écran).
+
+## Méta-méta
+
+Pourquoi un lien **versionné** et un `Resolve` **pur** ? Parce que la **vague de rouge** (§42) doit être **déterministe et rejouable** : l'ensemble des liens périmés après un bump n'est pas **chassé**, il est **calculé** — la même `(link, heads)` rend toujours le même statut. Mettre la résolution de tête (`heads`) **hors** de `Resolve` (passée en argument) garde la fonction pure et place la **source de la tête** dans un step ultérieur (le DAG, §43) — S17 ne décide pas **où** est la tête, seulement **si** le lien y est épinglé. Et stocker les refs **dans** le corps JSONB plutôt qu'en FK est un choix de **conception du vrai** : §42 a besoin que le lien dangling **survive** pour être montré rouge ; une FK le **refuserait** — on encoderait alors « pas de lien cassé » comme contrainte de base, exactement le silence que KRD proscrit. La péremption est rendue **visible**, jamais interdite.
+
+## La place dans le noyau
+
+S17 est une couche **Kernel** (le substrat des liens). Elle **réutilise** le content-hash de S02 (`records.NewRecord` / `Canonicalize` / `Hash`) sans le forker, **référence** la sémantique par kind de S11/S06, et **prépare** §42 (la vague de rouge, step ultérieur) et §43 (la phase stable — un cut où **tout lien résout** et tous les sensors sont verts). Le mur reste intact : `kernel.link` est SELECT-only pour l'agent ; toute écriture passe par propose → ChangeSet → approbation.

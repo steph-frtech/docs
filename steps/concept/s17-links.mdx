@@ -1,0 +1,41 @@
+---
+title: "S17 · Les liens versionnés — tout pointe vers une version, jamais une identité"
+description: "Une vérité n'est jamais isolée : elle se projette, dérive, contracte, déclenche, lie, se mire. S17 fige les six liens versionnés de KRD §41 (projects_to / derives_from / contracts_with / triggers / binds / mirrors), où chaque lien épingle sa cible par version (id@version) — jamais par identité nue — et un Resolve pur dit si le lien est vert (épinglé à la tête), périmé (stale) ou absent. Un lien vers une version absente est rouge : c'est la graine de la vague de rouge (§42)."
+keywords: ["aidos", "krd", "lien", "link", "versionné", "projects_to", "derives_from", "contracts_with", "triggers", "binds", "mirrors", "id@version", "épinglé", "pinned", "tête", "head", "stale", "périmé", "absent", "vert", "rouge", "vague de rouge", "red wave", "Resolve", "content-addressed", "kernel", "createOrder", "checkout-submit"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S17](/steps/internals/s17-links).</Note>
+
+## En une phrase
+
+S17 livre les **six liens versionnés** de KRD §41 — `projects_to`, `derives_from`, `contracts_with`, `triggers`, `binds`, `mirrors` — où **chaque lien épingle sa cible par une version** (`id@version`), **jamais** par une identité nue, et un `Resolve` **pur** rend le **statut** du lien : **vert** (épinglé à la tête courante), **périmé / stale** (épinglé à une version qui n'est plus la tête) ou **absent** (la cible n'a plus aucune tête). **Un lien vers une version absente est rouge.**
+
+## Le problème que ça résout
+
+Si un lien pointait vers une **identité** (« le lien vers `createOrder` »), il resterait **silencieusement vrai** même quand `createOrder` change de forme — exactement la dérive qu'un système auto-améliorant ne doit jamais s'autoriser. KRD §41 répond : **tout pointe vers une VERSION**. Le consommateur épingle `createOrder@v3`. Le jour où la tête de `createOrder` passe à `v4`, le lien est **périmé** — visible, rouge, **immédiatement**. Et si `createOrder` disparaît entièrement, le lien ne s'évanouit pas : il **pend bruyamment** (absent, rouge). Cette détection est la **graine de la vague de rouge** (§42) : l'ensemble des liens périmés après un bump est exactement ce qu'il faut re-prouver.
+
+## Les idées-clés
+
+<Field name="le lien épingle une version (id@version)">
+  Un lien a un **kind**, un `from` (la couche consommatrice) et un `to` (la cible) — et `from` comme `to` sont des références **épinglées** `id@version`. Un `to` **sans version** (une identité nue) est **refusé** à `Validate` : un lien non épinglé ne peut pas être résolu, c'est un **monstre**. L'épinglage par version **est** tout l'enjeu de §41.
+</Field>
+
+<Field name="les six kinds (un ensemble FERMÉ)">
+  Exactement six (KRD §41) : **projects_to** (une source se projette en projection), **derives_from** (une couche dérive d'une autre), **contracts_with** (une cellule contracte avec une autre, à travers une frontière), **triggers** (un contrôle déclenche une action — sémantique S11), **binds** (une action lie une opération — sémantique S11), **mirrors** (un miroir reflète une couche — KRD §28, « le sixième lien »). Un kind inconnu (`depends_on`…) est **refusé** : l'ensemble est fermé.
+</Field>
+
+<Field name="le statut (vert | stale | absent)">
+  Étant donné les **têtes courantes** (`heads` : pour chaque cible, sa version de tête), `Resolve` rend **exactement un** statut : **vert** (la cible existe **et** le lien est épinglé exactement à sa tête), **périmé / stale** (la cible existe mais le lien est épinglé à une version **qui n'est plus la tête** — rouge), **absent** (la cible **n'a aucune tête** — le lien pend, rouge). Le statut est **calculé**, jamais déclaré.
+</Field>
+
+<Field name="un lien vers une version absente est rouge (le critère de done)">
+  C'est **le** critère de done de S17. Une cible absente ne rend **jamais** un lien vert par défaut : elle le rend **absent / rouge**, inspectable, prêt à amorcer la vague de rouge. Le lien dangling n'est pas **interdit** (ce n'est pas une clé étrangère) — il reste **stockable et visible**, car §42 a besoin de le **montrer** rouge, pas de le refuser.
+</Field>
+
+## Ce que S17 n'est PAS
+
+S17 est le **substrat** des liens + leur **contrôle de péremption** (`Resolve`). Il **ne redéfinit pas** la sémantique par kind (`triggers` contrôle→action, `binds` action→opération, `mirrors` spec→miroir sont la propriété de S11/S06 et seulement **référencés** ici). Il **ne calcule pas** la vague de rouge complète à travers le DAG ni la liste de régénération (§42) — c'est un step ultérieur (`aidos impact`). Il **n'invente aucune cible** : les exemples (`createOrder`, `checkout-submit`, `checkout-button`) sont **réutilisés** des artefacts épinglés de S11.
+
+## À voir dans le Workbench
+
+La route **`/link-graph`** rend les six kinds comme un graphe d'arêtes, chacune étiquetée par son `kind` et sa cible épinglée `to`. Un bouton bascule les **têtes** : sous « tête présente », l'arête `binds` `checkout-submit → createOrder@v3` est **verte** ; sous « cible absente », la même arête devient **ROUGE / absent** — le critère de done, rendu à l'écran, jamais ré-implémenté.
