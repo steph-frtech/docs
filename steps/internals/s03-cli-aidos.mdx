@@ -1,0 +1,112 @@
+---
+title: "S03 · CLI aidos — implémentation"
+description: "Le détail technique du squelette de la CLI aidos : dispatcher pur Run(args, stdout) → exit code en Go (stdlib, pas de framework), registre de contrats déclaré, mirror Godog (un scénario par commande) + property rapid (déterminisme), route Workbench /cli, et la place dans le cliquet KRD."
+keywords: ["aidos", "krd", "implémentation", "cli", "runtime", "go", "godog", "rapid", "déterminisme", "stub", "next-intl", "playwright", "adr-0013"]
+---
+
+<Info>Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S03](/steps/concept/s03-cli-aidos).</Info>
+
+S03 pose l'**entrypoint** du Runtime AIDOS : la CLI `aidos` comme **squelette print-only**. Les cinq verbes cœur — `check`, `impact`, `stable`, `diff`, `explain` — déclarent chacun leur **contrat** et sortent `0`, de façon déterministe. Cette étape livre **la forme et le câblage seulement** : aucune vérité écrite, aucun Postgres touché, aucun serveur MCP, aucun hook — les commandes impriment, elles n'interrogent rien.
+
+## Implémentation
+
+### Le package Go `back/cmd/aidos`
+
+Tout dans `back/cmd/aidos/`, **pur** au cœur — aucune I/O hors de la frontière `main`. Le dispatcher est une fonction totale de ses arguments.
+
+| Élément | Comportement | Référence |
+|---|---|---|
+| `Verb` (type) | le nom canonique d'une commande cœur (`check`/`impact`/`stable`/`diff`/`explain`) | `contract.go` |
+| `Contract` (type) | le contrat déclaré : `Purpose`, `FutureInputs`, `FutureOutputs`, `OwnedBy`, `Status` | `contract.go` |
+| `Contracts() []Contract` | le registre déclaré, en ordre canonique (copie défensive) | `contract.go` |
+| `Run(args []string, stdout io.Writer) int` | le dispatcher **pur** : interprète les args, écrit le contrat, retourne le code de sortie | `main.go` |
+| `renderContract` / `renderHelp` | rendu déterministe d'un contrat / de l'aide, depuis le **même** registre | `main.go` |
+| `main()` | la seule frontière impure : câble `os.Args` / `os.Stdout` à `Run` | `main.go` |
+
+Le registre `contracts` est la **source unique** : il nourrit à la fois le binaire (aide + contrat par commande) et la projection Workbench `/cli`, donc les deux ne peuvent pas diverger. Chaque contrat est **déclaré, jamais inventé** — son sens est ancré dans `back/runtime/CONTEXT.md` (KRDCompiler/`check`, vague-de-rouge/`impact`, phase stable/`stable`, SemanticDiff/`diff`, BlockReason/`explain`) et dans l'étape future qui le livrera (`OwnedBy`). Le `Status` est `"stub"` : comportement non encore implémenté, conformément à la loi d'honnêteté (pas de comportement fabriqué).
+
+```go
+// back/cmd/aidos/main.go — le dispatcher pur
+func Run(args []string, stdout io.Writer) int {
+	if len(args) == 0 {
+		renderHelp(stdout)
+		return exitOK
+	}
+	switch args[0] {
+	case "help", "-h", "--help":
+		renderHelp(stdout)
+		return exitOK
+	}
+	c, ok := lookup(args[0])
+	if !ok {
+		renderHelp(stdout)
+		fmt.Fprintf(stdout, "\nunknown command %q — ...\n", args[0])
+		return exitUsage // 2
+	}
+	renderContract(stdout, c)
+	return exitOK // 0
+}
+```
+
+### Le choix d'outil — stdlib, pas de framework (ADR 0013)
+
+La CLI est dans le **slot Go figé** (CLAUDE.md §3) ; la question n'est que *quelle forme de CLI dans Go*, choisie au début de l'étape, le plus simple gagne. Trois options pesées : `spf13/cobra` (le framework conventionnel — mais une nouvelle dépendance et de la cérémonie pour un stub qui imprime des constantes), `urfave/cli` (plus léger, toujours une dépendance), et le **dispatch stdlib** (`os.Args` + un `switch`, zéro dépendance, fonction pure trivialement déterministe). **Décision : stdlib.** Réutiliser-ne-pas-réinventer (ADR 0007) lu correctement : il n'y a pas de roue à réutiliser pour *imprimer cinq constantes et sortir* — un framework serait *plus* de code et *plus* de surface de déterminisme à garder, pas moins. Le seam `Contracts()` + `Run` permet d'envelopper un framework plus tard sans réécrire la source de vérité du contrat (voir [ADR 0013](/internals/the-stack)).
+
+### La route Workbench `/cli`
+
+`front/web/app/cli/page.tsx` — un panneau **lecture seule** : une carte par commande montrant exactement ce que le binaire imprime (en-tête `aidos <cmd>`, but, entrées/sorties à venir, étape qui le livre, badge `stub`). La source de données est `front/web/lib/cli.ts` — un registre statique déclaré qui **miroite `contract.go` champ pour champ**, couvert par `lib/cli.test.ts`. Le composant `CliTeach` rend l'écran **auto-pédagogique** (loi `ui-completeness` : tutoriel + exemple travaillé). Thémé sur les tokens ADR 0010, bilingue via next-intl (ADR 0011, FR par défaut).
+
+## Méta
+
+Le comportement de S03 est prouvé par **deux mirrors vivants** côté back, plus un e2e Playwright côté front.
+
+<Steps>
+  <Step title="Mirror acceptation (Gherkin / Godog)">
+    `tests/runtime/cli_aidos.feature` — `reflects=runtime.cli`, `test_kind=acceptance`, `cert_language=gherkin`, `liveness=live`, `authority=below`. Un `Scenario Outline`, un exemple par commande (≤ 5) : *Given the aidos CLI is built, When I run "aidos &lt;cmd&gt;", Then it prints the "&lt;cmd&gt;" contract heading And it exits with code 0*. Exécuté par Godog (`cli_bdd_test.go`), qui appelle directement le dispatcher pur `Run`.
+  </Step>
+  <Step title="Mirror invariant (property / rapid)">
+    `contract_property_test.go` — `reflects=runtime.cli.determinism`, `test_kind=property`, `cert_language=rapid`, `liveness=live`. Les propriétés ∀ : pour **tout** vecteur d'arguments (verbe connu, variantes d'aide, jeton inconnu arbitraire), deux exécutions de `Run` produisent un **stdout byte-identique** et le **même code de sortie** ; et tout verbe déclaré sort toujours `0`. C'est le mirror de reproductibilité du mandat déterminisme-first.
+  </Step>
+  <Step title="e2e Playwright (route /cli)">
+    `tests/e2e/cli.spec.ts` — navigation vers `/cli`, les cinq cartes de commande rendent avec leur en-tête `aidos <cmd>`, un bloc de contrat complet (but + entrées + sorties + étape) est visible, et l'écran enseigne (tutoriel à quatre étapes + exemple travaillé). 6/6 verts.
+  </Step>
+</Steps>
+
+**red → green.** Au départ, le dispatcher `Run` n'existait pas : le mirror Godog échouait à la compilation (`undefined: Run`). Ce rouge **est** le `/goal`. Il passe au vert une fois `contract.go` + `main.go` écrits. La sortie est observée déterministe end-to-end (deux runs de `aidos explain` byte-identiques). Le schéma Postgres `mirrors` n'existe qu'à partir de **S06** : ici les mirrors sont **matérialisés en fichiers + tests exécutables**, exactement comme l'autorise l'exception bootstrap.
+
+### Déterminisme
+
+S03 n'a **aucune** surface agent/LLM : tout est fonction pure, donc **code autoritatif**, couvert par un mirror de reproductibilité.
+
+| Capacité | Déterministe ? | Implémentation autoritative | Mirror de reproductibilité |
+|---|---|---|---|
+| Dispatch des verbes (args → contrat) | oui | `Run` (`main.go`) | property rapid → même args ⇒ stdout byte-identique |
+| Rendu d'un contrat | oui | `renderContract` (`main.go`) | mirror acceptation Godog (en-tête + exit 0) |
+| Registre des commandes | oui | `Contracts()` (`contract.go`) | unit `cli_test.go` + `cli.test.ts` (front) → les cinq verbes en ordre |
+| Projection lecture front (TS) | oui | `front/web/lib/cli.ts` | Vitest `cli.test.ts` + e2e `cli.spec.ts` |
+
+Aucune capacité de S03 n'est irréductible : tout est code déterministe, rien n'est délégué à un agent. Le set de commandes est **déclaré, jamais découvert** au runtime — donc l'ordre de l'aide et de la projection `/cli` est stable, jamais dépendant de l'itération d'une map.
+
+## Méta-méta
+
+**Place dans le cliquet.** S03 est l'**entrypoint** du Runtime — une *balle traçante* (tracer bullet) qui valide la forme de la surface CLI avant d'empiler le comportement. Une dent isolée, testée, visualisée, qui laisse une phase stable : les étapes futures remplissent chaque verbe de comportement réel (`explain`→S13, `impact`→S22, `stable`→S23, `diff`→S24, `check`→S45) **sans changer la surface**. Elle s'appuie sur S01/S02 (contenu + enregistrements) sans toucher à leur contrat.
+
+**Le mur.** La CLI à S03 **n'écrit aucune vérité** et ne touche aucun Postgres : le mur est trivialement respecté (il n'y a rien à écrire). La route `/cli` est strictement lecture seule. La clause *action-capable* de `ui-completeness` est satisfaite **par le vide** : il n'y a aucune capacité backend à lier ici, donc aucune capacité headless cachée — il n'y en a pas. Quand un verbe gagnera un comportement écrivant la vérité (jamais avant son étape), ce sera via propose → ChangeSet → approbation, jamais une écriture directe.
+
+**ADR concernés.**
+
+- **ADR 0013** (nouveau) — la CLI `aidos` utilise un **dispatch stdlib**, pas de framework, tant qu'un verbe n'a pas de comportement réel ; réversible par un ADR de suivi le jour où cobra se justifie (le seam `Contracts()` + `Run` le permet).
+- **ADR 0003 / 0007** — slot Go figé ; réutiliser des libs matures *lu correctement* : pas de roue à réutiliser pour un stub print-only.
+- **ADR 0010 / 0011** — pas de serveur MCP ni de migration à cette étape (les commandes impriment, elles n'interrogent pas) ; la route `/cli` est thémée (tokens ADR 0010) et bilingue (next-intl, ADR 0011).
+
+**Anti-écrasement.** S03 n'édite que ses propres fichiers déclarés (`back/cmd/aidos/*`, son mirror `tests/runtime/`, `front/web/app/cli/*`, `front/web/lib/cli.*`, `tests/e2e/cli.spec.ts`) ; le seul fichier partagé touché est `WorkbenchHeader.tsx` (ajout **additif** d'un lien de nav `/cli`) et `playwright.config.ts` (port surchargeable via env, défaut inchangé). Aucun contrat antérieur n'est réécrit.
+
+**Forward-dependencies (OpenQuestions, pas des `residual_issues`).**
+
+- Le **comportement réel** de chaque verbe est différé à son étape propriétaire (`explain`→S13, `impact`→S22, `stable`→S23, `diff`→S24, `check`→S45) ; à S03 le `Status` est `"stub"` et le contrat est déclaré, pas exécuté.
+- La persistance du mirror dans le schéma Postgres `mirrors` est différée à **S06** ; jusque-là le mirror de S03 vit en fichier exécutable.
+- Aucun argument/flag, aucune sous-commande, aucune complétion shell à cette étape — par conception (un stub n'en a pas besoin).
+
+<Card title="Voir le concept de l'étape" icon="lightbulb" href="/steps/concept/s03-cli-aidos">
+  Ce qu'apporte la CLI aidos et ses cinq verbes, sans le code.
+</Card>

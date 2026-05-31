@@ -55,7 +55,9 @@
               "steps/concept/s01-content-store",
               "steps/internals/s01-content-store",
               "steps/concept/s02-krdcore-records",
-              "steps/internals/s02-krdcore-records"
+              "steps/internals/s02-krdcore-records",
+              "steps/concept/s03-cli-aidos",
+              "steps/internals/s03-cli-aidos"
             ]
           }
         ]

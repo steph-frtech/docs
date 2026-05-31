@@ -1,0 +1,66 @@
+---
+title: "S03 · La CLI aidos — cinq verbes, cinq contrats"
+description: "Le squelette de la CLI aidos : les cinq commandes cœur — check, impact, stable, diff, explain — déclarent chacune leur contrat (but, entrées/sorties à venir) et sortent 0, de façon déterministe. Un stub print-only : aucune vérité écrite, aucun Postgres touché."
+keywords: ["aidos", "krd", "cli", "runtime", "check", "impact", "stable", "diff", "explain", "tracer-bullet", "déterministe", "stub"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S03](/steps/internals/s03-cli-aidos).</Note>
+
+## En une phrase
+
+S03 dresse l'**entrypoint** du Runtime AIDOS : la CLI `aidos`, avec ses cinq commandes cœur — `check`, `impact`, `stable`, `diff`, `explain`. À ce stade chacune **déclare son contrat** (son but, et les entrées/sorties qu'elle possédera) et **sort 0** ; rien n'est encore exécuté.
+
+## Le problème que ça résout
+
+Les étapes précédentes ont posé des fondations sans porte d'entrée : un magasin de contenu (S01), les sept enregistrements typés du Kernel (S02). Mais comment un opérateur **parle-t-il** à AIDOS ? Il faut une surface unique, stable, scriptable — une ligne de commande.
+
+S03 câble cette surface en **balle traçante** (*tracer bullet*) : on tire une seule balle de bout en bout — `aidos <commande>` imprime un contrat et termine proprement — pour valider la **forme** de l'entrypoint avant d'empiler le moindre comportement réel. Aucune vérité n'est écrite, aucun Postgres n'est touché : les commandes ne font qu'**annoncer** ce qu'elles deviendront. C'est un squelette honnête, pas une promesse vide.
+
+## Les idées-clés
+
+Le vocabulaire introduit ici, défini simplement.
+
+<Field name="CLI aidos">
+  La **ligne de commande** du Runtime AIDOS — l'outil que l'opérateur lance dans son terminal. À S03, un squelette qui imprime : il déclare cinq commandes et leur contrat, il n'exécute encore rien.
+</Field>
+
+<Field name="contrat d'une commande">
+  La **description déclarée** de ce qu'une commande fait : son nom, son but en termes AIDOS, et les entrées/sorties qu'elle possédera une fois implémentée. Le contrat est **déclaré, jamais inventé** — chaque sens est ancré dans le vocabulaire du Runtime et dans l'étape future qui le livrera.
+</Field>
+
+<Field name="check">
+  **Vérifie le graphe de vérité** — c'est le KRDCompiler : il rejoue le set rouge (les mirrors en échec) et calcule l'état objectif du système. *« Aucun concept KRD n'existe si `aidos check` ne peut pas le vérifier. »* (livré par S45)
+</Field>
+
+<Field name="impact">
+  **Prévisualise la vague de rouge** qu'un changement de noyau déclenche : la cascade de liens périmés et de mirrors qui rougissent, du mirror vers les projections. La liste de travail est *calculée, jamais chassée*. (livré par S22)
+</Field>
+
+<Field name="stable">
+  **Montre la phase stable courante** — la coupe cohérente du DAG où tout lien se résout et tout capteur est vert en même temps. C'est l'état figé sur lequel l'étape suivante s'appuie. (livré par S23)
+</Field>
+
+<Field name="diff">
+  Calcule le **SemanticDiff** entre deux phases : la *vraie nature* d'un changement de noyau (type de changement, rayon de souffle, autorité requise, vague de rouge) — pas un diff textuel à la `git`. (livré par S24)
+</Field>
+
+<Field name="explain">
+  Rend un refus **actionnable** (un BlockReason : code, sévérité, explication, comment réparer) ou la **provenance** d'une vérité. *« Un mur sans BlockReason devient une prison. »* (livré par S13)
+</Field>
+
+<Field name="déterministe">
+  Lancer une commande deux fois produit **exactement la même sortie** : pas d'horloge, pas d'aléatoire, pas d'ordre dépendant de l'environnement. C'est une fonction pure de ses arguments — la base d'un système reproductible.
+</Field>
+
+## Ce que ça vous permet de faire
+
+- **Lancer `aidos <commande>`** et lire le contrat complet de chaque verbe — son but, ses entrées/sorties à venir, et l'étape qui le livrera.
+- **Découvrir les cinq concepts cœur** du Runtime par la porte d'entrée : vérifier, prévoir l'impact, voir le stable, comparer, expliquer.
+- **Compter sur une sortie stable** : la même commande imprime le même contrat à chaque exécution — idéale à scripter, à tester, à projeter à l'écran.
+- **Visualiser la CLI** dans le Workbench, sur la route `/cli` : une carte par commande, montrant exactement ce que le binaire imprime.
+
+Ces cinq verbes sont le **clavier** d'AIDOS : à mesure que les étapes futures les remplissent de comportement réel, l'opérateur garde la même surface — un seul outil, dont le contrat ne se rétracte jamais.
+
+<Card title="Pour aller plus loin — l'implémentation" icon="wrench" href="/steps/internals/s03-cli-aidos">
+  Le dispatcher pur en Go, les mirrors (Godog + property rapid), le déterminisme, et la place dans le cliquet KRD.
+</Card>
