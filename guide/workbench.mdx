@@ -1,0 +1,102 @@
+---
+title: "Le Workbench"
+description: "Le Workbench est votre cockpit de gouvernance : les panneaux que vous lisez, et comment vous approuvez, refusez et tracez chaque décision sur votre vérité."
+keywords: ["aidos", "krd", "workbench", "gouvernance", "changeset", "blockreason", "redwave", "semanticdiff"]
+---
+
+<Note>
+  Côté concept — aucune ligne de code de AIDOS ici. Vous lisez ce que le Workbench vous montre et comment vous l'utilisez pour gouverner votre app.
+</Note>
+
+## En une phrase
+
+Le **Workbench** est l'écran propre à AIDOS — votre **cockpit de gouvernance**. C'est là que vous voyez l'état de votre vérité (le **kernel**, ses **miroirs**, les versions), et c'est le seul endroit d'où vous **renvoyez vos décisions** : approuver ou refuser un **ChangeSet**, lire un **BlockReason**, mesurer l'impact d'un changement. Sans le Workbench, l'autorité se contourne au lieu de décider.
+
+## Ce que le Workbench fait pour vous
+
+Le Workbench ne génère rien et n'écrit aucune vérité par lui-même. Il **surface** ce que les autres sous-systèmes produisent et **route** vos gestes humains vers la vérité sous forme de ChangeSets approuvés. C'est la frontière où vous gardez la main : l'agent écrit le code, vous décidez de ce qui devient vrai.
+
+- Vous **voyez** : le contrat d'exécution, le magasin de contenu, et — à terme — l'impact d'un changement, le graphe d'autorité, la dette du noyau, le DAG des phases, la file de travail rouge.
+- Vous **décidez** : approuver ou refuser un ChangeSet, comprendre pourquoi une écriture a été bloquée, choisir quelle variante promouvoir.
+- Tout est **tracé** : une décision n'est pas une retouche, c'est un ChangeSet enregistré, avec sa provenance (qui a voulu quoi, quand, pourquoi).
+
+<Info>
+  Le Workbench est **bilingue par défaut**, **français d'abord**. C'est la même convention que pour l'app que AIDOS fabrique pour vous — voir [L'app que vous obtenez](/guide/your-app).
+</Info>
+
+## Ce qui existe aujourd'hui
+
+Le Workbench est en construction, tooth par tooth, comme le reste de AIDOS. Deux panneaux sont **vivants** aujourd'hui — tous deux en **lecture seule** : ils projettent la vérité, ils ne l'écrivent pas. Le Workbench tourne en ligne sur [aidos.sagedesk.fr](https://aidos.sagedesk.fr).
+
+<Columns cols={2}>
+  <Card title="/contract — le contrat d'exécution" icon="list-checks">
+    Le **contrat d'exécution** d'une étape : la boucle par étape (ses phases, avec pour chacune le *gate* — purement computationnel, ou humain) et la règle de granularité (ce qui fait qu'une étape est valide : minimale, autonome, visualisable, non destructive, chaînable). Affiché avec sa version ; toute modification passe par un ChangeSet et un changement de version.
+  </Card>
+  <Card title="/store — le magasin de contenu" icon="database">
+    Le **magasin de contenu** de l'Archive : la liste des objets stockés par **hash** (la version *est* le hash — content-addressed), et pour chaque *head* sélectionné, son corps courant plus son **historique** (append-only, du plus ancien au plus récent, avec le hash parent). Vous y lisez comment une vérité a évolué sans que rien n'ait jamais été détruit.
+  </Card>
+</Columns>
+
+Ces deux panneaux montrent déjà le principe central : ce que vous voyez à l'écran est une **projection** de la vérité stockée dans la base, jamais une copie modifiable. Le panneau ne peut pas casser ce qu'il reflète.
+
+## Ce qui vient
+
+Le reste de la surface de gouvernance est **spécifié** (dans la méthode KRD) mais **pas encore implémenté**. Voici ce que le Workbench surfacera, et ce que chaque panneau vous permettra de faire.
+
+<AccordionGroup>
+  <Accordion title="SemanticDiff — ce qu'un changement veut dire" icon="git-compare">
+    <Note>À venir</Note>
+    Avant d'approuver, vous verrez non pas un *diff* de texte mais un **SemanticDiff** : la nature du changement (ajout, affinage, *override*, redéfinition de portée, repondération, dépréciation) et son **rayon d'impact** — ce qu'il propage, ce qu'il risque de casser. C'est le panneau qui vous dit *ce que ça veut dire*, pas seulement *ce qui a changé ligne à ligne*.
+  </Accordion>
+  <Accordion title="L'impact d'un changement — la vague de rouge (RedWave)" icon="waves">
+    <Note>À venir</Note>
+    Quand une vérité change, la **vague de rouge** démarre au miroir et cascade vers les projections : les miroirs qui repassent au rouge, le code qui doit suivre. Le Workbench vous montrera cette vague — l'étendue exacte du travail qu'un changement déclenche — pour que vous décidiez en connaissance de cause.
+  </Accordion>
+  <Accordion title="AuthorityGraph — qui a le droit de décider quoi" icon="shield">
+    <Note>À venir</Note>
+    Le **graphe d'autorité** : qui peut approuver quel changement, sur quelle portée. C'est ce qui garantit qu'une décision est prise par la bonne autorité, et non contournée.
+  </Accordion>
+  <Accordion title="KernelDebt — la dette du noyau" icon="gauge">
+    <Note>À venir</Note>
+    La **dette du noyau** : les fixtures périmées, les mutants survivants, les miroirs orphelins, les miroirs morts (qui n'échouent jamais). Le panneau mesure la dette et propose des réductions minimales — il **suggère**, il ne supprime jamais une vérité ni un miroir tout seul.
+  </Accordion>
+  <Accordion title="Le DAG des phases stables" icon="network">
+    <Note>À venir</Note>
+    Le **DAG** : les phases stables (les nœuds) reliées par les ChangeSets (les arêtes) — branches, annulations, fusions. C'est votre historique navigable : où vous en êtes, ce qui a été tenté, et comment revenir en arrière sans rien détruire.
+  </Accordion>
+  <Accordion title="RedWorkQueue — la file de travail rouge" icon="list-todo">
+    <Note>À venir</Note>
+    La **file de travail rouge** : les miroirs actuellement au rouge — le travail qui reste à passer au vert. C'est votre tableau de bord du *reste à faire* tel que la vérité le définit, pas tel qu'on le déclare.
+  </Accordion>
+</AccordionGroup>
+
+## Comment vous gouvernez
+
+Le Workbench tourne autour de trois gestes. Aujourd'hui, vous pouvez déjà **lire** la vérité (panneaux `/contract` et `/store`) ; les gestes d'**approbation** et de **lecture d'impact** arrivent avec les panneaux ci-dessus.
+
+<Steps>
+  <Step title="Lire l'impact avant de décider">
+    Un changement vous est présenté avec son **SemanticDiff** et sa **vague de rouge** : ce qu'il veut dire, et tout ce qu'il fait bouger. Vous ne décidez jamais à l'aveugle. <Note>À venir</Note>
+  </Step>
+  <Step title="Approuver ou refuser un ChangeSet">
+    Une décision est un **ChangeSet** : il passe de l'état *DRAFT* à *APPLIED* (ou reste refusé). Approuver, c'est laisser la vérité bouger — la spécification et son miroir ensemble, d'un seul bloc. Rien n'est jamais perdu : un changement appliqué peut être *REVERTED* plus tard, et la trace reste. <Note>À venir dans le Workbench ; aujourd'hui, le `/store` vous laisse déjà lire l'historique des versions.</Note>
+  </Step>
+  <Step title="Lire un BlockReason quand une écriture est refusée">
+    Le **mur** empêche l'agent d'écrire la vérité. Quand une écriture est refusée, vous obtenez un **BlockReason** : un code, une sévérité, une explication, et une marche à suivre (`how_to_fix`). Ce n'est pas un mur de pierre opaque — c'est un refus *actionnable* qui vous dit comment passer par la porte officielle (une idée, un miroir, un `/goal`). <Note>À venir dans le Workbench ; le mur lui-même est livré plus tard dans la construction de AIDOS.</Note>
+  </Step>
+</Steps>
+
+<Tip>
+  Le principe à retenir : dans le Workbench, **un override n'est pas une retouche, c'est une décision enregistrée** — un ChangeSet, avec sa provenance et, s'il le faut, son ADR. C'est ce qui rend la gouvernance honnête : on peut toujours répondre à « qui a voulu quoi, quand, pourquoi ».
+</Tip>
+
+## Pour aller plus loin
+
+<Columns cols={2}>
+  <Card title="L'app que vous obtenez" icon="package" href="/guide/your-app">
+    Ce que AIDOS fabrique pour vous : les projections émises (web, mobile, cli, api, db), les données Doltgres, et le bilingue par défaut.
+  </Card>
+  <Card title="Les cinq sous-systèmes" icon="layers" href="/concepts/five-subsystems">
+    Où le Workbench se situe : Runtime, Kernel, Mirror, Archive, Workbench — et comment ils se tiennent.
+  </Card>
+</Columns>

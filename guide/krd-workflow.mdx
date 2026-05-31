@@ -1,0 +1,138 @@
+---
+title: "Le cycle de développement KRD"
+description: "Comment vous construisez votre app avec AIDOS : de l'intention au miroir BDD rouge, au goal, jusqu'à la phase stable verrouillée par le cliquet."
+keywords: ["aidos", "krd", "cliquet", "ratchet", "miroir BDD", "goal", "phase stable", "ChangeSet", "RedWave", "workflow"]
+---
+
+<Note>
+Cette page décrit le cycle de développement **voulu** par AIDOS — la méthode KRD appliquée à **votre** app. AIDOS est en construction : aujourd'hui seuls les panneaux Workbench `/contract` et `/store` sont en ligne. Là où une capacité n'est pas encore livrée, c'est signalé par <Tooltip tip="capacité spécifiée, pas encore implémentée">À venir</Tooltip> ou « en construction ».
+</Note>
+
+## En une phrase
+
+Vous ne demandez jamais à AIDOS de « coder une fonctionnalité » à partir d'un prompt. Vous **déplacez un cran de vérité** — une intention devient un **miroir BDD** rouge — puis AIDOS ramène le code au vert sous cette contrainte, sans jamais casser ce qui était déjà vert. C'est le cliquet : le comportement ne peut qu'avancer.
+
+## La règle d'or
+
+> On ne va **jamais** du prompt au code directement.
+
+```text
+Idée → miroir BDD → goal (set rouge) → noyau / vérité → implémentation → vert → phase stable
+```
+
+Deux propriétaires, une frontière (le **mur**) :
+
+- **Vous possédez la vérité** — ce qui doit être vrai (le comportement, les invariants, les contrats). Lent, délibéré, au-dessus du mur.
+- **AIDOS possède l'implémentation** — comment c'est fait (la structure, le code, les adaptateurs). Rapide, libre, en dessous du mur.
+
+AIDOS écrit le code librement, mais n'écrit **jamais** votre vérité. Pour en savoir plus sur cette frontière, voir [la méthode KRD](/concepts/krd-method).
+
+## Les deux mandats que le cycle respecte
+
+<Columns cols={2}>
+  <Card title="Mandat A — la preuve avant le code" icon="flask">
+    Aucune ligne de code sans un **scénario rouge** écrit d'abord. La vérité sans miroir n'est qu'un vœu. On écrit le miroir, on le regarde échouer, on code jusqu'au vert, on refactore.
+  </Card>
+  <Card title="Mandat B — la vérité hors de portée" icon="lock">
+    Votre vérité et son historique vivent dans le noyau (une base Postgres content-addressed, append-only), pas dans des fichiers épars. AIDOS n'a aucun droit d'écriture dessus.
+  </Card>
+</Columns>
+
+## Le cycle, étape par étape
+
+<Steps>
+  <Step title="L'intention — vous dites ce que vous voulez">
+    Vous partez d'une intention métier, pas d'une demande de code : « un anonyme ne doit jamais voir de contenu privé », « le bouton commander n'est actif que si le panier n'est pas vide ». Une intention, c'est un candidat-vérité — pas encore figé.
+  </Step>
+  <Step title="/grill — préciser jusqu'à ce que ce soit falsifiable">
+    Le geste `/grill` vous interroge : l'intention est-elle trop grosse ? Mélange-t-elle plusieurs sujets ? Métier ou simple préférence ? Une intention floue part en exploration (`/spike`), pas dans le noyau. À la sortie : **une** intention, **≤ 5 scénarios**, le vocabulaire affûté. Voir [les gestes](/guide/gestures).
+
+    <Note>`/grill` est un geste **vous** invoquez aujourd'hui dans votre session de travail ; son intégration complète au Workbench est <Tooltip tip="capacité spécifiée, pas encore implémentée">à venir</Tooltip>.</Note>
+  </Step>
+  <Step title="Le miroir BDD — la preuve, rouge d'abord">
+    L'intention devient un **miroir BDD** : la forme exécutable de la vérité. Trois formes selon la nature du comportement :
+
+    | Nature de la vérité | Forme du miroir |
+    |---|---|
+    | Parcours / acceptation | scénario `Given / When / Then` (Gherkin) |
+    | Invariant (vrai sur **tous** les chemins, ∀) | property test (une propriété) |
+    | Workflow (un chemin précis) | fixture `état → commande → events` |
+
+    Vous l'écrivez **avant** qu'aucun code n'existe. Il est **rouge** : rien ne le satisfait encore. Ce rouge n'est pas un échec — c'est la spec exécutable.
+  </Step>
+  <Step title="/goal — le set rouge est la condition d'arrêt">
+    Le miroir rouge **est** votre goal. Pas un vœu en prose : un test qui définit précisément ce que « atteindre le but » veut dire, et qui passe au vert quand on y est.
+
+    La condition d'arrêt est **non-gameable** et **calculée**, jamais déclarée : *le set rouge passe au vert, sans casser un seul vert existant*. Pas d'auto-évaluation, pas de « je pense que c'est fini ». Le set rouge **est** la todo-list.
+  </Step>
+  <Step title="AIDOS construit — rouge → vert → refactor">
+    AIDOS travaille en dessous du mur, dans le code uniquement. Il descend du miroir le plus externe vers le plus interne, écrit chaque test intérieur juste-à-temps, et fait passer une micro-tranche à la fois au vert avant de refactorer.
+
+    Les **sensors** (types, lint, tests, contrats) sont verts à chaque diff. AIDOS s'auto-certifie sur le déterministe — jamais sur le sens d'une vérité métier.
+  </Step>
+  <Step title="La revue dans le Workbench — vous approuvez via ChangeSet">
+    Le vert computational est nécessaire, pas suffisant : **vous** vérifiez dans le Workbench que le vert *veut dire la bonne chose* et qu'AIDOS n'a pas contourné le miroir. Votre approbation est enregistrée comme un **ChangeSet** — une enveloppe atomique, réversible, tracée (`DRAFT → APPLIED`, append-only). Rien n'est jamais écrasé en silence. Voir [le Workbench](/guide/workbench).
+
+    <Note>Les panneaux `/contract` (le contrat de cycle) et `/store` (le content-store de l'Archive) sont en ligne aujourd'hui. Les panneaux de revue et d'approbation par ChangeSet sont <Tooltip tip="capacité spécifiée, pas encore implémentée">à venir</Tooltip>.</Note>
+  </Step>
+  <Step title="La phase stable — le cliquet verrouille">
+    Quand tous les liens se résolvent et que tous les sensors sont verts simultanément, vous atteignez une **phase stable** : une coupe cohérente du noyau, le « lockfile » de votre vérité. Le **cliquet** verrouille ce cran. Le comportement acquis ne peut plus reculer en silence : la prochaine intention repart de là.
+  </Step>
+</Steps>
+
+## Le schéma à garder en tête
+
+```text
+        VOUS (au-dessus du mur)              AIDOS (en dessous du mur)
+   ┌──────────────────────────────┐    ┌──────────────────────────────┐
+   │  intention                    │    │                              │
+   │     │  /grill (préciser)      │    │                              │
+   │     ▼                         │    │                              │
+   │  miroir BDD  ──── rouge ──────┼───▶│  rouge → vert → refactor     │
+   │     │  (= le goal)            │    │  (sensors verts à chaque diff)│
+   │     ▼                         │    │                              │
+   │  revue + ChangeSet ◀──────────┼────┤  vert computational atteint  │
+   │     │  (vous approuvez)       │    │                              │
+   │     ▼                         │    │                              │
+   │  ╔═══════════════╗            │    │                              │
+   │  ║ phase stable  ║ ◀── le cliquet verrouille le cran             │
+   │  ╚═══════════════╝            │    │                              │
+   └──────────────────────────────┘    └──────────────────────────────┘
+                    │
+                    ▼  la prochaine intention repart d'ici
+```
+
+## Les trois invariants à ne jamais oublier
+
+<AccordionGroup>
+  <Accordion title="Aucune ligne de code sans un scénario rouge d'abord">
+    Le test-first n'est pas une étape *avant* le goal — c'est le goal sous sa seule forme exécutable. Un comportement qui n'a pas son miroir rouge n'existe pas pour AIDOS. C'est ce qui empêche le glissement vers le « vibe coding ».
+  </Accordion>
+  <Accordion title="« Done » est calculé, jamais déclaré">
+    Vous ne pouvez pas forcer « terminé ». La fin est un calcul : set rouge passé au vert **∧** vert antérieur intact **∧** pas de monstre (miroir orphelin ou vérité sans miroir). AIDOS ne note jamais sa propre copie — le juge est déterministe (le miroir + la réalité), hors de sa portée.
+  </Accordion>
+  <Accordion title="Rien ne casse l'acquis">
+    Le cliquet interdit la régression silencieuse, pas le changement. Modifier une vérité existante est légitime : son hash change, tous ses consommateurs virent au rouge — c'est la **RedWave** (vague de rouge), votre worklist. Le changement passe par un ChangeSet versionné, jamais par une réécriture muette.
+  </Accordion>
+</AccordionGroup>
+
+## Modifier une vérité existante
+
+Le cycle ne sert pas qu'à ajouter : il rend le changement honnête. Quand vous changez une vérité déjà figée, son empreinte change et **tous les consommateurs de l'ancienne version virent au rouge automatiquement**. Cette **RedWave** est votre liste de travail : AIDOS réconcilie le code, les miroirs inchangés tiennent, et vous atteignez une nouvelle phase stable. « Les facts changent » est résolu mécaniquement — un override est une décision enregistrée (ChangeSet + raison), pas une édition silencieuse.
+
+## Et ensuite
+
+<Columns cols={2}>
+  <Card title="Les gestes" icon="hand" href="/guide/gestures">
+    Les commandes que vous invoquez : grill, goal, tdd, spike, evolve, et les autres.
+  </Card>
+  <Card title="Le Workbench" icon="gauge" href="/guide/workbench">
+    Vos panneaux et comment gouverner votre vérité depuis l'interface.
+  </Card>
+  <Card title="La méthode KRD" icon="book" href="/concepts/krd-method">
+    Les deux mandats et le mur, expliqués en profondeur.
+  </Card>
+  <Card title="Votre app" icon="rocket" href="/guide/your-app">
+    Les projections émises (web, mobile, CLI, API, base) que vous obtenez.
+  </Card>
+</Columns>

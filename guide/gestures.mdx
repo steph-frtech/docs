@@ -1,0 +1,185 @@
+---
+title: "Les gestes"
+description: "Les gestes (commandes) que vous invoquez pour développer votre app avec AIDOS, regroupés par moment du cycle KRD — préciser l'intention, écrire la preuve, ouvrir un goal, coder, explorer, faire évoluer, fusionner, gouverner."
+keywords: ["aidos", "krd", "gestes", "grill", "goal", "tdd", "spike", "evolve", "miroir", "cliquet", "workbench"]
+---
+
+Développer avec AIDOS, ce n'est pas écrire du code puis espérer. C'est enchaîner des **gestes** : des commandes nommées, chacune avec une intention précise et une place dans le cycle KRD. Vous ne tapez jamais « écris-moi cette feature » ; vous posez une intention, vous la durcissez en preuve, vous ouvrez un **goal**, et vous laissez AIDOS ramener le code au vert sous cette contrainte. Cette page liste les gestes que **vous** invoquez, dans l'ordre où ils servent.
+
+<Note>
+  Les gestes suivent le cycle complet décrit dans [Le cycle KRD](/guide/krd-workflow). Le lieu d'où vous les pilotez, c'est le [Workbench](/guide/workbench).
+</Note>
+
+## Ce qu'est un geste
+
+Un geste est une procédure rejouable : il prend une intention floue ou un artefact (une idée, un miroir, un changeset, une branche) et le fait avancer d'un cran le long du chemin légal `idée → miroir → /goal → approbation humaine`. Aucun geste ne franchit le **mur** (wall) tout seul : un geste **propose**, l'humain **gèle**. C'est la règle qui sépare votre rôle (la vérité) de celui de l'agent (l'implémentation).
+
+Deux familles cohabitent :
+
+- les **gestes interactifs** (`/grill`, `/goal`, `/tdd`, `/spike`…), que vous lancez aujourd'hui depuis votre **session de travail** (le pilotage depuis le Workbench est à venir) ;
+- les **sous-commandes `aidos …`** (la CLI : `check`, `impact`, `stable`, `diff`, `explain`, `trim`, `goal`, `grill`, `spike`, `harvest`, `init`), qui exposeront les mêmes gestes en ligne de commande.
+
+<Warning>
+  AIDOS est encore en construction. Aujourd'hui, seules les étapes S00 et S01 sont livrées : les panneaux Workbench `/contract` et `/store` existent. Les gestes ci-dessous sont décrits tels qu'ils sont **prévus** dans la méthode KRD ; chacun porte une mention **« à venir »** quand son moteur n'est pas encore bâti. La **CLI `aidos`** n'est pas encore implémentée — toutes ses sous-commandes sont « à venir ».
+</Warning>
+
+## Le cycle des gestes, par moment
+
+Les gestes se rangent par moment du cycle. Vous les parcourez à peu près dans cet ordre, mais vous revenez en arrière dès qu'une intention n'est pas encore assez nette.
+
+<Steps>
+  <Step title="Préciser l'intention" icon="comments">
+    Avant tout, on durcit ce que vous voulez et le vocabulaire qui le porte — `/grill`, `classify-truth`, `/context`.
+  </Step>
+  <Step title="Écrire la preuve" icon="vial">
+    On choisit la forme du miroir et on l'écrit **rouge**, avant le code — `derive-mirror`, `write-bdd-scenario`, `view`, `action`.
+  </Step>
+  <Step title="Ouvrir un goal" icon="bullseye">
+    On promeut l'idée vers la vérité en calculant le red set qui devient la condition d'arrêt — `/goal`.
+  </Step>
+  <Step title="Coder jusqu'au vert" icon="code">
+    On ramène le code au vert sous la contrainte du miroir, on régénère les projections — `/tdd`, `project`, `/diagnose`.
+  </Step>
+  <Step title="Explorer quand c'est flou" icon="flask">
+    Quand l'intention n'est pas encore falsifiable, on sort du cliquet pour sonder — `/spike`, puis `harvest`.
+  </Step>
+  <Step title="Faire évoluer & vérifier" icon="arrows-rotate">
+    On explore des variantes sous quarantaine, on prouve la complétude, on apprend de la réalité — `/evolve`, `check-completeness`, `learn`, `improve-codebase-architecture`.
+  </Step>
+  <Step title="Fusionner & gouverner" icon="code-merge">
+    On joint des branches en re-jouant les miroirs, on mesure la dette, on explique les blocages — `merge-semantic`, `semantic-diff`, `trim-kernel`, `explain-block`.
+  </Step>
+</Steps>
+
+## 1. Préciser l'intention
+
+<AccordionGroup>
+  <Accordion title="/grill — durcir le plan contre votre langage et vos décisions" icon="comments">
+    Vous interroge sans relâche sur chaque branche de votre intention jusqu'à un accord partagé, aiguise le vocabulaire ubiquitaire et met à jour la documentation au passage. **Quand :** au tout début d'un pas, avant d'écrire le moindre miroir — vous ne démarrez pas sans lui. *Disponible.*
+  </Accordion>
+  <Accordion title="classify-truth — est-ce une vraie vérité, ou un vœu ?" icon="scale-balanced">
+    Classe une vérité candidate (`truth_kind`, vérifiabilité, scope, autorité) et **route vers `/spike`** toute affirmation non vérifiable au lieu de la laisser approcher du noyau. **Quand :** pour trier une idée avant d'en faire un miroir, pour décider si une affirmation est prouvable. *À venir.*
+  </Accordion>
+  <Accordion title="/context — compiler le contexte minimal d'un goal" icon="crosshairs">
+    Compile un **ContextPack** minimal et branch-aware pour un goal rouge via un routeur déterministe : seulement le noyau porteur, les miroirs rouges, les contrats traversés et la mémoire à portée — jamais le projet entier (« trop de contexte détruit le contexte »). **Quand :** juste avant d'attaquer un goal, pour ne charger que ce qui porte. *À venir.*
+  </Accordion>
+</AccordionGroup>
+
+## 2. Écrire la preuve (le miroir, avant le code)
+
+<AccordionGroup>
+  <Accordion title="derive-mirror — choisir la bonne forme de miroir" icon="shapes">
+    Dérive la **forme** correcte du miroir selon la nature de la vérité (acceptation → Gherkin, invariant → propriété, workflow → fixture) et le **lie** à la vérité qu'il prouve. **Quand :** quand une vérité du noyau doit recevoir sa forme de miroir, avant d'écrire le scénario. *À venir.*
+  </Accordion>
+  <Accordion title="write-bdd-scenario — écrire le miroir rouge" icon="vial">
+    Crée le **miroir BDD rouge** avant toute implémentation (Gherkin/Godog, propriété, ou fixture), stocké dans le schéma `mirrors` et matérialisé pour le runner. Ce miroir rouge **est** le goal. **Quand :** chaque fois qu'un comportement doit être prouvé avant le code (Mandat A). *À venir.*
+  </Accordion>
+  <Accordion title="view — spécifier un écran comme une source" icon="window-maximize">
+    Rédige la **spec-écran** d'un écran (son goal, ses zones, les données affichées) comme une source du Kernel, avec son miroir — la source d'où la projection front est émise, jamais de l'UI à la main. **Quand :** avant de bâtir un écran ou un panneau du Workbench. *À venir.*
+  </Accordion>
+  <Accordion title="action — câbler un bouton à une opération" icon="hand-pointer">
+    Rédige la **control-spec** (bouton : `visible_when` / `enabled_when` / `triggers`) et son **action-spec** (lie le contrôle à une opération, `on_success` / `on_error`) avec leurs fixtures state/event. **Quand :** quand l'existence, la visibilité ou l'effet d'un bouton doit être épinglé comme vérité. *À venir.*
+  </Accordion>
+</AccordionGroup>
+
+## 3. Ouvrir un goal
+
+<AccordionGroup>
+  <Accordion title="/goal — promouvoir une idée vers la vérité (DRAFT)" icon="bullseye">
+    Transforme une idée moissonnée en goal : crée la Vérité + le Miroir comme **changeset DRAFT** et calcule le **red set** non-gameable qui devient la condition d'arrêt du pas. Le geste s'arrête au DRAFT — il n'écrit jamais la vérité et ne déclare jamais « fini » : c'est votre approbation qui gèle. **Quand :** quand vous voulez définir l'objectif et le red set d'un pas. *À venir.* La sous-commande `aidos goal` exposera ce geste en CLI. *À venir.*
+  </Accordion>
+</AccordionGroup>
+
+## 4. Coder jusqu'au vert
+
+<AccordionGroup>
+  <Accordion title="/tdd — ramener le code au vert (red → green → refactor)" icon="code">
+    Boucle test-d'abord, outside-in : le miroir est rouge, vous codez le minimum pour le passer au vert, puis vous refactorez sans casser un vert existant. **Quand :** dès que le red set est posé et qu'il faut écrire le code — vous ne codez pas sans lui. *Disponible.*
+  </Accordion>
+  <Accordion title="project — régénérer une projection depuis une source" icon="wand-magic-sparkles">
+    Lance l'**émetteur déterministe** (un par `kind × target`) pour (re)générer une projection — structs Go (sqlc), DDL Postgres, types TS, ou UI Workbench — depuis une source du noyau. La projection est régénérable, jamais éditée à la main. **Quand :** quand une entité/un contrat a changé et que son code émis doit être reconstruit. *À venir.*
+  </Accordion>
+  <Accordion title="/diagnose — isoler un capteur ou un test qui reste rouge" icon="bug">
+    Boucle de diagnostic disciplinée : reproduire → minimiser → hypothèse → instrumenter → corriger → test de non-régression. **Quand :** avant de clore un pas de code, ou face à un bug tenace / une régression de performance — vous ne finissez pas un pas de code sans lui. *Disponible.*
+  </Accordion>
+</AccordionGroup>
+
+## 5. Explorer quand l'intention est floue
+
+<AccordionGroup>
+  <Accordion title="/spike — sonder, cliquet OFF, code jetable" icon="flask">
+    Ouvre la **zone d'exploration `/spike`** (cliquet OFF, rigueur T0, jetable) pour rendre une intention floue *falsifiable* avant qu'elle n'approche du noyau. Rien ici n'est vérité ; aucune écriture n'échappe au préfixe `/spike`. **Quand :** quand une idée n'est pas encore falsifiable, ou que `/grill` y a routé. *À venir.* (`aidos spike` en CLI — *à venir*.)
+  </Accordion>
+  <Accordion title="harvest — moissonner un spike en idée candidate (DRAFT)" icon="wheat-awn">
+    Clôt la zone jetable en extrayant la **leçon durable** et la propose comme **Idée DRAFT** (un kernel-delta sans version gelée ni miroir). Harvest **propose** ; vous gelez plus tard via `/goal`. **Quand :** après un `/spike`, pour capter un acquis sans le figer en vérité. *À venir.* (`aidos harvest` en CLI — *à venir*.)
+  </Accordion>
+</AccordionGroup>
+
+## 6. Faire évoluer et vérifier
+
+<AccordionGroup>
+  <Accordion title="/evolve — explorer des variantes sous quarantaine" icon="dna">
+    Lance la boucle moyenne (self-play + QD) sur une cellule **dans l'EvolutionSandbox** : génère des variantes qui ne peuvent écrire que branches/rapports/idées, jamais le noyau. Une variante n'est promue dans une niche QD que si elle porte un miroir vert (∧ vert hors-échantillon ∧ approbation d'autorité). `/evolve` **propose**, il ne gouverne jamais. **Quand :** pour explorer automatiquement des variantes d'une opération. *À venir.*
+  </Accordion>
+  <Accordion title="check-completeness — chasser les monstres" icon="magnifying-glass">
+    Vérifie la **loi de complétude** : chaque couche de spec a un miroir vivant, et chaque miroir reflète une vraie vérité. Une vérité sans miroir est un vœu ; un miroir orphelin est un **monstre**. La preuve qu'un miroir est vivant se fait par injection de faute. **Quand :** avant de clore un pas, ou quand le hook Stop signale un trou. *À venir.*
+  </Accordion>
+  <Accordion title="learn — apprendre d'un signal de la réalité" icon="satellite-dish">
+    Transforme un signal de télémétrie ou un incident (une divergence du **RealityMirror**) en **Idée DRAFT avec provenance** — la seule rampe d'accès légale de la réalité de production vers le noyau. La réalité entre comme candidate, jamais comme correctif. **Quand :** quand un capteur saute, qu'un incident tombe, que la prod diverge d'un miroir. *À venir.*
+  </Accordion>
+  <Accordion title="improve-codebase-architecture — approfondir le code émis" icon="diagram-project">
+    Fait remonter les frictions d'architecture et propose des **opportunités d'approfondissement** (rendre des modules superficiels plus profonds), pour la testabilité et la navigabilité par l'IA. **Quand :** avant de passer au pas suivant — vous n'avancez pas sans lui. *Disponible.*
+  </Accordion>
+</AccordionGroup>
+
+## 7. Fusionner et gouverner
+
+<AccordionGroup>
+  <Accordion title="semantic-diff — nommer le changement et son rayon d'impact" icon="code-compare">
+    Classe un changement du noyau (`add` / `refine` / `override` / `rescope` / `reweight` / `deprecate`) et calcule sa **blast radius** — chaque vérité, miroir et projection qu'il perturbe — **avant** de l'appliquer. **Quand :** quand un changeset s'apprête à toucher le noyau, ou pour répondre à « qu'est-ce que ce changement casse ? ». La sous-commande `aidos diff` l'exposera. *À venir.*
+  </Accordion>
+  <Accordion title="merge-semantic — fusionner par le miroir, pas par le diff texte" icon="code-merge">
+    Joint deux branches du DAG en calculant la **coupe fusionnée** et en re-jouant **tous** les miroirs dessus : le miroir est le juge, un diff texte propre ne suffit pas. Tout miroir rouge **bloque** la fusion. **Quand :** quand deux phases stables doivent être jointes, ou pour demander « cette fusion est-elle sûre ? ». *À venir.*
+  </Accordion>
+  <Accordion title="trim-kernel — mesurer la dette du noyau" icon="scissors">
+    Mesure la **KernelDebt** (fixtures périmées, mutants survivants, miroirs orphelins, liveness morte) et **propose** les réductions minimales. Le geste mesure et suggère ; il ne supprime **jamais** une vérité, un miroir ou une fixture tout seul. **Quand :** pour réduire la surface de vérité. La sous-commande `aidos trim` l'exposera. *À venir.*
+  </Accordion>
+  <Accordion title="explain-block — comprendre pourquoi un geste a été refusé" icon="circle-question">
+    Transforme un blocage opaque (refus du mur, capteur rouge, violation de complétude) en **BlockReason** actionnable : `code`, `severity`, `explanation`, `how_to_fix[]`. L'agent n'avale jamais un blocage en silence — il l'explique. **Quand :** quand une écriture est refusée, qu'un hook vire au rouge, ou face à « pourquoi ça a été bloqué ? ». La sous-commande `aidos explain` l'exposera. *À venir.*
+  </Accordion>
+</AccordionGroup>
+
+## La CLI `aidos` (à venir)
+
+Les mêmes gestes seront accessibles en ligne de commande, pour scripter le cycle hors du Workbench. La CLI n'est **pas encore implémentée** — l'inventaire prévu :
+
+| Sous-commande | Ce qu'elle fait | Le geste correspondant |
+|---|---|---|
+| `aidos init` | Initialise un projet AIDOS (le truth-store, les schémas Postgres). | — |
+| `aidos grill` | Durcit l'intention en session. | `/grill` |
+| `aidos goal` | Ouvre un goal et calcule le red set. | `/goal` |
+| `aidos check` | Lance les capteurs / miroirs et calcule l'état vert. | `check-completeness` |
+| `aidos impact` | Calcule le rayon d'impact d'un changement. | `semantic-diff` |
+| `aidos diff` | Classe un changement du noyau et sa blast radius. | `semantic-diff` |
+| `aidos stable` | Pose ou inspecte une **phase stable**. | — |
+| `aidos explain` | Rend un blocage en BlockReason actionnable. | `explain-block` |
+| `aidos trim` | Mesure la KernelDebt et propose des réductions. | `trim-kernel` |
+| `aidos spike` | Ouvre la zone d'exploration jetable. | `/spike` |
+| `aidos harvest` | Moissonne un spike en idée candidate. | `harvest` |
+
+<Note>
+  **À venir.** Le dossier `back/cmd/aidos/` ne contient pour l'instant aucune sous-commande. Cette table décrit l'interface visée, alignée sur les gestes ci-dessus ; rien ici n'est encore exécutable.
+</Note>
+
+## Une règle qui ne change jamais
+
+Quel que soit le geste, le **mur** tient : aucun de ces gestes n'écrit la vérité (les schémas `kernel`, `mirrors`, `fitness`) de sa propre initiative. Ils produisent des brouillons, des classifications, des propositions, des changesets DRAFT. La seule porte vers le noyau reste `idée → miroir → /goal → approbation humaine`. Vous gouvernez ; l'agent rattrape ; le harnais arbitre.
+
+<Columns cols={2}>
+  <Card title="Le cycle KRD" icon="arrows-rotate" href="/guide/krd-workflow">
+    Comment ces gestes s'enchaînent, de l'intention à la phase stable.
+  </Card>
+  <Card title="Le Workbench" icon="display" href="/guide/workbench">
+    D'où vous pilotez les gestes et où vous gouvernez la vérité.
+  </Card>
+</Columns>

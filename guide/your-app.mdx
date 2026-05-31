@@ -1,0 +1,118 @@
+---
+title: "L'app que vous obtenez"
+description: "Ce qu'AIDOS produit dans votre espace de travail : les projections émises (web / mobile / cli / api / db) depuis une source unique, des données versionnées sur Doltgres, et une app bilingue par défaut."
+keywords: ["aidos", "krd", "projection émise", "doltgres", "emitter", "i18n", "bilingue", "source unique"]
+---
+
+<Note>
+  Côté concept — aucune ligne de code d'AIDOS ici. Cette page décrit le **produit** que vous obtenez en utilisant AIDOS, pas les rouages internes de l'OS.
+</Note>
+
+<Warning>
+  **À venir.** AIDOS est encore en construction. Aujourd'hui, seuls les premiers panneaux du Workbench existent (le contrat d'exécution et le store). Les **emitters** qui produisent réellement votre app arrivent à des étapes ultérieures. Cette page décrit fidèlement le produit visé ; chaque capacité non encore livrée est marquée comme telle.
+</Warning>
+
+## En une phrase
+
+Vous décrivez **une seule source** de vérité ; AIDOS en **émet** votre application — son code web, mobile, CLI, API et sa base de données — chez **vous**, jamais dans ce dépôt. Ces sorties s'appellent les **projections émises**.
+
+## D'une source unique à plusieurs projections
+
+Dans AIDOS, vous ne tapez pas du code à la main pour chaque cible. Vous épinglez une **entité** (un contrat de données, une vérité du kernel), et un **emitter** la projette vers chaque cible dont vous avez besoin. Une même entité émet à la fois le typage Go, le DDL Postgres et les types TS — jamais deux fois la même chose, jamais deux définitions à garder synchronisées.
+
+<Info>
+  Le principe est : **une source → plusieurs projections**. La source est la vérité (dans le kernel) ; chaque projection est du code **régénérable**. Vous ne corrigez jamais une projection à la main : vous changez la source, et AIDOS ré-émet.
+</Info>
+
+Les cibles d'émission prévues :
+
+<Columns cols={2}>
+  <Card title="web" icon="globe">
+    L'interface web de votre application (la façade que vos utilisateurs voient).
+  </Card>
+  <Card title="mobile" icon="smartphone">
+    L'application mobile, émise depuis la même source que le web.
+  </Card>
+  <Card title="cli" icon="terminal">
+    Une interface en ligne de commande pour piloter votre app.
+  </Card>
+  <Card title="api" icon="plug">
+    Les contrats d'API (handlers, types) que vos clients consomment.
+  </Card>
+</Columns>
+
+<Card title="db — la base de votre application" icon="database">
+  Le schéma de données de votre app : DDL et migrations, émis depuis la même source que tout le reste.
+</Card>
+
+<Note>
+  **À venir.** Les emitters web / mobile / cli / api / db sont prévus pour des étapes ultérieures du chantier AIDOS (S34 et au-delà). Aujourd'hui, le Workbench ne fait que **projeter en lecture seule** la vérité déjà stockée (panneaux `/contract` et `/store`) ; ni la déclaration d'une entité, ni la génération de l'app ne sont encore actives.
+</Note>
+
+## La base de données de votre app : Doltgres
+
+L'app qu'AIDOS bâtit pour vous a besoin d'une base de données pour ses données d'exécution. La cible privilégiée est **Doltgres** — la version *Postgres-wire* de Dolt, c'est-à-dire **git-for-data** : du versionnement de version (git) appliqué à vos **données**.
+
+<Note>
+  Ne confondez pas deux bases bien distinctes :
+  - **L'AIDOS truth-store** — la base de gouvernance de l'OS lui-même (le kernel, les miroirs, le DAG…). Toujours **Postgres**, hors de votre portée comme de celle de l'agent.
+  - **L'emitted-app datastore** — la base d'exécution de **votre** application, qui vit dans **votre** espace de travail. C'est elle qui tourne sur **Doltgres**.
+</Note>
+
+Ce que Doltgres vous apporte sur les données de votre app :
+
+<Columns cols={2}>
+  <Card title="branch" icon="git-branch">
+    Créer une branche de vos données, comme on branche du code — pour tester une transformation sans toucher la branche principale.
+  </Card>
+  <Card title="merge" icon="git-merge">
+    Fusionner une branche de données dans une autre.
+  </Card>
+  <Card title="diff" icon="git-compare">
+    Voir exactement ce qui a changé entre deux versions de vos données.
+  </Card>
+  <Card title="time-travel" icon="clock">
+    Interroger l'état de vos données telles qu'elles étaient à un instant passé (`as of`).
+  </Card>
+</Columns>
+
+Le choix de Doltgres (plutôt que la variante MySQL de Dolt) tient à **un seul dialecte de bout en bout** : votre base d'app parle le **dialecte Postgres**, exactement comme le truth-store. Concrètement, les mêmes outils de génération servent les deux ; vous restez dans un seul modèle mental, sans coupure MySQL.
+
+<Warning>
+  **À venir, et avec des réserves assumées.** Doltgres est en bêta (pas de version GA, plus lent, pas de pgvector aujourd'hui). C'est tolérable ici car il s'agit des données de **votre produit**, pas du truth-store de l'OS. La cible est **`replaceable`** : pour une app qui n'a pas besoin de versionner ses données, ou qui exige une forte concurrence en écriture, AIDOS peut **retomber sur du Postgres simple**. Si votre app a besoin de vecteurs/embeddings, cette partie passe par un Postgres+pgvector dédié à côté.
+</Warning>
+
+## Votre app est bilingue par défaut
+
+Point important : l'application qu'AIDOS produit pour vous est **bilingue par défaut**. L'internationalisation (**i18n**) n'est pas une option ajoutée après coup — c'est le réglage de départ.
+
+<Field name="Français d'abord">
+  La langue par défaut de votre app est le **français**, avec une **seconde langue** disponible.
+</Field>
+
+<Field name="Chaînes de traduction dans Postgres">
+  Les chaînes traduisibles ne vivent pas éparpillées dans des fichiers : elles sont stockées dans des **tables Postgres**, comme le reste des données.
+</Field>
+
+<Field name="Toute entité textuelle est traduisible">
+  Dès qu'une entité porte du texte destiné à l'utilisateur, ce texte est **traduisible** par construction.
+</Field>
+
+<Note>
+  **À venir.** La convention i18n bilingue (français par défaut + une seconde langue, chaînes en tables Postgres) est définie comme cap du produit ; son émission complète suit le calendrier des emitters.
+</Note>
+
+## Ce que ça vous permet de faire
+
+- Décrire votre app **une fois** (la source) et obtenir **plusieurs projections** cohérentes : web, mobile, cli, api, db — sans jamais les resynchroniser à la main.
+- Garder l'**historique de vos données** comme on garde l'historique du code : brancher, fusionner, comparer, remonter dans le temps, grâce à Doltgres.
+- Livrer une app **bilingue d'emblée**, français d'abord, sans recâbler l'i18n après coup.
+
+<Columns cols={2}>
+  <Card title="Les cinq sous-systèmes" icon="layers" href="/concepts/five-subsystems">
+    Le Workbench, le Runtime qui émet, et où se situe ce que vous obtenez dans l'ensemble.
+  </Card>
+  <Card title="Premiers pas" icon="play" href="/guide/getting-started">
+    Ouvrir le Workbench, charger votre projet et exprimer votre première intention.
+  </Card>
+</Columns>

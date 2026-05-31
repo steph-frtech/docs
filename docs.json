@@ -24,10 +24,13 @@
             ]
           },
           {
-            "group": "Les étapes — le concept",
+            "group": "Développer votre app",
             "pages": [
-              "steps/concept/s00-exec-contract",
-              "steps/concept/s01-content-store"
+              "guide/getting-started",
+              "guide/krd-workflow",
+              "guide/gestures",
+              "guide/workbench",
+              "guide/your-app"
             ]
           }
         ]
@@ -45,9 +48,11 @@
             ]
           },
           {
-            "group": "Les étapes — l'implémentation",
+            "group": "Les étapes",
             "pages": [
+              "steps/concept/s00-exec-contract",
               "steps/internals/s00-exec-contract",
+              "steps/concept/s01-content-store",
               "steps/internals/s01-content-store"
             ]
           }

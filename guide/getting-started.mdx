@@ -1,0 +1,108 @@
+---
+title: "Premiers pas"
+description: "Ouvrir le Workbench, comprendre le partage des rôles, et formuler votre première intention pour développer votre app avec AIDOS."
+keywords: ["aidos", "krd", "getting started", "premiers pas", "workbench", "intention", "goal", "miroir bdd", "kernel", "wall"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour voir comment le dépôt AIDOS se construit, voir [Pour moi → Vue d'ensemble](/internals/overview).</Note>
+
+## En une phrase
+
+Développer une app avec AIDOS, c'est **décider ce qui doit être vrai** de votre produit, laisser l'IA en écrire l'implémentation, et n'avancer qu'une fois chaque vérité prouvée par un miroir. Cette page vous met en route : ce dont vous avez besoin, comment ouvrir le **Workbench**, qui possède quoi, et comment formuler votre première intention.
+
+<Info>AIDOS est en construction. Aujourd'hui, le Workbench expose deux panneaux réels — **/contract** et **/store**. Le reste de la surface décrite ici (les autres panneaux, les gestes, les projections émises) est l'objectif du produit, spécifié mais pas encore entièrement livré. Chaque capacité non encore active est marquée <Note>À venir</Note>.</Info>
+
+## Ce dont vous avez besoin
+
+Pour développer votre app avec AIDOS, vous n'avez pas besoin d'écrire le code vous-même. Vous avez besoin de trois choses :
+
+<Field name="Une intention">
+  Savoir ce qui doit être vrai de votre produit — un comportement attendu, une règle, un écran. Pas le *comment*, mais le *quoi*. C'est la matière première de tout le cycle KRD.
+</Field>
+
+<Field name="Un navigateur">
+  Le Workbench est une application web. Il s'ouvre à l'adresse [https://aidos.sagedesk.fr](https://aidos.sagedesk.fr). Aucune installation locale n'est requise pour le consulter.
+</Field>
+
+<Field name="La posture du KRD">
+  Accepter le partage des rôles : vous possédez la **vérité**, l'agent possède l'**implémentation**, le harnais tient le **mur**. C'est ce contrat qui rend AIDOS sûr. La méthode est détaillée dans [La méthode KRD](/concepts/krd-method).
+</Field>
+
+<Note>La ligne de commande `aidos` (ouvrir un `/goal`, vérifier, marquer une phase stable…) est le second point d'entrée de l'OS, complémentaire du Workbench. À venir : son installation et son usage feront l'objet de leur propre page.</Note>
+
+## Ouvrir le Workbench
+
+Le **Workbench** est le cockpit d'AIDOS : son interface visuelle de gouvernance. C'est là que vous voyez l'état de la vérité et que vos décisions humaines redescendent dans le système. Il est déployé publiquement.
+
+<Steps>
+  <Step title="Aller sur le Workbench">
+    Ouvrez [https://aidos.sagedesk.fr](https://aidos.sagedesk.fr) dans votre navigateur. La connexion est servie en HTTPS.
+  </Step>
+  <Step title="Visiter le panneau /store">
+    [https://aidos.sagedesk.fr/store](https://aidos.sagedesk.fr/store) lit en direct le contenu versionné de l'**Archive** d'AIDOS. C'est votre première fenêtre sur la vérité telle qu'elle est stockée — content-addressed, append-only.
+  </Step>
+  <Step title="Visiter le panneau /contract">
+    [https://aidos.sagedesk.fr/contract](https://aidos.sagedesk.fr/contract) montre le **contrat d'exécution** d'AIDOS : la boucle par étape (ses phases, et pour chacune son *gate* — computationnel ou humain) et la règle de granularité d'une étape. C'est une projection en lecture seule, affichée avec sa version.
+  </Step>
+</Steps>
+
+<Note>À venir — les autres panneaux du Workbench (file de travail rouge, SemanticDiff, graphe d'autorité, DAG des phases stables, dette du kernel) sont spécifiés mais pas encore livrés. Voir [Le Workbench](/guide/workbench) pour la surface visée.</Note>
+
+## Le partage des rôles
+
+C'est le cœur de la posture AIDOS, et la chose à comprendre avant tout. Trois rôles, inséparables, qu'aucun acteur ne franchit.
+
+<CardGroup cols={3}>
+  <Card title="Vous possédez la vérité" icon="user-check">
+    Vous décidez ce qui doit être vrai de votre app. Une vérité n'entre dans le **kernel** (noyau) que par une porte unique — une idée, son **miroir**, un `/goal`, et votre approbation.
+  </Card>
+  <Card title="L'agent possède l'implémentation" icon="robot">
+    L'IA écrit, refactore et réécrit le code librement — les **projections émises** vers le web, le mobile, l'API, la base. Mais jamais la vérité.
+  </Card>
+  <Card title="Le harnais tient le mur" icon="shield-halved">
+    Le harnais (le Runtime) applique mécaniquement le **mur** (*wall*) : il refuse toute tentative de l'agent d'écrire la vérité, avec une explication actionnable.
+  </Card>
+</CardGroup>
+
+Ce partage donne une **liberté asymétrique** : l'IA a une liberté totale sur la structure du code, mais une contrainte stricte sur le comportement. Une fois une vérité prouvée, le **cliquet** (*ratchet*) ne laisse plus jamais le comportement régresser — l'agent peut tout réécrire, jamais redescendre sous une vérité acquise.
+
+<Tip>Conséquence pratique : vous n'avez pas à relire chaque ligne générée par l'IA pour dormir tranquille. Vous gardez le contrôle là où ça compte — sur ce qui doit rester vrai — et le miroir vous signale au **rouge** tout ce qui se casse.</Tip>
+
+## Formuler votre première intention
+
+Vous ne demandez jamais directement à l'IA « code-moi ça ». Le KRD interdit le chemin prompt → code. Une intention devient un comportement prouvé en passant par les étapes ci-dessous. C'est l'amorce du [cycle KRD](/guide/krd-workflow).
+
+<Steps>
+  <Step title="Dites ce qui doit être vrai">
+    Exprimez une seule intention, simplement et en langage métier : « un utilisateur connecté peut archiver une facture ». Pas le *comment*, le *quoi*. C'est votre vocabulaire — la langue ubiquitaire — qui devient celle du système.
+  </Step>
+  <Step title="Affûtez-la (geste /grill)">
+    Le geste `/grill` interroge votre intention : il la confronte au modèle existant, en clarifie les termes, et la découpe en au plus cinq scénarios nets. Une intention floue n'avance pas tant qu'elle n'est pas falsifiable.
+    <Note>À venir comme geste piloté depuis le Workbench. Voir [Les gestes](/guide/gestures).</Note>
+  </Step>
+  <Step title="Écrivez le miroir BDD (il est rouge)">
+    L'intention affûtée devient un **miroir BDD** — un scénario `Étant donné / Quand / Alors`, un invariant, ou une fixture. Écrit *avant* le code, il est d'abord **rouge** : il échoue, parce que rien ne le satisfait encore. Ce rouge *est* votre `/goal`.
+  </Step>
+  <Step title="Ouvrez le /goal et approuvez">
+    Le `/goal` fixe l'ensemble rouge à atteindre : la condition d'arrêt de l'étape. C'est vous qui l'approuvez — c'est la porte unique vers le kernel.
+  </Step>
+  <Step title="AIDOS construit jusqu'au vert">
+    L'agent écrit l'implémentation `rouge → vert → refactor` jusqu'à ce que le miroir passe au **vert**, sans casser aucune vérité déjà acquise.
+  </Step>
+  <Step title="Vous obtenez une phase stable">
+    Une fois le vert atteint et le cliquet engagé, l'étape laisse une **phase stable** : un point de l'histoire sur lequel la suite se construit, et qui ne régressera jamais en silence.
+  </Step>
+</Steps>
+
+<Note>À venir — le cycle complet piloté de bout en bout (grill, goal, construction, phase stable) est l'objectif du produit. Aujourd'hui, vous pouvez observer la vérité déjà stockée via les panneaux **/store** et **/contract**.</Note>
+
+## Et ensuite
+
+<Columns cols={2}>
+  <Card title="Le cycle KRD en détail" icon="arrows-spin" href="/guide/krd-workflow">
+    De l'intention à la phase stable : `/grill` → miroir BDD → `/goal` → AIDOS construit → Workbench → phase stable.
+  </Card>
+  <Card title="Qu'est-ce qu'AIDOS ?" icon="compass" href="/concepts/what-is-aidos">
+    Le produit, la distinction AIDOS ≠ KRD, et les idées-clés : kernel, miroir, cliquet, mur.
+  </Card>
+</Columns>
