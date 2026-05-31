@@ -97,7 +97,9 @@
               "steps/concept/s16-authority-graph",
               "steps/internals/s16-authority-graph",
               "steps/concept/s17-links",
-              "steps/internals/s17-links"
+              "steps/internals/s17-links",
+              "steps/concept/s18-composes-aggregate",
+              "steps/internals/s18-composes-aggregate"
             ]
           }
         ]

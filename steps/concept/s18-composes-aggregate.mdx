@@ -1,0 +1,41 @@
+---
+title: "S18 · La vérité compositionnelle — un tout est vert seulement si son propre miroir et tous ses enfants le sont"
+description: "Une vérité n'est jamais isolée : un tout contient des parties. S18 fige le 7e lien de KRD §108 — composes — et rend la loi de complétude récursive (§109) : un composite est VERT seulement si son propre miroir émergent est vert ET si chaque enfant composes est vert. Un enfant rouge rougit le parent agrégé. Les poids (load-bearing | cosmetic) et le seuil d'activation sont déclarés au-dessus de la ligne, jamais appris (§112) ; un changement cosmetic sous le seuil ne rouvre pas l'invariant du parent."
+keywords: ["aidos", "krd", "composes", "7e lien", "méréologie", "vérité compositionnelle", "agrégat", "aggregate", "récursif", "own_mirror", "load-bearing", "cosmetic", "poids", "weight", "activation_threshold", "seuil", "drill-down", "fall-back-up", "vert", "rouge", "product", "journey", "view", "control", "KRD §108", "KRD §109", "KRD §112", "KRD §114"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S18](/steps/internals/s18-composes-aggregate).</Note>
+
+## En une phrase
+
+S18 livre le **septième lien** de KRD §108 — `composes`, le lien de **méréologie** (un tout contient une partie, épinglé en version et **pondéré** `load-bearing | cosmetic`) — et rend la **loi de complétude récursive** (§109) : un composite est **VERT** seulement si **son propre miroir** est vert **et** si **chaque enfant** `composes` est vert. **Un enfant rouge rougit le parent agrégé.**
+
+## Le problème que ça résout
+
+S06 a posé une complétude **plate** : chaque couche a son miroir vivant. Mais une couche **composite** — un *product* qui contient un *journey*, qui contient une *view*, qui contient un *control* (l'exemple travaillé §114) — n'est pas verte juste parce que son propre miroir l'est : elle est verte seulement si **toutes ses parties** le sont aussi. Sans récursion, un *control* cassé laisserait son *product* parent **silencieusement vert** — exactement la dérive proscrite. §109 répond : `aggregate_complete(L) := own_mirror(L)==VERT ∧ ∀ enfant via composes : aggregate_complete(enfant)`. La vérité **remonte** la chaîne : un défaut dans une feuille rougit chaque ancêtre porteur.
+
+## Les idées-clés
+
+<Field name="composes — le 7e lien (méréologie)">
+  Là où les six liens de S17 relient des **pairs**, `composes` construit le **tout** à partir de ses **parties** : `truth(composite) = Σ truths(parts) + propre vérité émergente`. Il est épinglé en version (les deux extrémités) et **pondéré**. *Le bas est une contrainte que l'agent réconcilie ; le haut est un signal qui peut nécessiter un arbitrage humain.*
+</Field>
+
+<Field name="l'agrégat récursif (§109)">
+  `Aggregate(L)` rend **VERT** ssi `own_mirror(L)` est vert **et** chaque enfant `composes(L)` agrège **VERT**. Un miroir propre rouge, **ou** n'importe quel enfant agrégé rouge, rougit le parent. La loi tient **à chaque nœud** de la chaîne. Le verdict est **calculé**, jamais déclaré.
+</Field>
+
+<Field name="poids & seuil — déclarés, jamais appris (§112)">
+  Chaque arête `composes` porte un **poids déclaré** (`load-bearing` ou `cosmetic`) ; chaque composite porte un **`activation_threshold` déclaré**. Quand des enfants **changent**, l'activation `← Σ poids(enfants changés)` ; l'invariant émergent du parent ne se **rouvre** que lorsque `activation ≥ seuil`. Un changement **cosmetic** reste sous le seuil — *« épingle un défaut, pas un changement »*. Les poids et le seuil sont **humains, au-dessus de la ligne**, jamais inventés ni appris.
+</Field>
+
+<Field name="drill-down & fall-back-up (§110)">
+  Un parent rouge **descend** (drill-down) vers l'enfant rouge qui l'a causé — le chemin **nomme** le coupable. Réciproquement, une feuille rouge **remonte** (fall-back-up) en teintant ses ancêtres porteurs en rouge jusqu'au seuil. La cause d'un rouge est toujours **traçable**, jamais un verdict opaque.
+</Field>
+
+## Ce que S18 n'est PAS
+
+S18 **généralise** la loi existante — *aucun primitif neuf* (KRD §108). Le **kind** `composes` et la **loi récursive** sont la **méthode** ; les **arêtes** parent→enfant, les **poids** et les **seuils** d'un vrai projet sont des **vérités humaines** au-dessus de la ligne — S18 n'en **invente aucune** (les valeurs montrées sont des exemples). Il n'érige **pas** de nouveau hook (le Stop de S12 reste la barrière non-contournable ; S18 le nourrit avec `Aggregate(L)` au lieu du verdict plat — un ChangeSet sur l'entrée de S12, pas un second hook), n'expose **pas** de nouvelle capacité MCP, et ne calcule **pas** la propagation pondérée bidirectionnelle complète (c'est S19).
+
+## À voir dans le Workbench
+
+La route **`/truth-tree`** rend la chaîne de composition §114 (`product → journey → view → control` + une feuille cosmetic). Chaque nœud montre **son propre miroir** ET son **agrégat** récursif ; chaque arête montre son **poids** `composes` et sa **version épinglée** ; chaque composite montre son **seuil**. Un bouton bascule le scénario : tout vert ⇒ le *product* est **VERT** ; la feuille porteuse *control* en **ROUGE** ⇒ la remontée rougit *view*, *journey*, *product*, et le drill-down depuis le *product* **nomme** le *control* — le critère de done, rendu à l'écran. Un changement cosmetic sous le seuil laisse le *product* **VERT**.
