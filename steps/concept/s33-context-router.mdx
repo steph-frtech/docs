@@ -1,0 +1,45 @@
+---
+title: "S33 · ContextRouter / ContextPack — le contexte minimal compilé depuis le red-set"
+description: "S33 livre le ContextRouter de KRD §144 : un ALGORITHME (pas un prompt, pas un RAG) qui compile, depuis le red-set d'un goal (S22, jamais recalculé) et le sous-graphe affecté du ContextGraph (§142), le ContextPack MINIMAL (§143) — seulement le kernel porteur, les miroirs rouges qui définissent la condition d'arrêt, les contrats qui FRANCHISSENT une frontière de bounded context, et la mémoire scopée (confiance ≥ repeated, ni stale ni out_of_scope ni unapproved — §119.3). Branch-aware et content-addressé. La loi de §141 : trop de contexte détruit le contexte. Le pack interdit TOUJOURS /kernel/** et /mirror/** (le mur)."
+keywords: ["aidos", "krd", "ContextRouter", "ContextPack", "contexte minimal", "minimal context", "red-set", "compile context", "compiler le contexte", "algorithme pas un prompt", "algorithm not a prompt", "pas un RAG", "not a RAG", "affected_subgraph", "sous-graphe affecté", "ContextGraph", "branch-aware", "bounded context", "crossed contract", "contrat franchi", "PaymentGateway", "load-bearing", "porteur", "stale", "out_of_scope", "unapproved", "cosmetic-below-threshold", "progressive disclosure", "§119.3", "§141", "§142", "§143", "§144", "§145", "trop de contexte détruit le contexte", "stop_condition", "content-addressed", "hash", "le mur", "the wall", "forbidden_paths", "S22", "déterministe", "deterministic"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S33](/steps/internals/s33-context-router).</Note>
+
+## En une phrase
+
+S33 livre le **`ContextRouter`** (KRD §144) : un **algorithme** — pas un prompt, pas un RAG — qui **compile** depuis le **red-set** d'un goal (S22) le **`ContextPack`** **minimal** (§143) dont l'agent a besoin pour le travailler : seulement le **kernel porteur**, les **miroirs rouges** qui définissent la condition d'arrêt, les **contrats qui franchissent** une frontière de bounded context, et la **mémoire scopée**. Jamais tout le projet.
+
+## Le problème que ça résout
+
+**« Trop de contexte détruit le contexte »** (KRD §141). Donner le projet entier à l'agent le fait **inventer** : il se noie, perd le fil, hallucine. La réponse n'est pas un meilleur prompt ni un RAG plus malin — c'est de **compiler** un pack court et traçable depuis le **graphe de vérité affecté**. On ne donne pas le projet à l'agent ; on lui compile **exactement ce qui porte** le goal courant.
+
+## Les idées-clés
+
+<Field name="Un ALGORITHME, pas un prompt" type="déterministe, sans LLM">
+  Le router est une **fonction pure** `Compile(goal, branch, graph) → ContextPack` : `red ← red-set(goal)` (réutilisé de S22, **jamais recalculé**) → `affected_subgraph` → inclure le kernel porteur + les miroirs rouges + les contrats franchis + la mémoire scopée. Pas d'I/O, pas d'horloge, **aucun LLM**. Même entrée ⇒ pack **byte-identique** et **hash identique**.
+</Field>
+
+<Field name="Minimal — seulement ce qui porte" type="le red-set, pas le projet">
+  Les `affected_layers` sont **exactement** le red-set ; un nœud qui n'est pas porteur du red-set **n'entre pas**. Un voisin d'un **autre bounded context** n'apparaît **que** comme son **contrat PUBLIC franchi** — jamais comme couches/miroirs internes. Un goal *checkout* ne reçoit **pas** les internes *billing*.
+</Field>
+
+<Field name="Progressive Disclosure" type="forbidden: stale, out_of_scope, unapproved">
+  La mémoire est **filtrée** (KRD §119.3) : aucune mémoire **stale**, **hors-scope** ou **non approuvée** n'entre jamais ; toute mémoire incluse a un **scope qui recouvre** le goal et une **confiance ≥ repeated**. Chaque exclusion est **étiquetée** par son pourquoi : `cross-BC`, `stale`, `out-of-scope`, `cosmetic-below-threshold`.
+</Field>
+
+<Field name="Le mur, rendu comme une frontière" type="/kernel/** /mirror/** toujours interdits">
+  Tout pack porte des `boundaries` dont les `forbidden_paths` contiennent **toujours** `/kernel/**` et `/mirror/**` — quel que soit le goal. Le router **lit** le ContextGraph ; il n'écrit **aucune** vérité. Le pack est l'**antidote à la dérive de contexte** : où tu es, quoi faire, ce que tu **ne peux pas** toucher, comment tu **sais** que c'est fini (`stop_condition`).
+</Field>
+
+<Field name="Branch-aware & content-addressé" type="le cut dépend de la branche, sans fuite">
+  Le cut **dépend de la branche** : changer de branche peut changer le cut, mais un nœud d'**une autre branche ne fuit jamais**. Le pack est **content-addressé** (réutilise le schéma de hash S01/S02) et **rejouable** : packs versionnés (§144).
+</Field>
+
+## Le critère « fait »
+
+Compiler le goal `checkout-apply-promo` sur `main` donne un pack qui **inclut** le sous-graphe checkout, ses miroirs rouges et le contrat franchi `PaymentGateway@hash`, et qui **exclut prouvablement** `billing:invoice-internals` (cross-BC), `billing-internal@hash` (cross-BC), la règle périmée `old-promo-rule` (stale) et `refund-window` (out-of-scope). **Un goal checkout ne reçoit pas les internes billing ; la mémoire périmée est exclue.**
+
+## Ce que S33 ne fait pas
+
+Pas de dérivation du schéma `context` (le ContextGraph dérivé est une étape de persistance distincte ; S33 lit/mocke la vue). Pas de `ContextGraphDecision` (le plan de réutilisation, c'est S32). Pas de scoring mémoire / embeddings (la mémoire arrive **pré-scorée** ; le scoring est l'étape Archive `/brain`). Pas de codegen (un pack est un artefact compilé, rien à émettre).

@@ -1,0 +1,57 @@
+---
+title: "S33 · ContextRouter / ContextPack — implémentation, méta, méta-méta"
+description: "Le journal d'implémentation de S33 : le package Go back/runtime/context (le type ContextPack §143 + la fonction pure Compile(goal, branch, graph) §144, sans I/O, sans horloge, sans LLM, content-addressée via le schéma de hash S01/S02), le serveur MCP read-only back/mcp/context (context_compile / context_pack_get / context_graph_query — aucun GRANT d'écriture de vérité, le mur), les miroirs (fixture N2 ContextRouter + propriété rapid minimalité/exclusion/déterminisme), le twin déterministe lib/context-pack.ts (fast-check) et la route Workbench /context-pack avec son e2e Playwright. Les trois couches Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "S33", "ContextRouter", "ContextPack", "back/runtime/context", "Compile", "package Go", "pure", "minimal", "red-set", "S22", "affected_subgraph", "ContextGraph", "branch-aware", "cross-BC", "crossed contract", "stale", "out_of_scope", "unapproved", "cosmetic-below-threshold", "progressive disclosure", "§119.3", "§141", "§142", "§143", "§144", "§145", "content-addressed", "hash", "Canonicalize", "S01", "S02", "le mur", "the wall", "forbidden_paths", "MCP", "back/mcp/context", "context_compile", "context_pack_get", "context_graph_query", "read-only", "SELECT-only", "fixture", "rapid", "property", "twin", "lib/context-pack.ts", "fast-check", "/context-pack", "Playwright", "Workbench", "determinism-first", "skill /context"]
+---
+
+<Note>Côté implémentation — le journal de construction. Pour le concept sans code, voir [Pour les futurs utilisateurs → S33](/steps/concept/s33-context-router).</Note>
+
+## Couche 1 — Implémentation
+
+### Le package Go `back/runtime/context`
+
+Le cœur est une **fonction pure** :
+
+```go
+func Compile(goal Goal, branch string, graph ContextGraph) ContextPack
+```
+
+Le `ContextPack` est **exactement** celui de KRD §143 — aucun champ inventé : `goal`, `branch`, `affected_layers`, `active_kernel` (`mirrors` / `invariants` / `contracts`), `boundaries` (`bounded_context` / `allowed_paths` / `forbidden_paths`), `memory` (`relevant_lessons` / `recent_incidents` / `glossary_terms`), `skills`, `tools`, `stop_condition`, plus `excluded` (chaque nœud écarté avec son `reason`) et `hash`.
+
+Le pipeline suit §144, dans l'ordre :
+
+1. `red ← goal.RedSet` — **réutilisé de S22, jamais recalculé**.
+2. `affected_layers` ← les couches du red-set qui existent sur la branche, dans le bounded context du goal, et **porteuses** (un nœud d'une autre branche ne fuit pas ; un voisin cross-BC est exclu `cross-BC` ; un cosmétique sous le seuil est exclu `cosmetic-below-threshold`).
+3. `active_kernel.mirrors` ← les miroirs du BC du goal (les rouges définissent la condition d'arrêt) ; un miroir voisin est exclu `cross-BC`.
+4. `active_kernel.contracts` ← les contrats du BC du goal **plus** le contrat **PUBLIC franchi** d'un voisin ; un contrat **interne** voisin est exclu `cross-BC`.
+5. `memory` ← scope qui recouvre **et** confiance ≥ `repeated` **et** non `stale` **et** approuvé (§119.3) ; sinon exclu avec son `reason`.
+6. `boundaries.forbidden_paths` ← **toujours** `/kernel/**` et `/mirror/**` (le mur, sur **chaque** pack).
+7. `stop_condition` ← la condition canonique non vide.
+8. `hash` ← content-addressé sur l'encodage canonique (réutilise `records.Canonicalize` + `records.Hash`, **non forké**).
+
+**Déterminisme-first** (CLAUDE.md §6/§8) : pas d'I/O, pas d'horloge, **aucun LLM** — le router est un **algorithme**. La mémoire arrive **pré-scorée** dans la vue ; le router ne fait que **filtrer**.
+
+### Le serveur MCP `back/mcp/context` (read-only — le mur)
+
+Trois outils, un par op : `context_compile(goal, branch) → ContextPack{+hash}`, `context_pack_get(hash)` (rejoue un pack — packs versionnés), `context_graph_query(by_goal | by_bc | by_branch | by_term)`. Le serveur tient un **GRANT lecture seule** sur le schéma dérivé `context` et **aucun** GRANT sur `kernel`/`mirrors`/`fitness`. Le schéma `context` dérivé n'étant pas encore posé, le serveur compile sur la vue déterministe `ExampleGraph` (la vue mockée read-only, §6) — quand le schéma atterrit, on échange `newView`, les outils et le mur tiennent.
+
+### Les miroirs (la preuve, écrite avant le code)
+
+- **Fixture N2** `tests/runtime/context_router.fixture.md` (matérialisée) + `context_router_fixture_test.go` : A inclut le sous-graphe checkout ; B le critère **fait** (billing internals + contrat interne + mémoire stale/out-of-scope exclus, étiquetés) ; C déterminisme + content-addressing ; D branch-no-leak ; E le mur sur chaque pack.
+- **Propriété rapid** (`authority: below`) : minimalité, exclusion staleness/scope, mur-comme-frontière, déterminisme/content-addressing, branch-no-leak, `stop_condition` présent, totalité (jamais de panique).
+- **Twin déterministe** `front/web/lib/context-pack.ts` + `context-pack.test.ts` (fast-check) : les **mêmes** invariants, côté Workbench.
+
+### La route Workbench `/context-pack` + e2e Playwright
+
+`front/web/app/context-pack/page.tsx` rend le pack compilé : panneau **Inclus**, panneau **Exclu** (chaque item étiqueté `cross-BC` / `stale` / `out-of-scope` / `cosmetic-below-threshold`), bande **Frontières** (`allowed_paths` + le `/kernel/** /mirror/**` interdit). Action-capable : on choisit la branche, on clique COMPILER, le **même** `compile()` pur tourne. `tests/e2e/context-pack.spec.ts` prouve les inclusions, le critère fait rendu, et le mur.
+
+## Couche 2 — Méta (pourquoi ces choix)
+
+- **Pourquoi un algorithme et pas un prompt/RAG ?** §141 : trop de contexte détruit le contexte ; un prompt plus gros aggrave le mal. Le déterminisme-first (CLAUDE.md §8) impose : ce qu'une fonction pure peut faire **doit** être du code. Router = sélection sur un graphe = pure fonction.
+- **Pourquoi réutiliser le red-set de S22 ?** Le red-set est la **vérité de ce qui est rouge** ; le recalculer dupliquerait une vérité et créerait une dérive. Le router **consomme** S22, il ne le refait pas.
+- **Pourquoi un voisin n'entre que comme contrat PUBLIC franchi ?** §145 (le ContextMap exécutable) : un bounded context expose un contrat ; ses internes restent privés. Un goal checkout qui verrait les internes billing **inventerait** des couplages — l'anti-pattern que §141 combat.
+- **Pourquoi le mur sur chaque pack ?** Le pack dit « ce que tu ne peux pas toucher » (§143). Rendre `/kernel/** /mirror/**` interdits sur **tout** pack, indépendamment du goal, fait du mur une **frontière du contexte** — pas une règle qu'on pourrait oublier.
+
+## Couche 3 — Méta-méta (la loi sur la loi)
+
+Le ContextRouter est l'incarnation de **« on ne donne pas le projet à l'agent, on compile un pack depuis le graphe de vérité affecté »**. C'est la **vérticalité du déterminisme** appliquée au contexte : la décision « que vois-tu » n'est pas confiée à un jugement, elle est **calculée** sur la vérité (le ContextGraph dérivé), **rejouable**, **content-addressée**. Un fait manquant devient une **cicatrice** : on ajoute une **règle de routage** ou un **enregistrement mémoire**, **jamais** une instruction vague — le pack est lui-même versionné. Le router **lit** la vérité pour décider ce qu'il **surface** ; il n'en **écrit** aucune. Cette asymétrie — un consommateur Runtime qui lit kernel/mirrors mais ne peut **prouvablement** pas les écrire, et dont le pack rend ces zones interdites — **est** le contrat.
