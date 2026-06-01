@@ -1,0 +1,48 @@
+---
+title: "S28 · Les gestes d'exploration — /grill, /spike, /harvest"
+description: "S28 livre les trois gestes §75 de l'étage d'entrée comme une capacité du Runtime, par-dessus le cycle de vie des idées (S27). /grill challenge l'intention d'une idée AU-DESSUS du mur et la route sur un verdict CLOS à trois valeurs : sharp (falsifiable maintenant) → grilled, saute le spike (KRD §132) ; fuzzy (pas encore falsifiable) → spiking, la branche floue ; bad (mauvaise idée) → rejected, tracée (KRD §118). /spike est la zone CLIQUET OFF, rigueur T0, JETABLE (KRD §84) dont chaque écriture est confinée au préfixe /spike — une écriture qui s'échappe vers /kernel ou /src est refusée par un BlockReason actionnable SPIKE_WRITE_ESCAPES_ZONE (how_to_fix : confine_write_to_/spike), et un spike ne gradue JAMAIS directement vers le noyau (KRD §60.x). /harvest extrait l'intention découverte d'un spike et PROPOSE un delta-noyau comme DRAFT Truth — un candidat qui n'a toujours NI version gelée NI miroir ; harvest PROPOSE, il ne gèle pas, n'écrit ni le noyau ni un miroir (une tentative directe ⇒ HARVEST_CANNOT_FREEZE), le gel est un /goal ultérieur séparé. S28 prouve : une idée floue va au spike ; harvest produit une DRAFT Truth. Pas de /goal/gel/miroir, pas de /evolve/QD, pas de codegen, pas de nouveau schéma (réutilise ideas)."
+keywords: ["aidos", "krd", "exploration", "gestes", "geste", "/grill", "grill", "griller", "/spike", "spike", "jetable", "throwaway", "/harvest", "harvest", "récolter", "verdict", "sharp", "fuzzy", "bad", "verdict clos", "draft", "grilled", "spiking", "harvested", "rejected", "cliquet OFF", "rigueur T0", "T0", "zone d'exploration", "confinement", "confiné", "préfixe /spike", "SPIKE_WRITE_ESCAPES_ZONE", "HARVEST_CANNOT_FREEZE", "BlockReason", "actionnable", "how_to_fix", "confine_write_to_/spike", "DRAFT Truth", "vérité candidate", "delta-noyau", "delta noyau", "proposer", "PROPOSE", "pas de version", "pas de miroir", "sans gel", "le gel est un /goal", "pas de graduation directe", "le mur", "lecture seule", "provenance", "tracé", "append-only", "intention floue", "intention nette", "falsifiable", "pas falsifiable", "tracer bullet n'est pas un spike", "/exploration", "Grill & Spike Lab", "KRD §60.x", "KRD §75", "KRD §84", "KRD §116", "KRD §118", "KRD §119", "KRD §132", "KRD §44.5"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S28](/steps/internals/s28-exploration-gestures).</Note>
+
+## En une phrase
+
+S28 fait des trois **gestes d'exploration** §75 — `/grill`, `/spike`, `/harvest` — une **machine de gestes typée et traçable** par-dessus le cycle de vie des idées (S27) : `/grill` **challenge** une intention au-dessus du mur et la **route** (nette → grilled, floue → spiking, mauvaise → rejected), `/spike` est la zone **cliquet OFF, T0, jetable** dont les écritures sont **confinées à `/spike`**, et `/harvest` **extrait** l'intention découverte et **propose** une **DRAFT Truth** — un candidat qui n'a **ni version gelée ni miroir**, jamais un gel.
+
+## Le problème que ça résout
+
+Le danger : aller **du désir flou au noyau directement**. Quelqu'un dit « quelque chose autour de retries plus intelligents, pas sûr comment ». Ce n'est **pas encore falsifiable** : on ne peut pas en écrire le test rouge. Le graver dans le noyau serait un **vœu** — un monstre. Mais le jeter serait perdre une intention réelle. KRD §75/§84 tranche : entre l'intention floue et la vérité, il y a une **rigueur graduée**. On **grille** l'intention pour savoir si elle est nette ou floue ; si elle est floue, on entre dans une **troisième zone, `/spike`** (KRD §60.x) — **cliquet OFF**, rigueur **T0**, code **jetable** : ici « KRD serait net-négatif », on explore vite et sale pour rendre l'intention falsifiable. Mais le spike **ne gradue pas directement** vers le noyau (KRD §60.x) : on **récolte** (`/harvest`) l'intention découverte, qui devient une **DRAFT Truth re-construite** — un candidat à promouvoir plus tard, **proprement**, par son miroir. Le spike reste jetable, le noyau reste prouvé.
+
+## Les idées-clés
+
+<Field name="/grill route sur un verdict clos à trois valeurs (§75 / §118 / §132)" type="sharp → grilled · fuzzy → spiking · bad → rejected">
+  `/grill` challenge l'intention **au-dessus du mur** et la route sur **exactement trois** verdicts (pas de quatrième) : **sharp** — falsifiable **maintenant**, route `draft → grilled` et **saute le spike** (KRD §132 : « finalement je veux un code promo » → grill (clair) → harvest) ; **fuzzy** — pas-encore-falsifiable, route `draft → spiking` (la branche floue) ; **bad** — mauvaise idée, route `draft → rejected`, **tracée** (jamais effacée). Le verdict et la provenance sont **enregistrés**.
+</Field>
+
+<Field name="/spike est cliquet OFF, T0, jetable (§84 / §60.x)" type="la zone d'exploration où KRD serait net-négatif">
+  Une intention floue entre dans `/spike` : le **cliquet est OFF** (la marche-cliquet ne s'applique pas — on a le droit de casser, de revenir en arrière), la rigueur est **T0** (le niveau le plus bas — sondes jetables, pas de miroir exigé), et tout y est **throwaway**. C'est volontaire : sur une intention pas encore falsifiable, imposer KRD serait **net-négatif**. On sonde pour **apprendre**, pas pour livrer.
+</Field>
+
+<Field name="Les écritures d'un spike sont confinées à /spike (§84)" type="SPIKE_WRITE_ESCAPES_ZONE — le spike ne fuit pas">
+  Un spike est jetable : il **ne doit pas fuir** dans `/kernel` ni `/src`. Tant qu'une idée est `spiking`, **chaque** écriture est refusée **sauf** si son chemin est sous le préfixe `/spike`. Une écriture vers `/spike/retry-probe.go` est **permise** ; une écriture vers `/kernel/retry.policy` est **bloquée** par un `BlockReason` actionnable : `code = SPIKE_WRITE_ESCAPES_ZONE`, `how_to_fix` contient `confine_write_to_/spike`. Le confinement tient pour **tous** les chemins.
+</Field>
+
+<Field name="/harvest PROPOSE une DRAFT Truth, il ne gèle pas (§60.x / §116 / §118)" type="un delta-noyau candidat, pas une vérité">
+  `/harvest` extrait l'intention **découverte** d'un spike et produit un **delta-noyau proposé** marqué **DRAFT** (statut `harvested`) : un candidat qui a **toujours** `proposes` + `intent` + `provenance`, mais **toujours** **ni version gelée, ni miroir**. Harvest **propose** ; il ne **gèle pas**, n'écrit **pas** le noyau, n'écrit **pas** de miroir. Une tentative directe est refusée par `HARVEST_CANNOT_FREEZE`. Le gel — écrire le miroir = le `/goal` — est un geste **ultérieur séparé** (KRD §116/§132). L'IA esquisse, l'humain approuve, jamais l'inverse.
+</Field>
+
+<Field name="Un spike n'est PAS un tracer bullet (CONTEXT.md _Avoid_)" type="jetable ≠ câblage réel de bout en bout">
+  Ne confondez pas : un **tracer bullet** (ou walking skeleton) est un **vrai** câblage de bout en bout que l'on **garde** et que l'on étoffe. Un **spike** est **jetable** — on l'explore puis on le **jette**, en n'en gardant que la **leçon** (par harvest). Le code du spike ne gradue **jamais** directement vers le noyau.
+</Field>
+
+## Ce que S28 ne fait pas (dents ultérieures)
+
+- **Pas de /goal / gel / écriture de miroir** : promouvoir une DRAFT Truth en vérité noyau gelée et miroitée est un geste **ultérieur séparé** (`/goal` écrit le miroir = le gel). Harvest s'arrête à une **proposition**.
+- **Pas de /evolve / self-play / QD** : la boucle moyenne sur une cellule (variantes, archive de niches) est une dent Runtime ultérieure ; ici `/spike` est la zone d'exploration **manuelle**, jetable, seulement.
+- **Pas de codegen** : il n'y a aucune projection à émettre depuis une idée ou un spike.
+- **Pas de nouveau schéma Postgres** : le record `Idea` vit déjà dans le schéma `ideas` (S27) ; S28 le **réutilise**, il ne forke pas un schéma `exploration`.
+
+## Le mur
+
+Les gestes sont la machinerie du **harnais au-dessus du mur** (CLAUDE.md §2) : `/grill`, `/spike`, `/harvest` **ne renvoient que des valeurs** — la persistance de la ligne `Idea` et de la proposition passe par le MCP `idea-intake` (le rôle CLI `aidos` sur le schéma `ideas`), **jamais** l'agent. Le moteur des gestes **n'écrit rien** : `/harvest` ne gèle pas, n'écrit ni le noyau ni un miroir (`HARVEST_CANNOT_FREEZE`), et tant qu'une idée est `spiking` tout write hors `/spike` est refusé (`SPIKE_WRITE_ESCAPES_ZONE`). L'écran **/exploration** est en **lecture seule** : il **rejoue** les mêmes verdicts purs que le moteur Go (la route, le confinement, la forme DRAFT de la proposition) et **n'écrit aucune** vérité. La promotion d'une DRAFT Truth en vérité noyau passe par le **rôle writer `aidos`** via `/goal` — jamais l'agent, jamais l'écran. C'est l'**asymétrie** qui est le contrat : on **propose** au-dessus du mur, on **gèle** seulement par la preuve.

@@ -119,7 +119,9 @@
               "steps/concept/s26-curation-qd",
               "steps/internals/s26-curation-qd",
               "steps/concept/s27-ideas-lifecycle",
-              "steps/internals/s27-ideas-lifecycle"
+              "steps/internals/s27-ideas-lifecycle",
+              "steps/concept/s28-exploration-gestures",
+              "steps/internals/s28-exploration-gestures"
             ]
           }
         ]
