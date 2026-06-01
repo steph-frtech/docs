@@ -127,7 +127,9 @@
               "steps/concept/s30-memory-firewall",
               "steps/internals/s30-memory-firewall",
               "steps/concept/s31-memory-pgvector",
-              "steps/internals/s31-memory-pgvector"
+              "steps/internals/s31-memory-pgvector",
+              "steps/concept/s32-context-graph-decision",
+              "steps/internals/s32-context-graph-decision"
             ]
           }
         ]

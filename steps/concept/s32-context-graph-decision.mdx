@@ -1,0 +1,53 @@
+---
+title: "S32 · ContextGraphDecision — la réutilisation, permise ou bloquée"
+description: "S32 livre le ContextGraphDecision de KRD §119.2 : la porte DÉTERMINISTE et SANS LLM du plan de contrôle qui décide si une décision PASSÉE peut être RÉUTILISÉE pour une nouvelle requête. Elle vérifie EXACTEMENT quatre dimensions DÉCLARÉES — time (la fenêtre de validité / expires_at doit contenir `now`), scope (le TruthScope du candidat doit être un sur-ensemble du contexte de la requête — la loi no_reuse_outside_scope), authority (le détenteur d'autorité du candidat doit encore tenir pour le domaine/truth_kind de la requête, sinon revue humaine), conditions (les prédicats de réutilisation déclarés doivent tenir) — et émet {may_reuse, reason, checked, required_human_review}. Le verdict est FALSE-DOMINANT : le moindre contrôle qui échoue bloque la réutilisation. La fonction Decide(candidate, request, now) est PURE — pas d'I/O, pas d'horloge (now est passé), pas d'appel LLM : « Le LLM ne vit pas dans le ContextGraph ». Le graphe permet ou bloque ; les agents proposent ; l'Execution Layer agit. Une décision est enregistrée comme une LIGNE content-addressée (S01/S02), jamais un UPDATE."
+keywords: ["aidos", "krd", "ContextGraphDecision", "ContextGraph", "réutilisation", "reuse", "decision reuse", "plan de contrôle", "control plane", "déterministe", "deterministic", "sans LLM", "LLM-free", "le LLM ne vit pas dans le ContextGraph", "may_reuse", "reason", "checked", "required_human_review", "time", "scope", "authority", "conditions", "quatre dimensions", "four dimensions", "false-dominant", "TruthScope", "no_reuse_outside_scope", "hallucination structurelle", "AuthorityGraph", "expires_at", "fenêtre de validité", "time_window", "revue humaine", "human review", "Decide", "now passé", "pur", "pure", "content-addressed", "hash", "S01", "S02", "S15", "S16", "agents propose", "Execution Layer agit", "le mur", "the wall", "context schema", "ledger", "KRD §119.2", "KRD §13.7", "KRD §13.8", "KRD §82.2"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S32](/steps/internals/s32-context-graph-decision).</Note>
+
+## En une phrase
+
+S32 livre le **`ContextGraphDecision`** (KRD §119.2) : la **porte déterministe et sans LLM** qui décide si une **décision passée** peut être **réutilisée** pour une nouvelle requête, en vérifiant **exactement quatre dimensions déclarées** — *time / scope / authority / conditions* — et en émettant `{may_reuse, reason, checked, required_human_review}`. **Le graphe permet ou bloque ; les agents proposent ; l'Execution Layer agit.**
+
+## Le problème que ça résout
+
+Une décision prise hier — « accorder cette dérogation de SLA », « ce barème de remise » — a été prise **dans un contexte** : une **région**, une **fenêtre de temps**, sous une **autorité**, sous des **conditions**. La réutiliser **aveuglément** demain, hors de ce contexte, est une **hallucination structurelle** (KRD §13.7 : *« une décision réutilisée hors scope est une hallucination structurelle »*). Il faut donc une **porte** : « cette décision passée tient-elle encore *ici, maintenant, pour cette requête* ? ». S32 est cette porte — et elle est **déterministe** : la même entrée donne toujours le même verdict, car **`now` est passé en paramètre** (jamais lu sur l'horloge) et **aucun LLM ne vit dans cette couche**.
+
+## Les idées-clés
+
+<Field name="Exactement quatre dimensions DÉCLARÉES" type="time · scope · authority · conditions">
+  La porte vérifie **quatre** dimensions, ni plus ni moins (KRD §119.2) : **time** (la `time_window` / `expires_at` du candidat doit contenir `now`), **scope** (le `TruthScope` du candidat — région/tenant/target/user_segment/environment — doit être un **sur-ensemble** du contexte de la requête), **authority** (le détenteur d'`AuthorityGraph` du candidat doit **encore tenir** pour le domaine/truth_kind de la requête), **conditions** (les prédicats de réutilisation **déclarés** doivent tenir). Les prédicats sont **déclarés, jamais appris**.
+</Field>
+
+<Field name="FALSE-DOMINANT" type="le moindre contrôle qui échoue bloque">
+  Le verdict est **`false`-dominant** : on évalue les quatre dimensions **dans l'ordre** et le **premier** contrôle qui échoue **bloque** la réutilisation, en **nommant** la dimension fautive. `may_reuse == true` **⇔** les **quatre** dimensions ont été évaluées **et** ont toutes passé. Le champ `checked` enregistre **quelles** dimensions ont été vérifiées — le verdict s'**explique** lui-même.
+</Field>
+
+<Field name="Le LLM ne vit pas dans le ContextGraph" type="permet ou bloque — il n'agit pas">
+  La clé de voûte de §119.2 : **« Le LLM ne vit pas dans le ContextGraph. »** Le ContextGraph **permet ou bloque** ; les **agents proposent** ; l'**Execution Layer agit**. `Decide` est une **fonction pure** — pas d'I/O, pas d'horloge (`now` est passé), **aucun appel LLM, jamais**. Un agent qui ferait ce qu'une fonction peut faire serait un **écart de déterminisme** (CLAUDE.md §8).
+</Field>
+
+<Field name="time ⇒ expired = non réutilisable" type="le critère « done » (1/2)">
+  Une décision dont la fenêtre de validité est **dépassée** par `now` donne `may_reuse: false`, avec `"time"` dans `checked` et une raison **nommant la fenêtre expirée**. C'est le cas canonique du `ContextGraphMirror` : *given `{decision, region: EU, date: expired}` → expect `{may_reuse: false}`*.
+</Field>
+
+<Field name="scope ⇒ hors-scope = non réutilisable" type="le critère « done » (2/2) — no_reuse_outside_scope">
+  Une décision prise pour une **région** que la requête ne vise pas (candidat EU, requête US) donne `may_reuse: false`, avec `"scope"` dans `checked`. C'est la loi **`no_reuse_outside_scope`** (KRD §82.2 / §13.7) : réutiliser hors scope est une **hallucination structurelle**.
+</Field>
+
+<Field name="authority qui ne tient plus ⇒ revue humaine" type="required_human_review">
+  Si le détenteur d'autorité du candidat ne **gouverne plus** le domaine de la requête, la porte ne réutilise pas en silence : elle pose `required_human_review: true` — un **humain re-décide** (KRD §13.8).
+</Field>
+
+## Ce que S32 n'est PAS
+
+<Warning>
+S32 livre **uniquement la porte de réutilisation** sur un ContextGraph **déjà construit**. Ce n'est **pas** le **ContextRouter / la compilation du ContextPack** (§119.3, §141–§142, la *couche information* — quelles vérités/mémoires donner au modèle — étape ultérieure) ; **pas** la **construction/traversée** du ContextGraph (§142, consommée en entrée) ; **pas** le **flux de promotion** `Memory → ContextPack → Idea → Mirror → Goal → Kernel` (le MemoryFirewall §119.1, S30) ; **pas** d'AST `TruthScope` (S15) ni `AuthorityGraph` (S16) re-définis ; **aucun** LLM, RAG ou embedding.
+</Warning>
+
+## Pour aller plus loin
+
+- Le détail d'implémentation (les trois couches **Implémentation · Méta · Méta-méta**) : [Pour moi → S32](/steps/internals/s32-context-graph-decision).
+- Le store de mémoire d'où viennent les candidats : [S31 · L'adaptateur mémoire](/steps/concept/s31-memory-pgvector).
+- La porte qui interdit à la mémoire d'atteindre le noyau : [S30 · MemoryFirewall](/steps/concept/s30-memory-firewall).

@@ -1,0 +1,74 @@
+---
+title: "S32 · ContextGraphDecision — implémentation, méta, méta-méta"
+description: "Le journal d'implémentation de S32 : le package Go back/archive/brain/contextgraph (l'AST ContextGraphDecision + la fonction pure Decide(candidate, request, now) false-dominant sur time/scope/authority/conditions, sans I/O, sans horloge, sans LLM), la migration Atlas expand-only context.context_graph_decision (id=hash content-addressé S01/S02, GRANT SELECT-only pour l'agent — le mur), les miroirs (fixture N2 = le ContextGraphMirror + propriété rapid + roundtrip Testcontainers), le twin déterministe lib/contextgraph.ts et la route Workbench /decision-reuse avec son e2e Playwright. Les trois couches Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "S32", "ContextGraphDecision", "contextgraph", "Decide", "back/archive/brain/contextgraph", "package Go", "pure", "false-dominant", "time", "scope", "authority", "conditions", "may_reuse", "checked", "required_human_review", "TruthScope", "S15", "AuthorityGraph", "S16", "Canonicalize", "Hash", "S01", "S02", "content-addressed", "migration Atlas", "context.context_graph_decision", "expand-only", "append-only", "GRANT SELECT", "le mur", "the wall", "fixture", "ContextGraphMirror", "rapid", "property", "Testcontainers", "roundtrip", "no_reuse_outside_scope", "déterminisme", "determinism-first", "le LLM ne vit pas dans le ContextGraph", "twin", "lib/contextgraph.ts", "fast-check", "/decision-reuse", "Playwright", "Workbench", "KRD §119.2", "KRD §13.7", "KRD §13.8"]
+---
+
+<Note>Côté implémentation — le journal de construction. Pour le concept sans code, voir [Pour les futurs utilisateurs → S32](/steps/concept/s32-context-graph-decision).</Note>
+
+## Couche 1 — Implémentation
+
+### Le package Go `back/archive/brain/contextgraph`
+
+Le cœur est une **fonction pure** :
+
+```go
+func Decide(candidate Candidate, request RequestContext, now time.Time) ContextGraphDecision
+```
+
+L'AST du verdict est **exactement** celui de KRD §119.2 — aucun champ inventé :
+
+```go
+type ContextGraphDecision struct {
+    ID                  string      // = Hash(Canonicalize(body)) — content-addressé (S01/S02)
+    CandidateID         string      // n'échappe QUE le candidat donné — jamais d'invention
+    MayReuse            bool        // false-dominant : true ⇔ les quatre checks passent
+    Reason              string      // nomme la dimension fautive quand bloqué
+    Checked             []Dimension // time | scope | authority | conditions, dans l'ordre
+    RequiredHumanReview bool        // posé quand l'autorité ne tient plus
+}
+```
+
+`Decide` évalue les **quatre prédicats déclarés dans l'ordre canonique** (`time → scope → authority → conditions`), **false-dominant** : le premier qui échoue retourne immédiatement, en ayant enregistré dans `checked` les dimensions atteintes. **Pas d'I/O, pas de `time.Now()`** (l'horloge `now` est un paramètre → verdict déterministe et rejouable), **aucun appel LLM**. Les sous-checks réutilisent les contrats antérieurs sans les redéfinir :
+
+- **scope** consomme `scope.TruthScope` (S15) — un candidat est un **sur-ensemble** de la requête : une dimension vide côté candidat est un *wildcard*, `region "*"` est le global explicite ; sinon la requête doit correspondre.
+- **authority** consomme `authority.AuthorityGraph` (S16) — le détenteur « tient » si la requête ne nomme pas de domaine, ou si son domaine (et son truth_kind éventuel) correspond au graphe.
+- **time** parse `now` et les bornes RFC3339 ; une borne **mal formée** bloque (false-dominant).
+- l'**id** réutilise `records.Canonicalize` + `records.Hash` (S01/S02) — **jamais** un hash forké.
+
+### La migration Atlas `context.context_graph_decision`
+
+**Expand-only / append-only.** Elle ajoute le schéma **`context`** (CLAUDE.md §1 : *« la ContextGraph dérivée + le ContextGraphDecision »*) et une table content-addressée. Une décision est une **ligne**, jamais un `UPDATE` — une **ré-évaluation est une nouvelle ligne**. Trois `CHECK` en défense en profondeur : `checked` ⊆ `{time,scope,authority,conditions}` (aucune 5ᵉ dimension), `may_reuse=true` ⇒ les quatre dimensions présentes (false-dominance au niveau base), et `may_reuse=true` exclut `required_human_review=true`.
+
+**Le mur (CLAUDE.md §2).** `context` est un schéma de **vérité au-dessus de la ligne de flottaison** : l'agent obtient **`SELECT` seul** (il lit le ledger pour l'afficher) ; seul le rôle writer `aidos` insère une décision, via un ChangeSet (S20). La migration **ré-affirme** le mur sur kernel/mirrors/fitness (elle ne l'affaiblit pas).
+
+### Les miroirs (la preuve)
+
+- **Fixture N2** (`state → command → events`, interprétée en Go) — **le `ContextGraphMirror` de §119.2** : un candidat expiré ⇒ `may_reuse=false` + `"time"` ; hors-scope ⇒ `may_reuse=false` + `"scope"` ; in-time/in-scope/in-authority ⇒ `may_reuse=true`, `required_human_review=false` ; autorité qui ne tient plus ⇒ `required_human_review=true` ; condition qui échoue ⇒ `may_reuse=false` ; id = `Hash(Canonicalize(body))`.
+- **Propriété `rapid`** (∀, sous la ligne) : déterminisme (now passé), expired ⇒ false, hors-scope ⇒ false, `true` ⇒ les quatre vérifiés, jamais d'invention de candidat, jamais de panic.
+- **Roundtrip Testcontainers** : la migration s'applique sur un Postgres réel ; une ligne content-addressée fait l'aller-retour ; les `CHECK` refusent une 5ᵉ dimension et un `true` incomplet ; le rôle agent est **SELECT-only** (INSERT refusé — le mur prouvé).
+
+### L'écran `/decision-reuse`
+
+Le **twin déterministe** `lib/contextgraph.ts` (couvert par `lib/contextgraph.test.ts`, fast-check) réimplémente la **même** sémantique pure que le Go (mêmes quatre prédicats, même ordre, même false-dominance) — **une seule sémantique, zéro dérive**. La route rend le **ledger de réutilisation** : par ligne, un badge **ALLOW**/**BLOCK**, les **quatre chips** (chacune ✓/✗), la raison, et le drapeau *revue humaine*. Le bouton **DÉCIDER** exécute la porte pure (action-capable). Un e2e Playwright prouve qu'un candidat expiré → BLOCK + chip *time*, un hors-scope → BLOCK + chip *scope* (le critère « done » visible à l'écran), un in-time/in-scope → ALLOW.
+
+## Couche 2 — Méta
+
+**Pourquoi une fonction pure et non un agent ?** Parce que décider de la réutilisation est **entièrement déterministe** : comparer une date à une fenêtre, un scope à un sur-ensemble, un domaine à un détenteur, un fait à un prédicat. C'est **exactement** ce que le mandat *determinism-first* (CLAUDE.md §6, §8) exige : *« ce qui peut être une fonction pure DOIT être du code »*. Mettre un LLM ici serait un **écart de déterminisme** bloquant — et violerait la clé de voûte de §119.2.
+
+**Pourquoi `now` en paramètre ?** Pour rendre le verdict **rejouable**. Un test, un audit, une ré-exécution six mois plus tard doivent produire le **même** verdict pour la **même** entrée. Lire l'horloge dans `Decide` casserait la reproductibilité (et la propriété de déterminisme).
+
+**Pourquoi une ligne, jamais un `UPDATE` ?** Parce que `context` est de la **vérité** : l'historique des décisions de réutilisation est **append-only**. Réviser, c'est **ajouter** une nouvelle décision content-addressée, pas écraser l'ancienne.
+
+## Couche 3 — Méta-méta
+
+**La séparation des trois rôles est structurelle, pas conventionnelle.** *« Les agents proposent. Le ContextGraph permet ou bloque. L'Execution Layer agit. »* (§119.2). S32 incarne le rôle du **milieu** : une porte qui ne **génère** rien et n'**agit** sur rien — elle **juge** une réutilisation contre des dimensions **déclarées**. En isolant ce rôle dans une fonction pure et sans LLM, on rend la frontière **mécanique** : il n'y a pas de place, dans le type, pour qu'un LLM s'y glisse, ni pour que la porte invente un candidat, un scope ou une autorité qu'on ne lui a pas donnés.
+
+**Le `false`-dominance est une posture épistémique.** La porte refuse par défaut et n'autorise qu'au prix des **quatre** vérifications passées. C'est la traduction opérationnelle de *« aucune vérité n'est universelle par défaut »* (§13.7) : une décision passée ne mérite la réutilisation que si **tout** son contexte tient encore. Le doute (autorité incertaine) ne devient pas un refus sec mais une **escalade vers l'humain** — la porte connaît la différence entre *« non »* et *« je ne tranche pas seule »*.
+
+## Limites connues & prochaine dent
+
+- **Porte seulement** : pas de ContextRouter/ContextPack (§119.3, §141–§142), pas de construction de ContextGraph (§142), pas de flux de promotion MemoryFirewall (§119.1).
+- `TruthScope` (S15) et `AuthorityGraph` (S16) sont **consommés**, jamais re-définis. La couche est **strictement sans LLM**. Pas de MCP, pas de hook, pas de Skill nouveaux (le mur garde déjà `context.*`).
+- **OpenQuestions non bloquantes** : la forme exacte du *request-context* et le prédicat *« authority-holds »* sont des choix locaux raisonnables, à raffiner si une étape ultérieure les pin.
+- **Prochaine dent sûre** : le **ContextRouter / compilateur de ContextPack** (§119.3, §141–§142) — la couche information qui, à partir d'un goal + cellule + scope + autorité, émet le ContextPack **minimal**.
