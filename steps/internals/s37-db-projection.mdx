@@ -1,0 +1,52 @@
+---
+title: "S37 · DB projection — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail d'implémentation de S37 : l'emitter pur EmitMigration(entity, prior?) → migration Atlas expand-contract, le value object DataTruthScope (§44.3) + le guard pur RequireMigration, deux codes BlockReason ajoutés (HISTORICAL_IMPACT_REQUIRES_MIGRATION, UNKNOWN_MIGRATION_STRATEGY), la migration expand-only runtime.data_truth_scope, le dry-run Testcontainers, le twin TS byte-identique, et la route Workbench /db-projection. Trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "S37", "EmitMigration", "DataTruthScope", "RequireMigration", "expand-contract", "forward-only", "Atlas", "Postgres", "Testcontainers", "dry-run", "§44.3", "applies_to", "strategy", "expand_contract", "backfill", "dual_read", "dual_write", "preserve_old_truth", "HISTORICAL_IMPACT_REQUIRES_MIGRATION", "UNKNOWN_MIGRATION_STRATEGY", "BlockReason", "runtime.data_truth_scope", "content-addressed", "source_hash", "EmitDDL", "S35", "S02", "S13", "S21", "twin TS", "byte-identique", "rapid", "fast-check", "Playwright", "le mur", "SELECT-only", "back/gen/db", "ADR 0027"]
+---
+
+<Note>Côté implémentation — le journal de construction complet. Pour le concept, voir [Pour les futurs utilisateurs → S37](/steps/concept/s37-db-projection).</Note>
+
+## Implémentation
+
+**L'emitter `EmitMigration(entity, prior?) → MigrationArtifact`** (`back/gen/db/emit.go`) est une fonction **pure, totale, déterministe** : pas d'horloge, pas de RNG, pas de fuite d'ordre de map, pas de chemin absolu, retours à la ligne `\n` normalisés, ordre de champs stable (trié). Elle **réutilise** `generators.Emit(entity, TargetPgDDL)` (S35 `EmitDDL`) pour valider l'entité + obtenir la forme `CREATE TABLE`, et `records.Hash(records.Canonicalize(...))` (S02) pour le `source_hash` — **ni l'un ni l'autre n'est reforké**. Les formes :
+
+- `prior == nil` → **"create"** : le `CREATE TABLE` complet (la sortie S35 réutilisée verbatim, même header protégé + `source_hash`).
+- diff additif (colonnes ajoutées, aucune supprimée) → **"expand"** : un `ALTER TABLE … ADD COLUMN IF NOT EXISTS` par champ ajouté (NULLable).
+- diff restrictif (toute colonne supprimée) → **"expand_contract"** : un plan **EXPAND → BACKFILL → CONTRACT** forward-only ; le backfill est un placeholder commenté (jamais exécuté en silence) ; le contract drop est une étape forward séparée (`DROP COLUMN IF EXISTS`).
+
+Une entité malformée → un `BlockReason` (la forme S13, via `generators.Emit`), jamais un panic.
+
+**Le value object `DataTruthScope`** (`back/gen/db/datatruthscope.go`) épingle le §44.3 verbatim : `applies_to []AppliesTo` (jeu fermé), `Migration{Required, Strategy}` (jeu fermé), `Audit{PreserveOldTruth}`. Son `ID()` = `Hash(Canonicalize(body))` avec `applies_to` en ordre canonique — l'adresse de contenu est **indépendante de l'ordre** (S02 réutilisé).
+
+**Le guard pur `RequireMigration(change) → (required bool, *BlockReason)`** : un changement touchant `existing/historical_records` sans scope déclaré (ou avec `required:false`, ou `preserve_old_truth:false`) → `Blocked(HISTORICAL_IMPACT_REQUIRES_MIGRATION)` ; une stratégie hors jeu fermé → `Blocked(UNKNOWN_MIGRATION_STRATEGY)` ; un changement *nouvelles-données-seulement* → `Allowed`. Pur, total, ne panique jamais — il ne lit que son argument (le `change_type` de S21 référencé, jamais récupéré).
+
+**Deux codes `BlockReason` ajoutés** (`back/runtime/blockreason/blockreason.go`) à l'enum fermé S13 : `HISTORICAL_IMPACT_REQUIRES_MIGRATION`, `UNKNOWN_MIGRATION_STRATEGY` — extension **additive** (change_type: refine, jamais un retrait), enregistrée par ADR 0027 + ChangeSet + SemanticDiff.
+
+**La migration `runtime.data_truth_scope`** (`back/migrations/data_truth_scope_baseline.sql`) est **expand-only / append-only** : `id` PK (= hash), `body jsonb`, `entity_ref`, `migration_ref NULL`, `version`, `superseded_by NULL`, `created_at`, plus une CHECK `version = id` (content-address) et une CHECK sur le jeu fermé de stratégies. **GRANTs** : l'agent SELECT-only ; seul le rôle `aidos` insère via un ChangeSet approuvé (le mur). Elle n'altère/ne supprime **aucune** table ou GRANT antérieur.
+
+**Le dry-run Testcontainers** (`back/gen/db/migration_dryrun_test.go`, **le critère done moitié 1**) applique les baselines S02 + S04 + S35 + S37 sur un Postgres jetable, puis : le CREATE s'applique ; une ligne historique est insérée ; l'EXPAND (`+coupon`) s'applique **par-dessus** et la ligne historique **survit** (coupon NULL) ; le narrowing expand→backfill→contract s'applique ; un DataTruthScope round-trip content-addressé ; la CHECK de stratégie refuse `teleport` ; l'agent SELECT mais ne peut **pas** écrire le scope ni kernel.entity (le mur prouvé).
+
+**Le twin TS** (`front/web/lib/db-projection.ts`) reproduit `emitMigration` + `requireMigration` **byte-identique** ; le mirror fast-check (`db-projection.test.ts`, 9/9) ancre la sortie au SHA-256 des octets Go (`GO_*` hashes). La route **`/db-projection`** (themée ADR 0010, bilingue ADR 0011) rend la migration émise + le badge DRY-RUN VALIDE + les verdicts §44.3 ; **action-capable** : RE-ÉMETTRE (byte-identique) + DRY-RUN + un sélecteur de descripteur de changement (REQUIRES MIGRATION / ALLOWED / no migration needed). Playwright 6/6.
+
+## Méta
+
+Pourquoi ces choix (ADR 0027) :
+
+- **Le `prior` est un input explicite** (`*EntitySource`), pas une introspection Atlas sur une base vivante : ça garde `EmitMigration` **pure** (le contrat déterminisme-first), réutilise l'AST que le kernel stocke déjà, et laisse Testcontainers valider le SQL **émis** au dry-run (validé par le moteur par construction).
+- **Le critère done est calculé, pas déclaré** : le dry-run sur un vrai moteur + le guard pur + le twin byte-identique + Playwright. Aucun n'est une auto-déclaration.
+- **Pas de nouveau hook** : la règle « pas de changement de schéma silencieux sur des données historiques » est le **guard pur `RequireMigration`** que la porte wall/complétude existante (S04/S12) appelle — un hook qui ne se déclenche jamais est mort (§5 hook-honesty).
+- **Le mur tient** : `data_truth_scope` écrit seulement par `aidos` ; l'agent SELECT-only ; `back/gen/db` généré-seulement (garde de ré-émission byte-égale).
+
+## Méta-méta
+
+S37 instancie « **Kernel → projections : contraint, jamais ne génère** » sur la donnée elle-même : l'entité (la vérité) **contraint** la forme de la table, mais la migration (la projection) est dérivée et jetable. Et il pose la loi §44.3 — *les données ont leur propre inertie* — comme un **invariant exécutable** : changer la vérité du code ne touche pas en silence la vérité des données déjà produites. C'est le **déterminisme-first** poussé jusqu'au schéma (un diff de schéma est un diff d'ensembles de colonnes, une fonction pure — jamais un « agent de migration LLM ») et l'**honnêteté anti-hallucination** poussée jusqu'à la stratégie (un jeu fermé, jamais une stratégie coinée).
+
+## Limites connues
+
+- **Émis + dry-run seulement** : pas d'application/commit à une base de vérité vivante (runner forward-only humain-gated = étape ultérieure). `backfill`/`dual_read`/`dual_write` **déclarés**, pas exécutés.
+- **Une entité auto-contenue** : pas de migration multi-entité / clé étrangère (OpenQuestion si un besoin apparaît).
+- Pas de MCP migrate/apply. Une migration requise manquante **alimente** S22, ne la recalcule pas.
+
+## Prochaine dent sûre
+
+Le **runner forward-only humain-gated** (l'application/commit d'une migration émise à la base de vérité, via un ChangeSet approuvé), ou le **câblage de `RequireMigration` dans la porte de complétude** du writer `aidos` (pour qu'un changement à impact historique soit bloqué à l'écriture). Sûr à enchaîner : S37 laisse une phase stable — l'emitter pur + le guard + la table + les mirrors verts.

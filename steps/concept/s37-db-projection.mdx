@@ -1,0 +1,56 @@
+---
+title: "S37 · DB projection — la migration expand-contract depuis l'entité + DataTruthScope"
+description: "S37 livre la projection DB du KRD (ligne 532) : la migration Atlas expand-contract / forward-only émise depuis l'AST d'entité (S35), plus DataTruthScope (§44.3) — la déclaration explicite de ce que la nouvelle vérité fait aux données historiques. Un ajout de colonne est une étape EXPAND additive ; un changement restrictif est découpé EXPAND → BACKFILL → CONTRACT, jamais une seule étape destructive silencieuse. Un changement à impact historique EXIGE une migration déclarée (HISTORICAL_IMPACT_REQUIRES_MIGRATION). Le critère done : la migration dry-run valide sur Postgres (Testcontainers) sans perte de données, et un changement à impact historique exige une migration déclarée."
+keywords: ["aidos", "krd", "db", "migration", "projection", "expand-contract", "forward-only", "Atlas", "Postgres", "DataTruthScope", "§44.3", "applies_to", "new_records", "existing_records", "historical_records", "migration", "strategy", "expand_contract", "backfill", "dual_read", "dual_write", "preserve_old_truth", "audit", "données historiques", "historical data", "inertie", "ADD COLUMN", "DROP COLUMN", "EXPAND", "BACKFILL", "CONTRACT", "RequireMigration", "HISTORICAL_IMPACT_REQUIRES_MIGRATION", "UNKNOWN_MIGRATION_STRATEGY", "BlockReason", "content-addressed", "source_hash", "déterministe", "byte-identique", "le mur", "the wall", "SELECT-only", "back/gen/db", "runtime.data_truth_scope", "/db-projection", "Testcontainers", "dry-run", "S02", "S13", "S21", "S35"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S37](/steps/internals/s37-db-projection).</Note>
+
+## En une phrase
+
+S37 livre la **projection DB** : la **migration Atlas expand-contract / forward-only** émise depuis l'**entité** (S35), plus **DataTruthScope** (§44.3) — la déclaration explicite de **ce que la nouvelle vérité fait aux données historiques**. Le critère done : **la migration dry-run valide sur un vrai Postgres sans perte de données**, et **un changement à impact historique exige une migration déclarée**.
+
+## Le problème que ça résout
+
+Une entité du kernel (Order) est une vérité abstraite. Pour qu'une base la stocke, il faut une **table** — puis, quand l'entité change, une **migration**. L'écrire à la main risque deux choses : qu'elle **diverge** de l'entité, et — plus grave — qu'elle **réécrive silencieusement le passé**. Car *changer la vérité du code ne change pas automatiquement la vérité des données déjà produites* (KRD §44.3) : un remboursement ancien existe sous l'ancienne règle. La réponse KRD : **émettre** la migration depuis la source, déterministiquement, en forme **expand-contract** (jamais destructive d'un coup), et **exiger une déclaration explicite** (DataTruthScope) dès qu'un changement touche des données historiques.
+
+## Les idées-clés
+
+<Field name="La migration DB est une PROJECTION de l'entité, sous la ligne" type="KRD ligne 532, autorité below">
+  La **migration** (`db = migrations (expand-contract)`) est une **couche projection** : dérivée, jetable, **sous la ligne de flottaison**, matérialisée dans `back/gen/db/`, **jamais éditée à la main**. Elle est émise depuis l'**AST d'entité** (S35) que l'agent **lit** (SELECT-only) ; elle n'écrit aucune vérité (le mur).
+</Field>
+
+<Field name="Expand-contract / forward-only — additif = expand" type="ADD COLUMN, jamais une réécriture en place">
+  Un **ajout de colonne** est une étape **EXPAND** additive : `ALTER TABLE … ADD COLUMN` (NULLable), **jamais** une réécriture ou une suppression en place des lignes historiques. La donnée déjà produite survit intacte.
+</Field>
+
+<Field name="Un changement restrictif est découpé expand → backfill → contract" type="jamais une seule étape destructive silencieuse">
+  Un **drop / narrow** n'est **jamais** émis comme un seul `DROP` silencieux : il est **découpé** en **EXPAND** (ajouter la nouvelle forme) → **BACKFILL** (déclaré, humain-gated, jamais exécuté en silence) → **CONTRACT** (la suppression, dans une étape forward-only séparée, gardée par le DataTruthScope déclaré).
+</Field>
+
+<Field name="DataTruthScope déclare ce que la vérité fait aux données historiques" type="KRD §44.3">
+  **DataTruthScope** épingle, en clair : `applies_to` (le jeu fermé `new_records | existing_records | historical_records`), `migration{required, strategy}` (stratégie ∈ le jeu fermé `expand_contract | backfill | dual_read | dual_write`), et `audit{preserve_old_truth: true}`. C'est la déclaration que *les données ont leur propre inertie*.
+</Field>
+
+<Field name="Un changement à impact historique EXIGE une migration déclarée" type="le critère done (moitié 2)">
+  Un changement dont `applies_to` touche `existing_records`/`historical_records` **sans** migration déclarée est **REFUSÉ** avec un `BlockReason` (`HISTORICAL_IMPACT_REQUIRES_MIGRATION`, la forme S13) : **rien** n'est émis ou appliqué en silence. Un changement *nouvelles-données-seulement* ne l'exige pas.
+</Field>
+
+<Field name="Une stratégie inconnue est refusée, jamais devinée" type="honnêteté, UNKNOWN_MIGRATION_STRATEGY">
+  Si un DataTruthScope déclare une `strategy` **hors** du jeu fermé §44.3, c'est **REJETÉ** (`UNKNOWN_MIGRATION_STRATEGY`) : aucune stratégie n'est **coinée** ni coercée — ce que le KRD n'épingle pas n'est jamais inventé.
+</Field>
+
+<Field name="Content-addressé — l'identité, c'est le hash de l'entité" type="source_hash, S02 réutilisé">
+  Le `source_hash` de la migration = `Hash(Canonicalize(entité))` (le schéma de **S02**, jamais reforké). Tout changement d'octet de l'entité produit un **nouveau hash** ; une migration dont le `source_hash` ne correspond plus à la tête est **stale** — l'inégalité qui alimente la vague de rouge (S22).
+</Field>
+
+## Le critère « done »
+
+<Check>La migration émise **dry-run valide** sur un vrai Postgres (Testcontainers) **sans perte de données** : un ajout est un ADD COLUMN (la ligne historique survit), un retrait est découpé expand → backfill → contract.</Check>
+<Check>Un changement à **impact historique** sans migration déclarée est **bloqué** (`HISTORICAL_IMPACT_REQUIRES_MIGRATION`) ; un DataTruthScope déclaré le **débloque** ; un changement *nouvelles-données-seulement* ne l'exige pas.</Check>
+
+## Ce que S37 ne fait PAS (et pourquoi)
+
+<Warning>
+  S37 **émet et dry-run** seulement — pas d'**application / commit** à une base de vérité vivante (le runner forward-only humain-gated est une étape ultérieure). Les stratégies `backfill`/`dual_read`/`dual_write` sont **déclarées**, pas exécutées. Pas de migration multi-entité / clé étrangère (une entité auto-contenue). Pas de MCP migrate/apply. Une migration requise manquante **alimente** la vague de rouge (S22) — S37 ne la recalcule pas.
+</Warning>

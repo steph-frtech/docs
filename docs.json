@@ -137,7 +137,9 @@
               "steps/concept/s35-entity-source",
               "steps/internals/s35-entity-source",
               "steps/concept/s36-api-projection",
-              "steps/internals/s36-api-projection"
+              "steps/internals/s36-api-projection",
+              "steps/concept/s37-db-projection",
+              "steps/internals/s37-db-projection"
             ]
           }
         ]
