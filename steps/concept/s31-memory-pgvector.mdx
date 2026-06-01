@@ -1,0 +1,49 @@
+---
+title: "S31 · L'adaptateur mémoire — écrire et rappeler par similarité (pgvector)"
+description: "S31 donne au store /brain de KRD §136 un adaptateur mémoire : écrire un MemoryItem et le rappeler par similarité sur des embeddings pgvector, à travers les quatre mémoires INDEXABLES — épisodique, sémantique, procédurale, structurale. La mémoire working (la fenêtre de contexte) et la mémoire évolutive (le DAG de versions S24) ne sont PAS dans cet adaptateur. Une interface Store unique (Write / Recall / Get) porte deux backends INJECTABLES : un MockStore déterministe (cosine exact sur un Embedder seedé, sans modèle) et un PgxStore réel (ANN HNSW + cosine sur brain.memory_item). La même fixture passe à l'identique sur les deux — c'est le critère « les deux backends injectables ». L'Embedder est lui-même un port injecté (dimension 384, ADR 0025), de sorte que les tests n'ont besoin d'aucun modèle et que le runtime nomme son modèle dans la provenance. Le rappel est déterministe sous un seed fixe : recall retourne les plus proches d'abord, triés par score décroissant, ≤ k, filtrés par kind/branche. Le store est sous la ligne de flottaison (l'agent INSERT/SELECT, jamais UPDATE/DELETE — append-only) ; il n'atteint rien au-dessus du mur. Carburant de contexte, JAMAIS une vérité."
+keywords: ["aidos", "krd", "adaptateur mémoire", "memory adapter", "mémoire", "memory", "MemoryItem", "/brain", "brain", "pgvector", "embeddings", "similarité", "similarity", "recall", "rappel", "Store", "port", "interface", "MockStore", "PgxStore", "backend injectable", "injection", "Embedder", "HashEmbedder", "déterministe", "deterministic", "seed", "dimension 384", "HNSW", "cosine", "cosinus", "épisodique", "episodic", "sémantique", "semantic", "procédurale", "procedural", "structurale", "structural", "mémoires indexables", "indexable memories", "working memory", "evolutionary memory", "mémoire évolutive", "DAG de versions", "kind", "branche", "branch", "taint", "provenance", "confidence", "validity_scope", "expires_at", "append-only", "content-addressed", "hash", "S01", "carburant de contexte", "context fuel", "pas une vérité", "not truth", "le mur", "the wall", "ligne de flottaison", "waterline", "INSERT/SELECT", "MCP memory", "memory_write", "memory_recall", "memory_get", "ADR 0025", "ADR 0008", "KRD §136", "KRD §119.1", "LIVRE XXIV"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S31](/steps/internals/s31-memory-pgvector).</Note>
+
+## En une phrase
+
+S31 donne au store **`/brain`** un **adaptateur mémoire** (KRD §136) : **écrire** un **`MemoryItem`** et le **rappeler par similarité** sur des embeddings **pgvector**, à travers les **quatre mémoires indexables** — *épisodique, sémantique, procédurale, structurale*. Une **interface `Store`** unique, **deux backends injectables** (un mock déterministe ↔ un pgvector réel), et un **`Embedder` injecté**. **Carburant de contexte, jamais une vérité.**
+
+## Le problème que ça résout
+
+L'agent accumule de la **mémoire** — des runs, des termes du langage ubiquitaire, des gestes réutilisables, des cartes de dépendances. Pour qu'elle serve de **carburant**, il faut pouvoir la **retrouver** : « quelles mémoires ressemblent à *ce* que je fais maintenant ? ». S31 répond par le **rappel par similarité** — on **embedde** la requête, on compare par **cosinus** aux mémoires stockées, on rend les **plus proches d'abord**. Mais ce rappel reste du **carburant** : un item rappelé n'est **pas un fait**, il n'**atteint** ni le noyau ni un miroir. Le flux de promotion `Memory → ContextPack → Idea → Mirror → Goal → Kernel` (le **MemoryFirewall**, §119.1, livré en S30) est une **préoccupation séparée** ; ici on n'écrit et on ne rappelle que du carburant.
+
+## Les idées-clés
+
+<Field name="Quatre mémoires INDEXABLES" type="épisodique · sémantique · procédurale · structurale">
+  KRD §136 liste **six** mémoires. S31 n'indexe que les **quatre** indexables : **épisodique** (runs / incidents), **sémantique** (langage ubiquitaire / glossaire / patterns), **procédurale** (gestes / skills réutilisables), **structurale** (carte de contexte / graphes de dépendances). La mémoire **working** (la fenêtre de contexte vive — pas de store) et la mémoire **évolutive** (le **DAG de versions** S24 — déjà sa propre structure) sont **hors** de cet adaptateur.
+</Field>
+
+<Field name="Une interface Store, DEUX backends injectables" type="MockStore déterministe ↔ PgxStore pgvector">
+  Un seul **port `Store`** (`Write` / `Recall` / `Get`). Deux implémentations **interchangeables**, injectées **par constructeur** (pas de global) : un **`MockStore`** en mémoire (cosinus **exact** sur un `Embedder` seedé — aucun modèle, aucune base) et un **`PgxStore`** réel (ANN **HNSW + cosinus** sur `brain.memory_item`). **La même fixture passe à l'identique sur les deux** — c'est *exactement* le critère « les deux backends injectables ».
+</Field>
+
+<Field name="L'Embedder est un port injecté" type="dimension 384, déterministe et seedé — ADR 0025">
+  L'**`Embedder`** (texte → vecteur de dimension **384**) est lui-même **injecté**. Le mock utilise un `HashEmbedder` **déterministe** (aucun modèle — donc les tests n'en ont pas besoin et le **rappel est reproductible sous un seed fixe**) ; le runtime **nomme son modèle dans la provenance**, de sorte qu'un changement de modèle est un **réindexage tracé**, jamais une dérive silencieuse.
+</Field>
+
+<Field name="Le rappel est déterministe et borné" type="≤ k, trié par score décroissant, filtré par kind/branche">
+  `Recall(k)` retourne **au plus `k`** hits, **triés par score décroissant** (le plus proche d'abord), filtrés par **`kind`** et/ou **`branche`** quand ils sont posés. Sous un **seed fixe**, la même requête rend **toujours** le même ordre — un rappel est de l'arithmétique de cosinus, **jamais** un agent/LLM dans la boucle.
+</Field>
+
+<Field name="Append-only — la supersession est une NOUVELLE ligne" type="INSERT, jamais UPDATE/DELETE">
+  Écrire est **content-addressed** (l'`id` est le hash du corps, **réutilisé de S01**, jamais forké). Réécrire le **même** corps est idempotent (même adresse) ; un corps **changé** est une **nouvelle ligne**. Rien n'**édite** ni ne **supprime** : la supersession est un INSERT, l'expiration est `expires_at`. Le store est **sous la ligne de flottaison** — l'agent a `SELECT + INSERT`, jamais `UPDATE/DELETE`, et **aucun** grant sur les schémas de vérité.
+</Field>
+
+## Ce que ça n'est pas
+
+<Warning>
+Le store `/brain` n'est **pas** une base de données de vérité, **pas** un RAG qui décide, **pas** une base de connaissances. Le **rappel** retrouve les plus proches ; il ne **tranche** rien. S31 ne livre **aucun** chemin vers le noyau : pas de promotion MemoryFirewall (§119.1, livrée en S30 / étapes ultérieures pour le flux complet), pas de ContextGraph / ContextRouter / ContextPack (Livre XXV), pas d'ArchiveCurationPolicy, pas de mémoire working/évolutive. **Carburant de contexte, jamais une vérité.**
+</Warning>
+
+## La couture à résoudre plus tard
+
+<Note>
+S31 stocke une **`confidence` numérique** (0..1) ; KRD §138 / le ContextRouter de S33 filtrent sur une échelle **ordinale** (`observed_once | repeated | proven_by_sensor`). Le mapping entre les deux est **détenu par S33**, pas inventé ici (OpenQuestion enregistrée, ADR 0025 / 0008).
+</Note>

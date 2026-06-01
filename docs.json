@@ -125,7 +125,9 @@
               "steps/concept/s29-goal-engine",
               "steps/internals/s29-goal-engine",
               "steps/concept/s30-memory-firewall",
-              "steps/internals/s30-memory-firewall"
+              "steps/internals/s30-memory-firewall",
+              "steps/concept/s31-memory-pgvector",
+              "steps/internals/s31-memory-pgvector"
             ]
           }
         ]
