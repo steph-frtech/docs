@@ -1,0 +1,49 @@
+---
+title: "S40 · Score de mutation — le densimètre du serrage du noyau"
+description: "S40 livre le capteur de mutation testing du KRD (§19/§43/§59.8/§64) : un adaptateur Go au-dessus des runners gelés — gremlins (Go) et StrykerJS (front) — qui calcule un score de mutation post-intégration et compare ce score au SEUIL déclaré, lu en lecture seule dans le schéma fitness. Le seuil gate la phase stable : 40 % bloque, 80 % passe contre la barre à 0,80. Un mutant survivant = un trou à combler. L'agent lit la barre dont il est noté, il ne la rédige jamais (§8 anti-Goodhart)."
+keywords: ["aidos", "krd", "mutation testing", "score de mutation", "densimètre", "serrage", "tightness du noyau", "gremlins", "StrykerJS", "seuil", "threshold", "fitness", "lecture seule", "read-only", "phase stable", "Stop", "non-gameable", "mutant survivant", "surviving mutant", "MISSING_THRESHOLD", "UNPARSABLE_REPORT", "BlockReason", "pipeline", "post-intégration", "KRD §19", "anti-Goodhart", "S04", "S07", "S13", "S29", "/mutation-score", "mutation_runs", "déterministe"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S40](/steps/internals/s40-mutation-testing).</Note>
+
+## En une phrase
+
+S40 livre le **densimètre du noyau** : à la demande, en **post-intégration**, **gremlins** (Go) et **StrykerJS** (front) mutent le code et comptent combien de mutants les miroirs **tuent**. Ce **score de mutation** est comparé au **seuil déclaré** (lu en lecture seule dans la `fitness`) — et ce seuil **gate la phase stable**. Le critère done, c'est l'arithmétique de la barre : **40 % bloque, 80 % passe**.
+
+## Le problème que ça résout
+
+« Les tests passent mais le système se dégrade » (KRD §188). Un noyau **trop maigre** laisse le comportement **fuir par les trous** : il existe une densité optimale de vérités, et rien dans « tous les tests sont verts » ne te dit si tu y es. Le **mutation testing** est précisément ce qui te la fait **sentir** : on **mute** le code (on inverse une condition, on change un opérateur) ; si aucun miroir ne **tue** la mutation, c'est qu'il manque un invariant ou une fixture — un **trou**.
+
+## Les idées-clés
+
+<Field name="Le score de mutation est un densimètre, pas une note d'examen" type="KRD §19/§43">
+  Il **mesure** la tightness de la surface couverte (tué / (total − non-couvert)). Un mutant survivant n'est pas une punition : c'est un **trou nommé** (fichier · ligne · opérateur) — le prochain invariant à écrire (§59.8 « Serrage »).
+</Field>
+
+<Field name="C'est le tiroir PIPELINE, pas le tiroir par-diff" type="KRD §19">
+  KRD a trois tiroirs de timing. Le mutation testing est **cher, post-intégration, périodique** — pas à chaque diff (ça, ce sont les sensors computationnels de S07). On le lance **quand on serre**, pas à chaque frappe.
+</Field>
+
+<Field name="Le seuil est DÉCLARÉ au-dessus de la ligne — l'agent ne rédige jamais sa propre barre" type="§8 anti-Goodhart, KRD §66.2/§1831">
+  Le seuil vit dans le schéma `fitness` (NIVEAU 3, gravé, possédé par l'humain). L'agent le **lit** (SELECT seulement) et **en est noté** ; il ne l'écrit **jamais**. « Une fitness function buggée passe tout » (§1831) — d'où la règle : le gate **ne s'invente pas de barre**. Sans seuil déclaré, il **bloque** avec `MISSING_THRESHOLD`, jamais un laissez-passer choisi par lui-même.
+</Field>
+
+<Field name="Le score gate la phase stable — c'est UN conjoint du Stop non-gameable" type="KRD §64/§1485">
+  « Fini » est **calculé** : set rouge → vert ∧ vert antérieur intact ∧ **mutation ≥ seuil** ∧ aucun monstre. Le conjoint `mutation ≥ seuil` était **déjà câblé** dans le prédicat Stop (S29) ; S40 lui **fournit le score vivant** que le densimètre calcule. Sous la barre, la phase ne peut pas se fermer.
+</Field>
+
+<Field name="Un rapport vide ou illisible BLOQUE — jamais un 1,0 silencieux" type="KRD §82 anti-passthrough">
+  Pas de mutant couvrable (dénominateur nul) ou un rapport ingérable ⇒ `UNPARSABLE_REPORT`, un échec **rendu explicite**, jamais un score supposé à 1,0.
+</Field>
+
+## Ce que ça donne à l'écran
+
+La route Workbench **`/mutation-score`** rend, à partir de la projection en lecture seule de `mutation_runs` : la **jauge** du score face à la **barre du seuil déclaré** (étiquetée « déclaré au-dessus de la ligne · lecture seule »), le **verdict** pass/block de la phase stable, et la **liste des mutants survivants** (les trous à combler). Un sélecteur de scénario **rejoue le gate en direct** : 0,40 → BLOQUE, 0,80 → PASSE contre la barre à 0,80.
+
+## Ce que ça n'est PAS (les monstres évités)
+
+- **Pas une nouvelle valeur de seuil** ni une ligne `fitness` (au-dessus de la ligne, gravée — l'agent est SELECT-only).
+- **Pas un second hook Stop** — le conjoint `mutation ≥ seuil` existe déjà (S29), S40 le nourrit.
+- **Pas d'opérateurs de mutation** — gremlins / StrykerJS les possèdent (slot gelé, remplaçable).
+- **Pas de câblage par-diff** — c'est le tiroir pipeline.
+- **Pas de barre qui s'auto-ajuste** sur un survivant — la boucle n'édite jamais sa propre fitness (§8).

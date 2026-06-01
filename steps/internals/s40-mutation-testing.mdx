@@ -1,0 +1,48 @@
+---
+title: "S40 · Score de mutation — implémentation, méta, méta-méta"
+description: "Le détail d'implémentation de S40 : le paquet Go back/runtime/sensors/mutation (l'interface Runner au-dessus de gremlins/StrykerJS qui PARSE les rapports JSON, le MutationReport partagé, la fonction pure Gate(report, threshold) → verdict), la migration expand-only runtime.mutation_runs (+ enfant surviving_mutants, sous la ligne de flottaison, append-only), le serveur MCP mutation-runner (run_mutation + read_threshold SELECT-only sur fitness), le jumeau TS lib/mutation.ts et la route /mutation-score. Réutilise la forme S13 BlockReason ; nourrit le conjoint Stop S29 ; ne ré-implémente aucun opérateur de mutation."
+keywords: ["aidos", "krd", "mutation testing", "Gate", "MutationReport", "Runner", "gremlins", "StrykerJS", "Parse", "score", "dénominateur", "not_covered", "threshold", "fitness", "SELECT-only", "MISSING_THRESHOLD", "UNPARSABLE_REPORT", "BlockReason", "S13", "runtime.mutation_runs", "surviving_mutants", "Atlas", "expand-only", "append-only", "GRANT", "MCP", "mutation-runner", "run_mutation", "read_threshold", "S04", "S07", "S29", "goal.IsClosed", "Stop", "rapid", "fast-check", "fixture", "fault injection", "injection de faute", "déterministe", "lib/mutation.ts", "/mutation-score", "ADR 0030", "OpenQuestion"]
+---
+
+<Note>Côté implémentation — les trois couches. Pour le « pourquoi » sans code, voir [Pour moi → S40 (concept)](/steps/concept/s40-mutation-testing).</Note>
+
+## Couche 1 — Implémentation
+
+**Le gate pur.** `back/runtime/sensors/mutation/Gate(report MutationReport, threshold *float64) → Gated` est une **fonction pure, totale, déterministe** — pas d'horloge, pas de RNG, pas d'I/O. Le `threshold` est un **`*float64`** : `nil` (barre absente) ⇒ `MISSING_THRESHOLD`, distinct d'une barre déclarée à `0.0`. La logique : barre absente ⇒ block(`MISSING_THRESHOLD`) ; pas de mutant couvrable ou barre hors `[0,1]` ⇒ block(`UNPARSABLE_REPORT`) ; `score ≥ seuil` ⇒ pass ; sinon block, en portant les mutants survivants.
+
+**Le dénominateur (ADR 0030).** `score = (killed + timed_out) / (total − not_covered)`, clampé dans `[0,1]`. Un timeout compte comme un kill (gremlins et Stryker font de même) ; `not_covered` est exclu **du numérateur ET du dénominateur**, donc un fichier non couvert ne pèse ni dans un sens ni dans l'autre — le score mesure la **tightness de la surface couverte**, pas la couverture. Dénominateur nul ⇒ score **indéfini** ⇒ block (jamais un 1,0 silencieux).
+
+**L'interface `Runner`.** Une seule interface au-dessus des **runners gelés** : `Run() (MutationReport, error)` (le seul I/O — il lance le subprocess) et `Parse(raw []byte) (MutationReport, error)` (pur, total, **ne panique jamais** — un rapport ingérable est une erreur). Deux implémentations — `GremlinsRunner` (scope Go, parse le JSON `files[].mutations[].status` : `KILLED|TIMED_OUT|NOT_COVERED|LIVED`) et `StrykerRunner` (scope front, parse `files{}.mutants[].status` : `Killed|Timeout|NoCoverage|Survived`). **Aucun opérateur de mutation n'est rédigé ici** — les opérateurs appartiennent aux outils (slot gelé, remplaçable).
+
+**La persistance.** Migration Atlas **expand-only** `runtime.mutation_runs` (+ enfant `runtime.surviving_mutants`), append-only, content-addressée par `commit_or_phase_hash` : `scope CHECK(go|front)`, `killed/survived/timed_out/not_covered/total`, `score numeric`, `threshold_used numeric`, `verdict CHECK(pass|block)`, `block_reason jsonb`, fenêtre `started_at/finished_at`. Deux CHECK in-database : `score ∈ [0,1]` et `verdict = pass ⇒ score ≥ threshold_used`. **Sous la ligne de flottaison** (un journal Runtime, pas une vérité) : l'agent a **INSERT + SELECT** (privilèges par défaut du schéma `runtime`, S05), jamais UPDATE/DELETE/TRUNCATE. **Aucune ligne `fitness`, aucun GRANT d'écriture sur `fitness`.**
+
+**Le serveur MCP.** `back/mcp/mutation-runner` expose deux outils (ADR 0009 : une op = un outil) : `run_mutation(scope)` (invoque le runner, gate, persiste) et `read_threshold(scope)` (**SELECT-only** sur `fitness`). C'est une **capability à la demande** — le runner est cher/post-intégration, donc pas un hook par-diff (KRD §19). Le seam d'injection : pgx sur `runtime`/`fitness` quand `AIDOS_RUNTIME_DSN` est défini, sinon un mock déterministe (les barres d'exemple, jamais une vérité rédigée).
+
+**Le jumeau front.** `front/web/lib/mutation.ts` est le **jumeau pur** de `Gate` (mêmes deux codes, même dénominateur ADR 0030), couvert par **fast-check** (`lib/mutation.test.ts`). La route `/mutation-score` rejoue ce jumeau **en direct** sur un scénario choisi et projette `mutation_runs` — elle ne ré-encode ni le gate ni les runners en TS.
+
+## Couche 2 — Méta (le miroir)
+
+**Forme.** La preuve de ce capteur est, par nature, une **fixture** (l'arithmétique du gate `score + seuil → verdict` — le critère done) + une **propriété `rapid`** + l'**injection de faute** obligatoire (§5 hook-honesty).
+
+- **Fixture** (`gate_fixture_test.go`) — seuil 0,80 lu de fitness ; rapport 0,40 (40 tués / 100) ⇒ `block` + ligne `mutation_runs {0.40, 0.80, block}` portant les survivants ; rapport 0,80 ⇒ `pass` + ligne ; Gate sans seuil ⇒ `MISSING_THRESHOLD` ; rapport vide ⇒ `UNPARSABLE_REPORT`.
+- **Propriété `rapid`** (`gate_property_test.go`) — ∀ rapport, ∀ seuil : Gate déterministe ; `pass ⇔ score ≥ seuil` (pas de troisième verdict) ; **monotone** en score (tuer plus ne fait jamais passer pass→block) ; `score ∈ [0,1]` ; seuil absent ⇒ `MISSING_THRESHOLD` ; le parsing **ne panique jamais**.
+- **Injection de faute** (`fault_injection_test.go`) — depuis un workspace vert (tous les mutants tués, score 1,0 ≥ 0,80 ⇒ pass), on **affaiblit un miroir** (le mutant frontière `LIVED`) → score 0,75 < 0,80 → **block** + le survivant **listé** (fichier · ligne · opérateur) ; on **restaure** → pass. Le densimètre **lit le trou**, il ne compare pas juste un `≥` (« un détecteur qui ne fire pas est mort », KRD §1123).
+- **Conjoint Stop** (`stop_conjunct_test.go`) — consomme le contrat `runtime/goal` **en lecture seule** et prouve : score 0,40 < plancher 0,80 ⇒ `IsClosed` faux ; score 0,80 ⇒ satisfiable.
+
+**Câblage du Stop — déjà fait à S29.** `runtime/goal.IsClosed` condition (3) est `if Mutation < MutationFloor { return false }`, et `back/hooks/goal-check` lit déjà `Mutation`/`MutationFloor` de son événement injecté. Donc S40 **ne câble pas** un nouveau conjoint et **n'ajoute pas** un second hook Stop (méta-loop §5 : on AJOUTE, on ne duplique pas) — la branche « câbler le conjoint » du plan se résout en « déjà épinglé à S29 ». La contribution de S40, c'est **le densimètre qui produit le score vivant** que ce conjoint lit.
+
+**Codes BlockReason locaux (ADR 0030).** `MISSING_THRESHOLD` / `UNPARSABLE_REPORT` réutilisent la **forme** S13 `blockreason.BlockReason` mais sont déclarés **localement** dans le paquet `mutation` (le précédent ADR 0029 : pretooluse/posttooluse/sessionstart déclarent chacun leurs codes localement ; étendre l'enum FERMÉ de S13 en place serait éditer un contrat antérieur, §9). Chaque code porte un `how_to_fix` non vide (un mur sans porte est une prison, §44.5).
+
+## Couche 3 — Méta-méta (le miroir du miroir)
+
+**Qui surveille ce capteur ?** L'**injection de faute** : on affaiblit un vrai miroir, on asserte que le score **tombe** et que le gate **bloque** ; on restaure, on asserte qu'il **passe**. C'est le miroir du miroir rendu **déterministe** (pas un autre juge LLM) — il se referme proprement (KRD §60). Le mutation testing **est** l'instance comportementale de cette règle (§1123).
+
+**Anti-Goodhart, mécanique.** L'agent ne peut pas tricher la barre : un seuil manquant bloque, un rapport ingérable bloque, et la barre elle-même est **lecture seule au-dessus de la ligne** (le NIVEAU 3 inviolable de S39 garde cette posture — `fitness` SELECT-only). Le densimètre **mesure** la tightness, il ne **définit** pas la barre.
+
+**Déterminisme-first (les trois plans).** Le score, le gate, les parsers sont des fonctions pures (même rapport → même verdict) ; seul `Run` (le subprocess) touche le dehors, et son étape de parsing reste pure et testée contre de vrais JSON gremlins/Stryker — le gate est donc prouvable **sans les outils installés**. Un diff de rapport est un parse déterministe, jamais un « agent qui devine un score ».
+
+## OpenQuestions
+
+- **OQ-S40-1** — la ligne `fitness.mutation_threshold` n'est **pas encore gravée** (le mur : cette étape ne peut pas écrire `fitness`). `PgxThresholdReader` lit la ligne head ; tant qu'un ChangeSet humain/`aidos` ne la grave pas, le gate bloque avec `MISSING_THRESHOLD` en déploiement réel (le mock fournit une barre d'**exemple** pour le seam Workbench). Forme de colonne/JSONB proposée ici, à confirmer au gravage. Dépendance forward by-design — **ne bloque pas l'étape**.
+- **OQ-S40-2** — l'invocation subprocess réelle gremlins/Stryker est **différée** ; `Parse` est prouvé contre de vrais JSON, le câblage `Run` est fourni là où les outils sont installés, hors du chemin pur du gate.
+- **OQ-S40-3** — **pas encore de skill « plug-the-surviving-mutant »** (§5 : un geste rejouable ne s'acquiert qu'après un vrai trou récurrent). Enregistré ; non construit.
