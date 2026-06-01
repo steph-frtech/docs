@@ -1,0 +1,57 @@
+---
+title: "S30 · Le MemoryFirewall — la mémoire propose, le noyau déclare"
+description: "S30 érige le MemoryFirewall de KRD §119.1 dans le store /brain : la porte qui interdit à tout MemoryItem d'atteindre le noyau autrement que par le flux obligatoire à sens unique Memory → ContextPack → Idea → Mirror → Goal → Kernel. Un MemoryItem est du carburant de contexte, JAMAIS une vérité : il porte content + provenance + validity_scope + expires_at + confidence + taint, et — par construction — PAS de version-gel et PAS de miroir. Cette double absence est exactement ce qui en fait de la mémoire et non une vérité. L'arête directe Memory → Kernel est TOUJOURS bloquée (MEMORY_CANNOT_DECLARE_TRUTH), quels que soient la confiance ou le taint — même une mémoire propre et pleinement confiante n'est pas une vérité. La seule porte légale est ViaIdea → l'idea-intake (S27), où la mémoire devient une idée draft dont la provenance pointe vers la mémoire et qui doit ENCORE acquérir son miroir pour atteindre le noyau. Le store /brain est sous la ligne de flottaison : l'agent lit et ajoute la mémoire (INSERT/SELECT), mais n'a AUCUN grant sur kernel/mirrors/fitness — l'asymétrie est le firewall au niveau de la ligne. « La mémoire propose ; le noyau déclare le vrai. »"
+keywords: ["aidos", "krd", "MemoryFirewall", "memory firewall", "mémoire", "memory", "MemoryItem", "/brain", "brain", "carburant de contexte", "context fuel", "non-décisoire", "pas une vérité", "not truth", "pas de version", "pas de miroir", "no version", "no mirror", "content", "provenance", "validity_scope", "expires_at", "confidence", "confiance", "taint", "unverified", "stale", "user_claim", "incident_derived", "external_source", "flux obligatoire", "mandatory flow", "Memory → ContextPack → Idea → Mirror → Goal → Kernel", "sens unique", "one-way", "ContextPack", "Propose", "ToKernel", "ViaIdea", "Capture", "MEMORY_CANNOT_DECLARE_TRUTH", "BlockReason", "actionnable", "how_to_fix", "bloqué", "blocked", "Memory → Kernel", "raccourci interdit", "idea-intake", "S27", "idée draft", "draft idea", "le mur", "the wall", "ligne de flottaison", "waterline", "sous le mur", "below the waterline", "INSERT/SELECT", "append-only", "branch-aware", "branche", "la mémoire propose le noyau déclare", "memory proposes the kernel declares", "déterministe", "content-addressed", "hash", "S01", "KRD §119.1", "LIVRE XXIV"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S30](/steps/internals/s30-memory-firewall).</Note>
+
+## En une phrase
+
+S30 érige le **MemoryFirewall** §119.1 dans le store **`/brain`** : la **porte** qui interdit à tout **`MemoryItem`** d'atteindre le noyau autrement que par le **flux obligatoire à sens unique** `Memory → ContextPack → Idea → Mirror → Goal → Kernel`. L'arête **directe** `Memory → Kernel` est **toujours bloquée** — quels que soient la confiance ou le taint. **« La mémoire propose ; le noyau déclare le vrai. »**
+
+## Le problème que ça résout
+
+Un agent qui code accumule de la **mémoire** : des on-dit (« le lead support m'a dit que… »), des extraits d'incidents, des claims externes. Cette mémoire est **utile** comme **carburant de contexte** — mais elle est **non vérifiée**, souvent **périmée**, parfois **fausse**. Le danger : qu'une mémoire **se fasse passer pour une vérité** et entre dans le noyau sans preuve. C'est la faille que KRD §119.1 ferme. Une mémoire n'est **jamais** décisoire : elle ne peut entrer dans `/kernel` que par le **chemin complet** — devenir une **idée**, acquérir son **miroir**, passer le **/goal**. Entre la mémoire et la vérité, il y a **exactement un chemin**, à **sens unique**, et le raccourci `Memory → Kernel` n'existe **jamais**.
+
+## Les idées-clés
+
+<Field name="Un MemoryItem est du carburant, JAMAIS une vérité" type="pas de version-gel, pas de miroir — par construction">
+  Un `MemoryItem` porte `content` + `provenance` + `validity_scope` + `expires_at` + `confidence` + `taint`. Il est **branch-aware**, indexable, **non-décisoire**. Il n'a **pas** de `version`/gel et **pas** de `mirror` — et le **type le rend irreprésentable** (il n'y a tout simplement aucun champ pour ça). Cette **double absence** est *exactement* ce qui en fait de la mémoire et non une vérité.
+</Field>
+
+<Field name="L'arête directe Memory → Kernel est TOUJOURS bloquée" type="MEMORY_CANNOT_DECLARE_TRUTH — quels que soient confiance et taint">
+  `ToKernel(mémoire)` refuse **toujours** l'arête directe, avec le `BlockReason` actionnable `MEMORY_CANNOT_DECLARE_TRUTH` (`how_to_fix` = le flux complet). Il n'y a **aucun** seuil de confiance, **aucune** exception « mémoire propre » : même une mémoire **sans taint** et **pleinement confiante** (`confidence == 1.0`) reste **bloquée**. Une mémoire propre est **toujours** une mémoire, pas une vérité.
+</Field>
+
+<Field name="Une mémoire PEUT être proposée dans un ContextPack" type="Propose — le taint voyage avec elle">
+  La face **lecture** du flux est autorisée : `Propose(mémoire, goal)` empile la mémoire dans une **entrée ContextPack**, et le **taint voyage avec elle** — jamais perdu en silence. Le contexte se **compile** depuis la mémoire ; la mémoire ne **décide** rien.
+</Field>
+
+<Field name="La seule porte légale est ViaIdea → l'idea-intake (S27)" type="la mémoire devient une idée draft qui doit ENCORE acquérir son miroir">
+  `ViaIdea(mémoire)` remet le `content` de la mémoire à l'**idea-intake** (S27) comme **idée draft**, dont la **provenance** pointe vers la mémoire (`memory:<id>`). Cette idée a **toujours** `version == null` et `mirror == null` : elle doit **encore** acquérir son miroir via `/goal` pour **un jour** atteindre le noyau. `ViaIdea` n'écrit **rien** dans le noyau.
+</Field>
+
+<Field name="Le store /brain est sous la ligne de flottaison" type="l'agent lit et ajoute la mémoire — mais ne peut JAMAIS écrire le noyau">
+  L'agent obtient `INSERT/SELECT` sur `brain.memory_item` (il **lit** et **ajoute** la mémoire librement) — mais **aucun** grant sur `kernel`/`mirrors`/`fitness`. Cette **asymétrie** — du carburant **inscriptible** qui ne peut **jamais** devenir une vérité sans le flux complet — *est* le MemoryFirewall **au niveau de la ligne**. Le gel à l'autre bout est écrit par le rôle `aidos` via `/goal`, jamais par la mémoire ni par l'agent.
+</Field>
+
+## Ce que S30 n'est pas
+
+<Warning>
+Le MemoryFirewall n'est **pas** un contrôle d'accès, une **ACL**, un **sanitizer**, ni une **couche de validation** ; le store `/brain` n'est **pas** une base, un **RAG store** ou une **knowledge base**. C'est une **porte de provenance** : elle décide *par quel chemin* une mémoire peut influencer la vérité, jamais *qui* a le droit. Hors périmètre ici : le **ContextRouter** / la compilation progressive du `ContextPack` (§119.3) et la **ContextGraphDecision** / le Decision Reuse Test (§119.2) — des étapes ultérieures ; et l'**écriture/gel** réel du noyau (la mutation `/goal`, le flux S27 via le rôle `aidos`).
+</Warning>
+
+## En une image
+
+```
+   ┌─────────┐   Propose    ┌───────────┐   ViaIdea (S27)   ┌──────┐   /goal   ┌────────┐   /goal   ┌────────┐
+   │ Memory  │ ───────────▶ │ContextPack│ ────────────────▶ │ Idea │ ────────▶ │ Mirror │ ────────▶ │ Kernel │
+   │ (fuel)  │              └───────────┘   draft, pas de    └──────┘  acquiert └────────┘   gèle    └────────┘
+   └────┬────┘                              miroir encore                 son miroir
+        │
+        │   ToKernel  ✗  MEMORY_CANNOT_DECLARE_TRUTH  (aucune écriture noyau)
+        └──────────────────────────────────────────────────────────────▶  ⛔  (le raccourci direct n'existe jamais)
+```
+
+Le chemin du haut est le **seul** chemin. Le raccourci du bas est **toujours** refusé — pour **toute** mémoire, propre ou souillée, confiante ou non. La mémoire **propose** ; le noyau **déclare** le vrai.
