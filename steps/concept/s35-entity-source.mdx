@@ -1,0 +1,49 @@
+---
+title: "S35 · Entity source — une source, trois projections"
+description: "S35 livre la SOURCE entity du KRD (§23, ligne 530 : kind: entity = le modèle de données, une couche SOURCE, humaine, au-dessus de la ligne de flottaison) comme un AST en Postgres (schéma kernel, JSONB, content-addressed, append-only) et le codegen déterministe qui émet ses TROIS projections depuis cette source UNIQUE — une struct Go (sqlc), un type TypeScript, le DDL Postgres — jamais double-typé. L'entité canonique est Order. L'ordre des attributs est préservé ; identifier → PRIMARY KEY ; required → NOT NULL / non-optionnel ; un attribut non requis → NULLABLE / optionnel. Un attribut d'un type scalaire inconnu est REJETÉ (BlockReason UNKNOWN_ATTRIBUTE_TYPE), jamais deviné."
+keywords: ["aidos", "krd", "entity", "entité", "source", "AST", "modèle de données", "data model", "Order", "schéma", "schema", "LinkML", "kind: entity", "couche source", "source layer", "above the line", "au-dessus de la ligne", "projection", "struct Go", "Go struct", "sqlc", "type TS", "TypeScript", "DDL Postgres", "CREATE TABLE", "PRIMARY KEY", "NOT NULL", "NULLABLE", "identifier", "required", "optionnel", "optional", "jamais double-typé", "never double-typed", "une source trois projections", "one source three projections", "content-addressed", "source_hash", "ordre des attributs", "attribute order", "déterministe", "deterministic", "byte-identique", "UNKNOWN_ATTRIBUTE_TYPE", "BlockReason", "le mur", "the wall", "SELECT-only", "kernel.entity", "schema-validation", "/entity-map", "S02", "S34"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S35](/steps/internals/s35-entity-source).</Note>
+
+## En une phrase
+
+S35 livre la **source entity** : le **modèle de données** décrit **une seule fois** comme un **AST dans le kernel** (Postgres, content-addressed, au-dessus de la ligne), d'où l'on **émet trois projections** déterministes — une **struct Go** (sqlc), un **type TypeScript**, le **DDL Postgres**. **Une source, trois projections, jamais double-typé.** L'entité canonique est **Order**.
+
+## Le problème que ça résout
+
+Une même entité doit exister sous trois formes : un type Go pour le back, une table pour la base, un type TS pour le front. Les écrire à la main, c'est garantir qu'elles **divergeront** — un champ ajouté ici, oublié là. La réponse KRD : **une seule source de vérité** (l'AST `Order` dans le kernel) d'où l'on **émet** chaque forme, déterministiquement. Les trois projections ne sont **pas** la vérité — ce sont des **projections régénérables**, sous la ligne, jamais éditées à la main, et qui ne peuvent pas se contredire puisqu'elles viennent du même AST.
+
+## Les idées-clés
+
+<Field name="Une entité est une SOURCE, au-dessus de la ligne" type="kind: entity, autorité above">
+  Une **entity** (KRD §23) est une **couche source** : humaine, gelée, **au-dessus de la ligne de flottaison**. Elle vit comme un **AST en Postgres** (schéma `kernel`, JSONB, content-addressed, append-only) — **pas** comme une struct écrite à la main. L'agent la **lit** (SELECT-only) ; il ne l'**écrit jamais** (le mur). Seul le rôle `aidos`, via un ChangeSet approuvé, fige une entité.
+</Field>
+
+<Field name="Trois projections fidèles, jamais double-typé" type="le critère done">
+  De l'AST `Order`, trois emitters **purs et déterministes** émettent : `EmitGo` (la struct Go, forme sqlc), `EmitTS` (le type TS partagé), `EmitDDL` (le `CREATE TABLE` Postgres). Les trois s'accordent sur le **MÊME jeu d'attributs** — aucune n'ajoute, ne supprime ni ne renomme un attribut que la source n'a pas. **Jamais double-typé** (CLAUDE.md §3).
+</Field>
+
+<Field name="L'ordre est sémantique ; les règles sont fidèles" type="ordre, identifier, required">
+  L'**ordre des attributs** de la source est **préservé** dans les trois projections (un réordonnancement est une **nouvelle version**). L'attribut `identifier` devient la **PRIMARY KEY** ; un attribut `required` devient **NOT NULL** (Go présent, TS non-optionnel) ; un attribut **non requis** (comme `discount`) devient **NULLABLE** (TS optionnel `discount?`).
+</Field>
+
+<Field name="Un type inconnu est refusé, jamais deviné" type="honnêteté, UNKNOWN_ATTRIBUTE_TYPE">
+  Le jeu de types scalaires est **fermé** (`string`, `int`, `decimal`, `bool`, `timestamptz`) — les types ubiquitaires du domaine, jamais inventés à la volée. Un attribut d'un type **hors** de ce jeu est **REJETÉ** avec un `BlockReason` (`UNKNOWN_ATTRIBUTE_TYPE`, la forme S13) : **aucune** projection n'est émise, **jamais** de repli silencieux sur `any`/`text`.
+</Field>
+
+<Field name="Content-addressé — l'identité, c'est le hash" type="source_hash, S02 réutilisé">
+  L'`id` de l'entité = `Hash(Canonicalize(body))` (le schéma de hash de **S02**, jamais reforké). Tout changement d'octet (un attribut ajouté, retiré, réordonné, retypé) produit une **nouvelle version**. Chaque projection porte ce `source_hash` ; quand la tête de l'entité bouge, une projection dont le `source_hash` ne correspond plus est **stale** — l'inégalité qui alimente la vague de rouge (S22).
+</Field>
+
+## Ce que ça n'est pas (encore)
+
+- **Pas** les couches `api` / `operation` / `policy` / `control` / `action` (étapes sœurs) — une entité ici est un modèle de données **autonome**.
+- **Pas** de relations / clés étrangères entre entités (`Order` seule, auto-contenue) — les graphes multi-entités sont une étape ultérieure.
+- **Pas** d'expansion de **behavior-macro** (§24.6), **pas** de contrat **Pact** cross-cell (étape N5), **pas** d'**application** de la migration (le DDL est émis, pas commité — Atlas l'applique plus tard).
+
+## Voir aussi
+
+- L'écran [`/entity-map`](https://aidos.sagedesk.fr/entity-map) — la source `Order` à gauche, ses trois projections dérivées à droite.
+- [S34 · Emitters](/steps/concept/s34-emitters) — l'ensemble des emitters runtime (un par `kind × target`).
+- [Pour moi → S35](/steps/internals/s35-entity-source) — l'implémentation, les miroirs, la place dans le cliquet.

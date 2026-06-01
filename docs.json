@@ -133,7 +133,9 @@
               "steps/concept/s33-context-router",
               "steps/internals/s33-context-router",
               "steps/concept/s34-emitters",
-              "steps/internals/s34-emitters"
+              "steps/internals/s34-emitters",
+              "steps/concept/s35-entity-source",
+              "steps/internals/s35-entity-source"
             ]
           }
         ]
