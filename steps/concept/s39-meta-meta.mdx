@@ -1,0 +1,48 @@
+---
+title: "S39 · Méta-méta — le self-test du harness (fitness inviolable)"
+description: "S39 ferme la boucle méta-méta du KRD (LIVRE XIII §70) : un hook SessionStart (harness-self-test) qui, à chaque démarrage de session, lance une injection de faute DÉTERMINISTE prouvant les trois garanties inviolables du NIVEAU 3 — chaque capteur se déclenche encore, le mur refuse toujours les écritures kernel/mirrors/fitness de l'agent, et la fitness (définition de « réussi ») n'a pas été modifiée par la boucle méta. La boucle méta peut AJOUTER un garde-fou, jamais en RETIRER un. Cette étape n'écrit pas la fitness — elle la LIT et affirme qu'elle est inchangée. Il n'y a pas de niveau 4."
+keywords: ["aidos", "krd", "méta-méta", "meta-meta", "NIVEAU 3", "fitness", "self-test", "harness-self-test", "SessionStart", "injection de faute", "fault injection", "le miroir du miroir", "mirror of the mirrors", "inviolable", "le mur", "the wall", "garde-fou", "guardrail", "MUTED_SENSOR", "WALL_BREACHED", "FITNESS_MUTATED", "BlockReason", "déterministe", "lecture seule", "read-only", "baseline gravée", "S02", "S04", "S07", "S13", "pas de niveau 4", "no level 4", "/meta", "/self-test"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S39](/steps/internals/s39-meta-meta).</Note>
+
+## En une phrase
+
+S39 livre le **self-test méta-méta** : à chaque **démarrage de session**, une **injection de faute déterministe** prouve les trois garanties **inviolables** du NIVEAU 3 — **chaque capteur se déclenche encore**, **le mur tient toujours**, et **la fitness n'a pas été modifiée**. Le critère done : le self-test est vert ∧ la fitness est immuable par toute boucle.
+
+## Le problème que ça résout
+
+AIDOS s'améliore tout seul (la boucle méta : sensors, mur, complétude, évolution). Mais qui surveille les surveillants ? Une boucle qui pourrait **éteindre un capteur**, **percer le mur**, ou pire **réécrire sa propre définition de « réussi »** se mettrait n'importe quelle note — c'est le Goodhart ultime. La réponse KRD (LIVRE XIII §70) : le NIVEAU 3 — la **fitness** (définition de « réussi ») + la grammaire des couches + la ligne de flottaison — est **gravé**, possédé par **l'humain + la réalité**, et **aucune boucle ne peut l'éditer**. On le vérifie **mécaniquement**, à chaque session, par **injection de faute**.
+
+## Les idées-clés
+
+<Field name="Le self-test prouve TROIS garanties par injection de faute" type="KRD §70">
+  (1) **Chaque capteur se déclenche** — on casse une vérification surveillée connue-verte et on asserte que le détecteur vire au rouge (« le miroir du miroir, c'est est-ce que ce détecteur détecte ? », KRD §60). (2) **Le mur tient** — on tente une écriture de l'agent au-dessus de la ligne sur kernel · mirrors · fitness et on asserte qu'elle est **refusée**. (3) **La fitness est inchangée** — on recalcule le hash de contenu des lignes de fitness et on asserte qu'il égale la **baseline gravée**.
+</Field>
+
+<Field name="La boucle méta peut AJOUTER un garde-fou, JAMAIS en RETIRER un" type="KRD §70, CLAUDE.md §5">
+  Un garde-fou retiré (un capteur muet, un mur percé) est un **self-test rouge**. C'est la règle du méta-loop rendue mécanique : un nouvel artefact ne fait qu'ajouter une protection, jamais en enlever.
+</Field>
+
+<Field name="La fitness est LUE, jamais écrite — le contrôleur ne peut pas toucher ce qu'il contrôle" type="le mur, §2">
+  Cette étape n'écrit **pas** le schéma `fitness` (l'écrire serait précisément la dérive qu'elle existe pour attraper). Elle le **lit** (SELECT seulement) et affirme qu'il est inchangé. Les lignes de fitness sont octet-pour-octet identiques avant et après le self-test.
+</Field>
+
+<Field name="Il n'y a PAS de niveau 4 — le plancher est l'injection de faute déterministe" type="KRD §70">
+  Qui gouverne le méta-méta ? L'humain + la réalité, point. La régression s'arrête parce qu'à la fin c'est de la **mutation / injection de faute déterministe**, pas un autre juge-LLM. Pas de gouverneur au-dessus, pas de circularité.
+</Field>
+
+<Field name="Sur échec, un BlockReason bloque la session" type="S13">
+  `MUTED_SENSOR` (un garde-fou retiré), `WALL_BREACHED` (l'agent pourrait écrire la vérité), `FITNESS_MUTATED` (une boucle a édité sa propre fitness — le péché cardinal). Chaque BlockReason nomme la porte de sortie (`how_to_fix`).
+</Field>
+
+## Ce que S39 N'EST PAS
+
+- **Pas l'écriture de la fitness** — le NIVEAU 3 est gravé, l'humain + la réalité le possèdent ; S39 le **lit** et l'affirme inchangé, il ne définit jamais « réussi ».
+- **Pas un nouveau capteur** (S07) ni **un nouveau mur** (S04) — S39 **prouve** qu'ils tiennent encore.
+- **Pas de CellVitality / fitness de promotion** (une dent diagnostique séparée).
+- **Pas de niveau 4** — il n'y a pas de gouverneur au-dessus du méta-méta.
+
+## Le critère « done »
+
+Le self-test est **vert** : harness sain ⇒ chaque capteur déclenché, mur refusé sur kernel ∧ mirrors ∧ fitness, fitness inchangée. Un capteur muet, un mur percé, une fitness modifiée **virent chacun au rouge** avec le bon BlockReason. Vu à l'écran sur **/meta**.
