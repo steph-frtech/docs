@@ -1,0 +1,44 @@
+---
+title: "S41 · Dette du noyau — implémentation, méta, méta-méta"
+description: "Le journal d'implémentation de S41 : le paquet Go back/runtime/debt (Scan → KernelDebt, les trois détecteurs purs) + back/runtime/debt/trim (SuggestTrim → TrimPlan, suggest-only), la migration fitness.kernel_debt_snapshot (append-only, au-dessus de la ligne, agent SELECT-only), le miroir fixture + propriété rapid + injection de faute, le geste /trim, et le panneau /kernel-debt. Trois couches : Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "dette du noyau", "kernel debt", "trim", "back/runtime/debt", "Scan", "SuggestTrim", "DebtItem", "TrimPlan", "orphan_mirror", "stale_fixture", "surviving_mutant", "open_idea", "fitness.kernel_debt_snapshot", "append-only", "le mur", "rapid", "fixture", "injection de faute", "fault injection", "S01", "S02", "S12", "S40", "content-addressed", "déterministe", "/kernel-debt", "Playwright", "fast-check"]
+---
+
+<Note>Côté implémentation — le détail interne. Pour le concept, voir [Pour moi → S41 (concept)](/steps/concept/s41-kernel-debt).</Note>
+
+## Couche 1 — Implémentation
+
+**Le paquet Go `back/runtime/debt`.** `Scan(s Snapshot, now int64) KernelDebt` est pur et total — pas de DB, pas d'I/O, pas de `time.Now()`. Il diagnostique un **instantané en lecture seule** (`Snapshot` = les vérités vivantes du `kernel`, les enregistrements `mirror` avec `reflects`/`test_kind`/`liveness`/version épinglée, le dernier run de mutation **consommé** de S40) et retourne un `KernelDebt` = une liste ordonnée de `DebtItem{ id, kind, target_ref, reason, severity }`. Trois détecteurs purs :
+
+- **`orphanMirrors`** consomme `mirror/records.NoOrphanMirror` (S12/S06) — il ne re-dérive pas la notion de monstre. Il filtre ensuite la dérive de version : un miroir dont l'*id* de vérité est encore vivant (seule la version a bougé) n'est **pas** un orphelin (c'est une fixture périmée). Un orphelin = un *id* qui n'a **aucune** vérité vivante.
+- **`staleFixtures`** : une fixture (`test_kind == fixture`) dont l'*id* est vivant mais à une version ≠ tête vivante.
+- **`survivingMutants`** : une mutation `survived` (consommée) contre une vérité qu'un miroir **vivant** couvre — la raison **nomme** le miroir qui aurait dû la tuer.
+
+`id` et l'id de l'instantané sont `Hash(Canonicalize(body))` — **réutilisés** de S01/S02 (`records.Canonicalize` + `records.Hash`), jamais forkés. Le rapport est trié de façon totale (sévérité → kind → cible → id) pour être rejouable.
+
+**Le paquet `back/runtime/debt/trim`.** `SuggestTrim(d KernelDebt) TrimPlan` mappe chaque `DebtItem` à un `TrimSuggestion{ debt_item_ref, proposed_action, rationale, requires }` où `proposed_action ∈ { open_idea_to_retire_mirror, open_idea_to_repin_fixture, open_idea_to_strengthen_mirror }` et `requires == "idea → mirror → /goal → human approval"`. Il ne supprime rien, n'écrit aucune vérité, n'ouvre aucun ChangeSet. Une dette vide → un plan vide.
+
+**La migration `fitness.kernel_debt_snapshot`** (Atlas, expand-only / append-only, content-addressed). `id text PK` = hash du corps, `body jsonb` (les `[]DebtItem` + le `TrimPlan`), `scanned_at`, `kernel_head` (version-pinned), `mutation_run_ref`. L'agent a **SELECT seulement** (le mur — `fitness` est en lecture seule au-dessus de la ligne) ; seul `aidos` enregistre, via un ChangeSet (S20), et même lui ne peut pas UPDATE/DELETE (append-only).
+
+**Le geste `/trim`** (`.claude/skills/trim/`) encode la procédure (instantané → `Scan` → `SuggestTrim` → présenter) et les règles d'honnêteté (suggère, ne supprime jamais ; jamais de sorte/cible inventée).
+
+**Le panneau `/kernel-debt`** (`front/web/app/kernel-debt/`) rejoue le **jumeau pur** TS (`lib/kernel-debt.ts`) en direct sur un scénario sélectionné : le grand livre groupé sous **MIROIRS ORPHELINS / FIXTURES PÉRIMÉES / MUTANTS SURVIVANTS** et le plan de trim (chaque suggestion une proposition `open_idea_*` exigeant la porte, **sans bouton supprimer/appliquer**).
+
+## Couche 2 — Méta (le miroir)
+
+Le comportement est prouvé **avant** le code par un miroir à deux formes, conceptuellement dans le schéma `mirrors`, matérialisé dans `back/runtime/debt/` :
+
+- **Fixture (N2, `state → command → events`)** : un instantané + `now` → `Scan` → les `DebtItem` ; la dette → `SuggestTrim` → le `TrimPlan`. Couvre : orphelin détecté + rien supprimé (lecture seule), fixture à tête déplacée → `stale_fixture`, mutation survivante (couverte) → `surviving_mutant`, trim suggéré (3 actions `open_idea_*` à la porte, aucune suppression), noyau propre → dette vide + plan vide, id de l'instantané == `Hash(Canonicalize(body))`.
+- **Propriété (∀, `rapid`)** : déterminisme (`now` passé, jamais lu), toute sorte hors des trois interdite, instantané jamais muté, chaque suggestion un `open_idea_*` à la porte, chaque `target_ref` trace vers un vrai input (aucune cible inventée), instantané propre → vide, jamais de panique sur input malformé.
+- **Le jumeau TS** est couvert par **fast-check** (`front/web/lib/kernel-debt.test.ts`), ancré sur les mêmes scénarios.
+- **Persistance** : un test Testcontainers (Postgres réel) prouve le mur — l'agent SELECT mais INSERT/UPDATE/DELETE refusés ; l'écrivain non-propriétaire INSERT mais UPDATE/DELETE refusés (append-only).
+
+## Couche 3 — Méta-méta (le miroir du miroir)
+
+**L'injection de faute** (`fault_injection_test.go`) prouve que le diagnostic n'est pas mort : sur un instantané propre (dette vide), on **casse** le dépôt — on affaiblit un miroir (un mutant survit), on re-pointe un miroir vers une vérité disparue (orphelin), on déplace la tête épinglée (fixture périmée) — et on affirme que `Scan` **devient rouge** (nomme chaque rouille) ; puis on **restaure** et on affirme qu'il **redevient vert** (dette vide, plan vide). Un détecteur qui laisserait passer la vraie rouille fait échouer ce test.
+
+S41 **n'ajoute aucun garde-fou non-contournable** (le mur garde déjà `kernel/mirrors/fitness` ; la loi de complétude S12 bloque déjà sur les monstres orphelins). `/trim` est **conseil**, pas une barrière — un hook qui ne se déclenche jamais est mort (CLAUDE.md §5). S41 ne fait que **nommer et classer** la dette pour la disposition humaine.
+
+## OpenQuestions
+
+- **OQ-S41-ui-live** — le panneau `/kernel-debt` rend des scénarios pré-amorcés en attendant le câblage du chemin de lecture live `fitness.kernel_debt_snapshot` (SELECT-only). Dépendance-avant par conception, pas un résidu bloquant.

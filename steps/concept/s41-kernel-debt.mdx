@@ -1,0 +1,44 @@
+---
+title: "S41 · Dette du noyau — nommer la rouille, proposer un trim, ne rien supprimer"
+description: "S41 livre KernelDebt, le diagnostic en lecture seule qui nomme la rouille du dépôt de vérité en exactement trois sortes déclarées — miroir orphelin (un monstre de la loi de complétude, S12), fixture périmée (l'épingle a quitté la tête vivante) et mutant survivant (consommé du run S40) — plus le geste /trim qui PROPOSE un plan de réduction. /trim détecte et suggère ; il ne supprime rien : chaque action ouvre une idée, et toute action passe par la porte idea → mirror → /goal → human approval."
+keywords: ["aidos", "krd", "dette du noyau", "kernel debt", "trim", "miroir orphelin", "orphan mirror", "fixture périmée", "stale fixture", "mutant survivant", "surviving mutant", "loi de complétude", "monstre", "completeness", "S12", "S40", "S01", "S02", "content-addressed", "diagnostic", "lecture seule", "read-only", "suggest only", "idea → mirror → /goal", "le mur", "fitness", "kernel_debt_snapshot", "/kernel-debt", "déterministe", "anti-Goodhart"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S41](/steps/internals/s41-kernel-debt).</Note>
+
+## En une phrase
+
+S41 livre **KernelDebt** : un diagnostic **en lecture seule** qui **nomme la rouille** qui s'accumule dans le dépôt de vérité, en **exactement trois sortes déclarées**, et **`/trim`** qui **propose** un plan de réduction sur ces trouvailles. Le critère done, c'est qu'il **détecte** orphelins / périmées / survivants et **suggère** un trim — en **ne supprimant rien**.
+
+## Le problème que ça résout
+
+Le dépôt de vérité **vieillit**. Un miroir finit par refléter une vérité qui n'existe plus (un **monstre** de la loi de complétude). Une fixture reste **épinglée** sur une version que la tête vivante a quittée. Une mutation **survit** à un run de serrage alors qu'un miroir prétendait la couvrir. Cette rouille est invisible tant que « tous les tests passent » — et pourtant elle gonfle la surface de vérité sans la prouver. **Nommer la dette est un diagnostic, jamais une suppression** : on la mesure, on la classe, on propose — l'humain dispose.
+
+## Les idées-clés
+
+<Field name="Trois sortes déclarées — jamais inventées" type="KRD loi de complétude, S12">
+  `DebtItem.kind ∈ { orphan_mirror, stale_fixture, surviving_mutant }`. **Miroir orphelin** = un miroir qui ne reflète aucune vérité vivante (le monstre `no_orphan_mirror`, **consommé** de S12/S06, jamais re-défini). **Fixture périmée** = une fixture épinglée sur une version que la tête vivante a quittée. **Mutant survivant** = une mutation restée vivante au run S40, contre une vérité qu'un miroir vivant prétend couvrir. Trois sortes, pas une de plus.
+</Field>
+
+<Field name="/trim SUGGÈRE — il ne supprime rien" type="le mur, CLAUDE.md §2">
+  Chaque suggestion porte une action `open_idea_*` (`open_idea_to_retire_mirror`, `open_idea_to_repin_fixture`, `open_idea_to_strengthen_mirror`) — **l'ouverture d'une idée, jamais une suppression**. Et chaque suggestion **exige la porte** `idea → mirror → /goal → human approval`. Il n'existe **aucune** action `delete_*`. Le panneau `/kernel-debt` n'expose **aucun** bouton supprimer/appliquer.
+</Field>
+
+<Field name="La dette est CALCULÉE, jamais déclarée" type="§8 anti-Goodhart">
+  `Scan(instantané, now)` est **pur et déterministe** : `now` est passé en paramètre (la classification ne lit jamais l'horloge), donc le rapport est **rejouable**. Le juge est le miroir déterministe (la fixture + la propriété rapid), jamais un LLM qui se note lui-même.
+</Field>
+
+<Field name="L'instantané est au-dessus de la ligne — l'agent le lit, il ne l'écrit pas" type="le mur">
+  Un instantané de dette est enregistré dans `fitness.kernel_debt_snapshot` (zone diagnostic en lecture seule). L'agent a **SELECT seulement** ; seul le rôle écrivain `aidos` enregistre un instantané, via un ChangeSet approuvé (S20). C'est **append-only** : un nouveau scan est une nouvelle ligne, jamais un UPDATE.
+</Field>
+
+## Ce que S41 n'est PAS
+
+- **Pas un ramasse-miettes / une purge / une politique de rétention / un linter qui supprime.** KernelDebt **détecte et classe** ; `/trim` **propose**. Agir sur la dette est un goal **ultérieur** (`idea → mirror → /goal`).
+- **Pas le moteur de mutation testing** : les mutants survivants sont **consommés** du run S40, jamais produits ici.
+- **Pas une re-définition de la complétude** : le monstre/orphelin est **consommé** de S12.
+- **Aucune écriture de vérité.** Réutilise le hash de contenu de S01/S02 et la notion de monstre de S12 sans les dupliquer.
+
+## Le critère done
+
+Un miroir orphelin devient un `orphan_mirror`, une fixture à tête déplacée un `stale_fixture`, une mutation survivante (couverte) un `surviving_mutant` ; `/trim` propose des actions toutes `open_idea_*` exigeant la porte, **sans rien supprimer ni ouvrir de ChangeSet** ; un noyau propre donne une dette vide et un plan vide ; l'id de l'instantané est le hash de contenu de son corps. Tout cela est **calculé**, jamais déclaré.
