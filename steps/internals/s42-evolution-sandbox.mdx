@@ -1,0 +1,43 @@
+---
+title: "S42 · Evolution Sandbox — implémentation, méta, méta-méta"
+description: "Le journal d'implémentation de S42 : le paquet Go back/runtime/evolve (l'AST EvolutionSandbox + Confine/Promote/Evolve, purs), le hook back/hooks/sandbox-confinement (+ injection de faute), les MCP back/mcp/evolve et back/mcp/backtester, le geste /evolve, le miroir journey Godog + fixture + propriété rapid, et le panneau /evolution-sandbox. Trois couches : Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "evolution sandbox", "/evolve", "back/runtime/evolve", "Confine", "Promote", "Evolve", "EvolutionSandbox", "can_write", "cannot_write", "promotion gate", "mirror_green", "out_of_sample", "authority_approval", "SANDBOX_WRITE_ESCAPES_ZONE", "SANDBOX_CANNOT_GOVERN", "sandbox-confinement", "hook", "injection de faute", "fault injection", "MCP", "evolve", "backtester", "Godog", "rapid", "fast-check", "Playwright", "S26", "S87", "le mur", "déterministe", "/evolution-sandbox"]
+---
+
+<Note>Côté implémentation — le détail interne. Pour le concept, voir [Pour moi → S42 (concept)](/steps/concept/s42-evolution-sandbox).</Note>
+
+## Couche 1 — Implémentation
+
+**Le paquet Go `back/runtime/evolve`.** Trois fonctions **pures et totales** — pas de DB, pas d'I/O, pas de `time.Now()`/`rand` lus de l'ambiant (seed/budget/now sont passés, donc rejouables) :
+
+- **`Confine(WriteAttempt{Path}) → ConfineResult`** : une **liste blanche** (fail-closed). Un chemin sous un préfixe `can_write` (`/branches/evolution`, `/reports`, `/ideas/proposed`) → `Allowed` ; tout autre chemin (zone `cannot_write` **ou** hors de `can_write`) → `Refused` avec le `BlockReason` `SANDBOX_WRITE_ESCAPES_ZONE` (`how_to_fix` pointe vers le confinement + `open_a_/goal_to_promote_a_candidate`).
+- **`Promote(Variant, Evidence) → PromotionResult`** : le **gate binaire**. Admet la variante **seulement si** `mirror == green ∧ out_of_sample == green ∧ authority_approved` ; sinon `Refused` avec la raison (miroir rouge → l'ancre anti-Goodhart, quel que soit le score ; out-of-sample rouge → §87 ; autorité non approuvée). Une réussite produit une `PromotionProposal{ proposal:true, writes_truth:false, requires_goal }` — une **proposition**, jamais un gel.
+- **`Evolve(cell, budget, seed, sampler) → EvolutionRun`** : la **forme d'orchestration** de la boucle ②. Échantillonne un parent (stepping stones inclus) via le `Sampler` **injecté**, enregistre la variante + sa lecture de fitness **consommée** + sa niche, et n'émet **que** des écritures sous `can_write` (une branche, un rapport, optionnellement une idée). L'invariant clé (prouvé par la propriété) : **chaque** chemin émis passe `Confine ⇒ Allowed` — la boucle ne gouverne **jamais**.
+
+L'AST `EvolutionSandbox` (zones + `PromotionGate`) est **déclaré verbatim** de §66.1 (`Sandbox()` en retourne une copie sûre). La vocabulaire `MirrorStatus`/`OutOfSampleStatus` rejoint le jumeau S26 sans le forker.
+
+**Le hook `back/hooks/sandbox-confinement`** (binaire PreToolUse) **défère** à `evolve.Confine` ; il ne re-implémente pas la règle. Tant qu'un run `/evolve` est actif (signal `run_active` **injecté** — le hook ne touche jamais kernel/mirrors), une écriture hors `can_write` est refusée (`SANDBOX_WRITE_ESCAPES_ZONE`) et une tentative de **gouverner** (écrire une vérité/approbation/droit) est refusée (`SANDBOX_CANNOT_GOVERN`). Un événement malformé **fail-closed** (deny).
+
+**Les MCP `back/mcp/evolve` et `back/mcp/backtester`** (Go MCP SDK, une op = un outil). `evolve` : `evolve_run`, `evolve_confine`, `evolve_propose_promotion`, `evolve_run_get`, `evolve_run_list` — chacun défère au paquet pur ; il porte le grant d'écriture `aidos` sur `ideas`/`dag` (jamais le rôle agent) et **aucun** grant sur kernel/mirrors/authority/fitness. `backtester` : `backtest_out_of_sample` (évalue **out-of-sample uniquement** — un `in_sample:true` est refusé) et `backtest_get` ; il **retourne une lecture**, il ne définit jamais la fitness.
+
+**Le geste `/evolve`** (`.claude/skills/evolve/`) encode la procédure (échantillonner l'archive → générer → lire la fitness non-gameable → garder une élite par niche → émettre branches/rapports/idées) et la section Honnêteté : jamais de cible/fitness/niche inventée ; `/evolve` **propose**, il ne gouverne pas.
+
+**Le panneau `/evolution-sandbox`** (`front/web/app/evolution-sandbox/`) rejoue le **jumeau pur** TS (`lib/evolution-sandbox.ts`) en direct : le grand livre de quarantaine (écritures `can_write` en bleu ; une écriture `/kernel` en **ROUGE** avec `SANDBOX_WRITE_ESCAPES_ZONE` + `how_to_fix`), la grille de niches MAP-Elites, et la porte de promotion à **trois pastilles** (promouvable seulement si les trois sont allumées ; un candidat au miroir rouge montré **non promouvable** quel que soit son score ; chaque promotion étiquetée « PROPOSITION — la promotion en vérité passe par /goal »). Action : un bouton ouvre/ferme le run `/evolve`.
+
+## Couche 2 — Méta (le miroir)
+
+Le comportement est prouvé **avant** le code par un miroir à trois formes, conceptuellement dans le schéma `mirrors`, matérialisé dans `tests/` et `back/runtime/evolve/` :
+
+- **Journey Gherkin (N0, Godog, `authority: above`)** — `tests/runtime/evolution-sandbox.feature` : une écriture `/branches/evolution` (et `/reports`, `/ideas/proposed`) **autorisée** ; une écriture `/kernel` (et `/fitness`/`/authority`/`/mirrors/above`) **bloquée** avec `SANDBOX_WRITE_ESCAPES_ZONE` ; une variante verte (∧ oos-vert ∧ approuvée) → **PROPOSITION** sans écrire kernel/miroir/autorité/fitness ; une variante au miroir **rouge** (score plus élevé) **non promue** ; une variante miroir-vert mais oos-**rouge** non promue.
+- **Fixture (N2, `state → command → events`)** — sur `Confine`/`Promote`/`Evolve` : chaque zone `can_write` → `Allowed` ; chaque `cannot_write` + hors-zone → `Refused` ; `promote(green ∧ oos-green ∧ approved)` → proposition (no truth write) ; `promote(mirror_red)` / `promote(oos_red)` / `promote(no authority)` → `Refused` ; `Evolve` n'émet que des `can_write`.
+- **Propriété (∀, `rapid`, `authority: below`, computationnelle)** : tout `can_write` ⇒ `Allowed` ; tout `cannot_write`/hors-zone ⇒ `Refused(SANDBOX_WRITE_ESCAPES_ZONE)` ; tout `Evolve` n'émet que `can_write` (jamais de gouvernance) ; `mirror != green` ⇒ refus ; `oos != green ∨ ¬approuvé` ⇒ refus ; un `Promoted` est **toujours** une proposition (`writes_truth:false`) ; déterminisme (seed passé) ; jamais de niche/fitness/approbation inventée ; jamais de panique sur input malformé.
+- **Le jumeau TS** est couvert par **fast-check** (`front/web/lib/evolution-sandbox.test.ts`, 7 tests), ancré sur les mêmes critères (les trois done criteria visibles).
+- **Injection de faute du hook** (`back/hooks/sandbox-confinement/main_test.go`, §5 honnêteté) : un run actif écrivant `/kernel` **et** `/fitness` → le hook devient **rouge** (deny + `SANDBOX_WRITE_ESCAPES_ZONE`) ; une tentative de gouverner → `SANDBOX_CANNOT_GOVERN` ; une écriture `can_write` confinée → allow ; sans run actif → allow ; input malformé → deny. Un hook qui ne se déclenche jamais est mort.
+
+## Couche 3 — Méta-méta (le mur, l'honnêteté, l'anti-Goodhart)
+
+- **Le mur (CLAUDE.md §2 = KRD §66.1 `cannot_write`).** Le paquet, le hook et les MCP **n'écrivent aucune vérité**. Le jeu `cannot_write` est **le même mur** que la ligne de flottaison : kernel/mirrors/authority/fitness sont hors d'atteinte de la boucle **et** du rôle agent ; `ideas`/`dag` ne sont écrits que via le grant `aidos` des MCP.
+- **Le Juge est le miroir déterministe (§66/§62).** La promotion est un **gate binaire**, jamais un score : un LLM ne note jamais sa propre copie, la CellVitality ne valide jamais une variante (§66.2). Out-of-sample, jamais in-sample (§87).
+- **Promouvoir, c'est proposer (§118/§132).** Le sandbox s'arrête à une `PromotionProposal` ; le gel est un `/goal` **humain** séparé. Une promotion est un ChangeSet **proposé**, jamais une écriture de l'agent.
+- **Déterminisme-first (§6/§8).** Toute la classification est du **code pur** (parsing de chemin, gate, orchestration) — jamais un agent/LLM. La propriété de reproductibilité (même entrée ⇒ même sortie) le scelle. Le générateur self-play et le vrai backtest, eux seuls irréductibles, restent **derrière les MCP**.
+- **Consommé, jamais re-défini.** La forme niche/élite QD (S26), la lecture de fitness ancrée, la forme `BlockReason` (S13), les schémas `ideas`/`dag`/`changesets` sont **réutilisés**. Aucun nouveau schéma Postgres, aucun codegen. Les deux nouveaux codes `BlockReason` (`SANDBOX_WRITE_ESCAPES_ZONE`, `SANDBOX_CANNOT_GOVERN`) sont des extensions **additives** de l'enum fermé (`change_type: refine`), enregistrées par l'ADR 0032.

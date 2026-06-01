@@ -1,0 +1,44 @@
+---
+title: "S42 · Evolution Sandbox — l'évolution explore, elle ne gouverne pas"
+description: "S42 livre l'EvolutionSandbox (KRD §66.1) : la quarantaine où toute boucle /evolve (la boucle moyenne self-play + QD, §62 ②) s'exécute. Elle peut écrire uniquement /branches/evolution, /reports, /ideas/proposed et jamais /kernel, /mirrors/above, /authority, /fitness. Une variante n'est promue dans une niche qu'avec mirror_green ∧ out_of_sample_green ∧ authority_approval — une porte binaire (le miroir déterministe), jamais un score que la boucle se note elle-même ; out-of-sample, jamais in-sample. La promotion est une PROPOSITION que le /goal humain gèle."
+keywords: ["aidos", "krd", "evolution sandbox", "sandbox d'évolution", "/evolve", "quarantaine", "quarantine", "can_write", "cannot_write", "promotion", "mirror_green", "out_of_sample", "authority_approval", "MAP-Elites", "niche", "élite", "QD", "quality-diversity", "self-play", "stepping stone", "le Juge est le miroir", "anti-Goodhart", "in-sample", "out-of-sample", "walk-forward", "S26", "S87", "le mur", "SANDBOX_WRITE_ESCAPES_ZONE", "SANDBOX_CANNOT_GOVERN", "/evolution-sandbox", "déterministe", "proposition", "/goal"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S42](/steps/internals/s42-evolution-sandbox).</Note>
+
+## En une phrase
+
+S42 livre l'**EvolutionSandbox** : la **quarantaine** où toute boucle `/evolve` s'exécute. Elle **peut écrire** uniquement `/branches/evolution`, `/reports`, `/ideas/proposed` (candidats, branches, scores, hypothèses, suggestions) et **jamais** `/kernel`, `/mirrors/above`, `/authority`, `/fitness` (vérités, approbations, exceptions, droits). Une variante n'est **promue** dans une niche qu'avec `mirror_green ∧ out_of_sample_green ∧ authority_approval`. **L'évolution explore, elle ne gouverne pas.**
+
+## Le problème que ça résout
+
+Un système auto-améliorant a **un seul vrai danger** (KRD §62) : *il note sa propre copie*. Une boucle qui génère des variantes et décide elle-même lesquelles entrent dans le noyau finit par optimiser la **vitesse en cassant la vérité** — c'est l'overfit, la machine à Goodhart. La parade de KRD : enfermer la boucle dans une **quarantaine typée** où elle ne peut produire que des **propositions**, et faire juger les variantes par un **gate non-éditable par la boucle** — le **miroir déterministe**, ancré **out-of-sample**. Tout évolue **sauf la définition du vrai**.
+
+## Les idées-clés
+
+<Field name="can_write / cannot_write — déclarés, jamais inventés" type="KRD §66.1 = le mur §2">
+  `can_write = {/branches/evolution, /reports, /ideas/proposed}` ; `cannot_write = {/kernel, /mirrors/above, /authority, /fitness}`. Pas de quatrième zone. `Confine(write{path})` est une **liste blanche** (fail-closed) : un chemin hors de `can_write` est refusé avec `SANDBOX_WRITE_ESCAPES_ZONE` — qu'il vise une zone `cannot_write` ou n'importe où ailleurs. Le jeu `cannot_write` de §66.1 **est** le mur de §2.
+</Field>
+
+<Field name="La porte de promotion est BINAIRE — jamais un score" type="§64 gate binaire · §66 le Juge est le miroir">
+  `Promote(variant, evidence)` n'admet une variante **que si** `mirror_green ∧ out_of_sample_green ∧ authority_approval`. Une variante au **miroir rouge** n'est **jamais** promue, **quel que soit son score** de backtest (l'ancre anti-Goodhart). Le **Juge est le miroir déterministe**, jamais un LLM qui note sa propre copie, jamais la CellVitality (§66.2, diagnostic seulement).
+</Field>
+
+<Field name="Out-of-sample, jamais in-sample" type="KRD §87 la vérité brutale">
+  Un Sharpe in-sample ≈ un pouvoir prédictif **nul** out-of-sample ; le marché est adversarial et non-stationnaire. Le seul signal **honnête** est l'évaluation **out-of-sample / walk-forward**. Une variante au miroir vert mais **out-of-sample rouge** n'est **pas** promue. Le backtester **retourne une lecture** ; il ne définit jamais la fitness.
+</Field>
+
+<Field name="Promouvoir, c'est PROPOSER — jamais geler" type="§118/§132">
+  Même la porte franchie, `Promote` ne produit qu'une **PROPOSITION** (`writes_truth:false`) : un candidat qu'un `/goal` **humain** ultérieur gèlera. Le sandbox ne contourne **jamais** cette porte ; toute tentative d'écrire une vérité/approbation/droit directement est bloquée avec `SANDBOX_CANNOT_GOVERN`.
+</Field>
+
+## Ce que S42 n'est PAS
+
+- **Pas le moteur QD / la curation** : les niches/élites MAP-Elites sont **consommés** de S26, jamais re-définis.
+- **Pas la définition de la fitness** : `kernel_red_to_green ⊕ sensors_computational ⊕ out_of_sample` est **consommée** des étapes capteurs/fitness antérieures.
+- **Pas le `/goal` / le gel** : promouvoir un candidat en vérité figée, mirrorée, approuvée est un geste **humain séparé** que le sandbox **propose** seulement.
+- **Pas un vrai générateur self-play/AlphaEvolve ni de vraies données de marché** : le générateur et le backtest sont des **capacités** derrière les MCP `evolve` / `backtester`. S42 livre le **sandbox + le gate + la forme d'orchestration**.
+
+## Le critère done
+
+Écrire `/kernel` (et `/fitness`/`/authority`/`/mirrors/above`) depuis une boucle `/evolve` est **interdit** (`SANDBOX_WRITE_ESCAPES_ZONE`) ; une branche candidate sous `/branches/evolution` est **autorisée** ; et une variante n'est promue dans une niche **qu'avec** un miroir vert (∧ out-of-sample vert ∧ approbation d'autorité) — tandis qu'une variante au miroir rouge (même au score plus élevé) et une variante out-of-sample rouge **ne le sont pas**. Tout cela est **calculé**, jamais déclaré.
