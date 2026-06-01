@@ -131,7 +131,9 @@
               "steps/concept/s32-context-graph-decision",
               "steps/internals/s32-context-graph-decision",
               "steps/concept/s33-context-router",
-              "steps/internals/s33-context-router"
+              "steps/internals/s33-context-router",
+              "steps/concept/s34-emitters",
+              "steps/internals/s34-emitters"
             ]
           }
         ]
