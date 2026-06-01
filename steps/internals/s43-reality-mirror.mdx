@@ -1,0 +1,64 @@
+---
+title: "S43 · RealityMirror — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S43 : le moteur pur back/runtime/reality (Observe/Learn/ToIdea/ToKernel), le type Incident qui rend version/miroir inreprésentables, l'inférence conservatrice de proposes (unset ⇒ OpenQuestion), le code BlockReason additif REALITY_CANNOT_DECLARE_TRUTH, la migration incidents.* + telemetry.* (append-only / expand-only, le mur réaffirmé), le MCP telemetry-reader (telemetry_query / incident_observe / incident_list / incident_learn, aucun incident_to_kernel), le skill /learn, la route /incidents-to-ideas + son twin lib/reality.ts."
+keywords: ["aidos", "krd", "reality mirror", "back/runtime/reality", "Observe", "Learn", "ToIdea", "ToKernel", "Incident", "Signal", "InferProposes", "OpenQuestion", "REALITY_CANNOT_DECLARE_TRUTH", "blockreason", "incidents.incident", "telemetry.span", "telemetry.metric", "OpenTelemetry", "telemetry-reader", "incident_observe", "incident_learn", "idea_capture", "S27", "S01", "content hash", "records.Hash", "S30 taint", "incident_derived", "le mur", "GRANT", "fixture", "rapid", "fast-check", "/incidents-to-ideas", "lib/reality.ts", "ADR 0033"]
+---
+
+<Note>Trois couches : **Implémentation** (le code livré au vert), **Méta** (pourquoi cette forme), **Méta-méta** (l'invariant que ça protège). Côté concept : [Pour moi → S43](/steps/concept/s43-reality-mirror).</Note>
+
+## Implémentation
+
+### Le moteur pur — `back/runtime/reality`
+
+Quatre fonctions **pures et totales** (pas d'I/O, pas d'horloge, pas de RNG, jamais de panic) :
+
+<Field name="Observe(in) → Incident" type="reality.go">
+  Enregistre une défaillance récurrente / un budget dépassé comme un `Incident` adressé-par-contenu : `id = records.Hash(records.Canonicalize(body))` — le schéma de hash **S01/S02 réutilisé**, jamais forké. Le taint `incident_derived` est **garanti** présent. Le corps canonique ne porte **ni `version` ni `mirror`**.
+</Field>
+
+<Field name="Learn(incident) → IdeaCandidate" type="reality.go">
+  Esquisse la forme d'une idée S27 : `provenance{source: incident, detail: "#NNNN"}` **verbatim**, `intent` = le `cause_sketch`, `proposes` via `InferProposes`. L'idée est hashée par `ideas.Hashed` (S27). `WroteKernel == false` toujours. Si `proposes` n'est pas fixé, `OpenQuestion` porte la note honnête.
+</Field>
+
+<Field name="InferProposes(signal) → (Proposes, bool)" type="conservateur, reality.go">
+  Une **opération** qui échoue → `("operation", true)`. **Tout le reste** → `("", false)` — jamais une couche devinée. Élargir l'inférence est un `/goal` ultérieur, pas une devinette ici.
+</Field>
+
+<Field name="ToKernel(incident) → *BlockReason" type="le gate, reality.go">
+  Retourne **toujours** `blockreason.For(CodeRealityCannotDeclareTruth)` — jamais `nil`, jamais une écriture du noyau. Pas de bypass « haute récurrence ».
+</Field>
+
+`ToIdea(cand)` retourne le draft pour la porte S27 ; `LearnedIncident(inc, cand)` pose `idea_id` (la boucle tracée en retour), **sans** changer l'adresse de contenu.
+
+### Le code BlockReason additif
+
+`REALITY_CANNOT_DECLARE_TRUTH` est ajouté à l'enum **fermé** `blockreason.Code` (`change_type: refine`, jamais une suppression) avec son entrée dans `reasons` et `codeOrder`. Le `how_to_fix` porte `incident_then_learn_then_mirror_then_goal_then_approval`. Le test property piloté-par-enum de S13 le couvre automatiquement.
+
+### La persistance — `incidents_reality_baseline.sql`
+
+Schéma `incidents` : table append-only `incidents.incident` (`id` PK content-hash, `body jsonb`, `taint text[]`, `linked_branches text[]`, `idea_id text` nullable, `first_seen`, `created_at`). CHECK : `body->>'kind' = 'incident'`, **pas de clé `mirror`/`version`**, `incident_derived` ∈ `taint`. Schéma `telemetry` : `telemetry.span` + `telemetry.metric` (le chemin de lecture OpenTelemetry → Postgres). GRANTs : agent = SELECT/INSERT/UPDATE sur `incidents.incident` (UPDATE seulement `idea_id`), SELECT sur `telemetry.*`, **aucun** grant sur `kernel`/`mirrors`/`fitness` (le mur réaffirmé). Expand-only / append-only.
+
+### La capacité — `back/mcp/telemetry-reader`
+
+Quatre outils (1 outil = 1 op) : `telemetry_query` (lecture spans/metrics), `incident_observe` (→ `incidents.incident`), `incident_list`, `incident_learn` (→ `reality.Learn` → porte S27 `idea_capture` + trace `idea_id`). **Aucun** outil `incident_to_kernel`. Chaque op défère au moteur pur ; les stores sont des interfaces (`IncidentRepo`/`TelemetryRepo`/`IdeaCapturer`) testées sans DB.
+
+### La preuve
+
+- `reality_fixture_test.go` — `state → command → events` : observe (`#1043`, `incident_derived`, pas de version/miroir, pas d'idea_id) ; learn (idée draft, `incident:#1043` verbatim, intent = cause_sketch, `proposes=operation`, pas de version/miroir, idea_id tracé) ; to_kernel (Bloqué, `REALITY_CANNOT_DECLARE_TRUTH`) ; le cas `#2099` (proposes non fixé → OpenQuestion).
+- `reality_property_test.go` (rapid) — provenance verbatim, jamais de proposes inventé, pas de version/miroir, `ToKernel` bloque toujours et n'écrit jamais, append-only (récurrence ne rétrécit jamais), `id` = hash de contenu.
+- Twin TS `front/web/lib/reality.ts` + `lib/reality.test.ts` (fast-check) ; e2e `tests/e2e/incidents-to-ideas.spec.ts` (5 tests verts).
+
+## Méta — pourquoi cette forme
+
+- **Le type rend l'erreur inreprésentable.** Comme la `MemoryItem` de S30, l'`Incident` n'a **aucun** champ `Version`/`Mirror` ; le schéma Postgres le réaffirme par CHECK. On ne peut pas accidentellement geler un incident — la forme l'interdit.
+- **Réutiliser, ne pas réinventer.** Hash = `records.Hash` (S01) ; taint = `firewall.Taint` (S30) ; idée = `ideas.Idea` + la porte `idea_capture` (S27) ; `BlockReason` = S13. Le RealityMirror est l'**arête** `Incident → Idea`, pas une nouvelle pile.
+- **Pas de nouveau Hook.** Le mur (S04) + le gate de promotion (S27) interdisent déjà toute écriture `Incident → Kernel` ; `ToKernel` réutilise leur forme `BlockReason` plutôt que d'ajouter un second point d'application (OQ-S43-hook si un point distinct se prouve nécessaire).
+- **Déterminisme-first.** Tout est fonction pure ; le MCP/le store ne font que persister une observation déjà décidée. Le twin TS recalcule la **même** sémantique, donc l'écran rend exactement ce que le moteur Go calcule.
+
+## Méta-méta — l'invariant protégé
+
+> **Un incident devient une idée draft ; le noyau n'est JAMAIS auto-modifié.**
+
+C'est le deuxième cliquet inductif (KRD §53) rendu inviolable par construction : la réalité est un **sensor** qui lit et **propose** ; la seule arête sortante d'un RealityMirror est `→ idea-intake` (S27). Juger qu'un désaccord avec le réel est vrai est une **décision de vérité**, au-dessus de la ligne — détenue par l'humain + la réalité, jamais l'agent (§1099). Le gel reste `idea → mirror → /goal → approbation`. Le test property le prouve pour **tout** incident : `ToKernel` bloque toujours, n'écrit jamais. **« Le système a appris du MONDE, pas de lui-même. »**
+
+Voir [ADR 0033](https://github.com/steph-frtech/aidos) pour la forme de l'`Incident`, l'inférence conservatrice de `proposes`, et le code `REALITY_CANNOT_DECLARE_TRUTH`.

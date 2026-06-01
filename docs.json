@@ -149,7 +149,9 @@
               "steps/concept/s41-kernel-debt",
               "steps/internals/s41-kernel-debt",
               "steps/concept/s42-evolution-sandbox",
-              "steps/internals/s42-evolution-sandbox"
+              "steps/internals/s42-evolution-sandbox",
+              "steps/concept/s43-reality-mirror",
+              "steps/internals/s43-reality-mirror"
             ]
           }
         ]

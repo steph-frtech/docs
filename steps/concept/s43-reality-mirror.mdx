@@ -1,0 +1,45 @@
+---
+title: "S43 · RealityMirror — la réalité injecte des idées, pas des vérités"
+description: "S43 livre le RealityMirror (KRD §53/§67/§117/§1099) : la boucle externe (boucle ③) qui transforme un incident de prod / un signal de télémétrie en une idée DRAFT (provenance incident:#NNNN), remise à la porte idea-intake (S27). Un incident est de la RÉALITÉ, jamais une vérité : pas de version-gel, pas de miroir — il PROPOSE un miroir, il n'en est pas un. L'arête directe Incident → Kernel est TOUJOURS refusée (REALITY_CANNOT_DECLARE_TRUTH). Le noyau n'est jamais auto-modifié — le gel reste le mirror + /goal + approbation de l'humain."
+keywords: ["aidos", "krd", "reality mirror", "RealityMirror", "boucle externe", "external loop", "boucle ③", "incident", "télémétrie", "telemetry", "OpenTelemetry", "/learn", "idée draft", "draft idea", "provenance", "incident:#NNNN", "cause_sketch", "faux par omission", "incident_derived", "taint", "REALITY_CANNOT_DECLARE_TRUTH", "le mur", "S27", "idea-intake", "OpenQuestion", "proposes", "le noyau n'est jamais auto-modifié", "/incidents-to-ideas", "la réalité propose", "le système a appris du monde"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S43](/steps/internals/s43-reality-mirror).</Note>
+
+## En une phrase
+
+S43 livre le **RealityMirror** : la **boucle externe** (boucle ③) qui transforme un **incident** de prod / un signal de télémétrie en une **idée DRAFT** (provenance `incident:#NNNN`), remise à la porte **idea-intake** (S27). Un incident est de la **RÉALITÉ**, jamais une vérité — **pas de version-gel, pas de miroir** : il **PROPOSE** un miroir, il n'en est pas un. **« Le système a appris du MONDE, pas de lui-même. »**
+
+## Le problème que ça résout
+
+Un incident de prod — 30% des `createOrder` échouent parce qu'un article passe out-of-stock entre l'ajout au panier et le paiement — révèle que **le noyau était faux par OMISSION** : aucune fixture ne couvrait ce cas (KRD §67/§1316). La tentation naturelle est de **patcher la vérité directement**. KRD l'interdit : juger qu'un désaccord avec le réel est vrai est une **décision de vérité**, au-dessus de la ligne, détenue par **l'humain + la réalité**, pas par l'agent (§1099). La parade : la réalité est un **sensor** qui **lit** le monde et **propose** une idée — la seule arête sortante est `→ idea-intake`. Le gel en vérité reste le `mirror + /goal + approbation` de l'humain.
+
+## Les idées-clés
+
+<Field name="Un incident est de la RÉALITÉ, jamais une vérité" type="KRD §67 — pas de gel, pas de miroir">
+  Un `Incident` porte `{ref, signal{operation,error,recurrence}, cause_sketch, taint[], linked_branches[]}` et — par construction — **aucun champ `version` et aucun champ `mirror`**. Cette double absence est exactement ce qui en fait de la réalité et non une vérité : il **PROPOSE** un miroir, il n'en est pas un. Le `cause_sketch` est une **hypothèse**, jamais une assertion falsifiable. Le `taint` contient toujours `incident_derived` (vocabulaire S30).
+</Field>
+
+<Field name="/learn transforme l'incident en idée DRAFT" type="KRD §117 — la réalité injecte des IDÉES">
+  `Learn(incident)` esquisse la **forme** d'une idée S27 : `provenance = incident:#NNNN` portée **verbatim**, `intent` = le cause_sketch, `proposes` inféré **seulement** si le signal le fixe. L'idée est un **draft** sans version ni miroir — elle doit **encore** acquérir son miroir via `/goal` pour atteindre le noyau. L'incident est tracé en retour par `idea_id`.
+</Field>
+
+<Field name="proposes n'est JAMAIS deviné" type="honnêteté CLAUDE.md §8">
+  Une opération qui échoue fixe `proposes=operation`. **Tout le reste** laisse `proposes` non défini et émet une **OpenQuestion** — jamais une couche devinée. L'incident #2099 (budget de latence, sans opération) ne fixe aucune couche → OpenQuestion. L'humain décide la couche visée en écrivant le miroir au `/goal`.
+</Field>
+
+<Field name="L'arête Incident → Kernel est TOUJOURS refusée" type="§1099 · REALITY_CANNOT_DECLARE_TRUTH">
+  `ToKernel(incident)` retourne **toujours** le `BlockReason` `REALITY_CANNOT_DECLARE_TRUTH` — pour **tout** incident, quelle que soit sa récurrence ou son taint. Il n'existe **aucune porte** `Incident → Kernel`. Le `how_to_fix` nomme le chemin complet : `incident → /learn → mirror → /goal → approbation`.
+</Field>
+
+## Le cas « done »
+
+L'incident `out-of-stock-during-checkout` (`#1043`), sur `/learn`, donne une **idée draft** portant `incident:#1043` verbatim, `intent` reflétant le comportement du miroir manquant, `proposes=operation`, **sans version et sans miroir** ; l'incident est tracé en retour. L'arête directe `Incident → Kernel` est **bloquée** avec `REALITY_CANNOT_DECLARE_TRUTH`, le noyau **inchangé**. **La réalité injecte une idée ; elle ne peut pas déclarer une vérité.**
+
+## À l'écran
+
+La route Workbench `/incidents-to-ideas` rend la boucle externe : une carte par incident (signal / cause_sketch / provenance / taint `incident_derived`), le marqueur **« réalité, pas une vérité »**, l'action `/learn` rendant la flèche **`incident:#NNNN → idée draft`**, l'arête directe `Incident → Kernel` en **ROUGE** avec son `BlockReason`, et un marqueur **OpenQuestion** là où `proposes` n'est pas fixé.
+
+## Ce que S43 ne fait pas
+
+Pas de gel / miroir / écriture du noyau (c'est le `/goal` de l'humain) ; pas de nouveau Hook (le mur S04 + le gate de promotion S27 couvrent déjà l'arête) ; pas de `/evolve` (boucle ②) ni de méta-loop (boucle ④) ; pas d'émission télémétrie complète (seulement le chemin de **lecture** pour observer un incident).
