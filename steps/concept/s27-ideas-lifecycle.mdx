@@ -1,0 +1,52 @@
+---
+title: "S27 · Le cycle de vie des idées — la seule porte vers le noyau"
+description: "Une idée (KRD §115/§118) est une vérité-CANDIDATE mise en scène AU-DESSUS du produit mais SOUS le gel : un corps esquissé (proposes + intent + provenance) qui n'a NI gel de version, NI miroir. Cette double absence est EXACTEMENT ce qui en fait une idée et non une vérité. Son cycle de vie suit les gestes §75 : draft → grilled → {spiking → harvested | harvested}, avec une voie rejected parallèle (tracée, conservée, jamais effacée). « Promouvoir » n'est PAS un statut : c'est l'ACTE d'écrire le miroir de l'idée, qui EST le /goal, qui EST le gel dans /kernel (KRD §116). Une idée sans miroir ne peut JAMAIS entrer dans le noyau : la tentative de promotion d'une idée harvested sans miroir est refusée avec un BlockReason actionnable NO_MIRROR_NO_KERNEL (KRD §44.5), et l'idée RESTE harvested (aucune écriture noyau). Avec son miroir, la promotion passe par le /goal et gèle une vérité noyau dont la provenance pointe en arrière vers l'idée (KRD §119). S27 prouve le cycle de vie ET la barrière de promotion — pas l'écriture noyau elle-même (le rôle CLI aidos via /goal), pas le MemoryFirewall (§119.1, dent ultérieure)."
+keywords: ["aidos", "krd", "idée", "Idea", "cycle de vie", "candidate-truth", "vérité candidate", "draft", "grilled", "spiking", "harvested", "rejected", "proposes", "intent", "provenance", "pas de version", "pas de miroir", "sans gel", "le mur", "zone de staging", "/ideas", "promote", "promotion", "miroir+goal", "écrire le miroir", "le test rouge EST le /goal", "geler", "NO_MIRROR_NO_KERNEL", "BlockReason", "actionnable", "how_to_fix", "la seule porte vers le noyau", "reject tracé", "append-only", "jamais effacé", "spike", "harvest", "grill", "cliquet OFF", "exploration", "provenance pointe en arrière", "incident #NNNN", "human", "lecture seule", "ChangeSet", "KRD §115", "KRD §116", "KRD §117", "KRD §118", "KRD §119", "KRD §119.1", "KRD §44.5"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S27](/steps/internals/s27-ideas-lifecycle).</Note>
+
+## En une phrase
+
+S27 fait de l'**idée** la **seule porte** vers le noyau : une idée est une **vérité-candidate** (KRD §118) — un corps esquissé (`proposes` + `intent` + `provenance`) qui n'a **ni gel de version, ni miroir** — et elle ne devient une vérité noyau **qu'en acquérant son miroir** ; écrire ce miroir, c'est le `/goal`, c'est le gel (KRD §116). Une idée **sans miroir** ne peut **jamais** entrer dans le noyau.
+
+## Le problème que ça résout
+
+Le danger : aller **du désir au noyau directement**. Un humain dit « finalement je veux une remise pour les habitués » ; une vérité gravée dans le noyau sans **preuve** serait un vœu — un **monstre** (une vérité sans miroir). KRD §115/§116 tranche : entre le désir et la vérité, il y a une **zone de staging au-dessus du mur** — la zone `/ideas`. On y **capture** l'intention, on la **grille**, on l'**explore** (spike), on en **extrait** la leçon (harvest). Mais l'idée reste une idée **tant qu'elle n'a pas son miroir**. Le moment où l'on **écrit le test rouge qui la définit**, c'est **exactement** le `/goal`, et c'est **exactement** le gel dans le noyau. Donc : **idée → vérité = écrire son miroir**. Il n'y a **aucune autre porte**.
+
+## Les idées-clés
+
+<Field name="Une idée n'a NI version NI miroir (§118)" type="c'est ce qui la distingue d'une vérité">
+  Une idée porte la **forme** d'une vérité — `proposes` (ce qu'elle deviendrait : control / policy / operation / action / entity / product), `intent` (le comportement esquissé en prose, pas encore falsifiable), `provenance` (d'où elle vient). Mais elle n'a **ni gel de version, ni tête-preuve (miroir)**. Cette **double absence** est ce qui en fait une **idée** et non une **vérité** (KRD §115 : « un corps esquissé, sans tête-preuve, pas encore figé »).
+</Field>
+
+<Field name="Le cycle de vie (§75 / §118)" type="draft → grilled → {spiking → harvested | harvested} → (promote)">
+  **draft** (juste capturée), **grilled** (challengée contre le modèle de domaine), **spiking** (la branche « floue ? » — exploration, **cliquet OFF**), **harvested** (la leçon est extraite, prête à être promue). Une idée harvested **via spike** et une harvested **directe** sont **indistinguables** pour la promotion : toutes deux ont encore besoin du miroir.
+</Field>
+
+<Field name="« Promouvoir » n'est PAS un statut (§116)" type="c'est l'acte d'écrire le miroir = le /goal = le gel">
+  Il n'y a pas de statut « promu ». Promouvoir, c'est **écrire le miroir** de l'idée — ce qui **est** le `/goal`, ce qui **est** le gel dans `/kernel`. La promotion n'est donc pas une transition de statut de plus ; c'est le passage **hors** de la zone idée, vers le noyau, et il **exige** le miroir.
+</Field>
+
+<Field name="Sans miroir, jamais de noyau (§116 / §44.5)" type="NO_MIRROR_NO_KERNEL — la pierre angulaire">
+  Tenter de promouvoir une idée harvested **sans** miroir est **refusé** par un `BlockReason` **actionnable** : `code = NO_MIRROR_NO_KERNEL`, `how_to_fix` = « écris le miroir = lance /goal = gèle ». L'idée **reste harvested** — **aucune** écriture noyau. C'est **LE** critère done : *on ne peut pas écrire une idée dans le noyau directement ; la promotion exige un miroir.*
+</Field>
+
+<Field name="La provenance pointe en arrière (§119)" type="qui a voulu quoi, quand, pourquoi">
+  Avec son miroir, la promotion passe par le `/goal` et gèle une vérité noyau dont la **provenance pointe en arrière vers l'idée** — et à travers elle, vers l'utterance humaine ou l'incident `#NNNN` qui l'a engendrée. Toute vérité gelée trace son origine.
+</Field>
+
+<Field name="Reject est tracé, jamais effacé (§118)" type="append-only">
+  Une mauvaise idée n'est **pas supprimée** : elle passe en **rejected** avec sa **raison**, et **reste présente** (append-only, tracée). Le journal des idées ne **rétrécit jamais** — une idée rejetée hier reste consultable demain.
+</Field>
+
+## Ce que S27 ne fait pas (dents ultérieures)
+
+- **Pas d'écriture noyau / pas de gel réel** : promouvoir une idée écrit une vérité dans le schéma `kernel` via le **rôle CLI `aidos`** par le flux `/goal` — un câblage **ultérieur**. S27 prouve le **cycle de vie et la barrière de promotion**, pas la mutation noyau aval.
+- **Pas de MemoryFirewall / ContextPack** : `Memory → ContextPack → Idea` (KRD §119.1) est une dent **Archive/brain** ultérieure ; ici les idées entrent par provenance `human` ou `incident` seulement.
+- **Pas de codegen** : une idée est un **candidat**, pas une source gelée — il n'y a rien à émettre (ni structs Go, ni DDL, ni types TS) à partir d'un corps d'idée.
+- **Pas de nouveau Skill** : `/grill`, `/spike`, `/harvest`, `/goal` existent déjà comme gestes §75 ; le cycle de vie roule à travers le MCP `idea-intake` + la boucle standard.
+
+## Le mur
+
+L'idée est la zone de **staging au-dessus du mur** (CLAUDE.md §2) : l'agent **peut** capturer et faire avancer une idée (le schéma `ideas` est écrivable au-dessus de la ligne — `INSERT/SELECT/UPDATE`, jamais `DELETE`), mais il ne **peut prouvablement pas** écrire le `kernel` ni les `mirrors` (la barrière tient). L'écran **/ideas** est en **lecture seule** : il **projette** le tableau des idées et **rejoue** le même verdict de barrière que le moteur (la tentative sans miroir rend **rouge** `NO_MIRROR_NO_KERNEL`, l'idée reste harvested) ; il n'écrit **aucune** vérité. La promotion d'une idée écrit une vérité noyau via le **rôle writer `aidos`** par le chemin ChangeSet (S20) / `/goal` — jamais l'agent, jamais l'écran. C'est l'**asymétrie** qui est le contrat : idées écrivables au-dessus du mur, vérité non.

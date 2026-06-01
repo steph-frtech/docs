@@ -117,7 +117,9 @@
               "steps/concept/s25-semantic-merge",
               "steps/internals/s25-semantic-merge",
               "steps/concept/s26-curation-qd",
-              "steps/internals/s26-curation-qd"
+              "steps/internals/s26-curation-qd",
+              "steps/concept/s27-ideas-lifecycle",
+              "steps/internals/s27-ideas-lifecycle"
             ]
           }
         ]
