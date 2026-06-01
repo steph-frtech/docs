@@ -139,7 +139,9 @@
               "steps/concept/s36-api-projection",
               "steps/internals/s36-api-projection",
               "steps/concept/s37-db-projection",
-              "steps/internals/s37-db-projection"
+              "steps/internals/s37-db-projection",
+              "steps/concept/s38-web-projection",
+              "steps/internals/s38-web-projection"
             ]
           }
         ]

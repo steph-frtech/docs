@@ -1,0 +1,46 @@
+---
+title: "S38 · Projection web — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S38 : l'émetteur webcomponent (la cible ts-next pour kind=control dans le jeu S34), le composant Next.js émis dont visible/enabled sont EvalState(control, given) embarqué, le jumeau TS byte-identique + le jumeau aidos-expr, la migration expand-only widening le CHECK du registre, le round-trip Testcontainers, et le panneau /web-preview action-capable."
+keywords: ["aidos", "krd", "S38", "webcomponent", "ts-next", "Emit", "SourceHash", "render", "EvalState", "Plan", "aidos-expr", "web-projection.ts", "fast-check", "rapid", "Testcontainers", "generated_artifacts", "CHECK widen", "BlockReason", "OUT_OF_SCOPE", "playwright-bdd", "/web-preview", "ADR 0028", "S02", "S11", "S13", "S22", "S34"]
+---
+
+<Note>Pour moi — le journal d'implémentation complet de S38. Pour le pourquoi, voir [le concept](/steps/concept/s38-web-projection).</Note>
+
+## Couche 1 — Implémentation
+
+### L'émetteur Go (`back/runtime/generators/webcomponent/`)
+
+- `webcomponent.go` — `Emit(control, action, "ts-next") → (Artifact, *BlockReason)`. La cible (`TargetTSNext`) et le kind (`KindControl`) sont des constantes typées ; `Artifact` reprend la forme S34 (path, target, kind, bytes, source_hash, output_hash, protected) pour s'enregistrer dans le **même registre**.
+- `hash.go` — `SourceHash(c,a) = records.Hash(records.Canonicalize({"action": action.Canonicalize(a), "control": control.Canonicalize(c)}))`. **Réutilise S02 + S11**, jamais un chemin de hachage forké. L'enveloppe est re-canonicalisée (ordre des clés indépendant).
+- `validate.go` — `validateBind` est le **seul** endroit où les deux vérités sont vérifiées comme **liées** : `control.triggers == action.Name`, `action.on == click(control)`, `invoke` non vide. Un échec ⇒ `BlockReason` (réutilise `CodeOutOfScope` — l'énum S13 est fermé ; ajouter un code est un ChangeSet+ADR, hors S38) avec un `how_to_fix` français non vide. Jamais un panic, jamais un bind inventé.
+- `render.go` — produit le `.tsx` : l'en-tête protégé + le hash, les deux ASTs Expr embarqués (`const VISIBLE_WHEN: ExprNode = …` / `ENABLED_WHEN`), `const INVOKE`/`LABEL` **verbatim**, et un `<button>` dont `disabled={!enabled}`, `data-aidos-invoke={INVOKE}`, `onClick` appelle `onInvoke` si activé. Tabs, newlines `\n` normalisés.
+
+### Le composant émis + les jumeaux TS
+
+- `front/web/app/web-preview/_generated/checkout-button.tsx` — la **sortie** matérialisée, protégée, jamais éditée à la main. Importe `evalState` de `lib/aidos-expr`.
+- `front/web/lib/aidos-expr.ts` — le **jumeau TS** du catalogue Expr figé (`>`, `length`, `&&`, `!`) + `evalState` (miroir fidèle de `control.EvalState` : `enabled_when` consulté seulement si visible ; un ref pendant ⇒ rend `null`, jamais un bouton deviné).
+- `front/web/lib/web-projection.ts` — le **jumeau byte-identique** de l'émetteur Go (`emitWeb`, `sourceHash`, `canonExpr`). `goJSONString` reproduit l'échappement HTML de `json.Marshal` Go (`>`, `&`) pour que les ASTs embarqués soient octet-pour-octet identiques.
+
+### Persistance + le mur
+
+- `back/migrations/web_projection_target_baseline.sql` — **expand-only** : élargit le CHECK du registre à `('go-sqlc','pg-ddl','ts-types','ts-next')`. Aucune colonne, GRANT ou ligne antérieure touchée ; idempotent + gardé.
+- `ledger_roundtrip_test.go` — sur un vrai Postgres (Testcontainers, S02+S04+S34+S38) : l'artefact `ts-next` fait l'aller-retour ; le CHECK élargi admet `ts-next` et refuse `mobile` ; l'agent **SELECT** le registre mais ne peut ni l'**INSERT** ni écrire `kernel` (le mur tient).
+
+### Les mirrors (rouge d'abord)
+
+- `webcomponent_fixture_test.go` (fixture N2) + `webcomponent_property_test.go` (rapid ∀ : déterminisme, source_hash, en-tête protégé, orphan-bind bloque).
+- `web-projection.test.ts` + `aidos-expr.test.ts` (fast-check) — ancrés sur les hashes Go `source 8ebfb46f…` / `output 5b428d00…`, comparent l'octet sur disque, rejouent la fixture d'état.
+- `tests/e2e/web-preview.spec.ts` + `web-preview.feature` (playwright-bdd) — **le critère done**.
+
+## Couche 2 — Méta (pourquoi cette forme)
+
+- **Émetteur, pas fork.** Étendre le jeu S34 d'une cible garde un seul contrat de déterminisme/hachage/registre — on ne ré-implémente jamais `Project`/`Drifted`/le header.
+- **AST embarqué + jumeau évaluateur, pas d'appel réseau.** Le bouton rendu ne dépend pas du runtime Go ; il porte sa propre logique de rendu pure (le jumeau `aidos-expr`), fidèle à `EvalState`. C'est le déterminisme-first : la fonction pure gagne, l'authoritatif reste le Go (les mirrors fast-check ancrent le jumeau sur les hashes Go).
+- **Le clic déclare, n'exécute pas.** Séparer la *déclaration* du bind (S38) de son *exécution* (dent ultérieure) garde la projection sans I/O et testable hors d'un backend.
+- **Réutiliser `OUT_OF_SCOPE`.** L'énum S13 est fermé ; un code dédié `ORPHAN_WEB_BIND` serait additif via ChangeSet+ADR — noté OpenQuestion `OQ-S38-blockcode`, pas inventé en passant.
+
+## Couche 3 — Méta-méta (le principe)
+
+S38 ferme la boucle « une source → N projections » jusqu'au **bouton** : Go (S35), DDL (S35), TS (S35), API (S36), migration DB (S37), **et maintenant l'UI web** sont toutes des **projections** de la même vérité kernel, chacune déterministe, content-addressée, protégée, à péremption calculée. Le bouton cesse d'être un artefact écrit à la main qui peut mentir sur la vérité : il **est** la vérité, rendue. C'est *tout par écran* poussé à sa conclusion — l'écran ne montre pas une copie du comportement, il montre la **projection** du comportement, et un e2e prouve qu'elle le respecte.
+
+> OpenQuestions : `OQ-S38-web-emit-op` (un op `web_project_emit` appelable ⇒ outil MCP, plus tard, pas maintenant) ; `OQ-S38-blockcode` (un code BlockReason dédié à l'orphan-bind web).
