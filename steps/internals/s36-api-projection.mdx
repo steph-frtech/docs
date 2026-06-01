@@ -1,0 +1,64 @@
+---
+title: "S36 · API projection — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail d'implémentation de S36 : l'emitter pur EmitAPI(operation, entity) ajouté à la matrice kind × target de S34 (la cible `api`), le contrat Pact EmitContract + la vérification provider in-process VerifyContract (ADR 0026), le MCP pact-verifier (un op : pact_verify), la migration expand-only (la cible 'api' dans le CHECK du ledger + runtime.api_contract), le twin TS byte-identique, et la route Workbench /api-projection. Trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "S36", "EmitAPI", "EmitContract", "VerifyContract", "pact-verifier", "MCP", "api target", "runtime.api_contract", "ledger", "expand-contract", "operation.Interpret", "net/http", "httptest", "provider verification", "Pact v3", "ADR 0026", "twin TS", "byte-identique", "déterministe", "source_hash", "UNKNOWN_OPERATION_IO", "le mur", "SELECT-only", "back/gen/api", "Testcontainers", "rapid", "fast-check", "Playwright"]
+---
+
+<Note>Côté implémentation — le journal de construction complet. Pour le concept, voir [Pour les futurs utilisateurs → S36](/steps/concept/s36-api-projection).</Note>
+
+## Implémentation
+
+**L'emitter `EmitAPI(operation, entity) → Artifact`** (`back/runtime/generators/api.go`) est une fonction **pure, totale, déterministe** ajoutée à la matrice `kind × target` de S34 — la cible **`api`** (`TargetAPI`). Elle rend **un** handler Go `net/http` pour une opération :
+
+- la **méthode + la route** viennent de l'opération (`MethodRoute` : un `mutate create` → `POST` vers la collection pluralisée de l'entité, `Order` → `/orders`) ;
+- le **corps de requête/réponse** réutilise les champs de l'entité (les types Go de S35 — `string`, `int64`, `pgtype.Numeric`, `pgtype.Timestamptz`), en **ordre source**, jamais re-typé ;
+- le corps est **délégué** à `operation.Interpret` (S10) — le handler ré-implémente **aucune** règle ;
+- le `source_hash` = `records.Hash(records.Canonicalize(operation ⊕ entité))` (S02 réutilisé, jamais reforké) ;
+- le rendu passe par `go/format.Source`, donc le handler est **gofmt-clean** par construction et byte-stable ;
+- une E/S incohérente (l'opération mute une entité que l'AST fourni n'épingle pas) est **REJETÉE** avec un `BlockReason` (`blockreason.CodeOutOfScope`, l'explication nomme `UNKNOWN_OPERATION_IO`) — aucun handler émis.
+
+**Le contrat Pact** (`EmitContract`) rend un document **Pact-v3** : une interaction `POST /orders` → `201`, le corps requête = les attributs **requis**, le corps réponse = **tous** les attributs (la ressource créée). `ContractJSON` le canonicalise (clés triées, S02) puis l'indente — byte-stable.
+
+**La vérification provider** (`VerifyContract`, `back/runtime/generators/pactverify.go`, **ADR 0026**) est **in-process** : pas de daemon Ruby externe. Elle monte un provider `HandlerFunc` via `net/http/httptest`, rejoue la requête épinglée, et assure que le **statut** + le **jeu de champs** de la réponse correspondent au contrat (aucun champ en plus/en moins/renommé). `ReferenceProvider(op, e)` est le **même** adaptateur mince que `EmitAPI` rend (décode → `operation.Interpret` avec des `Deps` déterministes → encode la forme entité) ; le `back/gen/api/order.go` matérialisé est **byte-identique** à la sortie d'`EmitAPI` (gardé par le test de ré-émission).
+
+**Le MCP `pact-verifier`** (`back/mcp/pact-verifier/main.go`, Go MCP SDK) expose **un** op : `pact_verify` — émet le contrat, monte le provider, lance la vérification, retourne PASS/FAIL + le contrat + la route. Il lit les sources (SELECT-only) et n'écrit aucune vérité.
+
+**La migration** (`back/migrations/api_contract_baseline.sql`, **expand-only / append-only**) : (1) étend le CHECK `target` du ledger de S34 pour **admettre `'api'`** (drop + re-add du constraint avec le sur-ensemble — aucune valeur retirée) ; (2) ajoute `runtime.api_contract` (`route, method, operation_hash` PK, `pact_json` jsonb, `last_verified_at`). GRANTs : l'agent a **SELECT-only** sur `kernel.*` et `runtime.api_contract` (le mur) ; seul le rôle `aidos` insère/met à jour un contrat via un ChangeSet approuvé.
+
+**Les miroirs (rouges d'abord, conceptuellement dans le schéma `mirrors`, matérialisés dans `tests/`)** :
+- **fixture** `tests/runtime/api_projection.fixture.md` + l'interpréteur Go `api_fixture_test.go` (le handler existe, POST /orders depuis l'opération, réutilise la forme Order, délègue à S10 ; content-addressé ; E/S non épinglée → BlockReason) ;
+- **contract** : la route createOrder passe son contract test (le critère done) — `TestAPIContract_CreateOrderPassesContractTest` + le négatif (un champ retiré → FAIL) ;
+- **property `rapid`** `api_property_test.go` (7 invariants : déterminisme, totalité, route/méthode fidèle, no add/drop/rename, content-address) ;
+- **Testcontainers** `api_contract_roundtrip_test.go` (le ledger admet `'api'`, le contrat round-trip, le CHECK refuse encore un target inconnu, l'agent SELECT-only) ;
+- **twin TS** `front/web/lib/api-projection.test.ts` (fast-check, ancré sur le hash source Go `1c249219…` + l'output hash `35daca1e…` — byte-identique) ;
+- **e2e Playwright** `tests/e2e/api-projection.spec.ts` (POST /orders, header protégé, VERIFY CONTRACT → badge PASS).
+
+## Méta
+
+**Pourquoi un emitter et pas un handler écrit à la main ?** Parce qu'un handler écrit à la main **diverge** de l'opération. L'émettre déterministiquement depuis les sources fait du handler une **projection** : il ne peut pas se contredire avec l'opération/l'entité, et un changement de source **redde** le handler (la staleness, S22). C'est le **determinism-first** (CLAUDE.md §6) : tout ce qui peut être une fonction pure **doit** être du code, jamais un agent.
+
+**Pourquoi Pact in-process et pas le daemon ?** ADR 0026 : le verifier Pact-Go natif embarque un runtime Ruby/Rust à provisionner — non déterministe en CI, disproportionné pour une interaction. On reste **dans** le slot Pact (le contrat est en format Pact-v3, qu'un broker futur consommera) mais on vérifie en mémoire (`httptest`), avec la seule stdlib Go.
+
+**Le handler est mince exprès.** HTTP/JSON in → `operation.Interpret` → HTTP/JSON out. La règle métier vit dans l'opération (S10) ; les champs vivent dans l'entité (S35). Le handler ne fait que le transport — il n'a **aucune** vérité propre, donc rien à maintenir en double.
+
+**Le mur tient.** L'emitter et le MCP **lisent** les sources (SELECT-only) et écrivent la projection **sous** la ligne (`back/gen/api`, le filesystem). Le contrat (`runtime.api_contract`) est écrit par le rôle `aidos` via un ChangeSet — jamais par l'agent. La migration est expand-only : aucune table, valeur ou GRANT antérieure n'est altérée.
+
+## Méta-méta
+
+**La verticale du KRD §23.** Une **opération** (N2) + une **entité** (N3) alimentent une **ligne de projection** (l'API) qui **expose** l'opération. La projection est `role=projection`, `authority=below` — dérivée, jamais vérité. Le même AST source d'où S35 émet Go/TS/DDL est ici croisé avec l'opération pour émettre le transport : **une source (croisée), N projections, jamais double-typé**.
+
+**La loi de complétude.** La projection API a son miroir vivant (fixture + contrat Pact + property + twin + e2e). Pas de monstre : pas de projection sans miroir, pas de miroir orphelin, pas de handler qui dérive de sa source, pas de `back/gen/api` édité à la main (gardé par la ré-émission byte-identique).
+
+**Le cliquet, additif.** La cible `api` est une **addition** à la matrice de S34, pas un fork. La migration **ajoute** la valeur `'api'` et la table `runtime.api_contract`. Le MCP pact-verifier **active** son scaffold (ADR 0009) avec son test de fault-injection (un provider qui dérive → FAIL). Un nouvel artefact n'AJOUTE qu'un garde-fou, n'en retire jamais.
+
+## Limites connues
+
+- **`createOrder` seulement** — pas d'autres routes ; la matrice croît additivement.
+- **Pas d'auth/gateway/pagination/versioning/taxonomie d'erreurs** au-delà de ce que l'opération épingle.
+- **Côté provider seulement** — pas de Pact consommateur (front) ; dent ultérieure.
+- **Handler émis, non déployé** — monté seulement dans le vérificateur/testcontainer pour le contract test.
+- **OQ** : l'opération `ExampleCreateOrderOp` (forme API : mute Order depuis son propre input) est distincte de l'anchor S10 `CreateOrder` (flux cart-checkout lisant `$.input.cartId`) ; quand l'AST opération atterrit comme une vraie ligne kernel, le décodeur s'y lie, l'emitter inchangé.
+
+## Prochaine dent sûre
+
+La plus petite dent stable : une **deuxième** opération projetée (p. ex. `getOrder` → `GET /orders/{id}`) qui prouve la matrice de routes croît additivement, **ou** le **Pact consommateur** (front) pour createOrder, **ou** câbler `back/gen/api` dans la vague de rouge (S22) pour qu'un bump d'opération/entité reddisse d'abord son handler + son contrat.

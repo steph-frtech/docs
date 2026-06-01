@@ -1,0 +1,53 @@
+---
+title: "S36 · API projection — un handler REST/JSON depuis une opération + une entité"
+description: "S36 livre la projection API du KRD (§23) : un handler Go REST/JSON émis depuis DEUX sources — une opération (le workflow N2, S10) et l'entité qu'elle touche (la source N3, S35) — qui EXPOSE l'opération sur HTTP. Le handler est un adaptateur de transport mince : JSON in → l'interpréteur d'opération (S10) → JSON out ; il ne re-type jamais l'entité et ne ré-implémente jamais la règle métier. Sa méthode + sa route viennent DE l'opération (createOrder → POST /orders), jamais inventées. La forme requête/réponse est figée en contrat Pact (le slot « Pact between cells ») et VÉRIFIÉE par le MCP pact-verifier (provider verification, N5). Le critère done : la route createOrder passe son contract test."
+keywords: ["aidos", "krd", "api", "projection", "handler", "REST", "JSON", "net/http", "operation", "opération", "workflow", "N2", "entity", "entité", "source", "createOrder", "POST /orders", "route", "méthode", "method", "Pact", "contract", "contrat", "provider verification", "pact-verifier", "MCP", "interpréteur", "interpreter", "thin adapter", "adaptateur mince", "transport", "jamais re-typé", "never re-typed", "déléguer", "delegate", "UNKNOWN_OPERATION_IO", "BlockReason", "content-addressed", "source_hash", "déterministe", "deterministic", "byte-identique", "le mur", "the wall", "SELECT-only", "back/gen/api", "runtime.api_contract", "/api-projection", "S02", "S10", "S34", "S35"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S36](/steps/internals/s36-api-projection).</Note>
+
+## En une phrase
+
+S36 livre la **projection API** : un **handler Go REST/JSON** émis depuis **deux sources** — une **opération** (le workflow N2, S10) et l'**entité** qu'elle touche (la source N3, S35) — qui **expose** l'opération sur HTTP. Sa forme requête/réponse est figée en **contrat Pact** et **vérifiée** par le MCP `pact-verifier`. Le critère done : **la route `createOrder` passe son contract test.**
+
+## Le problème que ça résout
+
+Une opération du kernel (createOrder) est une vérité abstraite : un workflow `state → command → events`. Pour qu'un client puisse l'appeler, il faut une **porte HTTP** — une route, une méthode, un corps JSON, un code de statut. L'écrire à la main, c'est risquer qu'elle **diverge** de l'opération (un champ oublié, une route inventée, la règle métier ré-implémentée dans le handler). La réponse KRD : **émettre** le handler depuis les sources, déterministiquement. Le handler n'est **pas** la vérité — c'est une **projection régénérable**, sous la ligne, jamais éditée à la main, qui ne peut pas se contredire avec l'opération puisqu'elle en est dérivée.
+
+## Les idées-clés
+
+<Field name="Un handler d'API est une PROJECTION, sous la ligne" type="role: projection, autorité below">
+  Un **handler** (KRD §23) est une **couche projection** : dérivée, jetable, **sous la ligne de flottaison**, matérialisée dans `back/gen/api/`, **jamais éditée à la main**. Il est émis depuis **deux** sources — une **opération** (S10) et l'**entité** qu'elle touche (S35) — que l'agent **lit** (SELECT-only) ; il n'écrit aucune vérité (le mur).
+</Field>
+
+<Field name="Un adaptateur de transport mince" type="JSON in → interpréteur → JSON out">
+  Le handler est **mince** : il décode le JSON, **délègue** le corps à l'**interpréteur d'opération** (S10, `operation.Interpret`), et encode le résultat. Il ne **ré-implémente jamais** la règle métier (elle vit dans l'opération) et ne **re-type jamais** l'entité (la requête/réponse réutilise les champs de l'entité, S35 `EmitGo`).
+</Field>
+
+<Field name="La route vient de l'opération, jamais inventée" type="createOrder → POST /orders">
+  La **méthode + la route** sont dérivées **de l'opération** : un `mutate create` → un **POST** vers la collection de l'entité (`Order` → `/orders`). Aucune route, méthode ou code de statut n'est **coiné** — ce que la source n'épingle pas n'est jamais deviné.
+</Field>
+
+<Field name="La forme est figée en contrat Pact, puis vérifiée" type="le critère done">
+  La forme requête/réponse est gelée en un **contrat Pact** (l'attente du consommateur : `POST /orders` avec le corps Order → un `201` avec la forme Order). Le **MCP pact-verifier** monte le handler émis en mémoire, rejoue l'interaction, et assure que le statut + le **jeu de champs** correspondent au contrat — **la route createOrder passe son contract test** (le critère done).
+</Field>
+
+<Field name="Une E/S non épinglée est refusée, jamais devinée" type="honnêteté, UNKNOWN_OPERATION_IO">
+  Si l'opération référence une entité/un attribut que l'AST d'entité **n'épingle pas**, l'émission est **REJETÉE** avec un `BlockReason` (`UNKNOWN_OPERATION_IO`, la forme S13) : **aucun** handler n'est émis, **jamais** de repli silencieux sur une route/un champ/un statut par défaut.
+</Field>
+
+<Field name="Content-addressé — l'identité, c'est le hash de (opération ⊕ entité)" type="source_hash, S02 réutilisé">
+  Le `source_hash` du handler = `Hash(Canonicalize(opération ⊕ entité))` (le schéma de hash de **S02**, jamais reforké). Tout changement d'octet dans l'une ou l'autre source produit un **nouveau hash** ; un handler dont le `source_hash` ne correspond plus à la tête est **stale** — l'inégalité qui alimente la vague de rouge (S22).
+</Field>
+
+## Ce que ça n'est pas (encore)
+
+- **Pas une nouvelle opération ni une nouvelle entité** : ce sont des vérités sœurs antérieures (S10, S35) ; ici on les **lit** et on ajoute la projection + le contrat.
+- **Pas d'autres routes** : `createOrder` seulement ; la matrice de routes croît additivement (pas de `getOrder`/`cancelOrder` pré-construits).
+- **Pas d'auth/gateway/pagination/versioning/taxonomie d'erreurs** au-delà de ce que l'opération épingle — ce sont des dents ultérieures.
+- **Pas le Pact consommateur (front)** : cette dent fige et **vérifie le côté provider** ; le test consommateur est une dent front ultérieure.
+- **Pas de serveur déployé** : le handler est émis ; il n'est monté que dans le vérificateur/testcontainer pour le contract test.
+
+## Le critère « done »
+
+**La route `createOrder` passe son contract test.** `EmitAPI(createOrder, Order)` émet un handler `net/http` valide avec le header protégé (POST /orders depuis l'opération ; corps réutilisant la forme Order ; délégué à l'interpréteur S10) ; le `source_hash` est le hash de contenu de (opération ⊕ entité) ; une E/S non épinglée est `Blocked(UNKNOWN_OPERATION_IO)` ; le MCP `pact-verifier` **vérifie** le contrat — la route passe. `/api-projection` rend la source, le handler, le contrat et un badge **PASS** ; un e2e Playwright le prouve.

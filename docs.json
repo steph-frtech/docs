@@ -135,7 +135,9 @@
               "steps/concept/s34-emitters",
               "steps/internals/s34-emitters",
               "steps/concept/s35-entity-source",
-              "steps/internals/s35-entity-source"
+              "steps/internals/s35-entity-source",
+              "steps/concept/s36-api-projection",
+              "steps/internals/s36-api-projection"
             ]
           }
         ]
