@@ -1,0 +1,43 @@
+---
+title: "S45 · Compilateur aidos — chaque loi KRD a 1 rouge + 1 vert"
+description: "S45 rend mécanique la règle de voûte de KRD §82.1 — « aucun concept KRD n'existe s'il n'est pas vérifiable par aidos check » — en posant un harnais de couverture des lois sur le compilateur aidos : chaque loi KRD (les dix lois §82.1 plus la loi de complétude §29) porte exactement une fixture ROUGE (un graphe qui la viole → aidos check signale la violation) et une fixture VERTE (un graphe qui la satisfait → check passe), et les cinq verbes check/impact/stable/diff/explain les couvrent toutes. Aucune loi nouvelle, aucun détecteur nouveau : on CÂBLE les détecteurs déjà épinglés et on PROUVE la couverture, de bout en bout, sur le projet de démonstration."
+keywords: ["aidos", "krd", "compilateur", "compiler", "aidos check", "krd check", "KRDCompiler", "loi", "law", "couverture", "coverage", "1 rouge 1 vert", "fixture", "rouge", "vert", "TruthKind", "miroir incompatible", "scope absent", "autorité absente", "MemoryFirewall", "phase stable", "poids composes", "mutation score", "invariant global", "ContextGraphDecision", "complétude", "monstre", "BlockReason", "S13", "vague de rouge", "SemanticDiff", "déterminisme", "le mur", "tout par écran", "registre des lois", "law registry", "OpenQuestion"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S45](/steps/internals/s45-aidos-compiler).</Note>
+
+## En une phrase
+
+S45 rend **mécanique** la règle de voûte de KRD §82.1 — **« aucun concept KRD n'existe s'il n'est pas vérifiable par `aidos check` »** — en posant un **harnais de couverture des lois** sur le compilateur `aidos` : **chaque loi KRD** (les dix lois §82.1 plus la loi de complétude §29) porte **exactement une fixture ROUGE** (un graphe qui la viole → `aidos check` signale la violation) et **une fixture VERTE** (un graphe qui la satisfait → `check` passe). Les cinq verbes `check / impact / stable / diff / explain` les couvrent **toutes**.
+
+## Le problème que ça résout
+
+KRD énumère ses lois (§82.1) : une vérité doit déclarer son `TruthKind`, son miroir doit être compatible, son scope présent, son autorité assignée, la mémoire ne peut pas entrer dans le noyau sans `Idea → Mirror → Goal`, une phase doit être stable, un poids `composes` doit être justifié, le mutation score suffisant, un invariant pas trop large, une `ContextGraphDecision` testée — plus la **loi de complétude** §29 (pas de monstre). Mais une loi **énoncée** n'est pas une loi **vérifiée**. La règle de voûte dit l'inverse : un concept KRD qui ne passe pas `aidos check` **n'existe pas**. S45 ferme cette boucle : il **prouve** que chaque loi est réellement détectable — un graphe qui la viole produit la violation, un graphe qui la satisfait passe.
+
+## Les idées-clés
+
+<Field name="Une loi = un rouge + un vert" type="le critère de couverture">
+  Pour **chaque** loi du registre, une fixture **ROUGE** (un fragment de graphe de vérité qui la viole, plus `aidos <verbe>` → le `BlockReason` attendu) **et** une fixture **VERTE** (un fragment qui la satisfait → passe). Cette paire **prouve** que la loi est détectable : sans le rouge, la loi pourrait ne jamais se déclencher ; sans le vert, elle pourrait tout bloquer. Le registre est **total** : pas de loi sans ses deux fixtures, pas de fixture orpheline (un monstre).
+</Field>
+
+<Field name="On câble, on n'invente pas" type="le mur, CLAUDE.md §2">
+  S45 **n'écrit aucune loi nouvelle** et **aucun détecteur nouveau**. Le jeu des lois est gravé dans KRD §82.1 + §29 — ni plus, ni moins. Chaque verbe **appelle le détecteur déjà épinglé** par une étape antérieure (S14 typage, S06/S12 complétude, S15 scope, S16 autorité, S30 pare-feu mémoire, S23 phase, S19 composes, S40 mutation, S08 invariant, S32 décision de contexte). Si une loi §82.1 n'avait pas de détecteur antérieur, ce serait une **OpenQuestion** — jamais un détecteur inventé.
+</Field>
+
+<Field name="Une violation est un BlockReason actionnable" type="S13">
+  Une violation n'est jamais une prison : c'est un `BlockReason` de forme S13 — `code`, `severity`, `explanation`, `how_to_fix[]`. `aidos check` rend une liste **ordonnée et déterministe** de violations, ou `green`. Corriger une loi passe par un `/goal` — jamais par une écriture directe (le mur).
+</Field>
+
+<Field name="Les cinq verbes couvrent tout" type="la fermeture de couverture">
+  `check` possède la plupart des lois ; `stable` possède la loi de phase (§43), `diff` produit le `SemanticDiff` (§44.1), `impact` calcule la vague de rouge (§42), `explain` rend le `BlockReason` (§44.5). **Chaque loi a un verbe propriétaire** parmi les cinq, et chaque loi est atteignable par ce verbe — la règle de voûte tient sur l'ensemble du compilateur.
+</Field>
+
+## Ce que ça n'est pas
+
+- **Pas une loi nouvelle, pas un détecteur nouveau, pas une règle de fitness** : tout cela est au-dessus de la ligne, détenu par l'humain et la réalité (le mur).
+- **Pas un serveur MCP, pas un hook Go, pas un skill** : `aidos check` est un sous-commande de la CLI S03, appelant les détecteurs existants. Le mur (S04), les senseurs (S07), la porte de complétude (S12), le self-test (S39) existent déjà et ne sont que **référencés**.
+- **Pas une écriture de vérité** : le harnais lit le graphe (`SELECT` seul) et le projet de démonstration ; il n'écrit rien.
+
+## Tout par écran
+
+Le panneau `/check` du Workbench rend la **matrice de couverture des lois** — une ligne par loi (`law_id`, réf. KRD, verbe propriétaire, rouge, vert, détecteur réutilisé) — et laisse l'utilisateur **exécuter** `aidos check` sur le projet de démonstration (verdict GREEN) ou **lancer** la fixture rouge / verte de n'importe quelle loi depuis l'écran. Action-capable, bilingue, thémé — et en **lecture seule** contre la vérité.

@@ -1,0 +1,60 @@
+---
+title: "S45 · Compilateur aidos — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S45 : le registre des lois back/cmd/aidos/lawcoverage (les dix lois §82.1 + la complétude §29, chacune {law_id, krd_ref, owning_verb, detector_ref} + un détecteur déterministe qui RÉUTILISE le détecteur antérieur), la matrice de couverture (1 rouge + 1 vert par loi), le verbe aidos check câblé dans cmd/aidos, la property rapid de totalité, le miroir TS lib/law-coverage.ts, le panneau action-capable /check, l'e2e Playwright."
+keywords: ["aidos", "krd", "lawcoverage", "law registry", "registre des lois", "aidos check", "runCheck", "Detect", "Breach", "BlockReason", "S13", "truthtyping", "S14", "completeness", "S06", "S12", "scope", "S15", "authority", "S16", "MemoryFirewall", "S30", "phases", "S23", "composes", "S19", "debt", "S40", "IsGlobal", "S08", "ContextGraphDecision", "S32", "SemanticDiff", "S21", "redwave", "S22", "matrix", "fixture", "rapid", "property", "totalité", "déterminisme", "lib/law-coverage.ts", "/check", "CheckPanel", "Playwright", "le mur", "lecture seule", "OpenQuestion"]
+---
+
+<Note>Trois couches : **Implémentation** (le code livré au vert), **Méta** (pourquoi cette forme), **Méta-méta** (l'invariant que ça protège). Côté concept : [Pour moi → S45](/steps/concept/s45-aidos-compiler).</Note>
+
+## Implémentation
+
+### Le registre des lois — `back/cmd/aidos/lawcoverage`
+
+Le cœur de S45 : un **registre fermé** des onze lois KRD, en lecture seule.
+
+<Field name="Law { ID, KRDRef, OwningVerb, DetectorRef, Detect }" type="lawcoverage.go">
+  Une entrée par loi KRD §82.1 (dix) plus la loi de complétude §29 — **ni plus, ni moins**. Chaque entrée porte son `law_id`, sa référence KRD, son **verbe propriétaire** (`check` | `impact` | `stable` | `diff` | `explain`), le **détecteur antérieur réutilisé** (`detector_ref`), et une fonction `Detect(graph) → *Breach` **pure et déterministe** qui délègue le verdict autoritaire à la fonction antérieure et n'adapte que le fragment + le rendu du `Breach`.
+</Field>
+
+<Field name="Detect réutilise le détecteur antérieur" type="aucun détecteur réimplémenté">
+  `truth_without_kind` → `truthtyping.Classify` (S14) ; `mirror_incompatible` → `records.RequiredTestKinds` (S06) ; `scope_absent` → `scope.IsEmpty` (S15) ; `authority_absent` → `authority.Decide` (S16) ; `memory_without_goal` → le pare-feu mémoire (S30) ; `phase_not_stable` → `phases.IsStable` (S23) ; `composes_weight` → le poids `composes` (S19) ; `mutation_score` → le seuil de mutation déclaré (S40) ; `invariant_too_global` → `scope.IsGlobal` (S08) ; `context_decision_untest` → la `ContextGraphDecision` (S32) ; `completeness` → `completeness.Gate` sur le détecteur de monstre S06 (§29). Aucune loi n'est forkée.
+</Field>
+
+<Field name="Breach — la forme S13 portée par chaque violation" type="code / severity / explanation / how_to_fix[]">
+  Sur un fragment violant, `Detect` rend un `*Breach` (la même forme que `runtime/blockreason.BlockReason`, déclarée localement — le précédent établi) ; sur un fragment satisfaisant, `nil`. Chaque `Breach` **nomme la porte** (`how_to_fix` non vide) : jamais une prison.
+</Field>
+
+### La matrice de couverture — `matrix.go`
+
+<Field name="Cell { Law, Red, Green }" type="la forme matérialisée du miroir BDD">
+  Pour chaque loi, **un fragment ROUGE** (qui viole) et **un fragment VERT** (qui satisfait). Les fixtures sont des **means-tests vers le rouge humain** (les lois KRD telles qu'écrites) — jamais une loi nouvelle que l'agent inventerait puis noterait (CLAUDE.md §8). La loi §29 réutilise le vocabulaire S06 (`records.Mirror` / `records.Layer`) : rouge = une couche sans miroir vivant (un monstre), vert = la couche portant son miroir requis.
+</Field>
+
+### Le verbe — `back/cmd/aidos/check.go`
+
+`runCheck(args, stdout) → exit code`, câblé dans le dispatcher `main.go`. Sans opérande : il retombe sur le contrat déclaré S03 (la projection `/cli` est inchangée). `aidos check demo` exécute le **projet de démonstration** (tout vert) à travers chaque loi que `check` possède. `aidos check --red <law_id>` exécute le fragment violant de cette loi (la moitié rouge de la preuve). Sortie : `exitOK` (0) au vert, `exitBreach` (1) sur ≥1 violation, `exitUsage` (2) sur un `law_id` inconnu. **Lecture seule** — il n'écrit aucune vérité.
+
+<Field name="THE GRAPH FEED — OpenQuestion OQ-S45-1" type="forward dependency par conception">
+  La requête store « donne-moi tout le graphe de vérité » est détenue par le content store / DAG (S02/S24). En attendant, `aidos check` lit un **catalogue déterministe** de graphes de démonstration (les **mêmes** fragments que la matrice de fixtures) — cohérent avec `diff`/`impact`/`stable`. Brancher la lecture `SELECT`-seule réelle est une dent ultérieure qui **ne change pas cette surface**.
+</Field>
+
+### La preuve — fixture + property
+
+- **Fixture** (`check_bdd_test.go`, N2 : state → command → events) : le projet de démonstration est GREEN ; pour chaque loi `check`-owned, la fixture rouge viole avec le code attendu (exit ≠ 0) et le démo ne viole pas ; `stable`/`diff`/`explain` couvrent leurs lois via leurs verbes.
+- **Property** (`matrix_property_test.go`, rapid) : la matrice est **totale** (chaque loi une cellule, chaque cellule une loi enregistrée — pas d'orphelin) ; le jeu de lois est **exactement** §82.1 + §29 ; rouge → un `Breach` complet, vert → `nil` ; fermeture de couverture (chaque loi a un verbe + un `detector_ref`) ; `Detect` est déterministe.
+
+### Le miroir front + le panneau — `lib/law-coverage.ts`, `/check`
+
+`lib/law-coverage.ts` est le **miroir TS** du harnais Go : même registre fermé, mêmes codes, mêmes verbes ; `checkDemo()` et `checkRed(law)` reflètent `aidos check demo` / `--red`. Couvert par `lib/law-coverage.test.ts` (Vitest). `app/check/CheckPanel.tsx` (`"use client"`) est **action-capable** : il **exécute** `aidos check` (démo) et chaque fixture rouge/verte depuis l'écran et rend le verdict + les `BlockReason`. `app/check/page.tsx` ajoute le tutoriel + l'exemple, thémé ADR 0010, bilingue ADR 0011. e2e : `tests/e2e/check.spec.ts` (Playwright, 4 tests).
+
+## Méta — pourquoi cette forme
+
+- **Un registre unique, profond, bien nommé** plutôt que des listes de lois éparpillées : la totalité est prouvée **en un seul endroit** (la property rapid). Ajouter une loi sans ses deux fixtures fait rougir la property — impossible de tricher.
+- **Chaque verbe est un adaptateur mince sur un détecteur réutilisé** : aucune logique de loi dupliquée. Le verdict autoritaire reste la fonction antérieure ; `lawcoverage` n'adapte que le fragment + le rendu.
+- **Le catalogue déterministe** (au lieu d'une lecture store réelle) suit le précédent S21/S22/S23 : le verbe est rejouable et lecture seule **maintenant**, l'OpenQuestion trace la dette de câblage store.
+
+## Méta-méta — l'invariant protégé
+
+> **Aucun concept KRD n'existe s'il n'est pas vérifiable par `aidos check`** (KRD §82.1, la règle de voûte).
+
+S45 rend cette règle **non-gameable** : la property de totalité interdit une loi sans son rouge **et** son vert, et interdit une fixture orpheline (un monstre). Tant que la matrice est verte, on **sait** — de façon calculée, jamais déclarée — que chaque loi gravée par KRD est réellement détectable de bout en bout. Le harnais n'invente aucune loi : il prouve que les lois existantes **mordent**.
