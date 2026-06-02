@@ -1,0 +1,43 @@
+---
+title: "S49 · SagaInvariant — une jambe en échec déclenche la compensation"
+description: "S49 livre la SagaInvariant : un invariant de transaction distribuée TRANSVERSE qui lie des participants nommés (order, payment, shipping) à une property qui doit tenir à l'échelle de la fédération, chaque participant portant sa compensation. La propriété canonique : « payment_captured implies (order_confirmed or compensation_executed) ». Une jambe en échec après la capture déclenche la compensation déclarée — la propriété tient VIA la compensation, jamais malgré elle. Le monstre interdit : un paiement capturé sans commande confirmée ni compensation. La CoherenceTest garantit qu'aucun événement consommé n'est produit par une version incompatible. Par §49.1 une saga est transverse par définition : scope contract_pair ou federation_policy, jamais local_cell. Lecture seule, derrière le mur."
+keywords: ["aidos", "krd", "SagaInvariant", "saga", "transaction distribuée", "compensation", "participant", "CoherenceTest", "fédération", "federation_policy", "contract_pair", "payment_captured", "order_confirmed", "compensation_executed", "shipping_failed", "satisfied", "violated", "SAGA_INVARIANT_VIOLATED", "INCOMPATIBLE_CONTRACT_VERSION", "cert_language", "statechart", "pact", "tla+", "id@version", "Resolve", "S10", "S17", "S48", "GlobalInvariant", "§49.1", "§49.2", "§44.5", "BlockReason", "le mur", "déterminisme", "lecture seule"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S49](/steps/internals/s49-saga-invariant).</Note>
+
+## En une phrase
+
+S49 livre la **SagaInvariant** : un **invariant de transaction distribuée transverse** qui lie des **participants** nommés (`order`, `payment`, `shipping`) à une **property** qui doit tenir à l'échelle de la **fédération**, chaque participant portant sa **compensation**. La loi centrale (KRD §49.2) : **une jambe en échec déclenche la compensation** — quand une jambe échoue après `payment_captured`, la saga exécute la compensation déclarée, donc `compensation_executed` tient et la propriété est **satisfaite via la compensation**. Le monstre interdit : un **paiement capturé** laissé sans commande confirmée **ni** compensation exécutée.
+
+## Le problème que ça résout
+
+Une commande traverse plusieurs cellules : `order` confirme, `payment` capture, `shipping` planifie. Que se passe-t-il quand `payment` a capturé mais que `shipping` **échoue** ? Sans garde-fou, l'argent reste **capturé contre rien** — le bug le plus coûteux d'un système distribué. Une saga répond : **pas de verrou distribué, pas de rollback à deux phases** — chaque participant déclare sa **compensation** (l'opération qui défait son travail), et quand une jambe échoue, la saga **exécute les compensations** pour ramener la fédération à un état cohérent. La SagaInvariant fait de « la fédération ne reste jamais avec un paiement capturé contre rien » une **vérité typée et content-addressed**, pas une convention.
+
+## Les idées-clés
+
+<Field name="La propriété tient VIA la compensation, pas malgré elle" type="KRD §49.2">
+  La propriété canonique est **« `payment_captured` implies (`order_confirmed` or `compensation_executed`) »**. Sur le chemin nominal, `order_confirmed` la satisfait. Quand une jambe échoue, c'est **`compensation_executed`** qui la satisfait — la compensation **est** le chemin de réussite alternatif, pas un échec. Le seul cas violé : un paiement capturé sans **ni l'un ni l'autre**.
+</Field>
+
+<Field name="Une compensation est une opération épinglée, pas du code libre" type="KRD §49.2 + S10/S17">
+  Chaque participant porte ses compensations comme des **références d'opération** épinglées `id@version` (`refundPayment@v3`, `cancelOrder@v2`). Une compensation non épinglée est un **monstre** : refusée à la validation. Les compensations sont des **opérations S10**, jamais du code inventé.
+</Field>
+
+<Field name="Une saga est transverse par définition" type="KRD §49.1">
+  Hérité du `GlobalInvariant` (S48) : une saga est une **exception coûteuse**, pas le mode normal. Son `scope` est `contract_pair` ou `federation_policy`, **jamais** `local_cell` — une « saga » dans une seule cellule n'est pas une transaction distribuée. Une saga à un seul participant est aussi rejetée.
+</Field>
+
+<Field name="La CoherenceTest garde la fédération cohérente" type="KRD §49.2">
+  Le sibling de la saga : **« aucun événement consommé n'est produit par une version incompatible »**. Un participant épingle les contrats qu'il consomme (`order.events@v3`, `payment.commands@v2`) ; si le producteur a avancé sa version head au-delà de l'épinglage, c'est **incompatible** (`INCOMPATIBLE_CONTRACT_VERSION`). Un changement dans une cellule ne doit ni bloquer ni corrompre la fédération.
+</Field>
+
+## Comment vous l'utilisez
+
+Sur le panneau **`/sagas`** du Workbench, vous voyez la saga `checkout-payment-shipping` : son **statechart** (les commits `order → payment → shipping` puis les transitions de compensation tracées en retour), les **cartes participants** (cellule, événements commit, compensations `id@version`), la **property** transverse et le **cert_language** (`statechart`). La **table d'outcome** calcule, pour chaque trace, le verdict : le chemin nominal **satisfaite**, la jambe en échec avec compensation **satisfaite** (avec `refundPayment@v3 → cancelOrder@v2 → compensation_executed` visibles), le paiement capturé sans rien **violée** en rouge. La carte **CoherenceTest** montre `incompatible` quand un contrat consommé a dépassé sa version head.
+
+Déclarer ou re-scoper une saga est une **écriture de vérité** : elle passe par **propose → ChangeSet → approbation**, jamais une écriture directe depuis l'écran (le **mur**).
+
+## Ce que S49 ne fait pas (encore)
+
+L'**exécution réelle** des compensations contre un store vivant et le **runtime de fédération** sont des étapes ultérieures (ici les compensations sont des opérations *référencées*). Pas de `TemporalInvariant` (KRD §49.3 — horloges, timeouts, « dans les 5 minutes ») ni de `RedWorkQueue` (§49.4) : la saga est évaluée contre une **trace déclarée**, sans horloge.

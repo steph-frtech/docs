@@ -1,0 +1,46 @@
+---
+title: "S49 · SagaInvariant — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail d'implémentation de S49 : le package Go pur back/kernel/sagas (l'AST SagaInvariant + SagaParticipant + CoherenceTest, Validate + Evaluate + RunCompensation + CheckCoherence), la migration kernel.saga_invariant (content-addressed, append-only, CHECK scope excluant local_cell + CHECK cert_language, agent SELECT-only), les miroirs fixture + rapid + roundtrip Testcontainers, le twin front + fast-check, le panneau /sagas action-capable et l'e2e Playwright. La réutilisation de S02 (substrat content-hash), S08 (Expr DSL pour la property), S10 (opérations pour les compensations), S17 (links.Ref + Resolve), S48 (GlobalInvariant, le frame transverse). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "SagaInvariant", "sagas", "back/kernel/sagas", "Evaluate", "RunCompensation", "CheckCoherence", "Validate", "CoherenceTest", "compensation", "participant", "kernel.saga_invariant", "migration", "content-addressed", "append-only", "scope", "local_cell", "cert_language", "statechart", "Expr DSL", "S02", "S08", "S10", "S17", "S48", "Resolve", "links.Ref", "id@version", "fixture", "rapid", "fast-check", "Testcontainers", "déterminisme", "le mur", "SAGA_INVARIANT_VIOLATED", "INCOMPATIBLE_CONTRACT_VERSION", "§49.1", "§49.2"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Pour le concept, voir [Pour les futurs utilisateurs → S49](/steps/concept/s49-saga-invariant).</Note>
+
+## En une phrase
+
+S49 pose le **substrat de saga** : un package Go pur `back/kernel/sagas` (l'AST + `Validate`/`Evaluate`/`RunCompensation`/`CheckCoherence`), une migration `kernel.saga_invariant` content-addressed dont le `CHECK` de `scope` **exclut** `local_cell`, des miroirs `fixture` + `rapid` + roundtrip Testcontainers, un twin front pur + `fast-check`, et le panneau `/sagas` action-capable avec son e2e Playwright — le tout réutilisant S02/S08/S10/S17/S48 sans les forker.
+
+## Couche 1 — Implémentation
+
+**Le package Go (`back/kernel/sagas/sagas.go`).** L'AST : `SagaInvariant{name, scope, participants[], property, mirror{cert_language}, coherence_test?}`, `SagaParticipant{cell, commits[], compensation []links.Ref}`, `CoherenceTest{contracts []links.Ref, property}`. Le `scope` est un **set de deux** (`contract_pair`, `federation_policy`) — `local_cell` n'existe pas dans l'enum. Le `cert_language` est le set fermé `{statechart, pact, tla+}`.
+
+- **`Validate(saga)`** — name/property non vides ; `scope` transverse ; `cert_language` dans le trois-set ; ≥2 participants ; chaque compensation `stepRef` épinglée `id@version` (via `links.Ref.IsPinned()`, S17) ; la `property` encode en AST Expr ; les contrats de la CoherenceTest épinglés.
+- **`Evaluate(saga, trace) → SagaOutcome`** — encode la propriété canonique en **AST Expr S08** par De Morgan (le catalogue a `!` et `&&` mais ni `||` ni `implies`, par design — l'étendre serait un changement de contrat S08) : `payment_captured implies (order_confirmed or compensation_executed)` ≡ `!(payment_captured && (!order_confirmed && !compensation_executed))`. Lie chaque événement à sa présence dans la trace (`true`/`false`) sous la racine `$`, évalue via `expr.Eval`. `satisfied` si la propriété tient, sinon `violated` + `BlockReason{SAGA_INVARIANT_VIOLATED, how_to_fix:[run_compensation_on_failure, …]}`.
+- **`RunCompensation(saga, failedTrace) → Compensation`** — les compensations des participants dont un commit est présent, en **ordre inverse** (la jambe la plus récemment commitée compensée en premier — le pattern saga), puis le marqueur `compensation_executed`. Les legs sont des opérations S10 *référencées* `id@version`, **non exécutées**.
+- **`CheckCoherence(test, heads) → CoherenceOutcome`** — pour chaque contrat consommé, **compose `links.Resolve` (S17)** : `incompatible` dès qu'un ref n'est pas `green` (stale/absent), `coherent` sinon, + `BlockReason{INCOMPATIBLE_CONTRACT_VERSION}`.
+- **`SerializeBody(saga)`** — un body `{"kind":"truth","saga_invariant":…}` qui round-trip via `records.NewRecord` (S02) : `id == version == Hash(Canonicalize(body))`.
+
+**La migration (`back/migrations/kernel_saga_invariant_baseline.sql`).** Expand-only, append-only : `kernel.saga_invariant(id, body jsonb, version, superseded_by, created_at)` content-addressed. Le `CHECK saga_invariant_scope_enum` n'autorise que `contract_pair`/`federation_policy` (`local_cell` **exclu** au niveau DB) ; un `CHECK saga_invariant_cert_language_enum` pour le trois-set. `GRANT SELECT … TO aidos_agent` + `REVOKE INSERT/UPDATE/DELETE/TRUNCATE` — **le mur** : l'agent lit, n'écrit jamais la vérité.
+
+**Les miroirs (RED → GREEN).** `sagas_fixture_test.go` (le statechart `checkout-payment-shipping` : happy `satisfied`, jambe-en-échec-avec-compensation `satisfied` avec `refundPayment@v3 → cancelOrder@v2 → compensation_executed`, dangling-money `violated`/`SAGA_INVARIANT_VIOLATED`, CoherenceTest `incompatible`/`coherent`) ; `sagas_property_test.go` (rapid : `Evaluate` total + déterministe, la **propriété de sûreté** ∀ trace, `CheckCoherence` composant Resolve, les gardes `Validate`) ; `migration_roundtrip_test.go` (Testcontainers : roundtrip, le CHECK rejette `local_cell`, le mur SELECT-only). Source matérialisée : `tests/kernel/checkout-payment-shipping_saga.fixture.md`.
+
+**Le twin front + l'UI.** `front/web/lib/saga.ts` (projection pure, mêmes lois) + `lib/saga.test.ts` (fast-check, 10/10). Le panneau `/sagas` (`components/SagaPanel.tsx` + `app/sagas/page.tsx`) : statechart, cartes participants, table d'outcome calculée par l'évaluateur pur, carte CoherenceTest, contrôle propose→ChangeSet (stub, le mur). Bilingue (`messages/{fr,en}.json`), thémé (tokens ADR 0010). E2e `tests/e2e/sagas.spec.ts` (6/6).
+
+## Couche 2 — Méta
+
+**Pourquoi ces choix.** La SagaInvariant **spécialise** le `GlobalInvariant` (S48) au cas transaction distribuée : même frame transverse (`scope` exception coûteuse), nouvelle nature de propriété (une property cross-cell + des compensations). Le choix structurant est **réutiliser, ne pas réinventer** : la property est un **AST Expr S08** (pas un parser de prédicat maison), les compensations et contrats sont des **`links.Ref` S17** épinglés `id@version`, la coherence **compose `Resolve`** (la même primitive de fraîcheur que les liens), le hash de ligne réutilise **S02**. L'encodage De Morgan évite d'**étendre le catalogue Expr** (qui serait un changement de contrat S08 → ChangeSet + SemanticDiff) : la propriété tient dans `!`/`&&` existants. La saga prouve l'**invariant et sa propriété de compensation** ; l'exécution réelle et le runtime de fédération sont des projections ultérieures — la frontière est tracée pour ne pas inventer de runtime non testé.
+
+**Pas de hook, MCP, skill ni codegen.** La coherence est une **fonction de décision** que le flux fédération/`/goal` appelle, pas une règle de mur (le hook S04 garde déjà `kernel.*`) ; aucune capacité backend nouvelle exposée (l'executor de saga est plus tard) ; déclarer une saga n'est pas encore un geste répétable distinct ; rien à émettre depuis un AST de saga.
+
+## Couche 3 — Méta-méta
+
+**Déterminisme-first.** Tout ce que S49 introduit **est** une fonction pure et **doit** être du code, jamais un agent : parser l'AST, évaluer la property sur une trace, décider `satisfied|violated`, apparier une jambe en échec à sa compensation déclarée, hasher le body, et la coherence basée sur `Resolve` sont déterministes. `Evaluate`/`CheckCoherence` sont **autoritaires** (même saga + même trace/heads ⇒ même verdict). **Aucun LLM dans la boucle.** Le miroir de reproductibilité (rapid en Go, fast-check au front : même entrée ⇒ même sortie) épingle cette propriété — un agent qui « déciderait » si une saga est satisfaite à la place de l'évaluateur pur serait un **écart de déterminisme** qui bloque l'étape, comme une capacité headless ou un monstre.
+
+**Anti-écrasement et le mur.** Un nouveau contrat (les shapes AST, les deux codes BlockReason, la sémantique `Evaluate`/`CheckCoherence`) **ajouté**, aucun antérieur réécrit. Toute évolution d'un contrat amont (S02/S08/S10/S17/S48, le BlockReason, les GRANTs) passerait par ChangeSet + SemanticDiff. Une ligne de saga est **append-only** : superseder via `superseded_by`, jamais un edit destructif. L'agent n'a **aucun GRANT d'écriture** sur `kernel.saga_invariant` — la vérité ne s'écrit que via le rôle CLI `aidos`, sur ChangeSet approuvé.
+
+## Ce qui reste ouvert (OpenQuestions)
+
+- L'**executor de saga** (exécuter les vraies opérations de compensation contre un store) et le **runtime de fédération** — étape ultérieure.
+- Le **`TemporalInvariant`** (KRD §49.3 : horloges/timeouts/retries) et le **`RedWorkQueue`** (§49.4) — siblings ultérieurs ; ici aucune horloge.
+- La persistance Postgres réelle du miroir dans le schéma `mirrors` — back-fillée à S06 (exception bootstrap) ; ici le miroir est matérialisé en fichier + test exécutable.
+- **Linear MCP** non authentifié dans cet environnement d'exécution : le ticket `S49` n'a pas pu être déplacé In Progress/Done par l'agent (best-effort, §11).
