@@ -1,0 +1,51 @@
+---
+title: "S52 · L'agent comme couche gouvernée — il propose, il ne déclare jamais seul"
+description: "S52 livre l'agent comme COUCHE GOUVERNÉE (KRD §21/§13.8) : modéliser un agent, c'est poser une CoucheAgent — un source au-dessus de la ligne (versionné, content-adressé) qui déclare son rôle / ses droits / son objectif / ses outils / ses skills / ses hooks / ses limites, gouverné par sa propre AuthorityGraph (S16) et son TruthScope (S15). La taxonomie des couches GAGNE trois membres : agent | equipe_agents | orchestration. Une EXÉCUTION unique n'est PAS une couche : c'est un AgentRun, un événement de runtime sous la ligne, append-only, sans version ni miroir. Le mur (S04) refuse toute écriture d'un rôle agent au-dessus de la ligne avec AGENT_WRITE_ABOVE_WATERLINE ; un agent BDD-writer PROPOSE un scénario (status proposed) mais ne peut JAMAIS s'auto-approuver — seule une autorité HUMAINE l'admet. « En KRD un agent n'est jamais une autorité — c'est une couche gouvernée ; il propose, exécute, explore, mais ne déclare jamais seul ce qui est vrai. »"
+keywords: ["aidos", "krd", "agent", "couche gouvernée", "CoucheAgent", "AgentRun", "AgentAction", "AgentAssignment", "agent layer", "agent | equipe_agents | orchestration", "AgentSpec", "peut_proposer_verite", "peut_modifier_noyau", "peut_modifier_miroir", "peut_modifier_fitness", "AGENT_WRITE_ABOVE_WATERLINE", "le mur", "la ligne de flottaison", "proposer", "déclarer", "AuthorityGraph", "TruthScope", "auto-approbation", "S04", "S15", "S16", "S27", "S29", "S30", "§21", "§13.8", "§44.5", "déterminisme", "lecture seule"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S52](/steps/internals/s52-couche-agent).</Note>
+
+## En une phrase
+
+S52 livre **l'agent comme couche gouvernée** (KRD §21/§13.8) : modéliser un agent, **c'est poser une couche** — une **`CoucheAgent`**, un *source* au-dessus de la ligne qui déclare son rôle / ses droits / son objectif / ses outils / ses limites. Une **exécution unique** n'est **pas** une couche : c'est un **`AgentRun`**, un événement de runtime sous la ligne. La phrase à graver : **« en KRD un agent n'est jamais une autorité — c'est une couche gouvernée ; il propose, exécute, explore, mais ne déclare jamais seul ce qui est vrai. »**
+
+## Le problème que ça résout
+
+Un agent qui code votre application a des **droits**, un **objectif**, des **outils**, des **limites**. Laissés implicites, ces droits deviennent flous : qu'est-ce que l'agent a le droit d'écrire ? Peut-il décider seul qu'une règle métier est vraie ? Peut-il s'accorder une exception ? KRD répond en faisant de l'agent une **vérité gouvernée comme une autre** : on le **modélise** en une couche, versionnée et content-adressée, soumise au **mur** (§2) et à sa propre **AuthorityGraph** (S16). Le résultat : un agent ne peut jamais écrire au-dessus de la ligne, et il ne peut jamais déclarer seul ce qui est vrai — il **propose**, un humain **admet**.
+
+## Les idées-clés
+
+<Field name="La CoucheAgent est une COUCHE, pas un rôle IAM" type="KRD §21">
+  Modéliser un agent, c'est poser une **couche** au sens KRD §21 : versionnée, content-adressée, **au-dessus de la ligne** (un *source*). Elle porte le **rôle / les droits / l'objectif / les outils / les skills / les hooks / les limites** de l'agent. Ce n'est **ni** un ACL, **ni** un profil de permission isolé : c'est une vérité gouvernée par sa propre **AuthorityGraph** (S16) et son **TruthScope** (S15).
+</Field>
+
+<Field name="L'AgentRun est un événement, PAS une couche" type="runtime, sous la ligne">
+  Une **exécution unique** d'un agent n'est **jamais** une couche : c'est un **`AgentRun`**, un événement de runtime, sous la ligne, append-only, **sans version ni miroir**. On distingue rigoureusement *l'agent modélisé* (couche, vérité gouvernée) de *l'agent qui s'exécute* (trace de runtime). C'est la frontière de tout ce step.
+</Field>
+
+<Field name="La taxonomie gagne trois membres" type="agent | equipe_agents | orchestration">
+  La taxonomie des couches (S02/S35) **gagne** trois membres : `agent` (un agent seul), `equipe_agents` (une équipe), `orchestration` (une orchestration d'agents/équipes). C'est un **ajout** additif, jamais un remplacement.
+</Field>
+
+<Field name="Deux droits TOUJOURS false" type="le mur, §8">
+  Dans l'`AgentSpec`, `peut_modifier_noyau` et `peut_modifier_fitness` sont **toujours** false — structurels, pas des réglages d'écran. Aucun agent, quel que soit son rôle, n'écrit le noyau ni la fitness. Une `CoucheAgent` qui prétend le contraire est **invalide**.
+</Field>
+
+<Field name="Proposer ≠ déclarer" type="KRD §13.8">
+  Un agent BDD-writer **propose** un scénario (status `proposed`) ; il reste **non-admis** tant qu'une **autorité humaine** (S16) ne l'a pas approuvé. L'agent **ne peut pas s'auto-approuver** : c'est la circularité que le mur interdit. La proposition route par **idea → mirror → /goal → approbation** (S27/S29/S16).
+</Field>
+
+## Le mur, concrètement
+
+Une tentative d'écriture d'un rôle agent **au-dessus de la ligne** (`kernel` / `mirrors` / `fitness`) est **refusée** par le `BlockReason` **`AGENT_WRITE_ABOVE_WATERLINE`** (S04) — pour **tous** les rôles, qu'il soit « bdd-writer », « executor » ou « orchestrator ». Le `how_to_fix` nomme la seule porte : *idea → mirror → /goal → approbation*. « Un agent n'est jamais une autorité. »
+
+## À ne pas confondre
+
+<Warning>
+Le `CoucheAgent` n'est **pas** un « rôle IAM », ni une « politique RBAC/ACL », ni une « sandbox de permissions », ni un « agent autonome/décisionnaire ». C'est une **couche de vérité gouvernée**, sans autorité propre.
+</Warning>
+
+## Sur l'écran /agents
+
+Le Workbench expose **/agents** : une carte par `CoucheAgent` (badge de type, rôle, objectif, modèle, le **panneau de droits** avec `peut_modifier_noyau` / `peut_modifier_fitness` verrouillés à false, les zones de lecture/écriture, les skills/MCP/hooks, l'AuthorityGraph et le TruthScope), puis un **AgentRun récent** dont l'action d'écriture au-dessus de la ligne est affichée **en rouge** avec son `AGENT_WRITE_ABOVE_WATERLINE`. Un bouton **« Proposer un scénario »** produit une proposition `proposed` (jamais `admitted`) ; une tentative d'**auto-approbation** est refusée à l'écran.

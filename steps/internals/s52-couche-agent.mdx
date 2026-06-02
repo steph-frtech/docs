@@ -1,0 +1,48 @@
+---
+title: "S52 · L'agent comme couche gouvernée — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail d'implémentation de S52 : le package Go pur back/kernel/agentlayer (CoucheAgent + AgentSpec + la taxonomie agent|equipe_agents|orchestration, Validate qui force peut_modifier_noyau/peut_modifier_fitness false et rejette toute zone d'écriture au-dessus de la ligne, MayWrite qui réutilise le prédicat de ligne de flottaison S04 et refuse tout target au-dessus de la ligne avec AGENT_WRITE_ABOVE_WATERLINE, Propose qui rend toujours proposed jamais admitted, Approve qui refuse l'auto-approbation), le package back/runtime/agentrun (AgentRun/AgentAction/AgentAssignment sans version ni miroir, Record content-addressed via S01/S02, ApplyWall qui estampille le verdict du mur), la migration expand-only/append-only (kernel.agent_layer SELECT-only au-dessus de la ligne + runtime.agent_run/action/assignment below the waterline), les miroirs fixture + rapid + roundtrip Testcontainers, le twin front lib/agentlayer + lib/agentrun + Vitest, le panneau /agents action-capable et l'e2e Playwright. La réutilisation de S02 (Canonicalize/Hash), S04 (le mur), S13 (BlockReason CodeAgentWriteAboveWaterline), S15 (TruthScope), S16 (AuthorityGraph). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "agentlayer", "agentrun", "CoucheAgent", "AgentSpec", "AgentRun", "AgentAction", "AgentAssignment", "LayerKind", "agent | equipe_agents | orchestration", "Validate", "MayWrite", "Propose", "Approve", "ApplyWall", "Record", "AGENT_WRITE_ABOVE_WATERLINE", "aboveWaterline", "Canonicalize", "Hash", "kernel.agent_layer", "runtime.agent_run", "SELECT-only", "expand-only", "append-only", "le mur", "rapid", "Vitest", "Testcontainers", "déterminisme", "back/kernel/agentlayer", "back/runtime/agentrun", "lib/agentlayer", "S02", "S04", "S13", "S15", "S16", "S27", "S29", "S30", "§21", "§13.8", "§44.5"]
+---
+
+<Note>Côté implémentation — le détail interne. Pour le concept et l'usage, voir [Pour les futurs utilisateurs → S52](/steps/concept/s52-couche-agent).</Note>
+
+## En une phrase
+
+S52 ajoute `back/kernel/agentlayer` (la **couche**, au-dessus de la ligne) et `back/runtime/agentrun` (l'**exécution**, sous la ligne) — deux packages Go **purs** qui modélisent un agent comme une vérité gouvernée : `Validate` force les deux droits toujours-false, `MayWrite` réutilise le prédicat de ligne de flottaison S04 et refuse toute écriture au-dessus de la ligne avec `AGENT_WRITE_ABOVE_WATERLINE`, `Propose` rend toujours `proposed` (jamais `admitted`), et un `AgentRun` ne porte ni version ni miroir (un run n'est pas une couche).
+
+## Implémentation
+
+<Steps>
+  <Step title="back/kernel/agentlayer — la CoucheAgent (au-dessus de la ligne)">
+    `CoucheAgent` embarque l'`AgentSpec` (rôle, objectif, modèle, provider, droits déclarés, zones lecture/écriture, stop-conditions), les bindings (`SkillBinding`, `MCPBinding`, `AgentHookPolicy`), les politiques (mémoire/contexte qui **défèrent à S30**, écriture, évolution), l'`authority.AuthorityGraph` (S16) et le `scope.TruthScope` (S15) — **réutilisés verbatim, jamais forkés**. La taxonomie `LayerKind` ∈ `{agent, equipe_agents, orchestration}` étend la métamodèle S02/S35 (un `SemanticDiff add`).
+  </Step>
+  <Step title="Validate, MayWrite, Propose, Approve — purs">
+    `Validate(CoucheAgent)` : `Kind` dans le triplet fermé ; `peut_modifier_noyau == false` ET `peut_modifier_fitness == false` **toujours** ; aucune `ZonesEcriture` ne résout au-dessus de la ligne (via `aboveWaterline`, le prédicat S04) ; `Autorite`/`Scope` bien formés (S16/S15). `MayWrite(spec, target)` refuse tout target au-dessus de la ligne avec le `BlockReason` S13 `AGENT_WRITE_ABOVE_WATERLINE`, **quel que soit le rôle**. `Propose(c, scenario)` rend toujours `status == "proposed"` + les approbateurs humains S16, et **n'écrit rien**. `Approve(c, p, approver)` refuse l'auto-approbation (rôle/nom de l'agent) et n'admet que sur un approbateur **humain** nommé dans le graphe.
+  </Step>
+  <Step title="back/runtime/agentrun — l'AgentRun (sous la ligne)">
+    `AgentRun` / `AgentAction` / `AgentAssignment` sont des **événements append-only** : `AgentRun` ne porte **ni `Version` ni `Mirror`** (le type rend un run irreprésentable comme couche). `Record(run)` estampille `id = Hash(Canonicalize(body))` (scheme S01/S02, **sans horloge** — les timestamps sont fournis). `ApplyWall(action, spec)` estampille le verdict du mur via `agentlayer.MayWrite`.
+  </Step>
+  <Step title="La migration — expand-only, append-only, le mur">
+    `agent_layer_baseline.sql` crée `kernel.agent_layer` (content-adressé, `body jsonb`, `CHECK` sur le `kind`) **au-dessus de la ligne — l'agent y est SELECT-only** ; et `runtime.agent_run/action/assignment` (sous la ligne, `CHECK` sur `result`/`statut`, **pas de colonne version ni mirror**) où l'agent a INSERT/SELECT (il enregistre ses propres runs) mais jamais UPDATE/DELETE. Aucune table, GRANT ou posture antérieure n'est altérée.
+  </Step>
+  <Step title="Les miroirs (red → green)">
+    `agentlayer_fixture_test.go` (la fixture de gouvernance, materialisée dans `tests/kernel/agent-layer-governance.fixture.md`) ; `agentlayer_property_test.go` + `agentrun_property_test.go` (rapid — déterminisme, MayWrite refuse ssi au-dessus de la ligne, Propose jamais admitted, AgentRun sans version/miroir, taxonomie fermée) ; `migration_roundtrip_test.go` (Testcontainers — les CHECK, le mur SELECT-only, l'append-only). Côté front, `lib/agentlayer.test.ts` (Vitest, le twin pur) et l'e2e `tests/e2e/agents.spec.ts`.
+  </Step>
+</Steps>
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Réutilisation, pas de fork.** Le mur S04 (`Classify`) est le prédicat de ligne de flottaison ; comme il vit dans `package main` (le binaire hook) et n'est pas importable, `agentlayer.aboveWaterline` **reproduit son prédicat verbatim** (mêmes schémas, mêmes préfixes) — c'est une OpenQuestion (OQ-S52-wall : extraire le prédicat S04 dans un package importable). Le `BlockReason` `CodeAgentWriteAboveWaterline` (S13) est **réutilisé**, aucun code inventé. `AuthorityGraph` (S16) et `TruthScope` (S15) sont importés tels quels.
+- **Déterminisme-first.** Tout est une fonction pure et autoritaire : `Validate`, `MayWrite`, `Propose`, `Approve`, `Record`, `ApplyWall`. Aucun chemin LLM ici — décider des droits d'un agent ou de l'admission d'une proposition est une **décision déterministe**, jamais déléguée à un agent. Un agent qui déciderait seul de ses droits, ou s'auto-approuverait, serait à la fois une **brèche du mur** et un **écart de déterminisme**.
+- **La couche vs l'exécution.** La séparation `agentlayer` (kernel, au-dessus) / `agentrun` (runtime, en dessous) est la frontière conceptuelle du step, reflétée dans le code (deux packages, deux schémas) et dans le type (`AgentRun` sans `Version`/`Mirror`).
+
+## Méta-méta — la garantie de niveau 3
+
+S52 ne touche **ni la fitness ni le mur lui-même** : il les **réutilise**. Le `kernel.agent_layer` est *lui-même* gouverné par le mur qu'il décrit — la ligne `agent_layer` est SELECT-only à l'agent, exactement comme toute vérité. La garantie inviolable est que **rien dans la modélisation d'un agent n'ouvre une porte au-dessus de la ligne** : les deux droits structurels sont false, `MayWrite` refuse tout target au-dessus de la ligne pour tout rôle, et `Approve` interdit l'auto-approbation. La méta-loop **ajoute** un garde-fou (la gouvernance de l'agent), elle n'en retire aucun.
+
+## Limites connues
+
+- **Pas de câblage /goal de l'admission.** Une proposition devient vérité seulement via le flux S29 `/goal` appliqué par le rôle `aidos` — un câblage ultérieur (ici, `Propose`/`Approve` sont des fonctions pures non encore reliées à la porte d'admission `/goal`).
+- **Pas de boucle d'orchestration runtime.** `equipe_agents` / `orchestration` sont modélisables (la taxonomie) mais la gouvernance multi-agents (qui orchestre qui) n'a pas de boucle d'exécution à ce step.
+- **OQ-S52-wall.** Le prédicat de ligne de flottaison S04 devrait être extrait dans un package importable pour que `MayWrite` l'importe au lieu de le reproduire.
+- **Pas de nouveau hook / MCP / Skill / codegen** — le mur S04 refuse déjà les écritures au-dessus de la ligne, la porte idea-intake S27 reçoit déjà les propositions, et une couche agent ne *génère* aucun artefact.

@@ -167,7 +167,9 @@
               "steps/concept/s50-temporal-invariant",
               "steps/internals/s50-temporal-invariant",
               "steps/concept/s51-harness-economics",
-              "steps/internals/s51-harness-economics"
+              "steps/internals/s51-harness-economics",
+              "steps/concept/s52-couche-agent",
+              "steps/internals/s52-couche-agent"
             ]
           }
         ]
