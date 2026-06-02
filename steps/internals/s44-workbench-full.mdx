@@ -1,0 +1,55 @@
+---
+title: "S44 · Workbench complet — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S44 : le builder pur back/runtime/reality/workbenchgraph (BuildGraph : Head → WorkbenchGraph {nodes, edges, legend, graph_hash}, déterministe, SELECT-seul, jamais de panic), le miroir TS lib/workbench-graph.ts, le cockpit / (page.tsx + _graph/GraphCockpit) et le cockpit /brain, la légende déclarée, le graph_hash réutilisant records.Hash (S02), le BlockReason (S13) sur référence pendante, le skill /handoff, l'e2e Playwright + snapshots stables."
+keywords: ["aidos", "krd", "workbench", "workbenchgraph", "BuildGraph", "WorkbenchGraph", "Node", "Edge", "LegendEntry", "graph_hash", "records.Hash", "records.Canonicalize", "S02", "BlockReason", "S13", "deep-link", "route", "truth_type", "liveness", "red_wave_state", "S14", "S06", "S22", "S17", "S19", "S35", "page.tsx", "GraphCockpit", "/brain", "lib/workbench-graph.ts", "déterminisme", "snapshot", "Playwright", "rapid", "Vitest", "/handoff", "le mur", "lecture seule", "OpenQuestion"]
+---
+
+<Note>Trois couches : **Implémentation** (le code livré au vert), **Méta** (pourquoi cette forme), **Méta-méta** (l'invariant que ça protège). Côté concept : [Pour moi → S44](/steps/concept/s44-workbench-full).</Note>
+
+## Implémentation
+
+### Le builder pur — `back/runtime/reality/workbenchgraph`
+
+Une fonction **pure et totale** (pas d'I/O, pas d'horloge, pas de RNG, jamais de panic) :
+
+<Field name="BuildGraph(h Head) → (WorkbenchGraph, *BlockReason)" type="workbenchgraph.go">
+  Projette une `Head { nodes[], edges[] }` (lue en `SELECT` seul par l'adaptateur appelant sur kernel/mirrors/context) en un `WorkbenchGraph { nodes[], edges[], legend[], graph_hash }`. Elle : ordonne les nœuds par (ordre de kind, id) et les arêtes par (from, relation, to) — ordre **stable** ; valide que chaque `node.route` est une route Workbench connue (`/web-preview`, `/control`, `/operation`, `/entity-map`, `/mirrors`, `/scopes`, `/red-wave`) ; résout chaque extrémité d'arête vers un nœud (une **extrémité pendante ⇒ un BlockReason S13**, jamais de panic, jamais de nœud inventé) ; dérive la **légende** depuis les couleurs **réellement utilisées** ; calcule `graph_hash = records.Hash(records.Canonicalize(nodes ⊕ edges ⊕ legend))` — le contenu-adressage **S02 réutilisé**, jamais forké.
+</Field>
+
+<Field name="Les huit kinds de nœud" type="le walk du cockpit">
+  `button → view → action → operation → entity → mirror → scope → incident`. `kindOrder` fixe l'ordre de navigation profonde et sert de tie-break déterministe. Chaque nœud porte `id, kind, route, truth_type (S14), liveness (S06), red_wave_state (S22)` — toutes ces dimensions **calculées en amont**, portées verbatim.
+</Field>
+
+<Field name="La légende : couleurs déclarées, ni orpheline ni manquante" type="colorOf + buildLegend">
+  `colorOf(dimension, value)` mappe (type de vérité / vivacité / vague de rouge) → un **token de design déclaré** (ADR 0010 : `primary`, `muted`, `chart-2`, `destructive`). `buildLegend` n'ajoute qu'une entrée par (dimension, valeur) **réellement utilisée** ; une valeur inconnue ⇒ un BlockReason (jamais de couleur inventée). La propriété rapid prouve : pas d'entrée orpheline, pas de couleur manquante.
+</Field>
+
+### Le miroir TS — `front/web/lib/workbench-graph.ts`
+
+`buildGraph(head)` est le **miroir front** du builder Go : même contrat (validation des routes, résolution des arêtes, légende = couleurs utilisées, ordre par contenu), même forme de `BlockReason`. Le `graph_hash` front est un FNV-1a déterministe (pas byte-identique au SHA-256 Go — algorithme différent — mais **même contrat** : même projection ⇒ même hash). Couvert par `lib/workbench-graph.test.ts` (Vitest).
+
+### Les routes — `/` et `/brain`
+
+`front/web/app/page.tsx` rend le **cockpit complet** : `GraphCockpit` (sous `app/_graph/`) affiche la légende, les nœuds (chaque carte un deep-link vers `n.route`) et les arêtes (verbatim). `front/web/app/brain/page.tsx` rend le cockpit **mémoire + graphe de contexte** : MemoryItems (épisodique/sémantique/procédural) et décisions de réutilisation (verdicts du pare-feu). Les deux sont **lecture seule**, thémés ADR 0010, bilingues ADR 0011.
+
+### La preuve — fixture + property + e2e
+
+- **Fixture** (`workbenchgraph_fixture_test.go`) : Head canonique → BuildGraph → graphe couvrant les huit kinds, le walk complet, légende exacte, `graph_hash` déterministe, arête pendante ⇒ BlockReason.
+- **Property** (`workbenchgraph_property_test.go`, rapid) : `BuildGraph(h) == BuildGraph(h)` ; pas d'arête pendante ; routes connues ; légende sans orphelin/manquant ; pendante ⇒ BlockReason, jamais de panic.
+- **e2e** (`tests/e2e/workbench-graph.spec.ts`, Playwright) : la navigation profonde + la légende + les **snapshots stables** du graphe et de `/brain`.
+
+## Méta — pourquoi cette forme
+
+<Field name="Builder pur sur valeurs, pas sur DB" type="déterminisme-first">
+  Comme tous les paquets `reality`, `workbenchgraph` est **pur sur des valeurs** : l'appelant lit la vérité (SELECT seul) et passe une `Head`. Cela rend la projection **testable sans DB**, **déterministe par construction**, et garde l'écriture hors du paquet (le mur). Le round-trip Postgres réel via Testcontainers est porté par l'adaptateur appelant (OpenQuestion : adaptateur de lecture non encore câblé — déféré, ne bloque pas l'étape).
+</Field>
+
+<Field name="Le cockpit LIE, il ne re-rend pas" type="anti-duplication">
+  `/` ne réimplémente aucun panneau : il **deep-link** vers les routes existantes. Cela évite la duplication (S17/S19/S22/S35 restent l'unique rendu de leur couche) et garde le cockpit mince.
+</Field>
+
+## Méta-méta — l'invariant protégé
+
+<Field name="Une projection n'invente jamais de vérité" type="le mur + l'honnêteté">
+  S44 **ne crée aucune vérité** : ni table, ni nœud, ni arête, ni couleur. Une adjacence non épinglée est une **OpenQuestion**, jamais une arête devinée ; une extrémité pendante est un **BlockReason S13**, jamais un nœud synthétisé. La couleur d'un nœud est **calculée** (S14/S06/S22), jamais fixée à la main. Le déterminisme (`graph_hash`, snapshots stables) rend la **dérive calculée**, pas traquée — un changement de hash signale immédiatement une vérité qui a bougé.
+</Field>

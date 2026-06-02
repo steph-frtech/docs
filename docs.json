@@ -151,7 +151,9 @@
               "steps/concept/s42-evolution-sandbox",
               "steps/internals/s42-evolution-sandbox",
               "steps/concept/s43-reality-mirror",
-              "steps/internals/s43-reality-mirror"
+              "steps/internals/s43-reality-mirror",
+              "steps/concept/s44-workbench-full",
+              "steps/internals/s44-workbench-full"
             ]
           }
         ]

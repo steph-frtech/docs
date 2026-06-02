@@ -1,0 +1,48 @@
+---
+title: "S44 · Workbench complet — un cockpit qui marche les arêtes du noyau"
+description: "S44 livre le graphe complet du Workbench : le cockpit racine / devient un graphe de vérité navigable où un clic marche les arêtes du noyau — bouton → vue → action → opération → entité → miroirs → périmètres → incidents — chaque nœud renvoyant (deep-link) vers son panneau par étape, sous une légende de couleurs déclarée (type de vérité / vivacité / vague de rouge), plus un cockpit /brain sur la mémoire et le graphe de contexte. Une projection PURE et EN LECTURE SEULE de la vérité Postgres : elle n'écrit rien. Le déterminisme est le contrat : même tête de noyau ⇒ graphe byte-identique et snapshots pixel-stables."
+keywords: ["aidos", "krd", "workbench", "cockpit", "graphe complet", "full graph", "deep-link", "navigation", "bouton", "vue", "action", "opération", "entité", "miroir", "périmètre", "incident", "légende", "color legend", "type de vérité", "truth_type", "vivacité", "liveness", "vague de rouge", "red_wave_state", "/brain", "mémoire", "graphe de contexte", "ContextGraph", "MemoryItem", "pgvector", "projection lecture seule", "read-only", "déterminisme", "graph_hash", "snapshot", "S17", "S19", "S22", "S14", "S06", "S35", "tout par écran", "le mur", "OpenQuestion", "/handoff"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S44](/steps/internals/s44-workbench-full).</Note>
+
+## En une phrase
+
+S44 livre le **graphe complet du Workbench** : le cockpit racine `/` devient un **graphe de vérité navigable** où un clic **marche les arêtes du noyau** — **bouton → vue → action → opération → entité → miroirs → périmètres → incidents** — chaque nœud faisant un **deep-link** vers son panneau par étape, sous une **légende de couleurs déclarée** (type de vérité / vivacité / vague de rouge), plus un **cockpit `/brain`** sur la mémoire et le graphe de contexte. C'est une **projection PURE et EN LECTURE SEULE** : elle **n'écrit rien**.
+
+## Le problème que ça résout
+
+Après 43 étapes, AIDOS a 40+ panneaux Workbench, chacun rendant **une** couche de vérité (opérations, contrôles, entités, miroirs, périmètres, incidents…). Mais le développeur ne voit pas **le tout** : comment un bouton est-il relié à l'opération qu'il déclenche ? à l'entité qu'elle touche ? au miroir qui la prouve ? au périmètre qui la gouverne ? à l'incident qui l'a réveillée ? Sans une **vue d'ensemble navigable**, la vérité reste éclatée en silos. S44 assemble ces arêtes — **qui existent déjà** (liens S17, propagation pondérée S19) — en un seul graphe où **un clic suit l'arête** jusqu'au panneau de la couche suivante. Le cockpit **ne réinvente aucune adjacence** : chaque arête est de la vérité antérieure, lue en `SELECT` seul.
+
+## Les idées-clés
+
+<Field name="Tout est une PROJECTION de la vérité antérieure" type="le cockpit n'écrit rien">
+  Chaque **nœud** est une vérité antérieure — contrôles/vues/actions (S11), opérations (S10), entités (S35), miroirs (S06), périmètres (S15), incidents (S22). Chaque **arête** est un lien (S17) / une propagation pondérée (S19) existant. Le cockpit **n'invente** ni nœud, ni arête, ni couleur, ni périmètre, ni incident. Une adjacence non épinglée devient une **OpenQuestion** en `provenance`, jamais une arête devinée.
+</Field>
+
+<Field name="Le clic fait un DEEP-LINK, il ne re-rend pas le panneau" type="le cockpit LIE, il ne réimplémente pas">
+  Cliquer un nœud renvoie vers son panneau par étape déjà construit — `/web-preview`, `/control`, `/operation`, `/entity-map`, `/mirrors`, `/scopes`, `/red-wave` — via la `route` portée par le nœud (issue de la vérité). Le cockpit **lie** ces panneaux ; il ne re-rend jamais leurs internes. *Tout par écran* (CLAUDE.md §7) : chaque couche reste accessible et exécutable depuis son propre panneau.
+</Field>
+
+<Field name="La couleur vient de la vérité, jamais d'une supposition" type="légende déclarée">
+  La couleur d'un nœud est son **type de vérité** (au-dessus / en-dessous de la ligne, S14), sa **vivacité** (miroir vivant / périmé, S06) et sa **vague de rouge** (vert / rouge, S22) — toutes **calculées en amont**, portées verbatim, jamais fixées à la main. La **légende énumère exactement** les couleurs utilisées : pas d'entrée orpheline, pas de couleur manquante.
+</Field>
+
+<Field name="Le déterminisme est le contrat" type="même tête ⇒ graphe byte-identique">
+  Même tête de noyau ⇒ **JSON de graphe byte-identique** et **snapshots pixel/DOM-stables** : ordre des nœuds/arêtes par identifiant de contenu, pas d'horloge, pas de RNG. Le `graph_hash = Hash(Canonicalize(nœuds ⊕ arêtes ⊕ légende))` **réutilise** le contenu-adressage S02 — la dérive d'un snapshot est **calculée**, jamais traquée à l'œil.
+</Field>
+
+<Field name="Le cockpit /brain rend les verdicts, il n'écrit jamais la mémoire" type="S30/S31 + S32/S33, lecture seule">
+  `/brain` projette la **mémoire** (MemoryItem épisodique/sémantique/procédural, pgvector, S30/S31) et le **graphe de contexte** (décisions de réutilisation autorisée/refusée, S32/S33). Il rend les **verdicts du pare-feu mémoire** ; il **n'écrit jamais** la mémoire (le mur).
+</Field>
+
+## Le geste /handoff
+
+S44 ajoute le geste rejouable **`/handoff`** : compacter l'état du cockpit (le `graph_hash` courant + le nœud ouvert + l'état de la vague de rouge + les OpenQuestions ouvertes) en un artefact de handoff **déterministe** sous `docs/` pour que l'agent suivant reprenne. Comme tout dans S44, il **lit** et **ne mute aucune vérité** — et il **n'invente jamais** un nœud, une arête, une couleur ou une règle métier.
+
+## Ce que S44 ne fait PAS
+
+- **Aucune vérité nouvelle** : ni table, ni nœud, ni arête, ni périmètre, ni incident authorisé — tout est antérieur, lu en lecture seule.
+- **Aucun re-rendu** des panneaux antérieurs — le cockpit les **lie**.
+- **Aucune écriture mémoire** — `/brain` rend les verdicts.
+- **Aucune redéfinition** de la cascade de la vague de rouge (S22, lue, pas redéfinie).

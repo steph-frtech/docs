@@ -70,6 +70,20 @@ Le reste de la surface de gouvernance est **spécifié** (dans la méthode KRD) 
   </Accordion>
 </AccordionGroup>
 
+## Le graphe complet — la page d'accueil `/`
+
+La racine du Workbench est un **graphe de vérité navigable**. En un coup d'œil, vous voyez comment tout se relie : un **bouton** déclenche une **action**, qui invoque une **opération**, qui lit/écrit une **entité**, prouvée par un **miroir**, gouvernée par un **périmètre**, et parfois réveillée par un **incident**. Cliquez n'importe quel nœud : vous êtes **renvoyé** vers son panneau dédié (`/operation`, `/entity-map`, `/mirrors`, `/scopes`, `/red-wave`…). Le graphe ne réinvente rien — chaque lien est de la vérité déjà gouvernée.
+
+Une **légende de couleurs** vous dit, sans deviner, ce que chaque couleur signifie : **type de vérité** (au-dessus / en-dessous de la ligne), **vivacité** (miroir vivant ou périmé), **vague de rouge** (vert / rouge). La couleur d'un nœud est **calculée** depuis la vérité, jamais peinte à la main.
+
+<Tip>
+  Le graphe est **déterministe** : même état du noyau ⇒ même graphe, à l'identique. Une empreinte (`graph_hash`) en bas de page vous le confirme — si elle change, c'est qu'une vérité a bougé.
+</Tip>
+
+## Le cockpit `/brain`
+
+Le panneau `/brain` projette le **cerveau** d'AIDOS en lecture seule : les **éléments de mémoire** (épisodiques, sémantiques, procéduraux) avec leur provenance, et les **décisions de réutilisation** du graphe de contexte — autorisée si l'élément est dans le périmètre de votre objectif, refusée sinon. Le cockpit **rend les verdicts** du pare-feu mémoire ; il n'écrit jamais la mémoire.
+
 ## Comment vous gouvernez
 
 Le Workbench tourne autour de trois gestes. Aujourd'hui, vous pouvez déjà **lire** la vérité (panneaux `/contract` et `/store`) ; les gestes d'**approbation** et de **lecture d'impact** arrivent avec les panneaux ci-dessus.
