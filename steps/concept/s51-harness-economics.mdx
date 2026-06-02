@@ -1,0 +1,43 @@
+---
+title: "S51 · Économie du harnais — une contrainte coûteuse doit justifier sa valeur"
+description: "S51 livre l'économie du harnais (KRD §66.3) : chaque cellule DÉCLARE un HarnessCostBudget (max_ci_minutes, max_llm_tokens_per_goal, max_mutation_runtime, max_human_review_minutes, expected_risk_reduction) — le coût maximal que son harnais peut peser. Une vérité dont le coût de harnais MESURÉ dépasse ce budget sans ValueCase « justified » est signalée par un BlockReason advisory HARNESS_COST_EXCEEDS_BUDGET. La même vérité hors budget portant une ValueCase justified a gagné sa place (over_budget_justified). Le budget est DÉCLARÉ au-dessus de la ligne (zone fitness, lecture seule) ; l'agent ne le règle jamais. « Plus une contrainte coûte cher à maintenir, plus elle doit justifier sa valeur. » Lecture seule, derrière le mur."
+keywords: ["aidos", "krd", "économie du harnais", "harness economics", "HarnessCostBudget", "ValueCase", "budget", "coût du harnais", "max_ci_minutes", "max_llm_tokens_per_goal", "max_mutation_runtime", "max_human_review_minutes", "expected_risk_reduction", "risk_if_broken", "expected_impact", "decision", "justified", "too_expensive", "revisit", "within_budget", "over_budget_justified", "over_budget_flagged", "HARNESS_COST_EXCEEDS_BUDGET", "BlockReason", "advisory", "déclaré", "fitness", "§66.3", "§44.5", "le mur", "déterminisme", "lecture seule", "S39", "S40", "S41"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S51](/steps/internals/s51-harness-economics).</Note>
+
+## En une phrase
+
+S51 livre l'**économie du harnais** (KRD §66.3) : chaque cellule **déclare un `HarnessCostBudget`** — le coût maximal que son harnais (CI, tokens LLM, run de mutation, revue humaine) peut peser — et une vérité dont le coût **mesuré** dépasse ce budget **sans `ValueCase` « justified »** est **signalée**. La règle du jour : **« plus une contrainte coûte cher à maintenir, plus elle doit justifier sa valeur. »**
+
+## Le problème que ça résout
+
+KRD est exigeant : chaque vérité porte un miroir, chaque miroir tourne en CI, la mutation traque les survivants, l'humain relit. Tout cela **coûte** — en minutes de CI, en tokens LLM par `/goal`, en temps de run de mutation, en minutes de revue. Laissé sans garde-fou, **KRD peut devenir trop lourd** (KRD §66.3) : on entretient des contraintes coûteuses qui ne rapportent presque rien. L'économie du harnais répond en nommant le **prix** du harnais et en le confrontant à la **valeur** : une cellule **déclare son budget**, et une vérité qui dépasse ce budget doit **justifier sa valeur** (par une `ValueCase`) ou elle est signalée. Ce n'est pas un mur qui bloque — c'est un **diagnostic advisory** qui rend le coût visible et force l'arbitrage.
+
+## Les idées-clés
+
+<Field name="Le HarnessCostBudget est DÉCLARÉ, jamais appris" type="KRD §66.3 + §8">
+  Chaque cellule déclare son budget : `max_ci_minutes`, `max_llm_tokens_per_goal`, `max_mutation_runtime`, `max_human_review_minutes`, et la `expected_risk_reduction` qu'il est censé acheter. Ce budget vit **au-dessus de la ligne**, dans la zone `fitness` en **lecture seule** : c'est la **barre** contre laquelle la cellule est mesurée. L'agent la **lit** (SELECT-only) et ne la **règle jamais** — « les poids et seuils sont déclarés, jamais appris » (§8 anti-Goodhart). Relever un cap est un `/goal`, jamais une édition.
+</Field>
+
+<Field name="La ValueCase justifie une vérité coûteuse" type="KRD §66.3">
+  Pour une vérité **coûteuse**, une `ValueCase` relie son coût à sa valeur : `truth` (la vérité visée), `risk_if_broken` (`low | medium | high | critical`), `expected_impact` (texte libre humain), `harness_cost` (le coût attribué) et une `decision` ∈ `justified | too_expensive | revisit`. **Seule `justified` lève le signalement** : la vérité a *gagné sa place*. `too_expensive` ou `revisit` ne lèvent rien.
+</Field>
+
+<Field name="Le verdict : within / justified / flagged" type="EconomicsDecision">
+  L'évaluateur compare le coût **mesuré** au budget **déclaré**, axe par axe. Dans tous les caps ⇒ **`within_budget`**. Au-dessus d'**un seul** cap avec une `ValueCase{justified}` ⇒ **`over_budget_justified`** (gardée). Au-dessus d'un cap **sans** `ValueCase` justified ⇒ **`over_budget_flagged`**, avec un `BlockReason` actionnable **`HARNESS_COST_EXCEEDS_BUDGET`** dont le `how_to_fix` propose : ouvrir une ValueCase, réduire le coût, ou relever le budget via un `/goal`.
+</Field>
+
+<Field name="Le coût est CONSOMMÉ, jamais produit" type="réutilisation S40/télémétrie">
+  S51 ne construit **aucun compteur de coût**. Les `ci_minutes` et `human_review_minutes` viennent de la télémétrie / des changesets, le `mutation_runtime` du run de mutation **S40**, les `llm_tokens` de la dépense enregistrée du `/goal`. L'économie du harnais **lit** ce coût et le compare à la barre déclarée — c'est tout.
+</Field>
+
+## Comment vous l'utilisez
+
+Sur le panneau **`/harness-economics`** du Workbench, vous voyez la **carte du budget** : les cinq caps déclarés (`max_ci_minutes: 10`, `max_llm_tokens_per_goal: 50000`, `max_mutation_runtime: 5m`, `max_human_review_minutes: 30`, `expected_risk_reduction: high`) **affichés à côté du coût mesuré** — en rouge quand un axe dépasse. La **table économique** calcule, pour chaque cas, le verdict : un coût dans le budget en **`within_budget`** ; un coût hors budget **sans** ValueCase en **`over_budget_flagged`** rouge (avec `HARNESS_COST_EXCEEDS_BUDGET` et son `how_to_fix` qui nomme `open_value_case`) ; le **même** coût hors budget avec une `ValueCase{justified}` en **`over_budget_justified`** (gardée). Une **carte ValueCase** montre la vérité coûteuse justifiée (`checkout.payment.idempotent`, `risk_if_broken: high`, `decision: justified`).
+
+Déclarer ou **relever** un budget est une **écriture de vérité** au-dessus de la ligne : elle passe par **propose → ChangeSet → approbation**, jamais une écriture directe depuis l'écran (le **mur**). Il n'y a **aucun** bouton « modifier le budget » ni « supprimer » — le diagnostic est advisory, toute action passe par `idea → mirror → /goal`. Un contrôle **« ré-évaluer »** en lecture seule rejoue l'évaluateur pur sous la ligne.
+
+## Ce que ça vous garantit
+
+Le coût de votre harnais est **visible et budgété** : une contrainte qui devient trop chère pour ce qu'elle rapporte ne se cache plus — elle est **signalée**, et l'arbitrage (la garder en la justifiant, la réduire, ou relever sciemment le budget) devient une **décision explicite**, jamais un dérive silencieuse. Le budget reste **votre barre déclarée** ; l'agent mesure contre elle, il ne la déplace jamais.
