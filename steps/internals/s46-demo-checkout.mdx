@@ -1,0 +1,59 @@
+---
+title: "S46 · Démo checkout — internals (la tranche end-to-end)"
+description: "Le détail d'implémentation de S46 : la tranche de démonstration checkout, une composition mince qui appelle les dents S27/S29/S20/S34-38/S10/S23 dans l'ordre pour porter « un client passe une commande depuis son panier » de l'idée au bouton, du rouge au vert. Trois couches : l'implémentation (le driver Go + le jumeau TS + le panneau /demo-checkout), la méta (les miroirs Godog/fixture/property/playwright-bdd qui la prouvent), la méta-méta (sa place dans le cliquet KRD, le mur, la complétude, l'honnêteté)."
+keywords: ["aidos", "krd", "demo checkout", "checkout slice", "RunSlice", "Trace", "createOrder", "Order", "panier", "cart", "Testcontainers", "Godog", "playwright-bdd", "fixture", "rapid", "fast-check", "ChangeSet", "phases.IsStable", "OpenGoal", "red wave", "le mur", "complétude", "déterminisme", "OpenQuestion", "tout par écran", "composition acceptance"]
+---
+
+<Note>Côté « Pour moi » — le détail complet. Pour le concept sans code, voir [Pour les futurs utilisateurs → S46](/steps/concept/s46-demo-checkout).</Note>
+
+## Implémentation
+
+La tranche est une **composition mince** : un driver Go qui **appelle** les dents existantes dans l'ordre, plus le jumeau TS et le panneau Workbench. Elle n'implémente aucune dent.
+
+**Le driver Go — `back/runtime/checkout/`**
+
+- `slice.go` — les types (`Cart`, `LineItem`, `PlacedOrder`, `OrderStore`, `Input`, `KernelASTs`, `Trace`, l'enum `Event`), `SeedIdea()` (la vérité-candidate verbatim) et `kernelASTs()` qui reconstruit les quatre adresses de contenu (S02) des **anchors réutilisés** : `entities.Order()` (S35), `operation.CreateOrder()` (S10), `control.CheckoutButton()` + `action.CheckoutSubmit()` (S11) — lecture seule sur la vérité (le mur).
+- `run.go` — `RunSlice(in)` walk la boucle en 7 étapes et émet la liste ordonnée `[IdeaIntaken, GoalOpened, ChangeSetApplied, MirrorLive, ArtifactsEmitted, OrderPlaced, PhaseSealed]` : intake → `goal.OpenGoal` (le set rouge) → `changeset.Apply` avec `SpecHasMirror` (la porte de complétude) → mirror live → `generators.Project` (les projections) → `Store.CreateOrder` (l'opération via le seam) → `sealPhase`.
+- `loop.go` — les helpers déterministes : `unixNanos` (le stamp est un argument, jamais l'horloge), `checkoutEdge` (l'arête S22 stale qui donne le set rouge non vide), `sealPhase` (via `phases.IsStable`, S23).
+- `example.go` — le panier travaillé (2 lignes : widget ×2, gadget ×1), le `MemoryOrderStore` (N en entrée ⇒ N en sortie, panier vide ⇒ `BlockReason`), `ExampleInput()`.
+
+**Le jumeau TS + le panneau — `front/web/`**
+
+- `lib/demo-checkout.ts` — le jumeau déterministe : `runSlice(cart)`, `SLICE_EVENTS`, `LOOP_STAGES`, `KERNEL_ASTS`, `exampleCart()`. Pure (pas d'horloge, pas de rng).
+- `app/demo-checkout/{page.tsx,DemoCheckoutPanel.tsx}` — le panneau `/demo-checkout` : la pipeline de la boucle, l'Idée + les AST, le **panier vivant + bouton checkout** (action-capable — le clic place la commande), le badge stable/vert. Thème ADR 0010, bilingue next-intl FR par défaut (ADR 0011), tutoriel + exemple traité.
+
+**Fichiers example-local — `examples/checkout/`** : `CONTEXT.md` (la langue de la tranche), `idea.md` (la vérité-candidate semée), `expected-stages.md` (les oracles), `order_line_items.sql` (le schéma example-local que `createOrder` persiste en Postgres réel — id + lignes, **sans total** : le prix est hors périmètre).
+
+## Méta
+
+Les miroirs qui **prouvent** la tranche — conceptuellement dans le schéma `mirrors`, matérialisés pour le runner :
+
+- **Godog (N0, acceptance)** — `tests/runtime/demo-checkout.feature` + `back/runtime/checkout/slice_bdd_test.go`. Le **driver de la boucle** : 4 scénarios (idée→goal→set rouge ; ChangeSet approuvé→mirror live ; émission→`createOrder` persiste en **Postgres réel via Testcontainers** ; phase scellée). `reflects=examples.checkout.full-loop · test_kind=gherkin · cert_language=godog · authority=above · liveness=live`.
+- **Fixture (N2)** — `slice_fixture_test.go` : l'ordre exact des 7 événements, l'idempotence de contenu (mêmes hashes, même phase scellée), le ChangeSet APPLIED via la porte, les lignes de la commande = le panier, le panier vide ⇒ `BlockReason`.
+- **Property (∀, rapid, sous la ligne)** — `slice_property_test.go` : idempotence de contenu, N lignes ⇒ N persistées (verbatim), panier vide ⇒ block (jamais de panic, jamais de commande inventée), l'écriture du noyau est **toujours** le ChangeSet complétude-gated.
+- **playwright-bdd (N0, front)** — `tests/e2e/demo-checkout.spec.ts` : le **driver du bouton** : la pipeline rend chaque étape, le panier montre 2 lignes, le bouton est visible/enabled (EvalState), le clic déclenche `createOrder` et la commande placée montre ses 2 lignes.
+- **fast-check (∀, front)** — `lib/demo-checkout.test.ts` : les mêmes invariants que la property Go, sur le jumeau TS.
+
+Résultats : Godog 4/4 (Testcontainers), fixture 8/8, rapid 4/4, Vitest 5/5, Playwright 3/3.
+
+## Méta-méta
+
+<Field name="Place dans le cliquet KRD" type="LIVRE V">
+  S46 est la **verticale complète** : *de l'intention au bouton et son action*. Elle ne **fait** pas avancer le cliquet par une vérité nouvelle — elle **prouve** que le cliquet déjà bâti porte un comportement de bout en bout. C'est la dernière dent avant le polish final (S47).
+</Field>
+
+<Field name="Le mur tient" type="§2">
+  La tranche n'écrit **aucune** vérité elle-même : l'écriture du noyau est **proposée** comme ChangeSet DRAFT et admise **seulement** par `changeset.Apply` à travers la porte de complétude. `OpenGoal` laisse le ChangeSet **DRAFT** — au goal-open, rien n'est gravé. La persistance de la commande est un **seam injecté**, sous la ligne d'eau.
+</Field>
+
+<Field name="La complétude : pas de monstre" type="§29/§33">
+  Le ChangeSet n'atteint APPLIED que si le `spec_delta` porte son `mirror_delta` — donc le miroir reflétant `createOrder` est vivant. La fixture et la property le pinnent.
+</Field>
+
+<Field name="Le déterminisme tient" type="§6/§8">
+  `RunSlice` est pure pour son seam : pas d'horloge (le stamp est un argument), pas de rng, pas de fuite d'ordre de map. Re-jouer depuis une phase propre donne les **mêmes** AST adressés par contenu, la **même** phase scellée, la **même** liste d'événements. Les deux properties (rapid + fast-check) le prouvent.
+</Field>
+
+<Field name="OpenQuestions" type="honnêteté">
+  Le prix / la taxe / la remise / l'inventaire / le paiement sont **hors périmètre** — l'entité `Order` porte un attribut `total` (vérité S35 antérieure) que la tranche **n'affirme jamais** ; il est laissé au seam de mutation, jamais deviné. Un éventuel `demo_checkout_run` callable (un MCP/CLI rejouant la tranche) reste une OpenQuestion, non construit ici (§5 hook/MCP-honnêteté). Le tracker Linear n'a pas pu être mis à jour automatiquement (OAuth interactif requis) — à reprendre à la main.
+</Field>

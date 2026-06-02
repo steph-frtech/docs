@@ -1,0 +1,41 @@
+---
+title: "S46 · Démo checkout — de l'intention au bouton, de bout en bout"
+description: "S46 livre la tranche de démonstration canonique d'AIDOS : une seule intention — « un client passe une commande depuis son panier » — traverse TOUTE la boucle KRD, Idée → Goal → Noyau → Miroir → Src → Stable, du rouge au vert, jusqu'à un bouton cliquable et vert. Ce n'est pas une capacité nouvelle : c'est une acceptation de composition, la preuve que l'OS bâti par les 45 dents précédentes porte réellement un comportement de l'idée jusqu'au bouton. Aucune vérité nouvelle, aucun DSL, aucun émetteur, aucun MCP, aucun hook — la tranche compose, elle ne réinvente rien."
+keywords: ["aidos", "krd", "démo", "demo", "checkout", "verticale", "verticale complète", "de l'intention au bouton", "tranche", "slice", "acceptation de composition", "composition acceptance", "Idée", "Goal", "noyau", "kernel", "miroir", "mirror", "Src", "projection", "phase stable", "createOrder", "Order", "panier", "cart", "ligne de commande", "line item", "ChangeSet approuvé", "le mur", "rouge vert", "tout par écran", "OpenQuestion", "honnêteté", "déterminisme"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S46](/steps/internals/s46-demo-checkout).</Note>
+
+## En une phrase
+
+S46 conduit **une seule intention** — **« un client passe une commande depuis son panier »** — à travers **toute la boucle KRD** : **Idée → Goal → Noyau → Miroir → Src → Stable**, du rouge au vert, jusqu'à un **bouton cliquable et vert**. Ce n'est pas une capacité nouvelle : c'est une **acceptation de composition** — la preuve que l'OS bâti par les 45 dents précédentes porte réellement un comportement *de l'idée jusqu'au bouton et son action*.
+
+## Le problème que ça résout
+
+Les 45 étapes précédentes ont posé chaque dent isolément : l'intake d'une idée, le goal et son set rouge, le ChangeSet et le SemanticDiff, les DSL opération/control/action, l'entité-source, les émetteurs Go/DDL/Next, le schéma des miroirs, la complétude, la phase stable. Mais une boucle **dont chaque maillon est prouvé séparément** n'est pas encore une **boucle prouvée de bout en bout**. S46 ferme cette boucle : il prend **une** intention et la fait **réellement** voyager d'un bout à l'autre — et le passage **rouge → vert sur toute la chaîne** est le critère de fait.
+
+## Les idées-clés
+
+<Field name="Une acceptation de composition, pas une capacité" type="KRD LIVRE V">
+  La tranche **n'invente rien** : elle **compose** les dents existantes. `createOrder`, l'entité `Order` et le bouton checkout sont **produits en rejouant la boucle** (S27 → S29 → S20 → S34/36/37/38 → S10 → S23), **jamais écrits à la main**. Aucune table de vérité nouvelle, aucun DSL, aucun émetteur, aucun MCP, aucun hook.
+</Field>
+
+<Field name="Le rouge EST le goal" type="S29">
+  L'Idée est intaken (S27) comme **vérité-candidate** (pas de gel, pas d'écriture du noyau). Puis un `/goal` **écrit le set rouge** pour `createOrder` — le rouge est le goal. À cet instant, **aucune vérité du noyau n'est écrite** : l'agent n'a **aucun GRANT** (§2).
+</Field>
+
+<Field name="La seule porte du noyau : le ChangeSet approuvé" type="le mur, §2">
+  L'entité `Order` + l'opération/control/action `createOrder` n'entrent dans le noyau **que** par un **ChangeSet approuvé** (S20), admis **uniquement** par la **porte de complétude** (le `spec_delta` porte son `mirror_delta` — pas de monstre). Toute autre voie est refusée par le mur (S04).
+</Field>
+
+<Field name="Le bouton est une projection" type="S38">
+  Le panier et le bouton checkout ne sont pas du code à la main : ce sont la **projection émise** de la control-spec et de l'action qui la lie. `EvalState(control, given)` décide visible/enabled ; le clic **déclenche** l'opération liée (`Plan(action, click)`). *Tout par écran*.
+</Field>
+
+<Field name="L'honnêteté : on n'invente rien" type="§8">
+  La tranche couvre **exactement** « créer une commande à partir d'un panier ». Le **prix, la taxe, la remise, l'inventaire, le paiement** ne sont **pas** dans l'Idée — donc **jamais inventés**. La commande placée porte ses lignes (N en entrée ⇒ N en sortie), **aucun total fabriqué**. Toute tentation au-delà devient une **OpenQuestion**, jamais une valeur par défaut devinée.
+</Field>
+
+## Ce que ça vous donne
+
+Ouvrez `/demo-checkout` dans le Workbench : vous voyez la **boucle entière** pour cette tranche — l'Idée semée, les AST du noyau, chaque étape reliée à la dent qu'elle compose — et un **panier vivant** avec son bouton checkout. Cliquez : `createOrder` est déclenché et la **commande placée** s'affiche avec ses 2 lignes, coiffée d'un badge **phase stable · tout vert**. C'est la verticale, rendue cliquable.
