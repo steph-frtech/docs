@@ -159,7 +159,9 @@
               "steps/concept/s46-demo-checkout",
               "steps/internals/s46-demo-checkout",
               "steps/concept/s47-adoption-release",
-              "steps/internals/s47-adoption-release"
+              "steps/internals/s47-adoption-release",
+              "steps/concept/s48-global-invariant",
+              "steps/internals/s48-global-invariant"
             ]
           }
         ]

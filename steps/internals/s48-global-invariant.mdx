@@ -1,0 +1,43 @@
+---
+title: "S48 · GlobalInvariant — internes (3 couches)"
+description: "Le détail d'implémentation de S48 : le package Go pur back/kernel/globalinvariant (l'AST GlobalInvariant + Validate + RedWave + Admit), la migration kernel.global_invariant (content-addressed, append-only, trois CHECK enums §49.1, agent SELECT-only), les miroirs fixture + rapid, le twin front + fast-check, le panneau /global-invariants action-capable et l'e2e Playwright. La réutilisation de S02 (substrat content-hash), S16 (Decide), S19 (propagation pondérée), S22 (vague de rouge). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "S48", "GlobalInvariant", "Validate", "RedWave", "Admit", "AdmissionDecision", "BlockReason", "INSUFFICIENT_APPROVAL_FOR_BLAST_RADIUS", "kernel.global_invariant", "content-addressed", "Hash", "Canonicalize", "CHECK", "enum", "scope", "blast_radius", "approval_required", "rapid", "fixture", "fast-check", "Playwright", "le mur", "déterminisme", "S02", "S16", "S19", "S22", "S15", "Decide", "FireParent", "propagation", "§49", "§49.1", "§44.5", "§44.1"]
+---
+
+<Note>Côté internes — l'implémentation complète. Pour la vue concept, voir [Pour moi → S48 (concept)](/steps/concept/s48-global-invariant).</Note>
+
+## Couche 1 — Implémentation
+
+### Le package pur `back/kernel/globalinvariant`
+
+`globalinvariant.go` porte l'**AST** `GlobalInvariant` (`name`, `scope`, `cells []CellRef`, `predicate`, `blast_radius`, `approval_required`) et trois fonctions **pures, totales, déterministes** — pas de DB, pas d'horloge, pas de RNG, pas d'I/O :
+
+- **`Validate(gi) error`** — forme : `name`/`predicate` non vides ; `scope`/`blast_radius`/`approval_required` chacun dans l'enum gelé §49.1 ; chaque `CellRef` non vide ; un invariant `contract_pair`/`federation_policy` couvre **≥ 2 cellules distinctes** (un nom de cellule unique sur une portée transverse est rejeté — `ErrNotCrossCell`) ; et l'`approval_required` est **cohérent** avec le `blast_radius` (`global ⇒ architecture_owner`, `bounded ⇒ ≥ both_contract_owners`).
+
+- **`RedWave(gi, violatedCell) → []CellRef`** — la fan-out transverse. Pour `local_cell` : exactement sa cellule. Pour `contract_pair`/`federation_policy` : la fonction **réutilise le moteur de propagation pondérée de S19** (`propagation.FireParent`) — chaque cellule partenaire est modélisée comme un composite dont l'invariant émergent se ré-ouvre quand le violateur (un enfant **load-bearing**, activation 1) change contre un seuil de 1 ; chaque partenaire **fire RED**. Le violateur est toujours rouge. Le résultat est **trié** (déterministe). C'est la vague de rouge §49, jamais une « LLM impact agent ».
+
+- **`Admit(gi, grantedApproval) → AdmissionDecision`** — la grille d'admission. Elle compare l'approbation accordée au palier minimum que le `blast_radius` exige (`minAuthorityForRadius`), en **réutilisant `authority.Decide` de S16** pour la résolution du palier (jamais un fork de la logique approver/veto/escalation). `granted ≥ required ⇒ admitted` ; exactement un palier en dessous ⇒ `escalated` (vers l'architecture_owner) ; ≥ 2 paliers en dessous (ou hors-enum) ⇒ `blocked` avec un `BlockReason` `INSUFFICIENT_APPROVAL_FOR_BLAST_RADIUS` (§44.5) dont le `how_to_fix` contient `escalate_to_architecture_owner`.
+
+`SerializeBody(gi)` rend un corps `kernel.truth` minimal portant l'invariant, qui round-trip via `records.NewRecord` en `id == version == Hash(Canonicalize(corps))` — le **substrat content-hash de S02 réutilisé**, jamais forké. Changer scope/cells ⇒ une nouvelle version (`rescope`) ; le blast_radius ⇒ `reweight` ; l'approval_required ⇒ `reauthorize` (KRD §44.1) — jamais une édition en place.
+
+### La persistance — `kernel.global_invariant`
+
+`back/migrations/kernel_global_invariant_baseline.sql` : table **content-addressed, append-only** (`id` PK = hash, `body jsonb`, `version`, `superseded_by`, `created_at`), **expand-only** (elle n'altère ni ne supprime aucune table antérieure — S02 et S16 intacts). Les trois enums §49.1 sont épinglés **dans** le corps JSONB **et** comme **CHECK** sur le chemin JSONB (`body->'global_invariant'->>'scope' IN (...)`, etc.) — une valeur hors-enum ne peut pas être persistée (défense en profondeur à côté de `Validate`). **Le mur** : l'agent obtient `SELECT` seulement ; tous les writes sont REVOKE. Seul le rôle écriture `aidos` écrit la vérité, via un ChangeSet approuvé.
+
+### Les miroirs (le rouge devenu vert)
+
+- **Fixture N2** (`globalinvariant_fixture_test.go`) : l'invariant `pii-forgettable-federation` valide ; `RedWave(billing)` rougit `[checkout, profile, billing]` (et **n'est pas** limité à billing) ; un `contract_pair [order, payment]` rougit sa paire ; `Admit(cell_owner)` ⇒ `blocked`/`INSUFFICIENT_APPROVAL_FOR_BLAST_RADIUS` (how_to_fix `escalate_to_architecture_owner`) ; `Admit(architecture_owner)` ⇒ `admitted` ; un `federation_policy` à cellule unique ⇒ `Validate` erreur. **7/7 vert.**
+- **Property rapid** (`globalinvariant_property_test.go`) : `RedWave` total/déterministe + **jamais de sous-propagation** (toute cellule couverte est dans la vague) ; `local_cell` ⇒ exactement une cellule ; `Admit` total/déterministe + **monotone en rayon** (`global` jamais admis sans `architecture_owner`) ; hors-enum ⇒ `Validate` erreur ; `< 2` cellules distinctes ⇒ `Validate` erreur. **Vert.**
+- **Roundtrip Testcontainers** (`migration_roundtrip_test.go`) : sur du vrai Postgres, l'invariant round-trip dans le `body jsonb` ; le CHECK rejette un scope hors-enum ; l'agent a SELECT-only (INSERT refusé). **3/3 vert.**
+
+### Le front (le twin déterministe) + l'écran action-capable
+
+`front/web/lib/global-invariant.ts` est la **projection déclarée** du package Go — même forme §49.1, même deux lois, mêmes décisions. `lib/global-invariant.test.ts` (fast-check) est le **miroir de reproductibilité** : il épingle la fan-out, la monotonie en rayon, la totalité et le déterminisme. **8/8 vert.** L'écran `/global-invariants` (`app/global-invariants/page.tsx` + `components/GlobalInvariantPanel.tsx`) rend la carte de l'invariant, le panneau **vague de rouge** (les trois cellules rougies, pas seulement le violateur) et la **table d'admission** (la ligne `cell_owner` en rouge / `INSUFFICIENT_APPROVAL_FOR_BLAST_RADIUS`, la ligne `architecture_owner` admise). Il est **action-capable** : un bouton « Proposer un ChangeSet » ouvre un stub propose → ChangeSet (le mur — jamais une écriture directe). Thémé (ADR 0010), bilingue (ADR 0011). L'e2e Playwright `tests/e2e/global-invariants.spec.ts` prouve chaque contrôle. **4/4 vert.**
+
+## Couche 2 — Méta
+
+S48 illustre la **distinction de natures de vérité** : `TruthScope` (S15) et `GlobalInvariant` (S48) se ressemblent (les deux parlent de « portée ») mais sont **deux primitives séparées** — l'une borne une vérité, l'autre lie des cellules. Les conflondre serait un **monstre conceptuel**. Le pattern de **réutilisation sans fork** est central : `RedWave` ne réinvente pas la vague de rouge (elle appelle `propagation.FireParent` de S19), `Admit` ne réinvente pas la résolution d'autorité (elle appelle `authority.Decide` de S16), l'`id` ne réinvente pas le hash (il appelle `records.Hash`/`Canonicalize` de S02). Chaque dent **importe le contrat publié** de la précédente — jamais une copie. La **précédence `blast_radius → minimum approval`** est une règle **déclarée au-dessus de la ligne** (jamais apprise) : c'est exactement « les poids sont déclarés, jamais appris » (§8), généralisée au couple rayon/autorité.
+
+## Couche 3 — Méta-méta
+
+S48 est entièrement **déterministe-first** : `Validate` (check schéma/enum/cardinalité), `RedWave` (traversée de graphe — une vague est un algorithme, jamais un agent), `Admit` (comparaison d'ordre total de paliers déclarés) sont des **fonctions pures** — il **n'y a aucune exception LLM** dans cette dent. Un agent faisant l'un des trois serait une **faille de déterminisme** qui bloque la dent (comme une capacité headless ou un monstre). Chaque op porte son **miroir de reproductibilité** (la property rapid : même `(invariant, cell)` ⇒ même vague ; même `(invariant, granted)` ⇒ même décision ; et son twin fast-check côté front). Le **mur tient** : la migration GRANT l'agent SELECT-only, les CHECK rejettent l'hors-enum au niveau base, l'écran propose mais n'écrit pas. Et l'**honnêteté du périmètre** est inscrite dans le code et la doc : S48 **ne prétend pas** la stabilité de fédération (différée S23/S47), ne tisse pas de `SagaInvariant` (§49.2), ne branche pas encore `Admit` dans `/goal` — ce sont des OpenQuestions assumées, jamais des prétentions silencieuses.
