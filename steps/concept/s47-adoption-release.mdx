@@ -1,0 +1,45 @@
+---
+title: "S47 · Adoption + Release v0 — le plus petit cliquet qui clique, le pack assemblé"
+description: "S47 livre deux choses, toutes deux en lecture seule. L'AdoptionStage : une échelle T0→T4 qui nomme le plus petit cliquet à installer ensuite (KRD §82.5), avec trois faits porteurs — T1 ne requiert PAS la QualityDiversity (avancée, §82.6), T2 exige un RealityMirror vivant (Livre XX), T4 exige un EvolutionSandbox (§66.1). Et le Release v0 : un pack content-addressed ASSEMBLÉ à partir du dépôt de vérité vivant — surface CLI, routes Workbench, démo, index doc, inventaire de tests, changelog, limites connues honnêtes. On calcule une échelle et on assemble un inventaire ; on n'installe rien, on ne livre rien, on n'écrit aucune vérité."
+keywords: ["aidos", "krd", "adoption", "AdoptionStage", "release", "release v0", "pack", "cliquet", "ratchet", "le plus petit cliquet qui clique", "T0", "T1", "T2", "T3", "T4", "palier", "stage", "QualityDiversity", "RealityMirror", "EvolutionSandbox", "Livre XX", "§82.5", "§82.6", "§66.1", "content-addressed", "inventaire", "changelog", "limites connues", "known limits", "le mur", "fitness", "lecture seule", "déterminisme", "OpenQuestion", "honnêteté"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S47](/steps/internals/s47-adoption-release).</Note>
+
+## En une phrase
+
+S47 livre **deux artefacts en lecture seule**. **L'AdoptionStage** : une **échelle** `T0 → T4` qui dit à un adopteur **quel est le plus petit cliquet à installer ensuite** (on installe KRD **progressivement**, jamais d'un bloc). Et le **Release v0** : un **pack content-addressed** qui prouve « cet AIDOS est lançable » — **assemblé** à partir de ce qui **existe** dans le dépôt de vérité vivant. On **calcule** une échelle et on **assemble** un inventaire ; on **n'installe rien, on ne livre rien, on n'écrit aucune vérité**.
+
+## Le problème que ça résout
+
+Après 46 dents, AIDOS est un OS complet — mais deux questions restent sans réponse outillée : **« par où commence-t-on quand on adopte KRD ? »** et **« qu'est-ce qui est réellement lançable aujourd'hui ? »**. On ne répond ni à l'une ni à l'autre en inventant : on les répond en **lisant la vérité vivante**. L'échelle nomme le **prochain cliquet** (le plus petit qui clique), le pack **inventorie** ce qui est là. Les deux sont **calculés**, jamais déclarés.
+
+## Les idées-clés
+
+<Field name="Le plus petit cliquet qui clique" type="KRD §82.5">
+  L'**AdoptionStage** est une échelle de cinq **paliers déclarés** `T0..T4`, repris des `stage0..stage5` de KRD §82.5 (**jamais recoinés**) : `T0`=tests+mutation existants, `T1`=une cellule KRD, `T2`=noyau+miroir, `T3`=ContextGraph+Memory, `T4`=evolve+QualityDiversity. `Plan` rend le **palier courant**, le **prochain palier installable** et les **manques** (`Gap`) qui bloquent chaque palier non satisfait. C'est une **échelle**, pas un installeur.
+</Field>
+
+<Field name="T1 ne requiert PAS la QualityDiversity" type="KRD §82.6">
+  La QualityDiversity est une capacité **avancée** — pas dans le minimum obligatoire. L'affirmer requise dès T1 serait un **monstre**. T1 n'exige que le plancher + une cellule KRD.
+</Field>
+
+<Field name="T2 exige un RealityMirror vivant" type="Livre XX">
+  Pas de **palier catastrophique** sans **ancrage dans le réel** : T2 est **bloqué** tant que le **RealityMirror** (le miroir du monde extérieur) n'est pas vivant. Son `Gap` le nomme explicitement.
+</Field>
+
+<Field name="T4 exige un EvolutionSandbox" type="KRD §66.1">
+  Pas d'**évolution** avant que sa **quarantaine** existe : T4 est **bloqué** tant que l'**EvolutionSandbox** (le bac à sable de `/evolve`) n'existe pas.
+</Field>
+
+<Field name="Le pack est ASSEMBLÉ, jamais rédigé" type="honnêteté">
+  Chaque champ du `ReleasePack` est **dérivé** de la vue : la surface CLI vivante, les routes Workbench vivantes, les miroirs vivants (l'inventaire de tests), l'historique des changesets (la source du changelog), les limites déclarées / OpenQuestions (les limites connues honnêtes). `Assemble` **inventorie ce qui existe** ; il **n'invente** ni commande CLI, ni route, ni démo, ni doc, ni ligne de changelog, ni limite. Une vue vide donne un pack **vide-mais-valide**.
+</Field>
+
+<Field name="Content-addressed, en lecture seule, derrière le mur" type="le mur §2">
+  `pack.id == Hash(Canonicalize(corps))` (le schéma de S01/S02, **réutilisé**). Un pack enregistré est une **ligne immuable** de `fitness.release_pack` — **append-only**, écrite **uniquement** par le rôle écriture `aidos` via un **ChangeSet** approuvé (S20). L'agent y a un GRANT **SELECT seulement**. Assembler **n'écrit aucune vérité, ne livre rien, ne publie rien**.
+</Field>
+
+## Ce que ça vous donne
+
+Une réponse **honnête et calculée** à « par où je commence » (le prochain cliquet) et à « qu'est-ce qui est lançable » (le pack assemblé) — sans jamais inventer ni livrer. Le panneau Workbench `/adoption` rend l'échelle (les cinq paliers, le courant surligné, les manques) et le pack (CLI, routes, démo, docs, tests, changelog, limites) **sans aucun bouton installer / livrer / publier** : on assemble, point.

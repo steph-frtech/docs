@@ -1,0 +1,43 @@
+---
+title: "S47 · Adoption + Release v0 — internes (3 couches)"
+description: "Le détail d'implémentation de S47 : le package Go pur back/runtime/adoption (l'échelle AdoptionStage T0→T4, les trois prédicats de gating) + back/runtime/adoption/release (Assemble, l'inventaire content-addressed), la migration fitness.release_pack (append-only, agent SELECT-only), les miroirs fixture+rapid, le twin front + fast-check, le panneau /adoption et l'e2e Playwright. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "S47", "adoption", "release", "AdoptionStage", "Plan", "Assemble", "ReleasePack", "Gap", "Capability", "fitness.release_pack", "content-addressed", "Hash", "Canonicalize", "rapid", "fixture", "fast-check", "Playwright", "le mur", "déterminisme", "T0", "T1", "T2", "T3", "T4", "QualityDiversity", "RealityMirror", "EvolutionSandbox"]
+---
+
+<Note>Côté internes — l'implémentation complète. Pour la vue concept, voir [Pour moi → S47 (concept)](/steps/concept/s47-adoption-release).</Note>
+
+## Couche 1 — Implémentation
+
+### Les deux packages purs
+
+`back/runtime/adoption/adoption.go` porte l'**échelle**. `AdoptionStage` est un enum typé `{ T0, T1, T2, T3, T4 }` (repris des `stage0..stage5` de KRD §82.5). `Capability` énumère les onze capacités **consommées** (jamais construites ici). Une table `specs` déclare le `requires`/`grants` de chaque palier — c'est là que vivent les trois faits porteurs :
+
+- `T1.requires = [tests, mutation, one_krd_cell]` — **pas** de `quality_diversity` (§82.6).
+- `T2.requires = [kernel, mirror, reality_mirror_live]` — le RealityMirror (Livre XX).
+- `T4.requires = [evolution_sandbox, evolve, quality_diversity]` — l'EvolutionSandbox (§66.1).
+
+`Plan(capabilities []Capability) → AdoptionPlan` est **pur et total** : pas de DB, pas d'I/O, pas de `time.Now()`, pas de RNG. Il calcule le statut de chaque palier (satisfiable + ses `Gap`), puis applique la **règle d'échelle monotone** : le palier **courant** est le plancher contigu satisfait, le **prochain** est le premier palier non satisfait dont tous les paliers inférieurs sont satisfaits (jamais de saut vers T2+ tant que T1 est manquant). Les capacités inconnues sont ignorées (jamais de panique).
+
+`back/runtime/adoption/release/release.go` porte l'**assembleur**. `Assemble(view View, capabilities []Capability, now int64) → ReleasePack` **inventorie** la `View` : `cli_surface`, `workbench_routes`, `demo_cell`, `docs_index`, `test_inventory` (les miroirs vivants), `changelog` (issu des changesets), `known_limits` (les limites déclarées / OpenQuestions). Chaque champ est une **copie défensive triée** de la vue — déterministe, jamais une mutation de l'entrée, jamais un contenu inventé. Le `pack.id == Hash(Canonicalize(corps))` **réutilise** le schéma de S01/S02 (`records.Canonicalize` + `records.Hash`), `assembled_at` **exclu** du corps haché (deux assemblées de la même vue à des instants différents partagent l'id).
+
+### La persistance — `fitness.release_pack`
+
+`back/migrations/release_pack_baseline.sql` : table **append-only, content-addressed** (`id` PK = hash, `body jsonb`, `assembled_at`, `kernel_head`), avec un `CHECK jsonb_typeof(body)='object'`. **Le mur** : l'agent obtient **SELECT seulement** ; le rôle écriture `aidos` obtient `SELECT, INSERT` (jamais UPDATE/DELETE/TRUNCATE — l'historique release ne se réécrit pas). `fitness` est en lecture seule au-dessus de la ligne (§2). Le roundtrip Testcontainers (`migration_roundtrip_test.go`) prouve l'existence de la table, le CHECK, le SELECT-only de l'agent et l'append-only du writer sur du vrai Postgres.
+
+### Les miroirs (le rouge devenu vert)
+
+- **Fixture N2** (`adoption_fixture_test.go`) : T1↛QD ; T2 bloqué sans RealityMirror (et débloqué une fois vivant) ; T4 bloqué sans EvolutionSandbox ; le plus petit cliquet (T0-only ⇒ next=T1) ; le pack assemblé depuis la vue vivante ; l'id = hash du corps ; la vue vide ⇒ pack vide-mais-valide. **8/8 vert.**
+- **Property rapid** (`adoption_property_test.go`) : déterminisme (now passé) ; T1.requires sans QD ; ∀ vue sans RealityMirror ⇒ T2 non satisfiable + Gap ; ∀ vue sans EvolutionSandbox ⇒ T4 non satisfiable + Gap ; échelle monotone ; aucun palier inventé ; aucun contenu inventé ; la vue jamais mutée ; pack content-addressed ; jamais de panique. **Vert.**
+- **Front** : le twin `front/web/lib/adoption.ts` + fast-check `adoption.test.ts` (**10/10 vert**), l'e2e Playwright `tests/e2e/adoption.spec.ts` (**7/7 vert**).
+
+### Le panneau `/adoption`
+
+`front/web/app/adoption/page.tsx` + `components/AdoptionPanel.tsx` rejouent le **même twin pur** sur un scénario sélectionné : l'échelle T0→T4 (palier courant surligné, prochain cliquet marqué, `Gap` par palier, les trois faits porteurs visibles) et le pack (CLI, routes, démo, docs, tests, changelog, limites). **Aucun bouton installer / livrer / publier** — on assemble seulement. Thémé (ADR 0010), bilingue FR par défaut (ADR 0011).
+
+## Couche 2 — Méta (pourquoi cette forme)
+
+`Plan` et `Assemble` sont **purs par construction** parce que l'échelle et le pack sont des **diagnostics**, pas des actions — leur autorité est **en dessous** de la ligne (`fitness` est lecture seule, le NIVEAU-3 anti-Goodhart de §8). « Fait » est **calculé** (le palier satisfiable, l'id du pack), jamais déclaré par l'agent. Le déterminisme (CLAUDE.md §6/§8) est non négociable : `now` est un **paramètre**, l'horloge n'est jamais lue ; le miroir de reproductibilité (la property) épingle « même entrée ⇒ même sortie ». Le mapping `T0..T4` est **repris** de §82.5 (jamais recoiné), et les capacités RealityMirror / EvolutionSandbox / QualityDiversity sont **consommées** comme faits (vivantes ou non), jamais construites — c'est ce qui garde S47 dans son créneau : une dent qui **compose et inventorie**, sans réinventer ni installer.
+
+## Couche 3 — Méta-méta (la garde)
+
+S47 **n'ajoute aucun MCP et aucun hook** : `Plan`/`Assemble` sont des bibliothèques pures ; lire la vue réutilise le chemin de lecture du MCP `store` ; enregistrer un pack passe par le MCP `changeset` (S20) + le rôle écriture `aidos` ; `/release` est **advisory**, pas une règle non contournable (un hook qui ne se déclenche jamais est mort — §5 honnêteté des hooks). La garde tient par le **mur** déjà posé (le GRANT SELECT-only sur `fitness`, S04) et la **loi de complétude** (S06/S12) : le diagnostic `fitness.release_pack` a son miroir vivant (fixture + property), il n'y a **pas de monstre** (pas de vérité sans miroir, pas de miroir orphelin, pas de palier ou de contenu inventé, pas de ligne mutée en silence, pas de pack qui installe ou livre). Un artefact nouveau **ajoute** une garde, n'en **retire** jamais (§5). La seule porte du noyau reste `idée → miroir → /goal → approbation humaine`.
