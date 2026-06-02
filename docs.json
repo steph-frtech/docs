@@ -163,7 +163,9 @@
               "steps/concept/s48-global-invariant",
               "steps/internals/s48-global-invariant",
               "steps/concept/s49-saga-invariant",
-              "steps/internals/s49-saga-invariant"
+              "steps/internals/s49-saga-invariant",
+              "steps/concept/s50-temporal-invariant",
+              "steps/internals/s50-temporal-invariant"
             ]
           }
         ]

@@ -1,0 +1,43 @@
+---
+title: "S50 · TemporalInvariant — toute vérité temporelle déclare son horloge"
+description: "S50 livre la TemporalInvariant : un type d'invariant de première classe dont la propriété dépend du temps et qui DOIT donc déclarer son horloge (clock ∈ system | external | logical) et sa tolérance (une durée), avec une forme de miroir temporelle (statechart | tla+ | uppaal). La loi : « payment_captured implies order_confirmed within 5 minutes » avec une tolérance de 10s est VERTE à 5m04s (dans 5m ± 10s, pas un flake) et ROUGE à 5m20s (hors tolérance). La tolérance déclarée est la bande qui empêche le faux rouge. L'ordre des événements fait partie de la propriété : une confirmation avant la capture est violée. Distinct de l'axe temporel du DAG et de scope.TimeWindow. Lecture seule, derrière le mur."
+keywords: ["aidos", "krd", "TemporalInvariant", "invariant temporel", "horloge", "clock", "system", "external", "logical", "tolérance", "tolerance", "bande de tolérance", "flake", "délai", "deadline", "within", "ordre des événements", "payment_captured", "order_confirmed", "5 minutes", "held", "violated", "TEMPORAL_INVARIANT_VIOLATED", "statechart", "tla+", "uppaal", "mirror", "TimeWindow", "DAG", "BlockReason", "§49.3", "§44.5", "le mur", "déterminisme", "lecture seule", "S15", "S49"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S50](/steps/internals/s50-temporal-invariant).</Note>
+
+## En une phrase
+
+S50 livre la **TemporalInvariant** : un **type d'invariant de première classe** (KRD §49.3) dont la propriété **dépend du temps** et qui **doit donc déclarer son horloge** (`clock ∈ system | external | logical`) et sa **tolérance** (une durée), avec une **forme de miroir temporelle** (`statechart | tla+ | uppaal`). La loi du jour : une propriété **rougit sur une vraie violation**, mais la **tolérance déclarée empêche le faux rouge** — `payment_captured implies order_confirmed within 5 minutes`, tolérance `10s`, est **HELD** à `5m04s` (dans `5m ± 10s`, ce n'est pas un flake) et **VIOLATED** à `5m20s` (hors tolérance).
+
+## Le problème que ça résout
+
+Les vérités les plus traîtresses d'un système distribué sont **temporelles** : « la commande se confirme dans les 5 minutes », « l'événement A arrive avant l'événement B », « le token expire au bout d'une heure ». Deux pièges : (1) sans **horloge déclarée**, « 5 minutes » est ambigu — l'horloge système ? une horloge externe ? un compteur logique ? ; (2) sans **tolérance**, un test temporel **flake** — une confirmation à `5m00s004` échoue alors que le métier s'en moque. La TemporalInvariant répond : **toute vérité temporelle déclare son horloge** (KRD §49.3) et porte une **tolérance** — la bande qui rend le test stable. Elle fait d'un délai, d'un ordre d'événements ou d'une expiration une **vérité typée et content-addressed**, pas une convention enfouie dans le code.
+
+## Les idées-clés
+
+<Field name="Toute vérité temporelle déclare son horloge" type="KRD §49.3">
+  La règle **portante** : une TemporalInvariant **sans horloge déclarée est refusée**. « 5 minutes » sur quelle horloge ? `system` (l'horloge murale du système), `external` (une source externe, NTP) ou `logical` (un compteur de pas causaux). Sans cette déclaration, la propriété n'est pas vérifiable — elle est rejetée à la validation.
+</Field>
+
+<Field name="La tolérance est la bande qui empêche le flake" type="KRD §49.3 + ADR 0034">
+  La borne est `5m` ; la **tolérance** (`10s`) élargit la **bande verte** à `5m + 10s`. Une confirmation à `5m04s` reste **HELD** — elle est dans la tolérance, ce n'est **pas un flake**. À `5m20s`, elle est **VIOLATED**. Pour un délai (`within`), la bande est **unilatérale** : on viole une échéance en étant **en retard**, jamais en avance (ADR 0034).
+</Field>
+
+<Field name="L'ordre des événements fait partie de la propriété" type="KRD §49.3">
+  §49.3 couvre aussi l'**ordre des événements**. La propriété `payment_captured implies order_confirmed` est **violée** si `order_confirmed` est observé **avant** `payment_captured` — une confirmation avant la capture brise l'implication, quel que soit le temps écoulé.
+</Field>
+
+<Field name="Ce n'est NI l'axe temporel du DAG, NI scope.TimeWindow" type="distinctions">
+  Trois choses à ne pas confondre. (1) **Pas l'axe temporel du DAG** : le DAG dit *quand les vérités ont changé* ; une TemporalInvariant est une vérité *sur le temps dans le comportement métier* (un délai, un ordre, une expiration). (2) **Pas `scope.TimeWindow` (S15)** : le `TimeWindow{From,To}` est la **fenêtre de validité opaque** d'une vérité (*quand* elle s'applique, sans horloge) ; une TemporalInvariant est une **propriété porteuse d'horloge** (une *relation* temporelle entre événements) avec une horloge ET une tolérance. (3) Elle **est** un type d'invariant à part entière, avec horloge + tolérance + forme de miroir temporelle.
+</Field>
+
+## Comment vous l'utilisez
+
+Sur le panneau **`/temporal-invariants`** du Workbench, vous voyez l'invariant `checkout-confirm-within-5m` : sa **propriété**, son **horloge** (`system`), sa **tolérance** (`10s`) et sa **forme de miroir** (`statechart`). Un **marqueur de bande verte** (`5m ± 10s`) rend la tolérance lisible. La **table d'évaluation** calcule, pour chaque observation, le verdict : `4m58s` et `5m04s` en **HELD** (le `5m04s` marqué *dans la tolérance*, pour qu'un humain voie pourquoi ce n'est pas un flake), `5m20s` en **VIOLATED** rouge (`TEMPORAL_INVARIANT_VIOLATED` + `how_to_fix`), l'observation hors-ordre en **VIOLATED**.
+
+Déclarer un invariant temporel ou changer sa tolérance est une **écriture de vérité** : elle passe par **propose → ChangeSet → approbation**, jamais une écriture directe depuis l'écran (le **mur**). Un contrôle **« ré-évaluer »** en lecture seule rejoue l'évaluateur pur sous la ligne.
+
+## Ce que S50 ne fait pas (encore)
+
+Aucune **horloge réelle n'est lue** : le datum `elapsed` est **passé en entrée** via l'observation (le sensor runtime qui échantillonne une vraie horloge et alimente les observations est une étape Runtime ultérieure). Pas de **model-checker** ni de runner **TLA+ / UPPAAL** : cette étape *type* la forme de miroir temporelle et prouve une propriété concrète via un **statechart**. Cette étape lande la relation **`within`** (le délai) ; `before` / `after` / `eventually` viendront en ajout, sans changer la bande existante.
