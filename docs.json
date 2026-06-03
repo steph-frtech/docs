@@ -207,7 +207,9 @@
               "steps/concept/ba18-identite-token-de-capacite",
               "steps/internals/ba18-identite-token-de-capacite",
               "steps/concept/ba19-agentloop-run",
-              "steps/internals/ba19-agentloop-run"
+              "steps/internals/ba19-agentloop-run",
+              "steps/concept/ba20-role-ordonnanceur",
+              "steps/internals/ba20-role-ordonnanceur"
             ]
           }
         ]

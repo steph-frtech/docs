@@ -1,0 +1,41 @@
+---
+title: "BA20 · Le rôle ordonnanceur — qui a le droit de réclamer un travail"
+description: "BA20 crée un NOUVEAU rôle Postgres, l'ordonnanceur, le seul autorisé à réclamer un item de travail rouge (open→claimed) en y posant un bail et un jeton de fencing monotone. Le rôle agent, lui, ne peut pas transitionner — il n'écrit que son propre journal. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA20", "ordonnanceur", "scheduler", "rôle Postgres", "RedWorkQueue", "bail", "lease", "fencing", "lease_epoch", "le mur", "determinism-first"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA20](/steps/internals/ba20-role-ordonnanceur).</Note>
+
+## L'idée en une phrase
+
+BA20 répond à une question de gouvernance simple : **qui a le droit de dire « cet agent travaille maintenant sur cet item rouge » ?** La réponse est un **nouveau rôle Postgres**, l'*ordonnanceur* — distinct de l'agent, et le seul à pouvoir réclamer un travail.
+
+## Pourquoi un nouveau rôle
+
+La file de travail rouge (la *RedWorkQueue*) est, par conception, **en écriture seule** pour l'agent : un agent peut y *ajouter* le travail qu'il découvre, et le *lire*, mais il ne peut pas se l'attribuer à lui-même. Réclamer un item — le faire passer de `open` à `claimed` — est un acte d'*ordonnancement*, pas d'*exécution*. Le séparer dans un rôle distinct rend mécanique la frontière « draîner la file » ≠ « être un agent ».
+
+## Le bail et le jeton de fencing
+
+Quand l'ordonnanceur réclame un item, il y pose :
+
+- un **propriétaire** (quel agent travaille dessus),
+- un **bail** (`lease_until`) — jusqu'à quand,
+- un **jeton de fencing** (`lease_epoch`) — un compteur **monotone** qui augmente à chaque nouveau bail.
+
+Le jeton de fencing est la pièce maîtresse : si un agent A part en pause, que son bail expire et que l'item est re-baillé à B (le jeton augmente), alors A — réveillé en retard — ne pourra pas écraser le travail de B. Son écriture porterait un jeton *périmé* et serait refusée. Pas de « lost-update ».
+
+## Ce que vous voyez à l'écran
+
+Le panneau **/agents** porte la section « Ordonnanceur — rôle & fencing ». Un item commence `open`, jeton à 0 :
+
+- **Claim (rôle ordonnanceur)** — l'item passe `open→claimed`, le propriétaire est posé, le jeton passe de 0 à 1, et l'AgentAssignment (le bail) s'affiche.
+- **Tenter le claim côté agent** — le rôle agent est **refusé en place** : il n'a aucun droit de transition (le mur). C'est un fait *structurel*, pas un réglage qu'un écran peut changer.
+
+## Le mur, en clair
+
+- **L'ordonnanceur n'est pas un 2ᵉ rôle privilégié** : il ne peut écrire AUCUN schéma de vérité (noyau / miroirs / fitness). Il lit les specs des couches-agent (pour savoir quel agent correspond au travail) et écrit *uniquement* les colonnes de transition de la file. C'est tout.
+- **L'agent reste en lecture+ajout seulement** : il ne transitionne jamais un item.
+
+## Ce que ça vous garantit
+
+Deux agents ne peuvent pas se marcher dessus en silence ; un agent zombie ne peut pas réécrire un travail repris par un autre ; et le pouvoir de « distribuer le travail » est tenu par un rôle nommé, fail-closed — jamais dilué dans l'agent lui-même.
