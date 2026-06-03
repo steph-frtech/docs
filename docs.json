@@ -189,7 +189,9 @@
               "steps/concept/ba09-enforcer-confinement",
               "steps/internals/ba09-enforcer-confinement",
               "steps/concept/ba10-enforcer-hooks-obligatoires",
-              "steps/internals/ba10-enforcer-hooks-obligatoires"
+              "steps/internals/ba10-enforcer-hooks-obligatoires",
+              "steps/concept/ba11-compteur-cout-gate-budget",
+              "steps/internals/ba11-compteur-cout-gate-budget"
             ]
           }
         ]

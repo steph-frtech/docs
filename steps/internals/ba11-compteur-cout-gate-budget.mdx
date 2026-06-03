@@ -1,0 +1,68 @@
+---
+title: "BA11 · Le compteur de coût par run RunMeter + le gate de budget CheckBudget — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de BA11 : RunMeter (un tally monotone pur des tokens/turns/ci-minutes/wall-clock), CostAware (tokens × taux déclaré), EffectiveTokensCap (le min() autoritaire de goal.Budgets.Tokens S29 et economics.HarnessCostBudget.MaxLLMTokensPerGoal S51) et CheckBudget (le gate pur, fail-closed, par-axe, qui bascule exactement au seuil min()). Le code S13 AGENT_BUDGET_EXCEEDED. Le miroir property+boundary budget_property_test.go (8 propriétés rapid) + le twin TS + le miroir Vitest. La sonde /agents action-capable au boundary. Les trois plans : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "BA11", "agentimpl", "budget.go", "RunMeter", "CheckBudget", "CostAware", "EffectiveTokensCap", "min()", "BudgetVerdict", "AGENT_BUDGET_EXCEEDED", "blockreason", "S13", "goal.Budgets", "HarnessCostBudget", "economics", "S29", "S51", "monotone", "boundary", "fail-closed", "wall-clock", "cost-aware", "property test", "rapid", "fast-check", "Vitest", "determinism-first", "reproducibility mirror", "le mur", "§6", "§8", "§9"]
+---
+
+<Note>Côté « Pour moi » — internals complets. Pour la vue concept, voir [Pour les futurs utilisateurs → BA11](/steps/concept/ba11-compteur-cout-gate-budget).</Note>
+
+## En une phrase
+
+`back/runtime/agentimpl/budget.go` ajoute un compteur de coût pur (`RunMeter.Tally`, monotone), une projection cost-aware (`CostAware`), la réconciliation du double budget (`EffectiveTokensCap` = `min(S29, S51)`) et le gate pur fail-closed (`CheckBudget`) qui rend `AGENT_BUDGET_EXCEEDED` quand le coût mesuré dépasse le cap effectif sur n'importe quel axe.
+
+## Implémentation
+
+**Le paquet.** `back/runtime/agentimpl/budget.go` — pur, total, sans DB, sans horloge, sans RNG, sans I/O, **sans LLM vivant**.
+
+**Les types.**
+
+- `RunDelta{Tokens, Turns, CIMinutes, WallClockSecs int}` — un incrément de coût consommé, nourri par la boucle (BA27).
+- `RunMeter{Tokens, Turns, CIMinutes, WallClockSecs int}` — le tally monotone ; le zéro est un run frais.
+- `BudgetVerdict{WithinBudget bool, BreachedAxis string, CostAware float64, CellRef string, BlockReason *blockreason.BlockReason}` — le résultat typé de `CheckBudget`.
+
+**Les fonctions.**
+
+- `(RunMeter).Tally(RunDelta) RunMeter` — un fold pur à sémantique de valeur (retourne un *nouveau* meter, aucune mutation). Chaque delta est clampé à `≥ 0` (`nonNeg`) pour que le meter soit **inconditionnellement monotone** ; un delta négatif serait un bug de producteur, le meter refuse de décroître.
+- `CostAware(RunMeter, ratePerToken float64) float64` — `tokens × taux`. Monotone non-décroissante en tokens ; le taux est une donnée passée, jamais inventée.
+- `EffectiveTokensCap(h economics.HarnessCostBudget, b goal.Budgets) int` — `min(b.Tokens, h.MaxLLMTokensPerGoal)`. **Exportée** pour que le SemanticDiff suggéré (déduplir à terme à un owner par axe) et la boucle (BA27) puissent pré-calculer le cap autoritaire.
+- `CheckBudget(m RunMeter, h economics.HarnessCostBudget, b goal.Budgets, ratePerToken float64) BudgetVerdict` — le gate. Cap effectif tokens = `min(S29, S51)` ; les axes mono-source utilisent leur unique cap déclaré (turns ← S29, ci-minutes ← S51, wall-clock ← `S29.TimeSeconds`). Comparaison par-axe en **précédence fixe** (`tokens → turns → ci_minutes → wall_clock`) pour que `BreachedAxis` soit déterministe. Un coût **égal** au cap est dans le budget (plafond inclusif) ; `cap+1` dépasse. Dépasser sur **n'importe quel** axe dépasse (OR par axe, fail-closed).
+
+**Le BlockReason (S13).** `back/runtime/blockreason/blockreason.go` gagne le code `CodeAgentBudgetExceeded = "AGENT_BUDGET_EXCEEDED"` (extension additive du registre fermé, `change_type: refine`), avec la forme actionnable complète (code/severity/explanation/how_to_fix nommant `tightest_cap_wins` et la porte `idée → miroir → /goal`). Le code est ajouté au `codeOrder` (le property test enum-driven le valide automatiquement). `budgetExceeded` réutilise `blockreason.For(...)` et **spécialise** l'explication avec l'axe concret + le coût mesuré vs le cap effectif (jamais une cible fabriquée — règle d'honnêteté).
+
+**Le miroir (mirror-first, ROUGE d'abord).** `budget_property_test.go` — 8 propriétés rapid écrites *avant* `budget.go`, confirmées rouges (compile-fail : `undefined: RunMeter/CheckBudget`) avant le vert :
+
+1. `TestRunMeter_Monotone` — `Tally` ne baisse jamais aucun axe.
+2. `TestCheckBudget_Deterministic` — mêmes entrées ⇒ verdict identique (reproductibilité).
+3. `TestCheckBudget_MinIsAuthoritative_Boundary` — le cap tokens effectif = `min(S29, S51)` ; within au cap, breached à `cap+1`, axe `tokens`.
+4. `TestCheckBudget_FailClosed_AnyAxis` — within **ssi** within sur tous les axes (OR par axe).
+5. `TestCheckBudget_CostAware` — `cost = tokens × taux`, monotone en tokens.
+6. `TestCheckBudget_WallClockDeadline` — dépasser la deadline dépasse même à zéro token (axe `wall_clock`).
+7. `TestCheckBudget_BlockReasonShape` — un dépassement porte `AGENT_BUDGET_EXCEEDED` + `how_to_fix` non vide + l'axe nommé ; un within ne porte aucun BlockReason.
+8. `TestCheckBudget_EqualCaps` — caps égaux : le verdict bascule à la valeur partagée.
+
+La propriété 3 + la 6 **sont** la fault-injection demandée : le verdict bascule exactement au boundary = `min()`, et un axe non-token (le temps) le fait basculer seul.
+
+**Le twin TS + le miroir Vitest.** `front/web/lib/agentlayer.ts` gagne `RunMeter`/`RunDelta`/`Budgets`/`HarnessCostBudget`/`BudgetVerdict`, `tally`/`costAware`/`effectiveTokensCap`/`checkBudget` et la constante `AGENT_BUDGET_EXCEEDED_REASON` (verbatim du registre Go). `agentlayer.test.ts` (fast-check) miroite verdict-pour-verdict : monotone, min() autoritaire au boundary, fail-closed par-axe, cost-aware, deadline wall-clock, déterminisme. 73 tests verts.
+
+**La sonde /agents (action-capable, boundary).** `AgentsPanel.tsx` gagne un `budget-gate` : il affiche le cap effectif `min(S29=1000, S51=800) = 800`, un `select` de faute (`within` / `exceeded`) et un bouton qui **exécute** `checkBudget` contre un `RunMeter` dont le tally de tokens est exactement le cap (within) ou un de plus (breach). 4 nouveaux e2e Playwright (présence + action-capable, within au cap, boundary breach avec axe `tokens` + `AGENT_BUDGET_EXCEEDED` + porte /goal). L'assertion de comptage de boutons BA06 passe de 4 à 5 (anti-overwrite §9).
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Pourquoi `min()` et pas une autre règle ?** Parce que deux budgets qui se chevauchent doivent **fail-closed** : le plus serré protège toujours. Prendre le `max()`, ou « le plus récent », laisserait un agent franchir le cap que *l'un* des deux propriétaires voulait imposer. Le `min()` est la seule règle qui ne trahit personne.
+- **Pourquoi exporter `EffectiveTokensCap` ?** Pour rendre la règle **inspectable** : le SemanticDiff (qui suggérera à terme de déduplir à un owner par axe) et la boucle (BA27, qui doit refuser de *démarrer* un tour qui dépasserait) lisent la même fonction autoritaire. Une seule source de la règle.
+- **Pourquoi un axe wall-clock ?** Parce qu'un budget purement en tokens a un angle mort : l'agent **hung**. Le temps est le seul signal qui croît quand l'agent ne produit plus rien.
+- **Pourquoi cost-aware ?** Pour comparer des agents hétérogènes dans une équipe. Sans le taux, « 100k tokens » d'un modèle bon marché et « 10k tokens » d'un modèle cher seraient incomparables ; avec, ils partagent une unité.
+- **Pourquoi le gate ne lit aucun transcript ni n'appelle aucun LLM ?** Parce que « suis-je dans le budget ? » est de l'**arithmétique** — un `min()` et des comparaisons. Un agent qui en jugerait par inférence serait la circularité du §8. Le code gagne, l'agent défère.
+
+## Méta-méta — la garantie de niveau 3
+
+BA11 est une **fonction pure totale**, donc une garantie de niveau 3 (déterministe, sans état, sans horloge). Le miroir de reproductibilité (`budget_property_test.go` côté Go, `agentlayer.test.ts` côté TS) **prouve** que mêmes entrées → même verdict, et la propriété de boundary prouve que le seuil est *exactement* `min()` — ni gameable, ni dérivant. C'est un caillou de plus dans le cliquet : un dépassement de budget ne peut pas « se dé-franchir » (monotone), et le cap effectif ne peut pas être desserré sous la ligne (les deux propriétaires le déclarent au-dessus, le gate ne fait que lire le `min()`).
+
+## Note d'évolution (anti-overwrite §9)
+
+BA10 affirmait « exactement 4 boutons dans la vue Implémentation » (les sondes capacité + skill + chemin + le gate de hooks). BA11 ajoute *un* cinquième contrôle — le gate de budget (un `select` de faute + un bouton) — lui aussi un **verdict pur sous la ligne**, ni un run d'agent ni une écriture de vérité. L'assertion e2e passe de 4 à 5 ; l'invariant protégé (aucun contrôle de *run*, aucune écriture de *vérité* dans la vue Implémentation) tient toujours. L'extension du registre `blockreason` est additive (`refine`, jamais une suppression).
+
+## Limites connues
+
+- Le `RunMeter` n'est pas encore **câblé dans la boucle** : `CheckBudget` est le gate pur ; l'accumulation *au fur* et le hard-stop streaming au franchissement sont **BA27** (OpenQuestion documentée, pas un `residual_issue`).
+- Le double budget reste **déclaré deux fois** : BA11 le réconcilie par `min()` à la lecture ; la déduplication à un seul owner par axe est une **SemanticDiff suggérée**, pas tranchée ici.

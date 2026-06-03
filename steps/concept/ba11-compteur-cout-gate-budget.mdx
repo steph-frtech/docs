@@ -1,0 +1,69 @@
+---
+title: "BA11 · Le compteur de coût par run + le gate de budget — le cap effectif est le min() des deux budgets déclarés"
+description: "BA11 ajoute le compteur de coût par run (RunMeter : un tally monotone des tokens/turns/ci-minutes/wall-clock) et le gate de budget pur CheckBudget. Sa règle centrale est la RÉCONCILIATION DU DOUBLE BUDGET : l'axe tokens est déclaré DEUX fois — dans goal.Budgets.Tokens (S29, le garde-fou anti-runaway secondaire) ET dans economics.HarnessCostBudget.MaxLLMTokensPerGoal (S51, le cap d'économie du harnais). Le cap effectif par axe partagé est le MINIMUM des deux : le plus serré gagne (fail-closed). Le coût est COST-AWARE (tokens × le taux modèle déclaré → une unité comparable entre agents d'une équipe) et inclut une DEADLINE wall-clock déclarée (un agent hung brûle du temps sans brûler de tokens). Le verdict bascule exactement au seuil = min() des caps (boundary). Code AGENT_BUDGET_EXCEEDED. Determinism-first : le gate est le min() arithmétique autoritaire, jamais un jugement de l'agent (§8)."
+keywords: ["aidos", "krd", "build-agent", "BA11", "agentimpl", "budget", "RunMeter", "CheckBudget", "compteur de coût", "cost-aware", "min()", "le plus serré gagne", "fail-closed", "double budget", "goal.Budgets", "HarnessCostBudget", "S29", "S51", "wall-clock", "deadline", "monotone", "boundary", "AGENT_BUDGET_EXCEEDED", "BlockReason", "S13", "anti-runaway", "le mur", "idée → miroir → /goal", "economics", "determinism-first", "§6", "§8"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → BA11](/steps/internals/ba11-compteur-cout-gate-budget).</Note>
+
+## En une phrase
+
+BA11 donne à un run d'agent gouverné un **compteur de coût** (`RunMeter`, un tally **monotone** des tokens / turns / ci-minutes / wall-clock) et un **gate de budget** pur (`CheckBudget`) : le run est dans son budget **uniquement si** le coût mesuré reste **≤ le cap effectif sur chaque axe** — et sur les axes déclarés deux fois, ce cap effectif est le **minimum** des deux déclarations (le plus serré gagne, fail-closed).
+
+## Le problème que ça résout
+
+Un agent gouverné peut être parfaitement confiné (axes ZONE/CAPACITÉ/SKILL/CONFINEMENT) et ses tours parfaitement admissibles (axe HOOK, BA10) — et **quand même** ruiner le harnais : boucler sans fin, brûler des centaines de milliers de tokens, ou rester **hung** (bloqué) à consommer du temps mur sans rien produire. Le périmètre de l'agent dit *où* et *avec quoi* il agit ; aucun axe ne dit **« combien ce run a-t-il le droit de coûter ? »**.
+
+Deux pièges concrets que BA11 ferme :
+
+- **Le double budget (gap G1).** L'axe tokens est déclaré **deux fois** dans AIDOS : `goal.Budgets.Tokens` (S29, le garde-fou anti-runaway du goal) **et** `economics.HarnessCostBudget.MaxLLMTokensPerGoal` (S51, le cap d'économie du harnais). Laquelle gagne ? BA11 tranche : le **min()** des deux. Relever un seul des deux ne desserre pas le gate tant que l'autre reste serré.
+- **L'agent hung (gap G2).** Un agent bloqué brûle du **temps mur** sans brûler de tokens. Un budget purement en tokens ne l'arrêterait jamais. BA11 porte donc un axe **wall-clock** : dépasser la deadline déclarée est un dépassement, même à zéro token.
+
+## Les idées-clés
+
+<Field name="Le compteur est MONOTONE" type="le coût ne fait que croître">
+  `RunMeter` est un **tally** : on lui ajoute des deltas (les tokens dépensés, les tours pris, les minutes CI brûlées, les secondes écoulées) au fur et à mesure que la boucle avance. Chaque axe ne fait **que croître** — jamais décroître. C'est la garantie qu'un budget franchi ne peut pas « se dé-franchir ».
+</Field>
+
+<Field name="Le cap effectif = min(S29, S51)" type="le plus serré gagne, fail-closed">
+  Sur un axe **partagé** (les tokens), le cap effectif est le **minimum** des deux budgets déclarés. Le plus serré gagne (fail-closed) : si S29 autorise 1000 tokens et S51 en autorise 800, le run est coupé à **800**. C'est la règle **autoritaire** — un algorithme, jamais une négociation.
+</Field>
+
+<Field name="Le coût est COST-AWARE" type="une unité comparable entre agents">
+  Le compteur ne s'arrête pas aux tokens bruts : il les projette sur une **unité de coût comparable** via le **taux modèle déclaré** (`tokens × taux`). Un agent « modèle pas cher, beaucoup de tokens » et un agent « modèle cher, peu de tokens » deviennent ainsi comparables dans une équipe. Le taux est une **donnée déclarée**, jamais inventée ni apprise.
+</Field>
+
+<Field name="La deadline wall-clock arrête l'agent hung" type="gap G2">
+  Le gate porte un axe **wall-clock** : un run qui dépasse la deadline déclarée (`goal.Budgets.TimeSeconds`) **dépasse son budget**, même avec **zéro token** consommé. C'est le seul axe qui attrape l'agent bloqué.
+</Field>
+
+<Field name="Le verdict bascule EXACTEMENT au seuil" type="boundary, plafond inclusif">
+  Un coût **exactement égal** au cap effectif est **dans le budget** (le cap est le plafond inclusif) ; **un de plus** dépasse. Le verdict bascule au seuil précis = `min()` des caps — pas avant, pas après. C'est le **boundary test**, miroré côté Go *et* côté TS, verdict pour verdict.
+</Field>
+
+<Field name="Fail-closed sur N'IMPORTE quel axe" type="OR par axe">
+  Dépasser sur **un seul** axe suffit à dépasser le budget (OR par axe). Le run est dans le budget **uniquement si** il l'est sur **tous** les axes. L'axe dépassé est nommé dans le `BlockReason` (`tokens` / `turns` / `ci_minutes` / `wall_clock`), suivant une précédence fixe — le verdict est déterministe.
+</Field>
+
+<Field name="Un BlockReason actionnable" type="S13, §44.5">
+  Un dépassement n'est jamais une prison. `AGENT_BUDGET_EXCEEDED` porte l'explication (l'axe dépassé, le coût mesuré vs le cap effectif) et un `how_to_fix` : réduire le coût du run, comprendre que **le plus serré gagne** (relever un seul des deux caps ne suffit pas), et — pour relever un cap déclaré — la seule porte est **idée → miroir → /goal** (la zone fitness pour `HarnessCostBudget`, le corps du goal pour `Budgets`), jamais une édition directe.
+</Field>
+
+## Ce que vous voyez dans le Workbench
+
+Le panneau **/agents**, dans la vue « Implémentation projetée », gagne un **gate de budget par run**, sœur des sondes de capacité (BA07), de skill (BA08), de chemin (BA09) et du gate de hooks (BA10) :
+
+- le panneau affiche le **cap tokens effectif** = `min(S29, S51)` (par ex. `800 = min(1000, 800)`) ;
+- choisissez une **injection de faute** : *au cap effectif* (dans le budget) ou *un de plus que le cap* (dépassement) ;
+- cliquez **« Vérifier le budget du run »** — le gate pur `checkBudget` s'exécute contre un `RunMeter` dont le tally de tokens est exactement le cap (ou un de plus), contre les deux budgets déclarés ;
+- au cap → un badge **« Dans le budget »** avec le coût cost-aware ;
+- un de plus → un encadré **« Budget dépassé — tokens »** avec le code `AGENT_BUDGET_EXCEEDED`, son explication, et le `how_to_fix` qui nomme la porte /goal.
+
+C'est **action-capable** : l'op que BA11 développe a un contrôle qui l'**exécute** depuis l'écran (pas de capacité headless), et la fault-injection au **boundary** est *visible*. C'est sûr pour le mur : le gate est un verdict **pur, sous la ligne** — il n'exécute aucun agent et n'écrit aucune vérité ; les caps sont **déclarés** au-dessus de la ligne, le gate les **lit** seulement.
+
+## Ce que ça ne fait pas
+
+- Ça ne **câble pas encore le compteur dans la boucle** : `CheckBudget` est le gate pur ; le `RunMeter` qui s'accumule *au fur* d'une vraie boucle et la coupe au dépassement, c'est **BA27** (le hard-stop streaming + le pré-call check).
+- Ça n'**invente ni n'apprend aucun cap ni aucun taux** : les budgets et le taux modèle sont des **données déclarées** au-dessus de la ligne ; le gate les lit, il ne les règle jamais (§8 — les poids/seuils sont déclarés, jamais appris).
+- Ça n'**émet aucun jugement** : c'est de l'arithmétique (un `min()` et des comparaisons par axe) ; mêmes entrées → même verdict, toujours. Un agent qui déciderait « suis-je dans le budget ? » par inférence serait une **faille de déterminisme**.
+- Ça ne **lance aucun LLM** : pas de modèle vivant dans le gate.
