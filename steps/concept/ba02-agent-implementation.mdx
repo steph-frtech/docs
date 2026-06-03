@@ -1,0 +1,47 @@
+---
+title: "BA02 · AgentImplementation — la projection sous la ligne qui ne porte aucune vérité"
+description: "BA02 définit le TYPE de projection AgentImplementation : la forme régénérable, sous la ligne, content-addressée par sa référence de couche (LayerRef == CoucheAgent@version), qu'une CoucheAgent (la SOURCE de S52) projette pour devenir runnable. Elle ne porte AUCUNE vérité : pas de version-comme-vérité, pas de champ Mirror. Elle est irreprésentable en CoucheAgent — exactement comme un AgentRun n'est jamais une couche. Type + invariants seulement ; l'émetteur Project est BA03. Le mur tient : la projection est sous la ligne, ses ForbiddenPaths portent toujours les zones de vérité (kernel/mirrors/fitness), aucun chemin autorisé ne résout au-dessus de la ligne. Determinism-first : Validate et les helpers sont purs, totaux, déterministes."
+keywords: ["aidos", "krd", "build-agent", "BA02", "AgentImplementation", "projection", "CoucheAgent", "LayerRef", "content-addressed", "régénérable", "sous la ligne", "pas de version", "pas de miroir", "irreprésentable en couche", "AgentRun", "le mur", "ForbiddenPaths", "AllowedPaths", "confinement", "fail-closed", "EgressAllowed", "ExecAllowed", "Validate", "déterminisme", "émetteur", "Project", "BA03", "S52", "§2", "§6", "§8"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → BA02](/steps/internals/ba02-agent-implementation).</Note>
+
+## En une phrase
+
+BA02 définit le **type `AgentImplementation`** : la **projection** qu'une `CoucheAgent` (la couche gouvernée de S52, *au-dessus* de la ligne) produit pour devenir **runnable** — une structure **sous la ligne**, **régénérable**, qui ne porte **aucune vérité** et qui ne peut **jamais** être reconstruite en couche.
+
+## Le problème que ça résout
+
+Une `CoucheAgent` est une **SOURCE** : versionnée, content-addressée, au-dessus de la ligne — c'est une *vérité*. Mais on ne *fait pas tourner* une vérité : on fait tourner une **configuration concrète** dérivée d'elle — un modèle, une température, une graine, une allow-list d'outils résolue, des chemins autorisés/interdits. Cette configuration est une **projection**, comme le code Go émis depuis une entité du kernel.
+
+Le danger : que cette projection se mette à **porter de la vérité** — un numéro de version qui ferait autorité, une référence de miroir qui la ferait passer pour une couche. Si une projection pouvait être **reconstruite en `CoucheAgent`**, la frontière SOURCE/projection s'effondrerait, et l'agent pourrait *déclarer* (au lieu de *proposer*). BA02 rend cette confusion **structurellement impossible**.
+
+## Les idées-clés
+
+<Field name="Une projection ne porte AUCUNE vérité" type="le mur, §2">
+  L'`AgentImplementation` n'a **pas** de champ `Version` ni de champ `Mirror` — les deux marques d'une SOURCE/vérité. Elle est **régénérable** : on peut la jeter et la reprojeter depuis la couche. Ce n'est pas une vérité, c'est une *image* de la vérité.
+</Field>
+
+<Field name="Irreprésentable en couche — comme un AgentRun" type="discipline miroré">
+  Tout comme un **`AgentRun`** (un run) ne peut jamais être représenté comme une couche, une `AgentImplementation` ne peut jamais être reconstruite en `CoucheAgent`. Le `LayerRef` est une **simple référence** (`CoucheAgent@version`), un pointeur de retour — **jamais** une couche ré-embarquée.
+</Field>
+
+<Field name="Le mur est dans la projection" type="confinement">
+  Les **`ForbiddenPaths`** de toute projection portent **toujours** les zones de vérité : `kernel`, `mirrors`, `fitness` et les préfixes sur disque. Aucun chemin autorisé (`AllowedPaths`) ne peut résoudre au-dessus de la ligne. La projection ne peut **jamais** accorder une écriture de vérité.
+</Field>
+
+<Field name="Les défauts ferment (fail-closed)" type="sécurité par défaut">
+  Les allow-lists réseau/exec vides **refusent tout** : `EgressAllowed` et `ExecAllowed` déferrent aux knobs gouvernés (BA01). Une projection au confinement maximal est la valeur valide par défaut.
+</Field>
+
+<Field name="Type + invariants seulement — pas encore d'émetteur" type="périmètre BA02">
+  BA02 fixe la **forme** et les **invariants** (le `Validate` pur). L'**émetteur** déterministe `Project(layer, cfg, pack)` — qui produit la projection octet-identique depuis la couche — est le pas suivant, **BA03**.
+</Field>
+
+## Ce que vous voyez à l'écran
+
+Sur la route **`/agents`** du Workbench, une section **« Implémentation projetée »** affiche la projection du `bdd-writer` : sa **référence de couche** (`CoucheAgent@version`), son fournisseur et son modèle, et ses **chemins interdits** — où l'on voit que les zones `kernel` / `mirrors` / `fitness` y figurent **toujours** (le mur). Un badge **« n'est pas une couche (aucune vérité) »** rend la discipline visible. Un bouton **« Valider la projection »** exécute le `Validate` pur et montre le verdict **projection valide (mur tenu, confinement fail-closed)** — la preuve, depuis l'écran, que la forme tient.
+
+## En une ligne
+
+> **L'implémentation d'un agent est une projection régénérable, sous la ligne, qui porte le mur mais aucune vérité — et qu'on ne peut jamais reconstruire en couche.**

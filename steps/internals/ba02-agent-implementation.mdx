@@ -1,0 +1,53 @@
+---
+title: "BA02 · AgentImplementation — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail d'implémentation de BA02 : le TYPE de projection AgentImplementation dans back/runtime/agentimpl, content-addressé par LayerRef (CoucheAgent@version), sans champ Version ni Mirror (irreprésentable en couche, comme AgentRun). Les types ResolvedTool/ResolvedHook, WallForbiddenPaths (les zones de vérité, toujours présentes), IsAboveWaterline (single-sourcé via agentlayer.MayWrite, le contrat S52), EgressAllowed/ExecAllowed (méthodes déférant aux knobs BA01), Validate (garde de forme + mur, fail-closed, pur). Les miroirs ROUGE-d'abord : agentimpl_property_test.go (rapid — not-a-layer structurel, embeds-no-layer, Validate déterministe/total/fail-closed, le mur dans la projection) + agentimpl_fixture_test.go. Le twin front lib/agentlayer (AgentImplementation/validateImpl/implEgressAllowed/wallForbiddenPaths) + Vitest, la section /agents « Implémentation projetée » action-capable + l'e2e Playwright. Pas d'émetteur (Project est BA03). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "build-agent", "BA02", "agentimpl", "AgentImplementation", "projection", "LayerRef", "content-addressed", "pas de version", "pas de miroir", "irreprésentable en couche", "AgentRun", "ResolvedTool", "ResolvedHook", "WallForbiddenPaths", "IsAboveWaterline", "agentlayer.MayWrite", "EgressAllowed", "ExecAllowed", "Validate", "fail-closed", "le mur", "ForbiddenPaths", "AllowedPaths", "rapid", "Vitest", "Playwright", "déterminisme", "émetteur", "Project", "BA03", "back/runtime/agentimpl", "lib/agentlayer", "S01", "S02", "S04", "S52", "§2", "§6", "§8", "§9"]
+---
+
+<Note>Côté implémentation — le détail interne. Pour le concept et l'usage, voir [Pour les futurs utilisateurs → BA02](/steps/concept/ba02-agent-implementation).</Note>
+
+## En une phrase
+
+BA02 ajoute le paquet `back/runtime/agentimpl` avec le **type `AgentImplementation`** — une projection sous la ligne, content-addressée par `LayerRef`, **sans** champ `Version` ni `Mirror` (irreprésentable en `CoucheAgent`, miroir de la discipline `agentrun`) — plus `Validate` (garde de forme + mur, pur/fail-closed), `WallForbiddenPaths`, `IsAboveWaterline` (single-sourcé via le contrat S52 `agentlayer.MayWrite`) et les méthodes de confinement `EgressAllowed`/`ExecAllowed` qui déferrent aux knobs BA01. **Type + invariants seulement** — l'émetteur `Project` est BA03.
+
+## Implémentation
+
+<Steps>
+  <Step title="Le type AgentImplementation (below the line, no truth)">
+    La struct porte `LayerRef string` (le pointeur de retour `CoucheAgent@version`), les knobs descendus de la SOURCE (`Provider`, `Model`, `Temperature`, `MaxTurns`, `Seed`, `MaxConcurrency`, `ResourceLimits`), la surface de capacité résolue (`Tools []ResolvedTool`, `Skills []string`, `Hooks []ResolvedHook`), et le confinement (`AllowedPaths`, `ForbiddenPaths`, `AllowedNetworkHosts`, `AllowedExec`). Elle n'a **délibérément** aucun champ `Version` ni `Mirror` — les deux marques d'une SOURCE/vérité. `ResolvedTool{Server,Tool}` et `ResolvedHook{Phase,Hook,Mandatory}` sont les types de bindings résolus (la résolution elle-même est BA05 ; ici on ne fixe que la forme).
+  </Step>
+  <Step title="WallForbiddenPaths + IsAboveWaterline — le mur, single-sourcé">
+    `WallForbiddenPaths()` retourne le set fermé des zones de vérité (`kernel`, `mirrors`, `fitness`, `back/kernel/`, `back/migrations/`) — non vide par construction, copie fraîche. `IsAboveWaterline(target)` est single-sourcé via `agentlayer.MayWrite(AgentSpec{}, target).Allowed` (le contrat publié S52) : un write refusé ⇒ au-dessus de la ligne. On **ne forke aucun prédicat de waterline** (l'extraction de `Classify` du hook S04 vers un paquet importable est OQ-S52-wall, résolue en BA03).
+  </Step>
+  <Step title="EgressAllowed / ExecAllowed — méthodes déférant à BA01">
+    `(a AgentImplementation) EgressAllowed(host)` et `ExecAllowed(cmd)` déferrent à `agentlayer.EgressAllowed`/`ExecAllowed` (les allow-lists pures de BA01) : une allow-list vide refuse tout (confinement maximal, fail-closed). Pas de logique dupliquée — la projection réutilise la sémantique gouvernée.
+  </Step>
+  <Step title="Validate — garde de forme + mur, fail-closed, pur">
+    `Validate(a)` (pure, totale, déterministe) refuse : `LayerRef`/`Model` vides ; `Provider` hors du set fermé ; `Temperature` hors [0,2] ; `MaxTurns`/`MaxConcurrency` < 0 ; tout axe `ResourceLimits` négatif ; **tout `AllowedPath` au-dessus de la ligne** (le mur) ; et toute projection dont les `ForbiddenPaths` ne portent **pas** l'ensemble complet du mur. Les allow-lists réseau/exec vides sont le défaut valide (max confinement, pas une erreur de plage).
+  </Step>
+  <Step title="Les miroirs (ROUGE d'abord → green)">
+    `agentimpl_property_test.go` (rapid) : (1) **not-a-layer structurel** — réflexion sur le type, aucun champ `Version`/`Mirror` (LE critère de done de BA02) ; (2) **embeds-no-layer** — aucun champ n'embarque `agentlayer.CoucheAgent`/`AgentSpec` ; `LayerRef` est une `string` ; (3) `Validate` déterministe + total + fail-closed (température hors-bornes refusée ; allow-lists vides valides) ; (4) le mur dans la projection (chaque `ForbiddenPath` au-dessus de la ligne ; aucun `AllowedPath` au-dessus). `agentimpl_fixture_test.go` : la projection golden valide, le confinement vide refuse tout, un provider/layerRef invalide est refusé.
+  </Step>
+  <Step title="Le twin front + la section /agents action-capable">
+    `lib/agentlayer.ts` gagne l'interface `AgentImplementation` (sans `version`/`mirror`), `validateImpl`, `implEgressAllowed`/`implExecAllowed` et `wallForbiddenPaths` — purs, couverts par `lib/agentlayer.test.ts` (Vitest, 25 tests). Le panneau `/agents` gagne une section **« Implémentation projetée »** : la référence de couche, fournisseur·modèle, les chemins interdits (où figurent `kernel`/`mirrors`/`fitness`), un badge **« n'est pas une couche »** et un bouton **« Valider la projection »** qui **exécute** `validateImpl` et montre le verdict valide. L'e2e `tests/e2e/agents.spec.ts` (2 nouveaux tests BA02) prouve l'affichage et l'exécution.
+  </Step>
+</Steps>
+
+## Méta — pourquoi c'est construit ainsi
+
+- **La projection est miroir de l'AgentRun.** La discipline « un run est irreprésentable en couche » (back/runtime/agentrun) est reprise verbatim au grain de la projection : pas de `Version`, pas de `Mirror`, asserté par **réflexion** (un test structurel, pas une convention de prose). On ne *peut pas* reconstruire une `CoucheAgent` depuis une `AgentImplementation` — la frontière SOURCE/projection est typée.
+- **Le mur est dans la projection, single-sourcé.** `IsAboveWaterline` réutilise `agentlayer.MayWrite` (le contrat S52) au lieu de re-dériver un prédicat — déterminisme-first et anti-fork : un seul prédicat de waterline fait foi. `Validate` exige que `ForbiddenPaths` porte **toujours** le mur complet : une projection ne peut jamais naître sans le mur.
+- **Fail-closed partout.** `Validate` rejette par défaut (champ vide, plage hors-bornes, chemin autorisé au-dessus de la ligne, mur manquant) ; le confinement réseau/exec vide refuse tout. La valeur sûre est la valeur fermée.
+- **Type + invariants seulement.** Pas d'émetteur ici : `Project(layer, cfg, pack)` (octet-identique, hash-stable, `cfg` sans knob) est BA03. BA02 garantit que *quand* l'émetteur produira une projection, elle ne pourra **structurellement** pas porter de vérité.
+
+## Méta-méta — la garantie de niveau 3
+
+BA02 ne touche **ni la fitness, ni le mur, ni le kernel** : il ajoute un type **sous la ligne** et **réutilise** le prédicat de waterline S52. La garantie inviolable rendue exécutable : une `AgentImplementation` est **structurellement** incapable de porter une vérité (réflexion : aucun `Version`/`Mirror`, aucun embed de SOURCE), et **structurellement** incapable d'accorder une écriture au-dessus de la ligne (`Validate` exige le mur, refuse tout `AllowedPath` au-dessus). Le miroir de reproductibilité (property : même entrée → même verdict de `Validate`) tient. La méta-loop **ajoute** un garde-fou (la projection sans-vérité), elle n'en retire aucun (§9).
+
+## Limites connues
+
+- **Pas d'émetteur (par conception).** `Project(layer, cfg, pack)` — l'émetteur déterministe couche→projection, hash-stable, `cfg` sans knob — est **BA03**. BA02 est le type + ses invariants seulement.
+- **Résolution des bindings différée.** `Tools`/`Skills`/`Hooks` sont les types résolus ; la *règle* de résolution (sous-ensemble des bindings activés) est **BA05**.
+- **OQ-S52-wall non encore résolue.** `IsAboveWaterline` réutilise `agentlayer.MayWrite` (le contrat S52) plutôt que le `Classify` du hook S04 (encore en `package main`, non importable) ; l'extraction single-sourcée est **BA03**.
+- **Parité front/back.** Le twin `lib/agentlayer.ts` mirroir `validateImpl` verdict-pour-verdict ; le Go reste l'autorité. Pas de migration / hook / MCP nouveau — type pur sous la ligne.
+- **Linear non authentifié.** L'issue de suivi BA02 n'a pu être mise à jour (OAuth du MCP `linear-server` requis) — noté comme OpenQuestion, non bloquant.

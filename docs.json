@@ -171,7 +171,9 @@
               "steps/concept/s52-couche-agent",
               "steps/internals/s52-couche-agent",
               "steps/concept/ba01-knobs-gouvernes",
-              "steps/internals/ba01-knobs-gouvernes"
+              "steps/internals/ba01-knobs-gouvernes",
+              "steps/concept/ba02-agent-implementation",
+              "steps/internals/ba02-agent-implementation"
             ]
           }
         ]
