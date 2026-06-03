@@ -1,0 +1,56 @@
+---
+title: "BA15 · La coquille de boucle — Drive — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de BA15 : Drive(DriveInput) → AgentRun, la coquille de boucle déterministe SOUS la ligne, modelée sur evolve.Evolve. Elle réclame l'item, déroule un ActionGenerator scripté (le LLM mocké), gate CHAQUE action via GateAction (BA13) AVANT exécution, applique l'effet sur vert seulement, tick le RunMeter (BA11), boucle jusqu'à goal.IsClosed OU dépassement de budget, et émet un agentrun.AgentRun via Record. Le miroir fixture (state→cmd→events) + le miroir property (reproductibilité/totalité/mur/result-calculé) + le twin TS drive + le miroir Vitest (+7) + la commande /agents action-capable + Playwright (+3). Les trois plans."
+keywords: ["aidos", "krd", "build-agent", "BA15", "agentloop", "drive.go", "Drive", "DriveInput", "ScriptedTurn", "ActionGenerator", "GateAction", "RunMeter", "goal.IsClosed", "agentrun.Record", "AgentRun", "evolve.Evolve", "rapid", "fast-check", "Vitest", "miroir", "le mur", "determinism-first", "§2", "§6", "§8"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet. Pour la vue concept (sans code), voir [Pour les futurs utilisateurs → BA15](/steps/concept/ba15-coquille-de-boucle-drive).</Note>
+
+mirror record : `reflects=BA15-loop-shell`, `test_kind=fixture+property`, `cert_language=go+rapid+fast-check`, `liveness=alive`, `authority=below`.
+
+## En une phrase
+
+`Drive(DriveInput) → (AgentRun, error)` est la **coquille de boucle déterministe** du build-agent gouverné : elle réclame un item rouge, pilote une session scriptée (le LLM mocké par une séquence), gate **chaque** action via `GateAction` (BA13) **AVANT** son exécution, applique l'effet sur vert seulement, tick le `RunMeter` (BA11), boucle jusqu'à `goal.IsClosed` OU un dépassement de budget OU l'épuisement du générateur, puis émet un `agentrun.AgentRun` complet via `Record`. C'est la coquille — pure, sans horloge, sans LLM vivant — modelée sur `evolve.Evolve`.
+
+## Implémentation
+
+Fichiers : `back/runtime/agentloop/drive.go` (la coquille + `ScriptedGenerator`/`ActionGenerator`). Twin : `front/web/lib/agentrun.ts` (`drive` + `isClosed`). Réutilise : `agentimpl.GateAction`/`RunMeter`/`CheckBudget` (BA13/BA11), `goal.IsClosed`/`Budgets` (S29), `agentrun.AgentRun`/`Record` (BA-E1), `economics.HarnessCostBudget` (S51).
+
+- **`ActionGenerator`** (la couture, modelée sur `evolve.Sampler`) : `Next(i) → (ScriptedTurn, ok)`. INJECTÉE pour que `Drive` reste pure et prouvable sans modèle. En prod, un générateur adossé à `provider.Provider` (câblé en BA17) l'implémente ; ici un fake déterministe — `ScriptedGenerator{Turns}` — lit une slice fixe en ordre. La règle arch-fitness BA14 garde tout SDK LLM hors de tout paquet sauf `provider/`.
+- **`ScriptedTurn`** : la donnée pure stand-in d'un tour LLM — `Action` (l'entrée de `GateAction`), `Body` (l'`AgentAction` à enregistrer : `Type`/`Cible` ; `Autorisee`/`RaisonBlocage` sont estampés par `Drive` depuis le verdict, jamais crus depuis le script), `Cost` (`RunDelta` tally dans le `RunMeter`), `Effects` (les flips de senseur que l'action pose **à l'exécution seulement**). Un `SensorEffect{Mirror, State}` est le stand-in du mock pour « l'agent a changé du code et le miroir a basculé au vert ».
+- **`DriveInput`** : l'entrée pure, tout SUPPLIÉ (pas d'horloge ambiante — `StartedAt`/`EndedAt` passés ; pas de rng). Porte l'`Impl` (BA02), le `Goal` (S29, dont `RedSet`/`Budgets`), l'item, le `ContextPack`, la carte `Sensors` initiale (un red set est rouge), les autres entrées non-gameables (`PriorGreen`/`Mutation`/`MutationFloor`/`Monsters` — lues par `goal.IsClosed`, jamais produites par la boucle), le double budget (`HarnessBudget` S51 ∧ `Goal.Budgets` S29, réconciliés par `min()` dans le gate), `HookVerdicts`, le `Generator`, et un `MaxTurns` backstop.
+- **`Drive`** — la boucle, dans l'ordre exact du roadmap :
+  1. **Terminal #1** en tête de boucle : `goal.IsClosed` sur le monde de senseurs ÉVOLUANT → `green` (un goal déjà fermé enregistre zéro action) ;
+  2. `Generator.Next(i)` → épuisement = terminal `still_red` ;
+  3. `meter = meter.Tally(turn.Cost)` AVANT le check de budget (le tour qui pousse au-delà du cap est celui qui déclenche le breach) ;
+  4. **Terminal #2** : `CheckBudget` → breach ⇒ enregistre l'action refusée avec `AGENT_BUDGET_EXCEEDED`, `Result:abandoned` ;
+  5. `GateAction(impl, turn.Action, meter, …)` — le verdict composé unique (BA13) gate l'action AVANT exécution ;
+  6. refus ⇒ enregistre `AgentAction{Autorisee:false, RaisonBlocage}` et **`continue`** SANS exécuter (l'effet n'atterrit jamais — le mur tient) ; un refus n'est pas un terminal (l'agent peut tenter une autre action au tour suivant) ;
+  7. vert ⇒ applique les `Effects` (le mock « avance ») et enregistre `AgentAction{Autorisee:true}` ;
+  8. un dernier check `goal.IsClosed` après la boucle pour qu'un dernier tour vert qui ferme le goal enregistre `green` ;
+  9. `agentrun.Record(run)` estampe l'id content-addressé.
+- **`Result` calculé, jamais auto-rapporté** : `green` ssi `goal.IsClosed` tient sur le monde de senseurs final ; `abandoned` sur breach ; `still_red` sinon. La coquille ne lit JAMAIS une confiance d'agent — `goal.StopInput` n'a pas de champ de confiance (§8).
+- **`FinalMeter`** : rejoue les coûts du script pour exposer le `RunMeter` total au panneau, sans re-décider le `Result` (Drive en est propriétaire).
+
+Le miroir ROUGE d'abord :
+
+- `drive_fixture_test.go` (state→cmd→events) : **la keystone** — une séquence avec une écriture au-dessus de la ligne donne un run dont CETTE action est `Autorisee:false` (code `AGENT_WRITE_ABOVE_WATERLINE`), les écritures légales suivantes ferment le goal, `Result` calculé `green` ; l'effet refusé n'atterrit jamais (mirror.a non-flippé ⇒ `still_red`) ; happy-path deux flips ⇒ `green` ; goal déjà fermé ⇒ zéro action, `green` ; breach budget ⇒ `abandoned` avec `AGENT_BUDGET_EXCEEDED` ; générateur épuisé ⇒ `still_red`.
+- `drive_property_test.go` (rapid) : **reproductibilité** (même input ⇒ même `AgentRun`, même id, deux fois) ; **totalité** (jamais de panic sur un script arbitraire) ; **le mur** (aucune écriture au-dessus de la ligne n'est jamais `Autorisee:true`) ; **result calculé** (`green` ⇒ `goal.IsClosed` tient sur le monde final re-dérivé des effets autorisés).
+- Twin Vitest `agentlayer.test.ts` (+7) : keystone (écriture au-dessus de la ligne refusée, result calculé) ; effet refusé n'atterrit pas ; happy path ; breach abandonné ; reproductibilité (fast-check) ; soundness mur (fast-check) ; `isClosed` non-gameable.
+
+`go test ./runtime/agentloop/...` vert ; `./runtime/...` ./hooks/... vert (prior-green intact) ; `go build ./...` clean ; Vitest **98/98** (+7) ; tsc 0 ; biome clean sur les fichiers touchés ; Playwright `agents.spec.ts` **53/53** (+3 BA15). La commande `drive-run` vit dans `AgentsPanel` (hors de l'`impl-viewer`) — le compte de boutons du viewer reste 7.
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Modelée sur `evolve.Evolve`.** La discipline « coquille pure sur un générateur injecté, sans horloge, sans rng, replayable » est exactement celle d'`Evolve`. `Drive` la reprend : la seule dépendance non-déterministe (le LLM) est isolée derrière `ActionGenerator`, comme `Evolve` isole l'échantillonnage derrière `Sampler`. La coquille (réclamer/gater/exécuter/tick/fermer) est **tout du code**.
+- **Le gate AVANT l'exécution — l'intercepteur sur le chemin.** Si l'on gatait après coup, l'effet aurait déjà eu lieu. La boucle appelle `GateAction` puis n'applique l'effet QUE sur vert. C'est la défense en profondeur côté runtime (le hook S04 et les GRANTs sont les autres niveaux).
+- **`Result` calculé, jamais déclaré (§8 descendu au grain du run).** « Done is computed, never declared » est l'invariant cardinal d'AIDOS. `Drive` ne lit jamais la confiance de l'agent : il interroge `goal.IsClosed` sur l'état réel des senseurs. Le mock peut prétendre qu'une action ferme le goal ; seul le verdict des miroirs décide.
+- **Le mock est de la donnée, pas un agent.** Le LLM est remplacé par une slice lue en ordre. Aucune logique de la coquille ne défère à un jugement — ce serait un determinism gap. Le générateur réel (BA17) restera derrière la même couture.
+- **Sous la ligne, le mur intact.** `Drive` n'écrit aucune vérité : l'`AgentRun` est de la télémétrie. Une écriture vers une zone de vérité est refusée par l'axe ZONE du gate AVANT exécution. Toute vérité proposée passe par `idée → miroir → /goal`.
+
+## Méta-méta — l'invariant que ça garde vivant
+
+- **Une couche gouvernée n'est jamais une autorité.** BA15 rend la couche **opérante** (elle code) tout en gardant qu'elle **propose, exécute, explore — mais ne déclare jamais seule ce qui est vrai**. La boucle interroge le goal ; elle ne se prononce pas.
+- **Le déterminisme est une propriété prouvée, pas une promesse.** Le miroir property pin `même input ⇒ même run` (et même id). Tant qu'il est vert, la coquille est rejouable — fondation de `Replay` (BA28) et de l'audit fidèle-à-la-réalité (BA29).
+- **Le mur descend jusqu'au grain de l'action.** Chaque tour est gaté ; aucune action ne s'exécute sans verdict vert. L'invariant « l'agent n'écrit jamais une vérité » n'est pas seulement un GRANT Postgres ou un hook : il est tenu, action par action, dans la boucle elle-même.
+- **OpenQuestion documentée (forward-dependency, ne bloque pas le pas).** Aucun SDK n'est encore câblé : le générateur réel adossé à `provider.Provider` arrive en BA17, le câblage live du compteur + halt-on-budget en BA27, le re-check déterministe de chaque action en BA16. `Drive` pré-pose la couture ; ces pas la branchent.

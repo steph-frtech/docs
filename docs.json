@@ -197,7 +197,9 @@
               "steps/concept/ba13-gate-action-composee",
               "steps/internals/ba13-gate-action-composee",
               "steps/concept/ba14-une-seule-fonction-llm",
-              "steps/internals/ba14-une-seule-fonction-llm"
+              "steps/internals/ba14-une-seule-fonction-llm",
+              "steps/concept/ba15-coquille-de-boucle-drive",
+              "steps/internals/ba15-coquille-de-boucle-drive"
             ]
           }
         ]

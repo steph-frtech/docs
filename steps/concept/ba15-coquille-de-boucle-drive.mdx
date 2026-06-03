@@ -1,0 +1,46 @@
+---
+title: "BA15 · La coquille de boucle — Drive"
+description: "BA15 construit la coquille déterministe qui réclame un item rouge et pilote une session de codage SOUS la ligne : à chaque tour elle gate l'action AVANT exécution, n'exécute que sur vert, enregistre tout refus, tick le compteur, et boucle jusqu'à ce que le goal soit fermé OU le budget dépassé. Le LLM est mocké par une séquence scriptée. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA15", "Drive", "coquille de boucle", "loop shell", "AgentRun", "goal.IsClosed", "le mur", "determinism-first", "mock"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA15](/steps/internals/ba15-coquille-de-boucle-drive).</Note>
+
+## L'idée en une phrase
+
+Tous les pas précédents ont construit les **gardes** (le mur, l'arbitre, le compteur de budget, la règle « une seule fonction LLM ») mais rien ne les appelait dans une vraie boucle. BA15 pose enfin la **coquille** : la mécanique déterministe qui réclame un travail rouge, fait avancer une session de codage tour après tour sous toutes les contraintes déclarées, et termine en émettant le compte-rendu complet de ce qui s'est passé.
+
+## Le problème que ça résout
+
+Un agent qui code votre app, ce n'est pas « un modèle qu'on lâche ». C'est une **boucle gouvernée** : à chaque action qu'il voudrait faire, le mur doit décider AVANT que l'action ne s'exécute ; le coût doit s'accumuler ; et la décision « est-ce fini ? » ne doit **jamais** venir de l'agent lui-même. BA15 est cette boucle.
+
+Le point délicat : prouver la boucle **sans** modèle vivant. Un modèle est non-déterministe ; impossible d'écrire un test stable autour de lui. La solution : le LLM est remplacé par une **séquence scriptée** — une liste fixe d'actions que la coquille déroule en ordre. La coquille devient alors entièrement prouvable, et la seule dépendance non-déterministe (le modèle) reste cachée derrière une couture qu'on branchera plus tard.
+
+## Comment ça marche, vu de loin
+
+À chaque tour, la coquille fait exactement ceci, dans cet ordre :
+
+1. **Réclamer** l'item rouge (le travail à faire).
+2. Demander la **prochaine action** à la source d'actions — ici un script déterministe (le modèle est mocké).
+3. **Gater l'action AVANT qu'elle ne s'exécute** — c'est l'intercepteur sur le chemin, jamais après coup. Le verdict unique (le mur + tous les axes) décide.
+4. Sur **vert**, exécuter l'action (appliquer son effet) et enregistrer « autorisée ».
+5. Sur **tout refus**, enregistrer « refusée » avec le motif de blocage — et **ne pas exécuter** : l'effet ne se produit jamais.
+6. **Tick** le compteur de coût.
+7. **Boucler** jusqu'à : le goal est fermé, OU le budget est dépassé, OU les conditions d'arrêt sont atteintes.
+
+À la fin, la coquille émet un **run complet** — la trace de tout ce que l'agent a tenté, avec le verdict du mur sur chaque action.
+
+## Le point qui ne se négocie jamais
+
+Le **Résultat** d'un run (« vert », « toujours rouge », « abandonné »…) n'est **jamais auto-rapporté** par l'agent. Il est **calculé** par la condition d'arrêt non-gameable du goal : le résultat est « vert » seulement si l'ensemble des miroirs rouges est devenu vert, le vert antérieur intact, le score de mutation au-dessus du plancher, et aucun monstre. L'agent ne note jamais sa propre copie.
+
+Et **le mur tient** : si une des actions scriptées vise une zone de vérité (le noyau, les miroirs), elle est refusée AVANT exécution — son effet ne s'applique jamais, même si le script prétendait qu'elle ferait avancer le travail.
+
+## Ce que vous voyez à l'écran
+
+Sur le panneau **/agents** du Workbench, une commande **« Piloter la coquille de boucle »** :
+
+- un clic lance une session scriptée : deux écritures légales font passer les deux miroirs au vert → le run se ferme en **« vert »**, et chaque action est affichée **autorisée** ;
+- un interrupteur **« injecter une écriture au-dessus de la ligne »** ajoute, au premier tour, une écriture vers le noyau : le run la montre **refusée** (avec son code `AGENT_WRITE_ABOVE_WATERLINE`), tandis que les écritures légales suivantes ferment quand même le goal en **« vert »** — preuve que l'effet refusé n'a jamais atterri et que le Résultat est **calculé**, pas déclaré.
+
+<Note>Lancer un run est une opération **sous la ligne** (de la télémétrie) : la coquille n'écrit jamais une vérité. Toute vérité qu'un run voudrait proposer passe par `idée → miroir → /goal → approbation` — jamais une écriture directe.</Note>
