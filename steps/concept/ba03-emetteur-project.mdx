@@ -1,0 +1,56 @@
+---
+title: "BA03 · Project — l'émetteur déterministe qui projette une couche en configuration runnable"
+description: "BA03 ajoute Project(couche, providerCfg, pack) : l'émetteur déterministe qui projette une CoucheAgent (la SOURCE gouvernée de S52, au-dessus de la ligne) en une AgentImplementation runnable (sous la ligne), content-addressée comme un AgentRun (records.Canonicalize + Hash). Mêmes (couche, cfg, pack) → projection octet-identique. Le providerCfg ne porte QUE l'endpoint et la clé résolus — JAMAIS un knob de comportement : température, graine, max-turns viennent uniquement de la couche gouvernée. Project refuse une couche invalide, un cfg dont le modèle ne correspond pas à la couche, un fournisseur ou un modèle hors des ensembles fermés. Le mur (les chemins interdits) est désormais single-sourcé : le classificateur de la ligne de flottaison du hook S04 est extrait en un paquet importable, partagé par le hook, l'émetteur et le futur GateAction. Pur : pas de LLM, pas d'horloge."
+keywords: ["aidos", "krd", "build-agent", "BA03", "Project", "émetteur", "déterministe", "AgentImplementation", "CoucheAgent", "providerCfg", "endpoint", "clé", "credential", "knob", "température", "graine", "max-turns", "octet-identique", "hash-stable", "content-addressed", "records.Canonicalize", "records.Hash", "IsKnownProvider", "IsKnownModel", "ensemble fermé", "le mur", "single-sourcé", "ForbiddenPaths", "Classify", "ligne de flottaison", "hook S04", "OQ-S52-wall", "fail-closed", "determinism-first", "S52", "§2", "§6", "§8", "§9"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → BA03](/steps/internals/ba03-emetteur-project).</Note>
+
+## En une phrase
+
+BA03 ajoute **`Project(couche, cfg, pack)`** : l'**émetteur déterministe** qui transforme une `CoucheAgent` (la couche gouvernée, *au-dessus* de la ligne) en une `AgentImplementation` **runnable** (la projection de BA02, *sous* la ligne) — mêmes entrées, projection **octet-identique**.
+
+## Le problème que ça résout
+
+BA02 a défini la *forme* de la projection (`AgentImplementation`) mais **pas** la fonction qui la produit. Sans elle, la `CoucheAgent` restait la **seule** SOURCE d'AIDOS sans émetteur : une vérité gouvernée que rien ne savait rendre exécutable.
+
+Deux dangers guettaient cette fonction :
+
+1. **La dérive de configuration.** Si projeter la même couche donnait des configurations *différentes* (un ordre de clés instable, un champ horloge, une graine aléatoire), on ne pourrait jamais **rejouer** une session ni la **content-adresser** — la reproductibilité du runtime s'effondrerait.
+2. **Le knob clandestin.** Une session de codage LLM a besoin d'un `providerCfg` (l'endpoint, la clé API). La tentation : y glisser *aussi* la température, la graine, le nombre de tours. Mais alors un **comportement gouverné** (au-dessus de la ligne) serait modifiable par une **config résolue** (sous la ligne) — un trou dans le mur, une déclaration déguisée en exécution.
+
+BA03 rend ces deux dérives **impossibles**.
+
+## Les idées-clés
+
+<Field name="Émetteur déterministe, octet-identique" type="determinism-first, §6/§8">
+  `Project` est une **fonction pure** : pas de LLM, pas d'horloge, pas d'aléa. Mêmes `(couche, cfg, pack)` → **exactement les mêmes octets**, donc la **même empreinte de contenu** (le même schéma de content-adressage qu'`agentrun.Record` : `records.Canonicalize` + `records.Hash`). Une projection se rejette et se reprojette à l'identique.
+</Field>
+
+<Field name="Le providerCfg ne porte QUE des credentials" type="le mur + determinism-first">
+  Le `providerCfg` transporte **uniquement** l'endpoint et la clé résolus. Il ne porte **jamais** un knob de comportement. Preuve exécutable : changer l'endpoint ou la clé laisse la projection **octet-identique** (le secret n'entre même pas dans l'identité de la projection). La température, la graine, le nombre de tours viennent **uniquement** de la couche gouvernée (BA01).
+</Field>
+
+<Field name="Le gate est fail-closed" type="fail-closed">
+  `Project` **refuse** (erreur typée) : une couche qui échoue sa validation gouvernée (le mur, la forme) ; un `cfg` dont le modèle ne correspond pas à celui de la couche (le cfg ne *re-choisit* pas le modèle) ; un fournisseur hors de l'ensemble fermé ; **et un modèle hors de l'ensemble fermé déclaré par fournisseur** — un modèle retiré ou inexistant échoue *ici*, au gate, jamais opaquement chez le fournisseur.
+</Field>
+
+<Field name="Le mur est désormais single-sourcé" type="le mur, §2/§9">
+  Les chemins interdits de la projection (`kernel`, `mirrors`, `fitness`, et les préfixes de vérité sur disque) **égalent** les zones interdites du mur. Pour le garantir, le classificateur de la ligne de flottaison — jusqu'ici prisonnier du binaire du hook S04, non importable — est **extrait** en un paquet partagé. Le hook, l'émetteur et le futur `GateAction` lisent désormais **la même** définition du mur. Plus de copie à la main qui pourrait diverger.
+</Field>
+
+## Ce que vous voyez dans le Workbench
+
+Le panneau **/agents** gagne une section **« Émetteur déterministe — Project(couche, cfg, pack) »** avec un bouton **« Projeter la couche »**. Il exécute l'émetteur **deux fois** avec les mêmes entrées, puis une **troisième** fois avec un endpoint et une clé différents. Il affiche :
+
+- l'**empreinte de contenu** de la projection ;
+- un badge **« octet-stable »** (les deux premières projections ont la même empreinte) ;
+- un badge **« cfg sans knob »** (la troisième projection, malgré l'endpoint/clé modifiés, a **toujours** la même empreinte).
+
+Vous *voyez* donc, exécuté à l'écran, que l'émetteur est déterministe et que le `providerCfg` ne change rien au comportement.
+
+## Ce que ça ne fait pas
+
+- Ça ne **résout pas** la couche en outils/skills/hooks concrets selon une règle métier — la *règle* de résolution est un pas ultérieur ; ici les bindings activés sont projetés tels quels, triés pour la stabilité.
+- Ça n'**écrit aucune vérité** : `Project` lit une SOURCE, produit une projection sous la ligne. Aucune écriture au-dessus de la ligne, jamais.
+- Ça n'**appelle aucun modèle** : c'est un émetteur pur ; piloter une vraie session LLM est un pas ultérieur.

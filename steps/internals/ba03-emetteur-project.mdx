@@ -1,0 +1,56 @@
+---
+title: "BA03 · Project — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail d'implémentation de BA03 : l'émetteur déterministe Project(layer, ProviderCfg, pack) dans back/runtime/agentimpl/project.go, content-addressé via records.Canonicalize + records.Hash (CanonicalBytes/Hash), exactement comme agentrun.Record. ProviderCfg ne porte que Provider/Model (gate) + Endpoint/APIKey (json:\"-\", jamais dans la projection). Le gate fail-closed : agentlayer.Validate (couche), cfg.Provider/Model == Spec, IsKnownProvider, et le nouveau IsKnownModel (ensemble fermé par fournisseur dans agentlayer). Le mur single-sourcé : extraction de Classify du hook S04 (package main → paquet importable back/hooks/pretooluse/wall), re-export par le hook (anti-overwrite §9, wall_bdd_test/wall_property_test inchangés), lu par WallForbiddenPaths (agentimpl) et aboveWaterline (agentlayer.MayWrite). Les miroirs ROUGE-d'abord : agentimpl_emitter_property_test.go (rapid — octet-stable, cfg sans knob, knobs de la couche, refus invalid-layer/model-mismatch/unknown-provider/unknown-model, toujours wall-holding) + le miroir property du paquet wall. Le twin front lib/agentlayer (project/ProviderCfg/isKnownModel/implContentHash) + Vitest (36 tests), la section /agents « Émetteur déterministe » action-capable + l'e2e Playwright (13 tests). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "build-agent", "BA03", "Project", "émetteur", "déterministe", "back/runtime/agentimpl", "project.go", "ProviderCfg", "Endpoint", "APIKey", "CanonicalBytes", "Hash", "records.Canonicalize", "records.Hash", "agentrun.Record", "octet-identique", "hash-stable", "gate", "fail-closed", "agentlayer.Validate", "IsKnownProvider", "IsKnownModel", "knownModelsByProvider", "ensemble fermé", "le mur", "single-sourcé", "Classify", "extraction", "back/hooks/pretooluse/wall", "ForbiddenZones", "WallForbiddenPaths", "IsAboveWaterline", "aboveWaterline", "MayWrite", "OQ-S52-wall", "anti-overwrite", "wall_bdd_test", "wall_property_test", "rapid", "Vitest", "Playwright", "lib/agentlayer", "S01", "S02", "S04", "S52", "§2", "§6", "§8", "§9"]
+---
+
+<Note>Côté implémentation — le détail interne. Pour le concept et l'usage, voir [Pour les futurs utilisateurs → BA03](/steps/concept/ba03-emetteur-project).</Note>
+
+## En une phrase
+
+BA03 ajoute l'**émetteur déterministe `Project(layer, cfg, pack)`** dans `back/runtime/agentimpl/project.go` — il projette une `CoucheAgent` valide en une `AgentImplementation` octet-identique (content-adressée via `records.Canonicalize` + `records.Hash`, comme `agentrun.Record`), refuse au gate (fail-closed) toute couche/cfg/fournisseur/modèle invalide, et **résout OQ-S52-wall** en extrayant le classificateur de la ligne de flottaison du hook S04 vers un paquet importable single-sourcé.
+
+## Implémentation
+
+<Steps>
+  <Step title="Extraction du mur — Classify dans un paquet importable">
+    Le classificateur vivait dans `package main` de `back/hooks/pretooluse` (le binaire du hook), donc **non importable**. On l'extrait dans `back/hooks/pretooluse/wall` (`Classify`, `IsAboveWaterline`, `ForbiddenZones`, `Verdict`, `BlockReason`, `Decision`). Le hook conserve **exactement** sa surface publique en re-exportant via alias de type (`type Verdict = wall.Verdict`, `func Classify(...) Decision { return wall.Classify(...) }`). Anti-overwrite §9 : supersede-via-projection, pas de move silencieux — `wall_bdd_test.go` et `wall_property_test.go` passent **inchangés**. Un nouveau miroir property certifie le paquet extrait (déterminisme, accord `Classify`/`IsAboveWaterline`, `ForbiddenZones` stable + copie fraîche).
+  </Step>
+  <Step title="Single-sourcing — agentimpl + agentlayer lisent le paquet wall">
+    `agentimpl.WallForbiddenPaths()` retourne désormais `wall.ForbiddenZones()` ; `agentimpl.IsAboveWaterline` délègue à `wall.IsAboveWaterline`. Côté kernel, `agentlayer.aboveWaterline` (qui sous-tend `MayWrite`) délègue lui aussi à `wall.IsAboveWaterline` au lieu de re-copier le set verbatim. Le hook, l'émetteur et le mur du kernel lisent **une seule** définition. Pas de cycle d'import : le paquet `wall` n'importe que `strings`.
+  </Step>
+  <Step title="IsKnownModel — l'ensemble fermé de modèles par fournisseur (kernel)">
+    `agentlayer` gagne `knownModelsByProvider` (map fermée : anthropic → claude-opus-4-8/sonnet-4-5/haiku-4-5 ; openai → gpt-5/… ; google → gemini-3-…), `ModelsFor(p)` (copie fraîche, ordre canonique) et `IsKnownModel(p, model)` — le jumeau de `IsKnownProvider` sur l'axe modèle, fail-closed (fournisseur inconnu **ou** modèle non déclaré ⇒ false). Un modèle s'**ajoute** au set déclaré (au-dessus de la ligne, via /goal), jamais inféré.
+  </Step>
+  <Step title="ProviderCfg — credentials seulement">
+    `ProviderCfg{Provider, Model, Endpoint, APIKey}`. `Provider`/`Model` sont les **entrées du gate** (doivent égaler la couche). `Endpoint`/`APIKey` portent `json:"-"` : ils ne sont **jamais** marshalés dans la projection (un secret ne fait pas partie de l'identité content-adressée). Aucun champ de knob — la doc du type l'inscrit explicitement.
+  </Step>
+  <Step title="Project — le gate fail-closed puis la projection">
+    `Project` (1) `agentlayer.Validate(layer)` → `ErrInvalidLayer` ; (2) `cfg.Provider != spec.Provider` → `ErrCfgProviderMismatch` ; (3) `cfg.Model != spec.Modele` → `ErrCfgModelMismatch` (le cfg ne re-choisit pas le modèle) ; (4) `!IsKnownProvider` → `ErrUnknownProvider` ; (5) `!IsKnownModel(spec.Provider, spec.Modele)` → `ErrUnknownModel` (nouveau, BA03). Ensuite il **descend** les knobs depuis la SOURCE (`Provider`/`Model`/`Temperature`/`MaxTurns`/`Seed`/`MaxConcurrency`/`ResourceLimits`), résout les bindings activés (`resolveTools`/`resolveSkills`/`resolveHooks`, triés pour la stabilité), pose `ForbiddenPaths = WallForbiddenPaths()`, et **re-valide** la projection émise (`agentimpl.Validate`). `CanonicalBytes(a) = records.Canonicalize(json.Marshal(a))` ; `Hash(a) = records.Hash(CanonicalBytes(a))` — le schéma S01/S02.
+  </Step>
+  <Step title="Les miroirs (ROUGE d'abord → green)">
+    `agentimpl_emitter_property_test.go` (rapid) : (1) **octet-stable** — `Hash(Project) == Hash(Project)` + bytes canoniques identiques ; (2) **cfg sans knob** — endpoint/clé perturbés ⇒ même hash ; (2b) les knobs de la projection == ceux de la couche ; (3a-d) refus couche-invalide / model-mismatch / provider-inconnu / modèle-inconnu ; (4) toute projection émise est `Validate`-clean et porte le mur. Le miroir du paquet `wall` certifie le classificateur extrait. Côté front, `lib/agentlayer.test.ts` passe à **36 tests** (Vitest).
+  </Step>
+  <Step title="Le twin front + la section /agents action-capable">
+    `lib/agentlayer.ts` gagne `KNOWN_MODELS_BY_PROVIDER`, `isKnownProvider`/`isKnownModel`, `ProviderCfg`, `project(layer, cfg, pack)` (mirroir verdict-pour-verdict) et `implContentHash` (FNV-1a sur le JSON canonique, id de display stable). Le panneau `/agents` gagne la section **« Émetteur déterministe »** avec le bouton **« Projeter la couche »** qui **exécute** `project` deux fois (mêmes entrées) puis avec endpoint/clé différents, et affiche l'empreinte + les badges **octet-stable** et **cfg sans knob**. L'e2e `tests/e2e/agents.spec.ts` passe à **13 tests** (2 nouveaux BA03 prouvant l'exécution).
+  </Step>
+</Steps>
+
+## Méta — pourquoi c'est construit ainsi
+
+- **L'émetteur est miroir d'`agentrun.Record`.** Même schéma de content-adressage (`records.Canonicalize` + `records.Hash`), même discipline « pur, pas d'horloge, pas d'aléa ». Une projection est adressée par son contenu exactement comme un run — la reproductibilité du runtime se branche sur la même infrastructure que S01/S02.
+- **Le knob clandestin est rendu impossible par le typage + le test.** `Endpoint`/`APIKey` sortent du marshal (`json:"-"`) — structurellement absents de l'identité. Le miroir property *exécute* la perturbation (endpoint/clé changés) et exige un hash identique : la propriété « cfg sans knob » n'est pas une promesse de prose, c'est un invariant rejoué.
+- **Le single-sourcing du mur résout une vraie dette.** Avant BA03, trois copies du set de zones (hook S04, `agentlayer.wall`, et le set en dur d'`agentimpl`) pouvaient diverger silencieusement. L'extraction en un paquet importable + les alias du hook collapse les trois en une seule définition, sans casser une seule régression (anti-overwrite §9).
+- **`IsKnownModel` ferme le dernier axe ouvert.** Le fournisseur était déjà un ensemble fermé ; le modèle ne l'était pas — un modèle retiré aurait échoué *opaquement* chez le fournisseur, au runtime. Le gate le refuse maintenant *à la projection*, déterministiquement.
+
+## Méta-méta — la garantie de niveau 3
+
+BA03 ne touche **ni la fitness, ni le kernel-as-truth** : il ajoute une fonction **sous la ligne** (`Project`) et **renforce** le mur en le single-sourçant. Les garanties inviolables rendues exécutables : (1) **reproductibilité** — même `(couche, cfg, pack)` → octets identiques (miroir property) ; (2) **le mur tient et est unique** — une projection porte *toujours* le set de zones extrait, lu par le hook, l'émetteur et le kernel (une seule source, plus de fork) ; (3) **fail-closed** — couche/cfg/fournisseur/modèle invalide refusé au gate, jamais laissé filer. La méta-loop **ajoute** un garde-fou (l'émetteur déterministe + le mur single-sourcé), elle n'en **retire** aucun (§9) ; les régressions du hook S04 passent inchangées.
+
+## Limites connues
+
+- **Résolution des bindings encore triviale.** `resolveTools`/`resolveSkills`/`resolveHooks` projettent les bindings *activés* (triés) ; la *règle métier* de résolution (sous-ensemble selon le rôle/la tâche) reste un pas ultérieur. BA03 garantit la stabilité d'ordre, pas la sémantique de sélection.
+- **`pack` est une référence opaque.** L'argument `pack` (le `ContextPack`) est pris comme identifiant ; sa compilation (`context.Compile`) et son influence fine sur la projection sont des pas ultérieurs — ici il participe à l'identité de la session sans être déstructuré.
+- **`implContentHash` (front) n'est pas cryptographique.** Le twin front utilise un FNV-1a sur le JSON canonique — un id de display stable qui prouve la *byte-stabilité* à l'écran ; le Go reste l'autorité (SHA-256 via `records.Hash`).
+- **Pas de session LLM.** `Project` est un émetteur pur ; aucun appel modèle. Piloter une vraie boucle de codage sous les contraintes projetées est un pas ultérieur.
+- **Linear non authentifié.** Si l'issue de suivi BA03 n'a pu être mise à jour (OAuth du MCP `linear-server` requis), c'est noté comme OpenQuestion, non bloquant.

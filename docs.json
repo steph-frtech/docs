@@ -173,7 +173,9 @@
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",
-              "steps/internals/ba02-agent-implementation"
+              "steps/internals/ba02-agent-implementation",
+              "steps/concept/ba03-emetteur-project",
+              "steps/internals/ba03-emetteur-project"
             ]
           }
         ]
