@@ -1,0 +1,44 @@
+---
+title: "BA21 · Role-matching déterministe + détecteur de famine — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de BA21 : MatchRole(item, layer, agents) → (chosenRef, ok), une fonction pure totale mappant un RedWorkItem à une CoucheAgent par rôle déclaré (mirror-first, jamais un fallback de mauvais rôle), HeadOf (la tête mirror-first), DetectStarvation (le signal still_red, gap E3), les miroirs de reproductibilité rapid + fast-check, l'UI action-capable et l'e2e Playwright."
+keywords: ["aidos", "krd", "BA21", "MatchRole", "role-matching", "ordonnanceur", "scheduler", "HeadOf", "DetectStarvation", "still_red", "famine", "gap E3", "mirror-first", "LayerRank", "determinism-first", "le mur", "rapid", "fast-check"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet. Pour la vue concept, voir [Pour les futurs utilisateurs → BA21](/steps/concept/ba21-role-matching).</Note>
+
+## En une phrase
+
+BA21 ajoute au paquet `back/runtime/scheduler` deux fonctions **pures, totales et déterministes** : `MatchRole(item, layer, agents) → (chosenRef, ok)`, qui mappe un `RedWorkItem` à une `CoucheAgent` par **rôle déclaré** (en respectant l'ordre mirror-first et SANS jamais retomber sur un mauvais rôle — le mur), et `DetectStarvation(head, agents, ticksWaited, threshold) → (signal, bool)`, qui surface un signal `still_red` quand la tête mirror-first reste non-staffée *N* ticks (anti-famine, gap E3). Le matching est un **algorithme sur des rôles déclarés, jamais un prompt LLM** (determinism-first).
+
+## Implémentation
+
+Tout vit dans `back/runtime/scheduler/matchrole.go` (cœur Go), jumelé dans `front/web/lib/scheduler.ts`.
+
+- **La table DÉCLARÉE `layerRole`** — le mapping `Layer → rôle requis` : `mirror → "bdd-writer"`, `projection / operation_action / button → "executor"`. Une couche inconnue ⇒ aucun rôle (`RoleFor` retourne `("", false)`, fail-closed). C'est une constante au-dessus de la ligne, jamais apprise.
+- **`LayerRank(layer) → int`** — le rang mirror-first (`mirror`=0 < `projection`=1 < `operation_action`=2 < `button`=3, inconnu=4), re-déclaré localement (la même règle que le `layerRank` non-exporté de `redwave`) pour que le cœur de l'ordonnanceur ne dépende d'aucun paquet amont — il lit une string déclarée, pas un import.
+- **`MatchRole(item, layer, agents) → (ref, ok)`** — pure + totale : elle résout le rôle requis de la couche (`RoleFor`), puis parcourt les `Candidate` (chacun : `Ref`, `Role` déclaré, `Free`) et retient le `Ref` **lex-le-plus-petit** parmi les agents **libres** dont le `Role` égale le rôle requis (un ordre total ⇒ même entrée, même sortie). Aucun match ⇒ `("", false)`. JAMAIS un agent occupé, JAMAIS un fallback vers un mauvais rôle, JAMAIS de panic. Aucune horloge, aucun rng, aucune I/O.
+- **`HeadOf(queue) → (QueueEntry, ok)`** — la tête mirror-first d'une file d'items ouverts : l'item de plus bas `LayerRank`, départage par `item_id` (ordre total). File vide ⇒ `ok=false`. Pure, ne mute pas la slice (tri sur une copie).
+- **`DetectStarvation(head, agents, ticksWaited, threshold) → (StarvationSignal, bool)`** — le détecteur anti-famine, pur lui aussi : il reçoit `ticksWaited` (le tick driver impur de BA22 compte les ticks — pas d'horloge ici) et un `threshold` DÉCLARÉ. Il surface un signal **ssi** (1) `MatchRole(head)` échoue (la tête n'a aucun agent libre du bon rôle), ET (2) `ticksWaited >= threshold`. Un `threshold <= 0` signifie « jamais de famine ». Si la tête EST matchable, pas de famine quel que soit le nombre de ticks (staffer la résout). Le `StarvationSignal` porte `Class="still_red"`, l'item de tête, sa couche, le rôle requis et le nombre de ticks — et, par construction, AUCUN `Version`/`Mirror` (c'est un événement runtime, pas une couche).
+- **Le miroir de reproductibilité** (`matchrole_property_test.go`, rapid, 4 propriétés + 1 table check) — (1) `MatchRole` déterministe + total + lié au rôle (re-calcul de l'attendu lex-le-plus-petit libre, assertion qu'une couche inconnue ne matche pas) ; (2) `DetectStarvation` ssi non-staffé ET au-dessus du seuil, silencieux si matchable ou `threshold<=0`, signal portant l'item + le rôle ; (3) `HeadOf` mirror-first + total (rang minimal, file vide sans tête) ; (4) la table `RoleFor`/`LayerRank` déclarée, pinnée par cas fixes.
+- **Le jumeau front** (`front/web/lib/scheduler.ts` : `matchRole`, `headOf`, `detectStarvation`, `roleFor`, `layerRank`) reflète le cœur Go verbatim ; son miroir fast-check (`front/web/lib/scheduler.test.ts`) rejoue les mêmes propriétés (déterminisme, mur-respecté, anti-famine, `threshold<=0` silencieux).
+- **L'UI action-capable** (`front/web/components/SchedulerSection.tsx`, sous-section `scheduler-matchrole` sur `/agents`) — une file de démo dont la tête est un item miroir + un roster (`bdd-writer@v1`, `executor@v1`). « Matcher le rôle (mirror-first) » bound à `matchRole(head.layer, roster)` → choisit le `bdd-writer` libre ; « Occuper le bdd-writer » le rend busy ; un re-match répond alors « pas de match » (pas de mauvais rôle) ; « Détecter la famine » bound à `detectStarvation` → lève `still_red`. Thémé (ADR 0010), bilingue FR/EN (ADR 0011). L'e2e Playwright (`tests/e2e/agents.spec.ts`, bloc BA21, 3 cas) prouve : contrôles présents + tête mirror-first ; match → `bdd-writer@v1` ; bdd-writer occupé → match refusé + signal `still_red`.
+
+## Méta — pourquoi c'est construit ainsi
+
+Deux décisions structurantes.
+
+**Le mapping `Layer → rôle` est une table déclarée, pas une heuristique.** Le rôle requis d'un item est une *donnée* (au-dessus de la ligne, jamais apprise) ; le matcheur ne « devine » jamais à quel agent confier un travail — c'est précisément le genre de jugement qu'on refuse de laisser à un LLM. Un agent qui choisirait l'assignation par prompt serait un trou de déterminisme qui bloque le pas. Le tie-break lex-le-plus-petit est arbitraire mais *total* : ce qui compte n'est pas *quel* agent gagne un ex æquo, mais que le choix soit reproductible à l'octet.
+
+**La famine est surfacée comme un signal, pas avalée.** Sans `DetectStarvation`, un dispatcher mirror-first parfaitement correct peut rester coincé en silence : la tête attend un `bdd-writer` que l'équipe ne contient pas. On *pourrait* faire un fallback vers un autre rôle — mais ce serait briser le mur (un item travaillé par le mauvais rôle). Le bon design est l'inverse : refuser le mauvais casting, ET lever une alarme. Le signal `still_red` rejoint la classe des signaux que l'on-ramp BA28 transformera en idée (« staffer un agent de ce rôle »). `ticksWaited` est *passé* (le tick driver BA22 le compte) pour que le détecteur reste pur — interdit d'horloge dans un `/long-run`.
+
+## Méta-méta — l'invariant que ça garde vivant
+
+> **L'assignation du travail est un algorithme sur des rôles déclarés — jamais un jugement d'IA — et une file qui coince faute du bon profil ne reste jamais silencieuse.**
+
+BA21 consomme le `SELECT kernel.agent_layer` que BA20 a ouvert (gap E4) pour lire les rôles déclarés, mais il n'écrit RIEN : `MatchRole` *choisit* l'owner que `Claim` (BA20) estampillera, l'ordonnanceur ne devient pas un 2ᵉ writer de vérité. Le matching est total (pas de match ⇒ `ok=false`, jamais de panic) et lié au rôle (jamais de fallback) : le mur tient même quand l'équipe est mal staffée. Et le détecteur de famine ferme le piège du « gouverné mais bloqué » : la tête non-staffée est *surfacée* (`still_red`), jamais contournée par un mauvais casting. Les deux miroirs de reproductibilité (rapid + fast-check) rejouent « même entrée ⇒ même sortie » sur les deux plans — un ordonnanceur qui jugerait par LLM ce qu'une table déclarée et un ordre total décident serait un trou de déterminisme qui **bloque le pas**.
+
+## Limites connues (OpenQuestions, par conception)
+
+- **Persistance Postgres du miroir.** Le miroir property de BA21 est matérialisé comme test exécutable (`matchrole_property_test.go`) ; sa persistance dans le schéma `mirrors` est back-fillée au pas qui consomme ce schéma (exception bootstrap, S06). N'empêche pas le pas.
+- **Le tick driver est BA22.** BA21 ne fournit que les fonctions pures (`MatchRole`, `HeadOf`, `DetectStarvation`) ; la coquille impure qui compte les ticks et appelle `DetectStarvation` au fil du temps est BA22 (la seule à porter `now`). Différé structurel.
+- **L'on-ramp du signal est BA28.** Le `StarvationSignal` est émis ici ; sa transformation en idée gouvernée (staffer un agent) est le pas BA28. Surface ouverte au pas qui en a besoin.

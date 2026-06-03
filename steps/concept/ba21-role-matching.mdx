@@ -1,0 +1,40 @@
+---
+title: "BA21 · Le bon agent pour le bon travail — et l'alarme « équipe mal staffée »"
+description: "BA21 décide, par un algorithme et non par un prompt, quel agent reçoit un item de travail rouge : on le mappe par RÔLE déclaré, en respectant l'ordre mirror-first. Et si la tête de la file n'a personne pour la prendre, un détecteur de famine lève un signal — l'équipe est mal staffée. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA21", "role-matching", "MatchRole", "ordonnanceur", "scheduler", "rôle", "mirror-first", "famine", "starvation", "still_red", "determinism-first", "le mur"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA21](/steps/internals/ba21-role-matching).</Note>
+
+## L'idée en une phrase
+
+BA20 a créé le rôle qui *réclame* un travail. BA21 répond à la question suivante : **quel agent doit le prendre ?** La réponse est un **algorithme** — on mappe l'item à un agent par son **rôle déclaré** — jamais un jugement d'IA.
+
+## Mapper par rôle, dans le bon ordre
+
+Chaque item de travail rouge porte une *couche* : un miroir, une projection, une opération, un bouton. Et chaque agent porte un **rôle déclaré** : un *bdd-writer* écrit les miroirs, un *executor* fait le reste. Le matching est simple et mécanique :
+
+- un item de couche **miroir** ne peut aller qu'à un **bdd-writer** ;
+- un item de couche **projection / opération / bouton** ne peut aller qu'à un **executor**.
+
+Et l'ordre compte : la discipline **mirror-first** veut que la tête de la file soit toujours le miroir. BA21 choisit donc la tête mirror-first, puis lui cherche un agent **libre** du bon rôle. S'il y en a plusieurs, le choix est **déterministe** (le même tri, toujours) — jamais un coup de dés.
+
+## Pas de mauvais casting
+
+Le point dur du mur, ici : **jamais de repli vers un mauvais rôle.** Si la tête demande un *bdd-writer* mais qu'aucun n'est libre, le matcheur ne « fait pas avec » un *executor* à la place — il répond simplement « pas de match ». Un item n'est jamais travaillé par un agent du mauvais rôle.
+
+## L'alarme anti-famine
+
+Un ordonnanceur peut être parfaitement gouverné **et parfaitement bloqué en silence** : la tête de la file attend un rôle que personne ne fournit. C'est exactement ce que BA21 refuse de laisser passer. Si la tête mirror-first reste sans agent correspondant pendant *N* ticks, un **détecteur de famine** lève un signal `still_red` — littéralement : « l'équipe est mal staffée pour ce travail ». Ce signal n'est pas une vérité, c'est une alarme : il nourrit plus tard l'apprentissage (BA28), pour qu'un humain décide d'ajouter un agent du bon rôle.
+
+## Ce que vous voyez à l'écran
+
+Le panneau **/agents**, sous la section ordonnanceur, porte « Role-matching & anti-famine ». La tête mirror-first et le roster d'agents sont affichés :
+
+- **Matcher le rôle (mirror-first)** — choisit l'agent libre du bon rôle pour la tête. La tête est un miroir → un *bdd-writer* libre est choisi.
+- **Occuper le bdd-writer** — rend le seul *bdd-writer* occupé : le re-matching répond alors « pas de match » (jamais un mauvais rôle à la place).
+- **Détecter la famine** — sur cette tête mal staffée, l'alarme `still_red` se lève, nommant l'item et le rôle manquant.
+
+## Ce que ça vous garantit
+
+Le bon agent prend le bon travail, dans le bon ordre, par une règle qu'on peut relire — pas une boîte noire ; un item n'est jamais confié à un rôle qui n'est pas le sien ; et une file qui *coince* faute du bon profil ne reste pas silencieuse : elle le dit, fort, pour qu'on staffe l'équipe.
