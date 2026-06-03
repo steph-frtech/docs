@@ -1,0 +1,97 @@
+---
+title: "BA10 · L'enforcer de HOOKS OBLIGATOIRES HooksSatisfied — internals (Implémentation · Méta · Méta-méta)"
+description: "Détail d'implémentation de BA10 : HooksSatisfied(impl, hookVerdicts) → *BlockReason dans back/runtime/agentimpl/enforce.go, une fonction pure totale (deux passes : sauté avant rouge) consommant un enregistrement de verdict par hook (HookVerdict{Phase,Hook,Ran,Green} — l'exit déterministe du BINAIRE, jamais le transcript de l'agent, §8) et assertant que chaque HooksObligatoires{Mandatory:true} a tourné ET est vert, avec les nouveaux codes S13 AGENT_MANDATORY_HOOK_SKIPPED / AGENT_MANDATORY_HOOK_RED. Le miroir property + FAULT-INJECTION rapid (hooks_property_test.go, 8 props : nil-ssi-tout-vert, non-mandatory-ne-bloque-jamais, codes sauté/rouge, sauté-précède-rouge, vert-sans-mandatory, déterminisme, fault-injection retirer/rougir) épingle la loi. Twin TS hooksSatisfied/HookVerdict (lib/agentlayer.ts) + sa sonde d'acceptation action-capable dans /agents (AgentsPanel.tsx) + Vitest (67) + 4 Playwright (fault-injection sauté/rouge). Mirror-first, hook-honesty §5, determinism-first."
+keywords: ["aidos", "krd", "BA10", "agentimpl", "HooksSatisfied", "enforce.go", "HookVerdict", "AGENT_MANDATORY_HOOK_SKIPPED", "AGENT_MANDATORY_HOOK_RED", "BlockReason", "S13", "axe hook", "hook obligatoire", "Mandatory", "acceptation du tour", "présence ≠ vert", "le verdict du binaire", "le juge est déterministe", "hook-honesty", "fault-injection", "rapid", "property test", "miroir", "determinism-first", "twin TS", "hooksSatisfied", "sonde d'acceptation", "Playwright", "ADR 0009", "ADR 0010", "ADR 0011", "le mur", "internals"]
+---
+
+<Note>Côté implémentation — l'intérieur de la machine. Pour le concept sans code, voir [Pour les futurs utilisateurs → BA10](/steps/concept/ba10-enforcer-hooks-obligatoires).</Note>
+
+## En une phrase
+
+BA10 ajoute `HooksSatisfied(impl AgentImplementation, verdicts []HookVerdict) → *BlockReason` — une **fonction pure, totale** (`back/runtime/agentimpl/enforce.go`) qui asserte que chaque `HooksObligatoires{Mandatory:true}` déclaré dans l'implémentation résolue a réellement **tourné** *et* est **vert**, jugé par le verdict du **binaire** du hook (`HookVerdict`), jamais le transcript de l'agent — avec les nouveaux codes S13 `AGENT_MANDATORY_HOOK_SKIPPED` / `AGENT_MANDATORY_HOOK_RED`.
+
+## Implémentation
+
+**Le miroir d'abord (rouge → vert).** `back/runtime/agentimpl/hooks_property_test.go` — les propriétés `rapid` de BA10 écrites AVANT le code, rouges (compile-fail : `HooksSatisfied`, `HookVerdict` et `blockreason.CodeAgentMandatoryHookSkipped`/`…Red` indéfinis). Elles épinglent la loi de BA10 :
+
+- `TestProp_HooksSatisfied_NilIffAllMandatoryGreen` — la loi : `HooksSatisfied == nil ⟺ ∀ h mandatory : (∃ v matching h ∧ v.Ran ∧ v.Green)` (comparée à une sémantique de référence `refSatisfied`).
+- `TestProp_HooksSatisfied_NonMandatoryNeverBlocks` — un hook non obligatoire, sauté ou rouge, ne bloque jamais.
+- `TestProp_HooksSatisfied_SkippedCarriesSkippedCode` — un hook obligatoire sans verdict ⇒ `AGENT_MANDATORY_HOOK_SKIPPED` + `how_to_fix` non vide.
+- `TestProp_HooksSatisfied_RedCarriesRedCode` — un hook obligatoire qui a tourné et n'est pas vert ⇒ `AGENT_MANDATORY_HOOK_RED` + `how_to_fix` non vide (**présence ≠ vert**).
+- `TestProp_HooksSatisfied_SkippedPrecedesRed` — la **précédence** : un hook absent est *sauté* (rapporté en premier), jamais miscodé *rouge*.
+- `TestProp_HooksSatisfied_GreenWhenNoMandatory` — sans hook obligatoire, toujours satisfait (rien à gater).
+- `TestProp_HooksSatisfied_Deterministic` — mêmes entrées → même verdict.
+- `TestFaultInjection_HooksSatisfied_RemoveOrRedFlipsRed` — **la fault-injection (§5 hook-honesty)** : partir d'une config tout-vert satisfaite, puis injecter deux fautes — (1) **retirer** le verdict d'un hook obligatoire (sauté) et (2) **rougir** un verdict présent — et asserter le bascule de `nil` au bon `BlockReason`. Un gate qu'on ne peut pas faire rougir est mort.
+
+**L'enforcer** — `back/runtime/agentimpl/enforce.go`.
+
+```go
+type HookVerdict struct {
+    Phase string `json:"phase"`
+    Hook  string `json:"hook"`
+    Ran   bool   `json:"ran"`
+    Green bool   `json:"green"`
+}
+
+func verdictFor(verdicts []HookVerdict, phase, hook string) (HookVerdict, bool) {
+    for _, v := range verdicts {
+        if v.Phase == phase && v.Hook == hook {
+            return v, true
+        }
+    }
+    return HookVerdict{}, false
+}
+
+func HooksSatisfied(impl AgentImplementation, verdicts []HookVerdict) *blockreason.BlockReason {
+    // First pass: any mandatory hook that NEVER ran is SKIPPED (reported before red).
+    for _, h := range impl.Hooks {
+        if !h.Mandatory { continue }
+        if v, ok := verdictFor(verdicts, h.Phase, h.Hook); !ok || !v.Ran {
+            br := blockreason.For(blockreason.CodeAgentMandatoryHookSkipped)
+            return &br
+        }
+    }
+    // Second pass: any mandatory hook that ran but is NOT green is RED (presence ≠ green).
+    for _, h := range impl.Hooks {
+        if !h.Mandatory { continue }
+        v, _ := verdictFor(verdicts, h.Phase, h.Hook)
+        if !v.Green {
+            br := blockreason.For(blockreason.CodeAgentMandatoryHookRed)
+            return &br
+        }
+    }
+    return nil
+}
+```
+
+- **Deux passes** : la première rapporte le *sauté* (un hook absent ou `Ran:false`), la seconde le *rouge* (un hook présent mais `Green:false`). La précédence sauté-avant-rouge rend le verdict **stable** (determinism-first) — un hook entièrement absent est « sauté », jamais miscodé « rouge ».
+- **Consomme `HookVerdict`** — l'enregistrement par hook qui est l'**exit/BlockReason du binaire** du hook lui-même, jamais un set auto-rapporté par l'agent (§8).
+- Pure, totale, déterministe : aucune DB, aucune horloge, aucun rng, aucune I/O. Évaluation de prédicat sur les hooks obligatoires déclarés, jamais un jugement.
+
+**Les deux nouveaux codes S13** — `back/runtime/blockreason/blockreason.go` (extension d'enum additive, change_type: refine, jamais une suppression — anti-overwrite §9) : `CodeAgentMandatoryHookSkipped`/`CodeAgentMandatoryHookRed`, leurs entrées dans le registre `reasons` (sévérité `blocking`, explication d'axe HOOK nommant « le verdict vient du binaire, jamais le transcript » et « présence ≠ vert », `how_to_fix` nommant `idée → miroir → /goal` pour qu'un hook cesse d'être obligatoire), et leur ajout à `codeOrder`. Le miroir property enum-driven existant valide **automatiquement** les nouveaux codes via `Codes()`.
+
+**Le twin TS + la sonde action-capable** — `front/web/lib/agentlayer.ts` (`hooksSatisfied`/`HookVerdict`, leurs reasons verbatim du registre Go) + son miroir de reproductibilité Vitest (`lib/agentlayer.test.ts`, bloc BA10 — 67 au total) + la **sonde d'acceptation de tour** dans `components/AgentsPanel.tsx` (`ImplementationViewer`) : un `select` d'injection de faute (*aucune* / *retirer un hook* / *rougir un hook*), un bouton « Évaluer l'acceptation du tour » qui **exécute** `hooksSatisfied(impl, verdicts)` (les verdicts construits depuis les hooks obligatoires de l'impl + la faute simulant le binaire), et le rendu du verdict (badge accepté, ou encadré refusé avec code + explication + how_to_fix). Themé (ADR 0010), bilingue (clés `hookGate*` FR/EN, ADR 0011).
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Cinquième axe, nature différente.** Les quatre axes du mur (zone/capacité/skill/confinement) gatent un *accès* (entrée = une cible) ; BA10 gate une *acceptation* (entrée = un set de verdicts). C'est pour ça que sa signature diffère — `(impl, verdicts) → *BlockReason` plutôt que `(impl, target) → Decision`. Le `*BlockReason` (nil = accepté) est la même forme que les autres axes habillent dans leur `Decision`, donc BA13 pourra le composer dans le `GateAction` à précédence unique sans cas spécial.
+- **Présence ≠ vert, l'erreur facile.** Le piège serait de n'asserter que « le hook a tourné ». Non : un hook obligatoire qui a tourné et *échoué* est aussi inacceptable qu'un hook *sauté*. Deux codes distincts (`SKIPPED`/`RED`), deux passes, pour que l'opérateur sache *laquelle* des deux fautes a bloqué.
+- **Le verdict du binaire, jamais le transcript (§8).** Si `HooksSatisfied` lisait un « j'ai passé mes hooks » de l'agent, le gate serait circulaire. L'entrée est le `HookVerdict` — l'exit déterministe du binaire du hook. Le juge est déterministe.
+- **Hook-honesty rendue exécutable (§5).** La fault-injection n'est pas un commentaire : c'est un test qui *retire* et *rougit* un hook obligatoire et asserte le bascule. Un gate qu'on ne peut pas faire rougir serait mort — le miroir le prouve vivant.
+
+## Méta-méta — la garantie de niveau 3
+
+- **L'axe HOOK déclaré est désormais appliqué.** Avant BA10, `HooksObligatoires{Mandatory:true}` (résolu par BA05, préservant le drapeau Mandatory à la projection) était du JSON inerte : rien ne vérifiait que les hooks obligatoires *tournent et passent*. BA10 ferme l'axe HOOK du périmètre — c'est la primitive que la boucle (BA15+) appellera pour **refuser d'accepter un tour** dont un hook obligatoire est sauté ou rouge. Aucune autonomie n'est câblée avant la fermeture du périmètre (BA-E2).
+- **Aucune capacité headless (§7, ui-completeness).** L'op `HooksSatisfied` est *atteignable ET exécutable* depuis un écran : la sonde s'exécute et rend son verdict, prouvé par 4 tests Playwright (présence + action-capable ; sans faute → accepté ; retirer un hook → `AGENT_MANDATORY_HOOK_SKIPPED` + how_to_fix nommant la porte ; rougir un hook → `AGENT_MANDATORY_HOOK_RED`).
+- **Le mur tient — sur le cinquième axe.** L'enforcer est un verdict pur sous la ligne : il n'exécute aucun agent, ne fait tourner aucun hook, n'écrit aucune vérité, n'ouvre aucune dispense. Qu'un hook cesse d'être obligatoire reste impossible sans passer la porte gouvernée (idée → miroir → /goal).
+
+## Note d'évolution (anti-overwrite §9)
+
+BA09 affirmait « exactement 3 boutons dans la vue Implémentation » (les sondes capacité + skill + chemin). BA10 ajoute *un* quatrième contrôle — la sonde d'acceptation de tour (un `select` de faute + un bouton) — lui aussi un **verdict pur sous la ligne**, ni un run d'agent ni une écriture de vérité. L'invariant protégé (aucun contrôle de *run*, aucune écriture de *vérité*) tient toujours.
+
+## Limites connues
+
+- La sonde évalue l'`impl` *projetée affichée* (mockée par les fixtures `agentlayer-data`, §6) ; les `HookVerdict` y sont *simulés* par le toggle de faute jouant le rôle du binaire. Quand les binaires hook réels émettront leurs verdicts (câblage dans la boucle BA15+), l'enforcer et son verdict tiennent inchangés (l'entrée change, pas la fonction).
+- L'enforcer est l'axe HOOK **seul** ; sa composition avec les axes zone/capacité/skill/confinement/budget dans un `GateAction` à précédence unique arrive à BA13. Le câblage de la boucle qui *refuse d'accepter un tour* dont les hooks obligatoires ne sont pas verts arrive à BA15/BA16 (le post-check par action).
+- Le twin TS utilise les mêmes reasons que le Go (verbatim) ; l'autorité du registre BlockReason reste le Go (`back/runtime/blockreason`).
+- **Linear :** le MCP `linear-server` n'est pas authentifié dans cette session (OAuth requis) ; le suivi du pas BA10 (statut In Progress → Done) n'a pu être mis à jour automatiquement — OpenQuestion, sans blocage du pas (CLAUDE.md §11, best-effort).

@@ -187,7 +187,9 @@
               "steps/concept/ba08-enforcer-skill",
               "steps/internals/ba08-enforcer-skill",
               "steps/concept/ba09-enforcer-confinement",
-              "steps/internals/ba09-enforcer-confinement"
+              "steps/internals/ba09-enforcer-confinement",
+              "steps/concept/ba10-enforcer-hooks-obligatoires",
+              "steps/internals/ba10-enforcer-hooks-obligatoires"
             ]
           }
         ]

@@ -1,0 +1,61 @@
+---
+title: "BA10 · L'enforcer de HOOKS OBLIGATOIRES — un tour n'est ACCEPTÉ que si chaque hook obligatoire est VERT"
+description: "BA10 ajoute l'axe HOOK de l'acceptation, distinct des quatre axes du mur. Les axes ZONE (S04/S52), CAPACITÉ (BA07), SKILL (BA08) et CONFINEMENT (BA09) gatent ce qu'une action peut TOUCHER ; BA10 gate si un TOUR peut être ACCEPTÉ. HooksSatisfied(impl, hookVerdicts) → *BlockReason est une fonction pure totale qui asserte que chaque HooksObligatoires{Mandatory:true} déclaré dans l'implémentation résolue de l'agent a réellement TOURNÉ ET est VERT — présence ≠ vert. Un hook absent (jamais tourné) → AGENT_MANDATORY_HOOK_SKIPPED ; un hook qui a tourné mais échoué → AGENT_MANDATORY_HOOK_RED. Le verdict provient de l'exit/BlockReason déterministe du BINAIRE du hook (l'enregistrement HookVerdict), JAMAIS d'un set de noms auto-rapporté par l'agent (§8 — le juge est déterministe). Hook-honesty §5 : la fault-injection (retirer/rougir un hook) prouve que le gate bascule. Le panneau /agents gagne une sonde d'acceptation de tour action-capable. Determinism-first : appartenance/prédicat, jamais un jugement."
+keywords: ["aidos", "krd", "build-agent", "BA10", "agentimpl", "HooksSatisfied", "axe hook", "hook obligatoire", "HooksObligatoires", "Mandatory", "acceptation du tour", "turn acceptance", "HookVerdict", "le verdict du binaire", "hook-honesty", "fault-injection", "AGENT_MANDATORY_HOOK_SKIPPED", "AGENT_MANDATORY_HOOK_RED", "BlockReason", "S13", "présence ≠ vert", "le juge est déterministe", "le mur", "idée → miroir → /goal", "sonde d'acceptation", "action-capable", "/agents", "determinism-first", "§5", "§6", "§8"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → BA10](/steps/internals/ba10-enforcer-hooks-obligatoires).</Note>
+
+## En une phrase
+
+BA10 ajoute l'**axe HOOK de l'acceptation** : après les quatre axes du mur qui gatent ce qu'une action peut **toucher** (ZONE, CAPACITÉ, SKILL, CONFINEMENT), l'axe HOOK gate si un **tour** peut être **accepté** — `HooksSatisfied(impl, hookVerdicts)` n'accepte le tour **que si** chaque hook **obligatoire** déclaré dans l'implémentation résolue de l'agent a réellement **tourné** *et* est **vert**.
+
+## Le problème que ça résout
+
+Un agent gouverné peut être parfaitement confiné — n'écrire que dans l'arbre de l'app, n'appeler que des outils liés, n'invoquer que des skills accordés, ne toucher que des chemins autorisés — et **quand même** produire un tour inacceptable : il a sauté un hook obligatoire, ou un hook obligatoire a tourné et **échoué** sans que personne ne le voie. Les quatre axes du mur protègent *où* et *avec quoi* l'agent agit ; aucun ne répond à la question « **ce tour est-il admissible ?** ».
+
+BA10 répond à cette question avec une primitive : un tour est admissible **uniquement** quand tous ses hooks obligatoires ont tourné et sont verts. C'est la garantie que `aidos check`, la complétude, les sensors — ce que les hooks obligatoires de l'agent surveillent — ont *réellement été exécutés et sont passés* avant que le tour ne compte.
+
+## Les idées-clés
+
+<Field name="Un cinquième axe, mais d'une nature différente" type="acceptation, pas accès">
+  Les axes ZONE / CAPACITÉ / SKILL / CONFINEMENT gatent **un accès** (puis-je toucher cette zone, cet outil, ce skill, ce chemin ?). L'axe HOOK gate **une acceptation** (ce tour, dans son ensemble, est-il admissible ?). C'est pour ça qu'il consomme non pas une cible, mais un **enregistrement de verdict par hook**.
+</Field>
+
+<Field name="Présence ≠ vert" type="la distinction centrale">
+  Un hook **présent mais rouge** ne suffit PAS. Un hook obligatoire qui a tourné et **échoué** bloque l'acceptation tout autant qu'un hook qui n'a **jamais tourné**. Deux codes distincts disent lequel : `AGENT_MANDATORY_HOOK_SKIPPED` (absent / jamais tourné) et `AGENT_MANDATORY_HOOK_RED` (tourné, pas vert).
+</Field>
+
+<Field name="Le verdict vient du BINAIRE, jamais du transcript" type="§8 — le juge est déterministe">
+  L'enforcer consomme l'**exit / BlockReason déterministe du binaire du hook lui-même** (l'enregistrement `HookVerdict`), **jamais** un set de noms que l'agent se serait auto-attribué (« mes hooks sont tous passés »). Un agent qui se déclare conforme serait exactement la **circularité** que le §8 interdit : le juge est déterministe, jamais le transcript.
+</Field>
+
+<Field name="Les hooks non obligatoires sont consultatifs" type="seul Mandatory gate">
+  Seuls les hooks `Mandatory:true` gatent l'acceptation. Un hook non obligatoire qui saute ou rougit n'empêche **jamais** le tour d'être accepté — il informe, il ne bloque pas.
+</Field>
+
+<Field name="Hook-honesty : un hook qui ne tourne jamais est mort" type="§5">
+  Un gate qu'on ne peut pas faire rougir est un gate **mort**. BA10 porte une **fault-injection** (loi §5) : retirer le verdict d'un hook obligatoire (sauté) ou le rougir (rouge) doit faire **basculer** `HooksSatisfied` d'accepté à un `BlockReason`. C'est la preuve vivante que le gate surveille réellement quelque chose.
+</Field>
+
+<Field name="Deux BlockReasons actionnables" type="S13, §44.5">
+  Un refus n'est jamais une prison. `AGENT_MANDATORY_HOOK_SKIPPED` et `AGENT_MANDATORY_HOOK_RED` portent chacun une explication et un **chemin de correction** (`how_to_fix`) : exécuter le hook manquant / corriger ce qu'il signale ; et — pour qu'un hook **cesse** d'être obligatoire — la seule porte est **idée → miroir → /goal → approbation**, jamais une dispense sous la ligne.
+</Field>
+
+## Ce que vous voyez dans le Workbench
+
+Le panneau **/agents**, dans la vue « Implémentation projetée », gagne une **sonde d'acceptation de tour**, sœur des sondes de capacité (BA07), de skill (BA08) et de chemin (BA09) :
+
+- choisissez une **injection de faute** : *aucune* (chaque hook obligatoire tourne vert), *retirer le verdict d'un hook* (sauté), ou *rougir un hook* (rouge) ;
+- cliquez **« Évaluer l'acceptation du tour »** — l'enforcer pur `hooksSatisfied` s'exécute contre l'implémentation résolue affichée et les verdicts simulés du binaire ;
+- sans faute → un badge **« Accepté — chaque hook obligatoire a tourné VERT »** ;
+- avec faute → un encadré **« Refusé — axe HOOK OBLIGATOIRE »** avec le code (`AGENT_MANDATORY_HOOK_SKIPPED` ou `AGENT_MANDATORY_HOOK_RED`), son explication, et le `how_to_fix` qui nomme la porte idée → miroir → /goal.
+
+C'est **action-capable** : l'op que BA10 développe a un contrôle qui l'**exécute** depuis l'écran (pas de capacité headless), et la fault-injection est *visible* à l'écran. C'est sûr pour le mur : l'enforcer est un verdict **pur, sous la ligne** — il n'exécute aucun agent et n'écrit aucune vérité.
+
+## Ce que ça ne fait pas
+
+- Ça ne **lance aucun run** et n'**exécute aucun hook** : l'enforcer *consomme* les verdicts des binaires hook, il ne les fait pas tourner (l'autonomie et le câblage réel arrivent bien plus tard ; le périmètre se ferme d'abord).
+- Ça ne **fait jamais confiance au transcript** : le verdict provient du binaire, jamais d'un set de noms auto-rapporté par l'agent.
+- Ça n'**émet aucun jugement** : c'est de l'évaluation de prédicat sur les hooks obligatoires déclarés et les verdicts émis par les binaires ; mêmes entrées → même verdict, toujours.
+- Ça n'**ouvre aucune dispense** : qu'un hook cesse d'être obligatoire ne se décide qu'en modifiant la CoucheAgent (la SOURCE) via idée → miroir → /goal — jamais sous la ligne.
