@@ -1,0 +1,32 @@
+---
+title: "BA17 · Sandbox OS/Postgres + l'unique exception LLM — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de BA17 : le binding sandbox (BindSandbox + FSBoundary/EgressBoundary/ExecBoundary/ResourceCaps) qui miroir les allow-lists BA09 au niveau OS sous le rôle aidos_agent ; CheckWrite/CheckEgress qui prouvent la défense en profondeur (fs + hook + GRANT) ; le seam ActionGenerator + GenerateAction + FakeGenerator + HardStop ; les miroirs fixture/property + le jumeau TS."
+keywords: ["aidos", "krd", "BA17", "BindSandbox", "Sandbox", "FSBoundary", "ActionGenerator", "GenerateAction", "HardStop", "aidos_agent", "défense en profondeur", "determinism-first", "le mur"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet. Pour la vue concept, voir [Pour les futurs utilisateurs → BA17](/steps/concept/ba17-sandbox-os-postgres).</Note>
+
+## En une phrase
+
+BA17 lie la boucle déterministe (BA15/BA16) à un **vrai sandbox OS/Postgres** : `BindSandbox(impl)` (back/runtime/agentimpl/sandbox.go) projette les quatre axes de confinement BA09 (`PathAllowed` / `EgressAllowed` / `ExecAllowed` / `ResourceLimits`) en frontières OS sous le rôle `aidos_agent`, et isole le LLM à **une** fonction `GenerateAction(impl, transcript)` derrière l'interface `ActionGenerator` (renommée pour éviter la collision avec l'enum `agentlayer.Provider`, gap K1), avec un fake déterministe et un hard-stop streaming.
+
+## Implémentation
+
+Le binding vit dans `back/runtime/agentimpl` (le confinement) + `back/runtime/agentloop` (le câblage).
+
+- **`Sandbox` + `BindSandbox(impl) Sandbox`** — un descripteur PUR : `FS FSBoundary`, `Egress EgressBoundary`, `Exec ExecBoundary`, `Caps ResourceCaps`, `Role string` (toujours `PostgresAgentRole = "aidos_agent"`). Chaque frontière **défère** au verdict BA09 correspondant — `FSBoundary.MayWrite == PathAllowed`, `EgressBoundary.MayReach == EgressAllowed`, `ExecBoundary.MayRun == ExecAllowed` — donc la frontière OS et le gate ne peuvent jamais diverger : la racine OS EST l'allow-list.
+- **La défense en profondeur, prouvée en un appel.** `CheckWrite(target) WriteVerdict` consulte les trois niveaux : `FS.MayWrite` (niveau 1), `GateWrite` → `GateAction` (niveau 1', zone + chemin), `GrantWouldDeny` (niveau 3). Il refuse si l'un refuse et liste **tous** les niveaux déchus (`DeniedLevels`). `GrantWouldDeny(target) == IsAboveWaterline(target)` : le rôle `aidos_agent` est SELECT-only au-dessus de la ligne (migration `agent_layer_baseline.sql`, S52) — une écriture de zone-vérité manquerait le GRANT. `CheckEgress(host)` est le jumeau à deux niveaux (frontière + gate).
+- **L'unique exception LLM** (sandbox.go côté agentloop + generate.go) — `ActionGenerator.GenerateAction(ctx, impl, Transcript) (Generated, error)` est la SEULE fonction autorisée à consulter un modèle. `ProviderGenerator` (production) enveloppe un `provider.Provider` (le seul paquet qui importe un SDK LLM, isolé par la règle arch-fitness BA14) ; `FakeGenerator` (tests) est PUR : l'index de réponse est `len(transcript.Turns)` (même transcript ⇒ même réponse, replay-safe). `HardStop(emitted, cap) bool` est le prédicat de hard-stop streaming (gap G3) : cap ≤ 0 ⇒ pas de cap ; sinon stop dès `emitted ≥ cap`.
+- **Les miroirs** — `sandbox_fixture_test.go` (fixture provider-fake : write non-AllowedPaths refusé aux trois niveaux ; egress non déclaré refusé aux deux ; fake déterministe ; hard-stop) + `sandbox_property_test.go` (reproductibilité ; `FSBoundary` miroir exact de `PathAllowed` ; invariant trois-niveaux pour toute zone ; egress fail-closed ; `HardStop` monotone). Côté agentloop, `sandbox_fixture_test.go` prouve `ProviderGenerator` + `CheckGeneratedWrite/Egress` bout-en-bout. Le jumeau TS (`front/web/lib/agentrun.ts`) porte `checkGeneratedWrite/Egress`, `grantWouldDeny`, `hardStop`, `fakeGenerateAction`, prouvés par Vitest + fast-check.
+
+## Méta — pourquoi c'est construit ainsi
+
+Le sandbox **ne réimplémente pas** le confinement : il **miroir** les verdicts purs BA09 au niveau OS. C'est délibéré — si la frontière FS forkait sa propre logique d'allow-list, elle pourrait diverger du gate, et un écart entre les deux est précisément le trou qu'un agent exploiterait. En faisant `FSBoundary.MayWrite` *défèrer* à `PathAllowed`, l'OS et le code parlent d'une seule voix. La défense en profondeur n'est donc pas trois règles à maintenir en accord, c'est **une** règle appliquée trois fois.
+
+Le rename `Provider → ActionGenerator` (gap K1) évite une collision réelle : `agentlayer.Provider` est l'enum fermé des vendeurs (anthropic/openai/google). Le seam, lui, nomme un **comportement** (générer la prochaine action), pas un vendeur. La séparation garde la règle arch-fitness BA14 lisible : un SDK LLM ne vit que dans `provider/`, et `ProviderGenerator` est le pont — déterministe partout sauf l'unique appel `Generate`.
+
+## Méta-méta — l'invariant que ça garde vivant
+
+> **Le mur tient trois fois, et le LLM est isolé à une fonction.**
+
+Une écriture de zone-vérité refusée par un seul niveau serait une promesse fragile ; refusée par les trois — la frontière FS, le hook, le GRANT — elle est structurellement impossible, et le miroir `TestProp_TruthZoneWrite_RefusedAtThreeLevels` le rejoue sur **toute** cible au-dessus de la ligne. Symétriquement, `determinism-first` exige que tout ce qui peut être une fonction pure le soit : la boucle entière l'est, et la seule non-déterminisme irréductible (la génération du modèle) est confinée à `GenerateAction`, re-checkée avant (gate) et après (post-check), et bornée par `HardStop`. Un agent qui sortirait du sandbox, ou un LLM qui ferait ce qu'une fonction pure couvre, serait un trou de détermisme qui **bloque le pas** — comme un monstre ou une capacité headless.

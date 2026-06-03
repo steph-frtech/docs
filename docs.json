@@ -201,7 +201,9 @@
               "steps/concept/ba15-coquille-de-boucle-drive",
               "steps/internals/ba15-coquille-de-boucle-drive",
               "steps/concept/ba16-re-check-deterministe",
-              "steps/internals/ba16-re-check-deterministe"
+              "steps/internals/ba16-re-check-deterministe",
+              "steps/concept/ba17-sandbox-os-postgres",
+              "steps/internals/ba17-sandbox-os-postgres"
             ]
           }
         ]

@@ -1,0 +1,33 @@
+---
+title: "BA17 · Lier le sandbox OS/Postgres — la défense en profondeur"
+description: "BA17 borne la boucle de l'agent à un vrai sandbox OS/conteneur tournant sous le rôle Postgres aidos_agent. L'arbre de votre app est l'UNIQUE racine inscriptible ; l'egress et l'exec sont fail-closed. Une même allow-list gouverne trois niveaux indépendants — la frontière FS, le hook, le GRANT — et le LLM est l'unique exception gatée. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA17", "sandbox", "défense en profondeur", "aidos_agent", "fail-closed", "egress", "ActionGenerator", "le mur", "determinism-first"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA17](/steps/internals/ba17-sandbox-os-postgres).</Note>
+
+## L'idée en une phrase
+
+L'agent qui code votre app ne tourne pas en liberté : il est enfermé dans un **sandbox**. L'arbre de votre app est le **seul** endroit où il peut écrire, il ne peut joindre **aucun** host réseau qu'on ne lui a pas déclaré, et il ne peut lancer **aucune** commande hors d'une liste précise. Et cette même règle est tenue par **trois gardiens indépendants**, pas un seul.
+
+## Pourquoi trois gardiens et pas un
+
+Une seule barrière, c'est un seul point de défaillance. BA17 pose **la défense en profondeur** : la même allow-list (« où l'agent peut écrire ») est appliquée à trois niveaux qui ne dépendent pas l'un de l'autre.
+
+- **Niveau 1 — la frontière du système de fichiers.** Le système d'exploitation lui-même ne monte QUE l'arbre de votre app comme inscriptible. Une écriture ailleurs n'a nulle part où atterrir.
+- **Niveau 1' — le hook.** Avant chaque action, le hook (le mur de l'OS AIDOS) refuse toute écriture vers une zone de vérité (le noyau, les miroirs, la fitness).
+- **Niveau 3 — le GRANT Postgres.** Le rôle de base `aidos_agent` sous lequel l'agent tourne n'a **aucun** droit d'écriture au-dessus de la ligne de flottaison : même si une écriture franchissait les deux premiers niveaux, la base la refuserait.
+
+Le niveau le plus souple — la consigne dans le prompt (« n'écris pas ici ») — n'est qu'un quatrième garde-fou *de confort*. Les trois autres sont **structurels** : ils tiennent même si le modèle se trompe ou ment.
+
+## Ce que vous voyez à l'écran
+
+Le panneau **/agents** porte un bouton « Lancer le sandbox sur une action générée ». Sans faute, l'agent génère une écriture **dans** l'arbre de l'app et un egress vers le host déclaré : tout est **AUTORISÉ**. Cochez « Injecter une faute » et l'agent vise **hors** du sandbox (une zone de vérité, un host non déclaré) : l'écriture est **REFUSÉE aux trois niveaux** (`fs_boundary · hook_gate · postgres_grant`), l'egress aux deux niveaux. La défense en profondeur est prouvée sous vos yeux.
+
+## Le LLM : l'unique exception gatée
+
+Toute la boucle est du code déterministe — le gate, le post-check, les frontières du sandbox, le compteur de budget. Le **seul** endroit où un modèle de langage intervient est **une fonction unique**, isolée derrière une interface (`ActionGenerator`), avec un faux déterministe pour les tests. Le code décide *avant* (le gate) et *après* (le post-check) ; le modèle ne fait que **proposer** la prochaine action. Et le streaming s'arrête net dès que le compte de tokens franchit le plafond déclaré — pas de génération qui s'emballe.
+
+## Ce que ça vous garantit
+
+Quand AIDOS lâche un agent sur votre code, il ne peut pas toucher le noyau, ne peut pas exfiltrer vers un serveur inconnu, ne peut pas lancer un shell libre. Le périmètre est **déclaré au-dessus de la ligne** (par `idée → miroir → /goal → approbation`) ; l'agent ne peut jamais l'élargir lui-même. La gouvernance ne fait que **rétrécir**.
