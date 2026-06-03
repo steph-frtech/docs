@@ -1,0 +1,56 @@
+---
+title: "BA08 · L'enforcer d'axe SKILL — un agent ne peut utiliser qu'un skill qu'on lui a accordé"
+description: "BA08 ajoute le TROISIÈME des quatre axes du mur : après l'axe ZONE (le mur S04/S52 refuse les zones de vérité) et l'axe CAPACITÉ (BA07 refuse tout outil MCP non lié), l'axe SKILL refuse tout skill non accordé. SkillAllowed(impl, skillName) est une fonction pure totale, fail-closed (default-deny) : autorisé si et seulement si le skill est un binding activé de l'implémentation résolue ; sinon le nouveau BlockReason S13 AGENT_SKILL_NOT_BOUND s'affiche, nommant la porte idée → miroir → /goal pour accorder un binding. C'est de l'appartenance ensembliste, jamais un jugement (determinism-first). Sans cet enforcer, SkillBinding.Enabled n'est que de la documentation : un skill ungouverné est la même classe de fuite qu'un outil ungouverné. Le panneau /agents gagne une sonde de skill action-capable : saisir un skill, exécuter l'enforcer, voir le verdict. Playwright prouve : un skill lié → autorisé ; un skill non lié → refusé avec AGENT_SKILL_NOT_BOUND + how_to_fix."
+keywords: ["aidos", "krd", "build-agent", "BA08", "agentimpl", "SkillAllowed", "axe skill", "axe capacité", "axe zone", "le mur", "AGENT_SKILL_NOT_BOUND", "BlockReason", "S13", "default-deny", "fail-closed", "appartenance ensembliste", "set-membership", "binding activé", "skill", "SkillBinding", "idée → miroir → /goal", "MayWrite", "ToolAllowed", "sonde de skill", "action-capable", "/agents", "determinism-first", "§2", "§6", "§8"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → BA08](/steps/internals/ba08-enforcer-skill).</Note>
+
+## En une phrase
+
+BA08 ajoute le **troisième axe du mur** : après l'axe ZONE (le mur refuse les *zones de vérité*) et l'axe CAPACITÉ (BA07 refuse tout *outil MCP* non lié), l'axe **SKILL** refuse tout *skill* qu'un agent gouverné n'a pas explicitement reçu — `SkillAllowed(impl, skillName)` est une fonction pure, fail-closed, qui dit **oui** uniquement si le skill est un binding activé de l'implémentation.
+
+## Le problème que ça résout
+
+Au pas BA05, AIDOS a appris à **résoudre** les skills d'un agent : `impl.Skills` ne contient que les skills que la couche gouvernée a marqués `Enabled` (la gouvernance ne peut que rétrécir). Mais c'était du **JSON inerte** : aucun gate ne vérifiait jamais « cet agent a-t-il le droit d'utiliser ce skill ? ». Sans cet enforcer, `SkillBinding.Enabled` n'est que de la **documentation** — un skill non gouverné est exactement la même classe de fuite qu'un outil non gouverné (BA07).
+
+BA07 a fermé l'axe capacité (les outils MCP). Mais un agent gouverné exerce *aussi* des **skills** — des gestes répétables qu'il rejoue. Une capacité déclarée mais non appliquée est du théâtre de gouvernance, que ce soit un outil ou un skill. BA08 ferme donc le troisième axe avant qu'aucune boucle d'autonomie n'existe : sans lui, la prétention « chaque axe déclaré a un gate » serait fausse.
+
+## Les idées-clés
+
+<Field name="Trois axes distincts du même mur" type="le mur, §2">
+  Le mur n'est pas qu'une chose. L'axe **ZONE** (`MayWrite`) protège *où* on écrit ; l'axe **CAPACITÉ** (`ToolAllowed`) protège *quels outils* on exerce ; l'axe **SKILL** (`SkillAllowed`) protège *quels skills* on utilise. Trois invariants, trois gates, la même forme fail-closed (entrée → verdict + BlockReason). BA08 est le 3ᵉ des quatre axes déclarés.
+</Field>
+
+<Field name="Autorisé si et seulement si le skill est lié" type="appartenance ensembliste">
+  `SkillAllowed(impl, skillName)` est **vrai exactement quand** `skillName` est présent dans `impl.Skills` (un binding activé). C'est de l'**appartenance ensembliste** — un calcul, jamais un jugement. Aucune inférence, aucun « l'agent estime que ce skill conviendrait ».
+</Field>
+
+<Field name="Default-deny : l'inconnu est refusé" type="fail-closed">
+  Tout skill absent est **refusé**. Un agent sans aucun skill lié se voit refuser *tous* les skills (confinement maximal par défaut). On ne fuit jamais par omission : le défaut est le refus, jamais l'autorisation.
+</Field>
+
+<Field name="Un BlockReason actionnable : AGENT_SKILL_NOT_BOUND" type="S13, §44.5">
+  Un refus n'est jamais une prison. Le nouveau code S13 `AGENT_SKILL_NOT_BOUND` porte une explication et un **chemin de correction** (`how_to_fix`) qui nomme la seule porte pour accorder un skill : ajouter un binding `Enabled` à la couche gouvernée via **idée → miroir → /goal → approbation**. Jamais une écriture directe.
+</Field>
+
+<Field name="La gouvernance ne peut que rétrécir" type="le mur">
+  On n'élargit jamais une capacité sous la ligne. L'implémentation projetée est un **sous-ensemble prouvable** de la couche gouvernée ; `SkillAllowed` n'ajoute aucun skill — il refuse seulement ce que la projection n'a pas porté. Le seul moyen d'accorder un nouveau skill est au-dessus de la ligne.
+</Field>
+
+## Ce que vous voyez dans le Workbench
+
+Le panneau **/agents**, dans la vue « Implémentation projetée », gagne une **sonde d'axe SKILL**, sœur de la sonde de capacité de BA07 :
+
+- saisissez un **skill** ;
+- cliquez **« Évaluer le skill »** — l'enforcer pur s'exécute contre l'implémentation résolue affichée ;
+- si le skill est un binding activé → un badge **« Autorisé »** ;
+- sinon → un encadré **« Refusé — axe SKILL »** avec le code `AGENT_SKILL_NOT_BOUND`, son explication, et le `how_to_fix` qui nomme la porte idée → miroir → /goal.
+
+C'est **action-capable** : l'op que BA08 développe a un contrôle qui l'**exécute** depuis l'écran (pas de capacité headless). Et c'est sûr pour le mur : l'enforcer est un verdict **pur, sous la ligne** — il n'exécute aucun agent et n'écrit aucune vérité.
+
+## Ce que ça ne fait pas
+
+- Ça ne **lance aucun run** : l'enforcer calcule un verdict, il n'exécute rien (l'autonomie arrive bien plus tard, le périmètre se ferme d'abord).
+- Ça n'**accorde aucun skill** : un refus ne s'ouvre que par la couche gouvernée (idée → miroir → /goal) — jamais depuis l'écran ni sous la ligne.
+- Ça n'**émet aucun jugement** : c'est de l'appartenance ensembliste pure ; mêmes entrées → même verdict, toujours.

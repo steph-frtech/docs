@@ -1,0 +1,65 @@
+---
+title: "BA08 · L'enforcer d'axe SKILL SkillAllowed — internals (Implémentation · Méta · Méta-méta)"
+description: "Détail d'implémentation de BA08 : SkillAllowed(impl, skillName) → (allowed, *BlockReason) dans back/runtime/agentimpl/enforce.go, une fonction pure totale fail-closed (appartenance ensembliste sur impl.Skills) avec le nouveau code S13 AGENT_SKILL_NOT_BOUND, la même forme que MayWrite/ToolAllowed mais sur l'axe SKILL — le 3ᵉ des quatre axes déclarés. Le miroir property rapid (enforce_property_test.go, 5 props) épingle allowed ⟺ skill ∈ impl.Skills + default-deny + déterminisme. Le twin TS skillAllowed (lib/agentlayer.ts) + sa sonde action-capable dans /agents (AgentsPanel.tsx) + 5 Vitest + 4 Playwright. Mirror-first, determinism-first."
+keywords: ["aidos", "krd", "BA08", "agentimpl", "SkillAllowed", "enforce.go", "AGENT_SKILL_NOT_BOUND", "BlockReason", "S13", "axe skill", "axe capacité", "MayWrite", "ToolAllowed", "fail-closed", "default-deny", "appartenance ensembliste", "set-membership", "rapid", "property test", "miroir", "determinism-first", "twin TS", "skillAllowed", "sonde de skill", "Playwright", "ADR 0009", "ADR 0010", "ADR 0011", "le mur", "internals"]
+---
+
+<Note>Côté implémentation — l'intérieur de la machine. Pour le concept sans code, voir [Pour les futurs utilisateurs → BA08](/steps/concept/ba08-enforcer-skill).</Note>
+
+## En une phrase
+
+BA08 ajoute `SkillAllowed(impl, skillName) → (allowed bool, *BlockReason)` — une fonction **pure, totale, fail-closed** (`back/runtime/agentimpl/enforce.go`) qui refuse tout skill absent de `impl.Skills` avec le nouveau code S13 `AGENT_SKILL_NOT_BOUND`, exactement la forme de `MayWrite`/`ToolAllowed` mais sur l'**axe SKILL** — le 3ᵉ des quatre axes déclarés.
+
+## Implémentation
+
+**Le miroir d'abord (rouge → vert).** `back/runtime/agentimpl/enforce_property_test.go` — 5 propriétés `rapid` écrites AVANT le code, rouges (compile-fail : `SkillAllowed` et `blockreason.CodeAgentSkillNotBound` indéfinis). Elles épinglent la loi de BA08 :
+
+- `TestProp_SkillAllowed_TrueIffBound` — `allowed == true ⟺ skillName ∈ impl.Skills` (la loi, sur un alphabet qui touche régulièrement le cas lié ET le cas non lié).
+- `TestProp_SkillAllowed_AllowCarriesNoBlockReason` — un verdict autorisé ne porte aucun BlockReason.
+- `TestProp_SkillAllowed_DenyCarriesAgentSkillNotBound` — un refus porte `AGENT_SKILL_NOT_BOUND` + un `how_to_fix` non vide (jamais la prison).
+- `TestProp_SkillAllowed_DefaultDenyEmptyImpl` — un `impl` sans skills refuse TOUT skill (default-deny, confinement max).
+- `TestProp_SkillAllowed_Deterministic` — mêmes entrées → même verdict (la reproductibilité).
+
+**L'enforcer** — `back/runtime/agentimpl/enforce.go`.
+
+```
+type SkillDecision struct { Allowed bool; BlockReason *blockreason.BlockReason }
+
+func SkillAllowed(impl AgentImplementation, skillName string) SkillDecision {
+    for _, s := range impl.Skills {
+        if s == skillName { return SkillDecision{Allowed: true} }
+    }
+    br := blockreason.For(blockreason.CodeAgentSkillNotBound)
+    return SkillDecision{Allowed: false, BlockReason: &br}
+}
+```
+
+- `SkillDecision` a la **même forme** que `ToolDecision` (l'axe capacité) et `agentlayer.WriteDecision` (l'axe zone) : `Allowed bool` + `*BlockReason` sur un refus.
+- Pure, totale, déterministe : aucune DB, aucune horloge, aucun rng, aucune I/O. Appartenance ensembliste sur `impl.Skills`, jamais un jugement.
+
+**Le nouveau code S13** — `back/runtime/blockreason/blockreason.go` (extension d'enum additive, change_type: refine, jamais une suppression — anti-overwrite §9) : `CodeAgentSkillNotBound = "AGENT_SKILL_NOT_BOUND"`, son entrée dans le registre `reasons` (sévérité `blocking`, explication d'axe skill nommant le 3ᵉ axe et la classe de fuite « un skill ungouverné est comme un outil ungouverné », `how_to_fix` nommant `idée → miroir → /goal`), et son ajout à `codeOrder`. Le miroir property enum-driven existant valide **automatiquement** le nouveau code via `Codes()` (aucun nouveau test d'enum à écrire — la couverture est dirigée par l'enum).
+
+**Le twin TS + la sonde action-capable** — `front/web/lib/agentlayer.ts` (`skillAllowed`, `SkillDecision`, `AGENT_SKILL_NOT_BOUND_REASON` verbatim du registre Go) + son miroir de reproductibilité Vitest (`lib/agentlayer.test.ts`, 5 cas — 57 au total) + la **sonde d'axe SKILL** dans `components/AgentsPanel.tsx` (`ImplementationViewer`) : un input `skill`, un bouton « Évaluer le skill » qui **exécute** `skillAllowed(impl, …)`, et le rendu du verdict (badge autorisé, ou encadré refusé avec code + explication + how_to_fix). Themé (ADR 0010), bilingue (clés `skillProbe*` FR/EN, ADR 0011).
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Trois axes, trois gates, une forme.** Le mur S04 est un *deny-list* d'axe zone ; BA07 a ajouté l'*allow-list* d'axe capacité ; BA08 ajoute l'*allow-list* d'axe skill. En réutilisant la forme `MayWrite`/`ToolAllowed` (entrée → `Allowed`+`BlockReason`), BA13 pourra composer les axes dans un verdict unique sans cas spéciaux.
+- **Sans cet enforcer, `Enabled` n'est que de la documentation.** BA05 résolvait `impl.Skills` (la gouvernance rétrécit), mais rien ne le gardait. Un skill non gouverné est la **même classe de fuite** qu'un outil non gouverné. Sans BA08, la prétention de BA12 « chaque axe déclaré a un gate » serait fausse — d'où la nécessité du 3ᵉ axe avant l'autonomie.
+- **Appartenance ensembliste, jamais un jugement (determinism-first, §8).** Un agent qui « déciderait » s'il peut utiliser un skill serait un *gap de déterminisme* — bloquant comme un monstre. Le verdict est calculé à partir des bindings déclarés, jamais inféré. Le miroir de reproductibilité l'épingle sur les deux plans (Go + TS).
+- **Le refus est actionnable.** Le `how_to_fix` nomme la *seule* porte (ajouter un `SkillBinding` `Enabled` à la couche, via idée → miroir → /goal). Le mur enseigne sa propre sortie.
+
+## Méta-méta — la garantie de niveau 3
+
+- **Un troisième axe déclaré est désormais appliqué.** Avant BA08, `impl.Skills` était du JSON inerte. BA08 ferme l'axe skill du périmètre : ce qui est déclaré rétrécissant (BA05) est maintenant *gardé* default-deny. Aucune autonomie n'est câblée avant la fermeture du périmètre (BA-E2).
+- **Aucune capacité headless (§7, ui-completeness).** L'op `SkillAllowed` est *atteignable ET exécutable* depuis un écran : la sonde de skill s'exécute et rend son verdict, prouvé par 4 tests Playwright (présence + action-capable ; un skill lié → autorisé ; un skill non lié → `AGENT_SKILL_NOT_BOUND` + how_to_fix nommant la porte ; un skill inconnu → default-deny).
+- **Le mur tient — sur le troisième axe.** L'enforcer est un verdict pur sous la ligne : il n'exécute aucun agent, n'écrit aucune vérité, n'accorde aucun skill. Élargir une capacité reste impossible sans passer la porte gouvernée.
+
+## Note d'évolution (anti-overwrite §9)
+
+BA07 affirmait « exactement 1 bouton dans la vue Implémentation » (la sonde de capacité). BA08 ajoute *un* second bouton — la sonde de skill — qui est lui aussi un **verdict pur sous la ligne**, ni un run d'agent ni une écriture de vérité. Le test e2e BA06/BA07 est raffiné de « exactement 1 bouton » vers « exactement 2 boutons, et ce sont les enforcers de capacité et de skill » — l'invariant protégé (aucun contrôle de *run*, aucune écriture de *vérité*) tient toujours.
+
+## Limites connues
+
+- La sonde évalue l'`impl` *projetée affichée* (mockée par les fixtures `agentlayer-data`, §6) ; quand le SELECT view `kernel.agent_layer` atterrira, l'enforcer et son verdict tiennent inchangés (l'entrée change, pas la fonction).
+- L'enforcer est l'axe skill **seul** ; sa composition avec les axes zone/capacité/chemin/budget/hook dans un `GateAction` à précédence unique arrive à BA13.
+- Le twin TS utilise le même `AGENT_SKILL_NOT_BOUND_REASON` que le Go (verbatim) ; l'autorité du registre BlockReason reste le Go (`back/runtime/blockreason`).

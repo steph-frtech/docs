@@ -183,7 +183,9 @@
               "steps/concept/ba06-mcp-agentimpl-viewer",
               "steps/internals/ba06-mcp-agentimpl-viewer",
               "steps/concept/ba07-enforcer-capacite",
-              "steps/internals/ba07-enforcer-capacite"
+              "steps/internals/ba07-enforcer-capacite",
+              "steps/concept/ba08-enforcer-skill",
+              "steps/internals/ba08-enforcer-skill"
             ]
           }
         ]
