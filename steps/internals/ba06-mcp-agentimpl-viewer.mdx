@@ -1,0 +1,49 @@
+---
+title: "BA06 · Le serveur MCP agentimpl + la vue « Implémentation » — internals (Implémentation · Méta · Méta-méta)"
+description: "Détail d'implémentation de BA06 : le serveur MCP back/mcp/agentimpl (outils agentimpl_project + agentimpl_list sur une vue read-only mockée), l'export LayerRef délégué à l'émetteur BA03, et la vue /agents « Implémentation » sélectionnable (front/web/components/AgentsPanel.tsx) avec son badge déterminisme. Le tout en lecture seule, sans contrôle de run, themé + bilingue, prouvé par 4 mirrors MCP Go + 4 tests Playwright."
+keywords: ["aidos", "krd", "BA06", "agentimpl", "MCP", "agentimpl_project", "agentimpl_list", "LayerRef", "ImplementationViewer", "badge déterminisme", "lecture seule", "le mur", "ADR 0009", "ADR 0010", "ADR 0011", "determinism-first", "Playwright", "internals"]
+---
+
+<Note>Côté implémentation — l'intérieur de la machine. Pour le concept sans code, voir [Pour les futurs utilisateurs → BA06](/steps/concept/ba06-mcp-agentimpl-viewer).</Note>
+
+## En une phrase
+
+BA06 câble l'émetteur `Project` (BA03) à une **porte de capacité MCP** (`back/mcp/agentimpl`) et à une **vue Workbench sélectionnable** (`/agents` « Implémentation »), toutes deux **lecture seule**, déterministes, sans contrôle de run.
+
+## Implémentation
+
+**Le serveur MCP** — `back/mcp/agentimpl/main.go` + `layers.go`.
+
+- Deux outils (un op = un outil, ADR 0009) :
+  - `agentimpl_project { layer_ref }` → `{ impl: AgentImplementation, hash, found }` : appelle `agentimpl.Project(layer, cfg, "pack-readonly")` puis `agentimpl.Hash(impl)`. Le `providerCfg` ne porte QUE l'endpoint/credential résolu (gate inputs = provider/model de la couche) — jamais un knob de comportement (BA03). Un `layer_ref` inconnu rend `found:false`, jamais une projection fabriquée.
+  - `agentimpl_list {}` → `{ layers: [{layer_ref, role, kind}] }` : énumération read-only triée.
+- La vue read-only est mockée par `exampleLayers()` (§6) — `bdd-writer` (max-confiné, aucun egress/exec) + `executor` (un host egress + go/git), **miroir verbatim** du fixture front `lib/agentlayer-data.ts`, pour que la projection MCP et la projection Workbench coïncident octet-pour-octet. Chaque couche est VALIDE contre `agentlayer.Validate` (donc `Project` réussit toujours).
+- Aucun état mutable au-dessus de la ligne : la projection est **régénérée** à chaque appel (idempotent), rien n'est persisté.
+
+**L'export `LayerRef`** — `back/runtime/agentimpl/project.go`.
+
+- BA06 a besoin d'adresser une couche par sa réf. L'interne `layerRef` n'était pas exporté. Ajout (anti-overwrite §9 : ajout additif, jamais un changement de sémantique) d'un `LayerRef(layer)` exporté qui **délègue** au `layerRef` interne — une seule résolution, jamais deux : la réf affichée est byte-pour-byte la réf que la projection embarque. Le mirror byte-stable BA03 reste inchangé.
+
+**La vue Workbench** — `front/web/components/AgentsPanel.tsx` (composant `ImplementationViewer`) + `app/agents/page.tsx` + `messages/{fr,en}.json`.
+
+- Un `<select>` (`viewer-agent-select`) choisit la couche ; `project()` (le twin front de l'émetteur) la projette ; un **second appel `project()`** sur la même couche + comparaison `implContentHash` donne le **badge déterminisme** (`viewer-determinism` `data-deterministic`).
+- Affiche : `layerRef`, provider·model, temperature/maxTurns/seed (dérivé si vide), concurrence, ressources, outils/skills/hooks résolus (★), chemins autorisés/interdits, réseau (« aucun egress » par défaut), exec, hash, prompt assemblé (`assembleSystemPrompt`).
+- **Aucun bouton** dans la section (`viewer.getByRole("button")` → count 0) : lecture seule, themé (tokens ADR 0010), bilingue (clés `viewer*` FR/EN, ADR 0011).
+
+## Méta — pourquoi c'est construit ainsi
+
+- **L'ordre du mur (§2).** On *montre* d'abord ce qu'une couche deviendrait — modèle, knobs, confinement — avant qu'une autonomie quelconque n'existe. Pas de contrôle de run à BA06 : l'exécution est accordée *parce que* le périmètre sera fermé (BA-E2), puis chaque action gatée (BA-E3). Mettre un bouton « run » ici inverserait l'ordre que la roadmap protège.
+- **Une vue read-only single-sourcée.** Le fixture MCP `exampleLayers()` copie le fixture front : un seul jeu de couches, deux projecteurs (Go et TS) qui doivent s'accorder. Quand le vrai SELECT view `kernel.agent_layer` atterrira, on échange `newView` ; les outils et le mur tiennent.
+- **Le badge déterminisme est une preuve à l'écran, pas une promesse.** Re-projeter + comparer le hash *exécute* l'invariant `determinism-first` dans l'UI : un knob smuggled casserait le badge. C'est §6 descendu au grain de l'écran.
+
+## Méta-méta — la garantie de niveau 3
+
+- **Tout op backend a son outil MCP (ADR 0009), sans exception** : la projection avait une fonction pure mais pas de porte de capacité ; BA06 la ferme. Le serveur n'expose QUE deux outils read-only et n'a aucun chemin d'écriture de vérité — le mirror `TestWall_NoFabricationNoTruthWrite` rougit si un futur edit ajoutait une fabrication ou une écriture.
+- **Aucune capacité headless (§7, ui-completeness)** : la projection est désormais *atteignable et exécutable* depuis un écran — sélection → projection → affichage — prouvé par 4 tests Playwright (présence + lecture seule sans bouton ; sélection → chemins interdits kernel/mirror + aucun egress ; badge déterminisme vert ; re-sélection de l'executor → egress/exec déclarés).
+- **Le mur tient en lecture seule** : la vue et le serveur ne peuvent rien écrire ; la projection régénérable ne porte aucune vérité. Ce que le mur garantissait en S52 reste vrai — l'agent propose/exécute/explore mais ne déclare jamais seul ce qui est vrai ; ici il ne fait même qu'**être montré**.
+
+## Limites connues
+
+- La vue read-only est mockée (`exampleLayers`, §6) — le SELECT view dérivé `kernel.agent_layer` est un pas de persistance ultérieur ; `newView` sera échangé sans toucher aux outils ni au mur.
+- Le badge déterminisme du front utilise un hash FNV-1a stable (intent d'affichage), pas le SHA-256 de `records.Hash` du Go ; les DEUX épinglent la même propriété (mêmes entrées → même hash). L'autorité de content-address reste le Go.
+- Pas de contrôle de run (par conception, le mur) : `agentloop.drive` et ses contrôles arrivent à BA19.

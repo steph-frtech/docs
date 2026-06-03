@@ -1,0 +1,64 @@
+---
+title: "BA06 · Le serveur MCP agentimpl + la vue « Implémentation » de /agents — projeter, en lecture seule"
+description: "BA06 expose l'émetteur déterministe Project comme une capacité (ADR 0009 : tout op backend est un outil MCP) et donne au panneau /agents une vue « Implémentation » sélectionnable. L'outil agentimpl.project(layerRef) renvoie l'AgentImplementation projetée — sous la ligne, régénérable, ne portant AUCUNE vérité, ne persistant rien au-dessus de la ligne. La route /agents gagne une vue déterministe, thémée (ADR 0010) et bilingue (ADR 0011, FR par défaut) : modèle, temperature/maxturns/seed, outils résolus, chemins autorisés/interdits, hôtes réseau autorisés, prompt assemblé, budgets, avec un badge déterminisme (re-projeter → même hash). Affichage seulement : aucun contrôle de run, car le mur impose que rien ne s'exécute tant que rien n'est appliqué. Le Playwright e2e prouve : sélectionner un agent → son implémentation s'affiche → les chemins interdits montrent les zones kernel/mirror, le réseau montre « aucun egress » par défaut."
+keywords: ["aidos", "krd", "build-agent", "BA06", "agentimpl", "MCP", "agentimpl.project", "layerRef", "AgentImplementation", "vue Implémentation", "/agents", "lecture seule", "read-only", "badge déterminisme", "re-projeter", "même hash", "content hash", "chemins interdits", "kernel", "mirror", "aucun egress", "no egress", "fail-closed", "le mur", "régénérable", "aucune vérité", "ADR 0009", "ADR 0010", "ADR 0011", "thémé", "bilingue", "determinism-first", "S52", "§2", "§6"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → BA06](/steps/internals/ba06-mcp-agentimpl-viewer).</Note>
+
+## En une phrase
+
+BA06 expose la **projection couche → implémentation** comme une **capacité MCP** (`agentimpl.project(layerRef)`) et l'**affiche** dans le Workbench : sélectionnez un agent, voyez son `AgentImplementation` complète — en **lecture seule**, déterministe, sans qu'aucun run ne se déclenche.
+
+## Le problème que ça résout
+
+Aux pas BA02–BA05, AIDOS a appris à **projeter** une couche gouvernée (`CoucheAgent`, la SOURCE au-dessus de la ligne) en une `AgentImplementation` runnable (le modèle, les knobs, les outils/skills/hooks résolus, les chemins autorisés/interdits, le confinement réseau). Mais cette projection vivait **dans le code et les tests** : rien ne l'exposait comme une capacité appelable, et rien ne la **montrait** à l'humain qui gouverne.
+
+Deux exigences KRD le réclamaient :
+
+- **ADR 0009** — *tout op backend est un outil MCP, sans exception*. La projection est un op ; elle doit avoir son outil.
+- **§6 / §7** — *tout se fait par écran* : une capacité headless est interdite ; l'humain doit pouvoir **voir** ce qu'un agent gouverné deviendrait, avant que quoi que ce soit ne tourne.
+
+BA06 répond aux deux : un serveur MCP `agentimpl` et une vue `/agents` « Implémentation » sélectionnable.
+
+## Les idées-clés
+
+<Field name="Un outil MCP : agentimpl.project(layerRef)" type="ADR 0009">
+  Donné un `layerRef` (une réf `CoucheAgent@version`), l'outil renvoie l'`AgentImplementation` projetée **plus son hash de contenu**. C'est la seule porte de capacité sur l'émetteur `Project` — la même fonction pure que les pas précédents, exposée comme un op appelable.
+</Field>
+
+<Field name="Lecture seule, ne persiste rien" type="le mur, §2">
+  Une projection est **régénérable** et ne porte **aucune vérité** (pas de version-comme-vérité, pas de miroir). Le serveur ne persiste **rien**, ni au-dessus ni au-dessous de la ligne : il **re-projette** à chaque appel. Aucun outil n'écrit le kernel, les mirrors ou la fitness.
+</Field>
+
+<Field name="Aucun contrôle de run" type="le mur, §2">
+  La vue **affiche** seulement. Il n'y a **aucun bouton de run** : rien ne s'exécute tant que rien n'est **appliqué** (la vraie boucle d'exécution arrive bien plus tard, à BA15+). Le mur impose cet ordre : on regarde d'abord ce qu'une couche deviendrait ; l'autonomie vient en dernier.
+</Field>
+
+<Field name="Un badge déterminisme : re-projeter → même hash" type="determinism-first, §6">
+  La vue re-projette la couche sélectionnée et **compare les hashes**. Le badge vert prouve, à l'écran, que la projection est une **fonction pure** : mêmes entrées → même sortie octet-stable. Un knob non gouverné qui se faufilerait casserait le badge.
+</Field>
+
+<Field name="La projection rend le mur visible" type="le mur, fail-closed">
+  Les **chemins interdits** affichés portent toujours les zones de vérité (`kernel`, `mirrors`, `fitness`) ; le **réseau** affiche « aucun egress » par défaut (allow-list vide ⇒ aucun accès, fail-closed). Vous *voyez* le confinement, vous ne le supposez pas.
+</Field>
+
+## Ce que vous voyez dans le Workbench
+
+Le panneau **/agents** gagne une section **« Implémentation projetée — agentimpl.project(layerRef) »** :
+
+- un **sélecteur d'agent** : choisissez `bdd-writer` ou `executor` ;
+- l'**implémentation projetée** s'affiche : modèle, température/tours max/seed, concurrence, limites ressources ;
+- les **outils MCP résolus**, **skills**, **hooks obligatoires** (★) ;
+- les **chemins autorisés** (écriture) et **interdits** (le mur : `kernel`, `mirrors`, `fitness`) ;
+- les **hôtes réseau** (« aucun egress » pour le `bdd-writer` max-confiné ; `api.anthropic.com` pour l'`executor`) et les **subprocess** autorisés ;
+- le **hash de contenu** et le **prompt système assemblé** ;
+- un **badge déterminisme** vert (re-projeter → même hash).
+
+Aucun bouton de run : la vue est **lecture seule** et taguée « pas une couche · aucune vérité ».
+
+## Ce que ça ne fait pas
+
+- Ça ne **lance aucun run** : il n'y a aucun contrôle d'exécution (le mur — l'autonomie n'est accordée que bien plus tard).
+- Ça n'**écrit aucune vérité** : le serveur MCP et la vue sont en lecture seule ; ils re-projettent, ils ne persistent rien.
+- Ça n'**appelle aucun modèle** : `Project` est une fonction pure des champs déclarés de la couche, pas une session LLM.

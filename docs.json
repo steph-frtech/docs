@@ -179,7 +179,9 @@
               "steps/concept/ba04-system-prompt",
               "steps/internals/ba04-system-prompt",
               "steps/concept/ba05-resolution-bindings",
-              "steps/internals/ba05-resolution-bindings"
+              "steps/internals/ba05-resolution-bindings",
+              "steps/concept/ba06-mcp-agentimpl-viewer",
+              "steps/internals/ba06-mcp-agentimpl-viewer"
             ]
           }
         ]
