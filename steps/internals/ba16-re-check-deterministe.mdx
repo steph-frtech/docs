@@ -1,0 +1,46 @@
+---
+title: "BA16 · Re-check déterministe de chaque action — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de BA16 : le post-check déterministe (PostCheck) qui re-checke CHAQUE action APRÈS exécution, par nature ; son câblage dans Drive ; le miroir de reproductibilité + invariance-à-la-confiance ; le jumeau TS ; et l'invariant méta-méta « une action sans post-check est un determinism gap »."
+keywords: ["aidos", "krd", "BA16", "PostCheck", "Drive", "agentloop", "AGENT_POSTCHECK_FAILED", "determinism-first", "goal.SensorState", "reproducibility mirror", "le juge est le miroir"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet. Pour la vue concept, voir [Pour les futurs utilisateurs → BA16](/steps/concept/ba16-re-check-deterministe).</Note>
+
+## En une phrase
+
+BA16 ajoute `PostCheck` (back/runtime/agentloop/postcheck.go), le **dual** du `GateAction` de BA13 : là où le gate décide AVANT exécution (l'action a-t-elle le droit de tourner ?), le post-check décide APRÈS (son effet revendiqué peut-il être ACCEPTÉ ?), **par nature d'action**, et Drive l'appelle entre « exécuter » et « appliquer l'effet ».
+
+## Implémentation
+
+**Le cœur pur — `PostCheck`.** Une fonction totale `PostCheck(turn, decision, observed) → PostCheckResult`. Elle mappe la nature de l'action (`agentrun.ActionType`) à un `PostCheckKind` :
+
+- `write` / `run_mirror` → `PostCheckMirror` : chaque flip revendiqué (`turn.Effects`) doit être **confirmé** par la lecture de sensor `observed` (`goal.SensorState`). Un vert revendiqué que le sensor lit rouge ⇒ refus ;
+- `propose` → `PostCheckShape` : un contrôle de forme — `Cible` non vide ET **aucun** flip de sensor (une proposition est une hypothèse, jamais une vérité) ;
+- `read` → `PostCheckNoOp` : **aucun** flip de sensor (une lecture est sans effet de bord) ;
+- nature inconnue → `PostCheckKindNone` : refus avec `AGENT_POSTCHECK_FAILED`.
+
+**Le juge — `observedSensors`.** Drive construit la lecture de sensor que le post-check consulte à partir du monde vivant : `turn.Observed == nil` ⇒ le sensor **confirme** les flips revendiqués verbatim (le chemin honnête) ; `turn.Observed != nil` ⇒ les lectures déclarées **écrasent** (modélise l'agent qui revendique un vert que le miroir dément). C'est la seule branche qui peut faire refuser une action de code.
+
+**Le câblage dans `Drive`.** Sur un verdict de gate `Allowed`, Drive ne fait plus « appliquer les effets ». Il fait : `observed := observedSensors(turn, sensors)` → `pc := PostCheck(turn, …, observed)`. Si `pc.Accepted` est faux, l'action est enregistrée `Autorisee:false` avec `pc.BlockReason`, et l'effet **n'atterrit pas** ; sinon les effets sont appliqués et l'action enregistrée `Autorisee:true`. `FinalMeter` rejoue la même logique pour que le monde de sensor du panneau suive le run réel.
+
+**Le BlockReason.** `AGENT_POSTCHECK_FAILED` est ajouté au registre `blockreason` (extension additive d'enum, change_type *refine*) avec son `how_to_fix` actionnable — single-sourced, partagé par `aidos explain` et le Workbench.
+
+**Le jumeau TS.** `postCheck` + `observedSensors` + `AGENT_POSTCHECK_FAILED_REASON` dans `front/web/lib/agentrun.ts`, câblés dans `drive()` verdict-pour-verdict. La commande **/agents** « Re-checker chaque action » exécute `drive()` sur le script de démo ; l'interrupteur de faute injecte un `observed` divergent.
+
+**Les miroirs.** `postcheck_property_test.go` (rapid) : totalité, kind toujours dans l'ensemble clos, nature inconnue toujours refusée, reproductibilité, et l'invariance-à-la-confiance (mêmes flips revendiqués + lectures opposées ⇒ résultats opposés). `postcheck_fixture_test.go` (state→cmd→events) : les trois natures, le mensonge refusé, la nature inconnue refusée. Côté front, le bloc `describe("postCheck …")` dans `agentlayer.test.ts` + 3 specs Playwright dans `agents.spec.ts`.
+
+## Méta — pourquoi c'est construit ainsi
+
+Le gate (BA13) et le post-check (BA16) sont les **deux côtés de l'exécution** : avant / après. Les séparer garde chacun pur et total, et rend explicite que « accepter un effet » est une décision *distincte* de « autoriser une action ». Le post-check ne lit qu'un `PostCheckDecision{Allowed}` minimal — il ne dépend pas de la forme complète de la `Decision` du gate (découplage : le dual, pas l'appelant).
+
+Le choix de modéliser le juge par `Observed` (une lecture de sensor injectée) plutôt que par un appel à un runner réel est l'**exception bootstrap** : le runner de miroir vivant arrive plus tard ; ici la lecture est scriptée, déterministe, et le miroir de reproductibilité la fige. La couture est la même que celle d'`evolve` (replay-by-seed) que Drive reprend.
+
+## Méta-méta — l'invariant que ça garde vivant
+
+> Une action dont la nature ne porte **aucun** post-check déterministe est elle-même un *determinism gap* qui bloque le pas.
+
+C'est le §8 (« done is computed ») descendu au grain de l'action. Trois conséquences que le harness garde vivantes :
+
+1. **Le juge est le miroir, jamais la confiance.** `PostCheck` ne lit jamais un champ « l'agent pense que c'est vert » ; il lit `observed`. La propriété d'invariance-à-la-confiance le prouve : ré-étiqueter la confiance ne change pas le Résultat, seule la lecture de sensor le peut.
+2. **CHAQUE action est re-checkée**, pas seulement celles qui changent du code — un read et un propose ont, eux aussi, leur juge déterministe (no-op / forme). C'est ce qui ferme le gap D2 généralisé.
+3. **La totalité est l'anti-monstre.** `postCheckKindOf` est total ; une nature hors enum tombe sur `PostCheckKindNone` et est refusée. Aucune action ne peut se faufiler « sans juge ».

@@ -199,7 +199,9 @@
               "steps/concept/ba14-une-seule-fonction-llm",
               "steps/internals/ba14-une-seule-fonction-llm",
               "steps/concept/ba15-coquille-de-boucle-drive",
-              "steps/internals/ba15-coquille-de-boucle-drive"
+              "steps/internals/ba15-coquille-de-boucle-drive",
+              "steps/concept/ba16-re-check-deterministe",
+              "steps/internals/ba16-re-check-deterministe"
             ]
           }
         ]

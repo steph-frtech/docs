@@ -1,0 +1,38 @@
+---
+title: "BA16 · Re-checker chaque action — le post-check déterministe"
+description: "BA16 ajoute le DUAL du gate : après chaque action de la boucle, un post-check déterministe décide si l'effet revendiqué peut être ACCEPTÉ — selon la nature de l'action (un changement de code → le miroir doit être d'accord ; un propose → un contrôle de forme ; un read → une assertion no-op). Le juge est le miroir, jamais la confiance revendiquée par l'agent. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA16", "post-check", "re-check", "determinism-first", "goal.IsClosed", "le juge est le miroir", "AGENT_POSTCHECK_FAILED", "done is computed"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA16](/steps/internals/ba16-re-check-deterministe).</Note>
+
+## L'idée en une phrase
+
+BA15 a posé la coquille qui gate chaque action **AVANT** qu'elle ne s'exécute. BA16 pose le **dual** : après que l'action a tourné, un **post-check déterministe** décide si son effet revendiqué peut être **accepté** — et ce juge n'est jamais la confiance que l'agent affiche, c'est le miroir lui-même.
+
+## Le problème que ça résout
+
+Un agent qui code dira volontiers « voilà, ce test passe maintenant ». Le croire sur parole, c'est laisser l'agent noter sa propre copie. Le principe d'AIDOS (§8 : « done is computed ») descend ici jusqu'au grain de l'**action unique** : ce n'est pas seulement le goal entier qui est jugé par les miroirs à la fin, c'est **chaque action**, juste après qu'elle a tourné.
+
+Et le re-check n'est pas le même selon la **nature** de l'action :
+
+- une action qui **change du code** (une écriture, un re-run de miroir) → le miroir/sensor pertinent doit **confirmer** que le miroir rouge est bien passé au vert. L'agent peut *revendiquer* un vert ; seul le sensor le *valide* ;
+- une action **propose** (une suggestion, une hypothèse de cause) → un simple **contrôle de forme**. Une proposition n'est jamais une vérité : elle ne fait basculer aucun sensor, elle est seulement bien-formée ou non ;
+- une action **read** (une lecture) → une **assertion no-op** : une lecture ne pose aucun effet de bord. Une lecture qui prétend changer l'état est une lecture frauduleuse, refusée.
+
+## L'invariant qui ne se négocie jamais
+
+> Une action dont la nature ne porte **aucun** post-check déterministe est **elle-même** un *determinism gap* qui bloque le pas.
+
+Autrement dit : on ne laisse jamais passer une action « jugée à l'œil ». Chaque nature connue (lecture, écriture, propose, re-run de miroir) a son juge déterministe ; une nature inconnue est refusée d'office. C'est la même exigence que « pas de capacité sans écran » ou « pas de monstre » — appliquée à l'acceptation des effets.
+
+Conséquence directe : le **Résultat** d'un run est une fonction **pure** des verdicts (le gate AVANT + le post-check APRÈS) + le budget + le mur. Il est **invariant à la confiance revendiquée** par l'agent. Deux runs avec exactement les mêmes flips revendiqués, mais des lectures de sensor opposées, donnent des résultats opposés : celui que le miroir confirme se ferme en vert ; celui que l'agent prétend seulement reste rouge.
+
+## Ce que vous voyez à l'écran
+
+Sur le panneau **/agents** du Workbench, une commande **« Re-checker chaque action (post-check déterministe) »** :
+
+- un clic lance une session de démo : le sensor **confirme** les deux flips revendiqués → chaque action est affichée **acceptée** et le run se ferme en **« vert »** ;
+- un interrupteur **« injecter une faute »** fait **revendiquer** à l'agent un flip vert que le sensor lit encore **rouge** : le post-check **refuse** chaque action (avec le code `AGENT_POSTCHECK_FAILED`), l'effet ne s'applique pas, et le goal reste **« toujours rouge »** — preuve que le juge est le miroir, et que le Résultat est **invariant** à ce que l'agent prétend.
+
+<Note>Re-checker une action reste une opération **sous la ligne** : le post-check ne *réécrit* aucune vérité. Il décide seulement si un effet revendiqué peut être accepté dans le run en cours — la trace, elle, est de la télémétrie.</Note>
