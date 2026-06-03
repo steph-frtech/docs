@@ -1,0 +1,49 @@
+---
+title: "BA04 · AssembleSystemPrompt — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail d'implémentation de BA04 : AssembleSystemPrompt(impl) dans back/runtime/agentimpl/systemprompt.go — un template PUR/TOTAL sur les seuls champs déclarés (Role, Objectif, StopConditions, la frontière du mur en prose, ForbiddenPaths verbatim, AllowedPaths verbatim). AgentImplementation gagne Role/Objectif/StopConditions (descendus de la SOURCE dans Project). Les miroirs ROUGE-d'abord : systemprompt_fixture_test.go (golden file exact, mis à jour via UPDATE_GOLDEN=1) + systemprompt_property_test.go (rapid — déterministe, champ-déclaré-change-le-prompt, no-leak en perturbant tous les knobs/bindings, mur toujours présent, ForbiddenPaths/AllowedPaths verbatim). Le twin front lib/agentlayer.ts (assembleSystemPrompt byte-pour-byte) + Vitest (42 tests). La section /agents « SystemPrompt assemblé » action-capable + l'e2e Playwright (15 tests). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "build-agent", "BA04", "AssembleSystemPrompt", "back/runtime/agentimpl", "systemprompt.go", "template pur", "déterministe", "Role", "Objectif", "StopConditions", "AgentImplementation", "Project", "ForbiddenPaths", "AllowedPaths", "verbatim", "WallForbiddenPaths", "golden file", "UPDATE_GOLDEN", "systemprompt_fixture_test", "systemprompt_property_test", "rapid", "no leak", "défense en profondeur", "kernel", "mirrors", "fitness", "hook PreToolUse", "GRANTs Postgres", "Vitest", "Playwright", "lib/agentlayer", "assembleSystemPrompt", "determinism-first", "determinism gap", "S52", "§2", "§6", "§8", "§9"]
+---
+
+<Note>Côté implémentation — le détail interne. Pour le concept et l'usage, voir [Pour les futurs utilisateurs → BA04](/steps/concept/ba04-system-prompt).</Note>
+
+## En une phrase
+
+BA04 ajoute le **template pur `AssembleSystemPrompt(impl)`** dans `back/runtime/agentimpl/systemprompt.go` — il rend le prompt système d'un build-agent à partir des **seuls** champs déclarés de sa projection (`Role`, `Objectif`, `StopConditions`, la frontière du mur, `ForbiddenPaths`/`AllowedPaths` verbatim), octet-stable (golden file exact), sans qu'aucun champ hors couche ne puisse fuir, et le mur y figure toujours.
+
+## Implémentation
+
+<Steps>
+  <Step title="AgentImplementation gagne les champs déclarés d'intention">
+    `AgentImplementation` (BA02) gagne `Role string`, `Objectif string`, `StopConditions []string` — les **entrées déclarées** du template. Ils sont **descendus** de la SOURCE par l'émetteur `Project` (BA03) : `impl.Role = spec.Role`, `impl.Objectif = spec.Objectif`, `impl.StopConditions = normalizePaths(spec.StopConditions)` (trié/dé-dupliqué pour la byte-stabilité). Ajout **additif** (anti-overwrite §9) : la projection reste content-adressée, le miroir byte-stable de BA03 passe inchangé.
+  </Step>
+  <Step title="AssembleSystemPrompt — le template pur et total">
+    `systemprompt.go` : une fonction pure (pas d'horloge, pas d'aléa, pas d'I/O) qui construit le prompt via un `strings.Builder` à partir d'un en-tête fixe puis des sections **Rôle / Objectif / Conditions d'arrêt / Le mur / Chemins autorisés**. Deux helpers totaux : `line(v)` (marqueur stable « (non déclaré) » si vide) et `bulletList(items)` (liste markdown verbatim ; marqueur « (aucun) » si vide). L'ordre des items est celui de la projection (déjà normalisé), jamais re-trié — le template est une fonction *pure* de son entrée. Les `ForbiddenPaths` et `AllowedPaths` sont émis **verbatim**.
+  </Step>
+  <Step title="Le miroir fixture (golden file)">
+    `systemprompt_fixture_test.go` : `goldenPromptImpl()` (la projection de référence + Role/Objectif/StopConditions) → `AssembleSystemPrompt` comparé à `testdata/systemprompt_golden.txt`. Régénéré via `UPDATE_GOLDEN=1`. Un second test (`AlwaysCarriesWall`) exige que chaque zone de `WallForbiddenPaths()` figure dans le prompt.
+  </Step>
+  <Step title="Le miroir property (rapid)">
+    `systemprompt_property_test.go` : (1) **déterministe** — deux assemblages d'une même projection sont égaux ; (2) **champ déclaré ⇒ change le prompt** — perturber Role/Objectif/un AllowedPath/une StopCondition change la sortie ; (3) **no leak** — perturber *tous* les champs non déclarés (Seed, MaxConcurrency, MaxTurns, Temperature, Model, LayerRef, ResourceLimits, Tools, Skills, Hooks, AllowedNetworkHosts, AllowedExec) laisse le prompt **byte-identique** ; (4) **mur toujours présent** ; (5) **ForbiddenPaths/AllowedPaths verbatim**. ROUGE d'abord : sans les champs ni la fonction, le paquet ne compile pas (`impl.Role undefined`, `AssembleSystemPrompt undefined`).
+  </Step>
+  <Step title="Le twin front + la section /agents action-capable">
+    `lib/agentlayer.ts` gagne `assembleSystemPrompt(impl)` (byte-pour-byte du Go : mêmes sections, mêmes marqueurs « (aucun) »/« (non déclaré) »), et `AgentImplementation`/`project` gagnent `role`/`objectif`/`stopConditions`. La reproductibilité mirror `lib/agentlayer.test.ts` passe à **42 tests** (déterminisme, mur verbatim, champ-déclaré-change, no-leak, totalité sur entrées vides). Le panneau `/agents` gagne la section **« SystemPrompt assemblé »** avec le bouton **« Assembler le prompt »** qui **exécute** l'assemblage deux fois + une fois perturbée et affiche les badges **octet-stable**, **aucune fuite**, **mur présent** + l'aperçu du prompt. L'e2e `tests/e2e/agents.spec.ts` passe à **15 tests** (2 nouveaux BA04 prouvant l'exécution).
+  </Step>
+</Steps>
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Le prompt est du code, pas une rédaction.** Le determinism-first (§6/§8) dit : ce qui *peut* être une fonction pure **doit** l'être. Un prompt système est un *rendu* de champs déclarés — donc un template, jamais une prose écrite à la main. Le miroir property *rejoue* la propriété « aucun champ hors couche ne fuit » au lieu de la promettre.
+- **La discipline « no leak » par perturbation exhaustive.** Le test ne liste pas les champs *autorisés* (fragile) ; il perturbe **tous** les champs *non* autorisés et exige l'invariance. Ajouter un futur champ à la projection ne pourra pas fuir sans qu'un test échoue — la surface du template reste prouvablement close.
+- **Le mur en triple barrière.** Le prompt est le niveau *souple* du mur (l'agent *lit* l'interdiction). Le hook PreToolUse (deny-list) et les GRANTs Postgres (aucun droit d'écriture) sont les niveaux durs. BA04 rend le niveau souple **toujours présent et verbatim** — la prose du prompt ne peut pas omettre une zone interdite.
+- **La byte-stabilité par normalisation.** `StopConditions` est trié/dé-dupliqué à la projection (comme les chemins) : l'ordre d'entrée dans la SOURCE ne change pas le prompt. Le template lui-même ne re-trie jamais — il reste une fonction pure de la projection.
+
+## Méta-méta — la garantie de niveau 3
+
+BA04 ne touche **ni la fitness, ni le kernel-as-truth** : il ajoute une fonction **sous la ligne** (`AssembleSystemPrompt`) et des champs déclarés *descendus* de la SOURCE par la seule porte légale (l'émetteur). Les garanties inviolables rendues exécutables : (1) **reproductibilité** — même projection → prompt octet-identique (golden + property) ; (2) **le mur tient** — toute prose porte *toujours* les zones interdites verbatim, troisième barrière de la défense en profondeur ; (3) **determinism-first** — le prompt n'est *jamais* écrit à la main ; un prompt rédigé serait un determinism gap qui bloque le pas. La méta-loop **ajoute** un garde-fou (le prompt déterministe), elle n'en **retire** aucun (§9) ; les miroirs byte-stables de BA03 et les régressions du hook S04 passent inchangés.
+
+## Limites connues
+
+- **Le prompt est en prose figée pour les sections fixes.** L'en-tête et les phrases du mur sont du texte constant dans le code (pas un champ déclaré) — c'est *du code*, donc déterministe, mais il ne *dérive* pas d'une couche : changer cette prose est un changement de code, revu comme tel.
+- **Pas de session LLM.** `AssembleSystemPrompt` produit le texte ; aucun appel modèle. Piloter une vraie boucle avec ce prompt est un pas ultérieur (BA-E3).
+- **`implContentHash` (front) n'est pas cryptographique.** Le twin front prouve la byte-stabilité par égalité de chaînes ; le Go reste l'autorité.
+- **Linear non authentifié.** Si l'issue de suivi BA04 n'a pu être mise à jour (OAuth du MCP `linear-server` requis), c'est noté comme OpenQuestion, non bloquant.

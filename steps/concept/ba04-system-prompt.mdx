@@ -1,0 +1,57 @@
+---
+title: "BA04 · AssembleSystemPrompt — le prompt système assemblé déterministiquement, jamais écrit à la main"
+description: "BA04 ajoute AssembleSystemPrompt(impl) : un template PUR qui assemble le prompt système d'un build-agent à partir des SEULS champs déclarés de sa couche — rôle, objectif, conditions d'arrêt, la frontière du mur en prose, et les chemins interdits/autorisés verbatim. Mêmes entrées → prompt octet-identique (miroir fixture : une couche donnée → un golden file exact). Changer un champ déclaré change le prompt ; aucun champ hors couche (graine, température, modèle, bindings, credentials) ne peut fuir dans la prose. Les zones noyau/miroirs figurent TOUJOURS dans le prompt (défense en profondeur : le mur est dans le prompt ET les hooks ET les GRANTs Postgres). Un prompt d'agent écrit à la main est un determinism gap qui bloque le pas — le prompt est du code, jamais une rédaction."
+keywords: ["aidos", "krd", "build-agent", "BA04", "AssembleSystemPrompt", "system prompt", "prompt système", "template pur", "déterministe", "champs déclarés", "rôle", "objectif", "conditions d'arrêt", "StopConditions", "le mur", "frontière du mur", "ForbiddenPaths", "AllowedPaths", "verbatim", "golden file", "octet-identique", "no leak", "hors couche", "défense en profondeur", "kernel", "mirrors", "fitness", "hook PreToolUse", "GRANTs Postgres", "determinism-first", "determinism gap", "jamais écrit à la main", "AgentImplementation", "CoucheAgent", "S52", "§2", "§6", "§8"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → BA04](/steps/internals/ba04-system-prompt).</Note>
+
+## En une phrase
+
+BA04 ajoute **`AssembleSystemPrompt(impl)`** : le **template pur** qui assemble le prompt système d'un build-agent à partir des **seuls champs déclarés** de sa couche — mêmes entrées, prompt **octet-identique**, jamais écrit à la main.
+
+## Le problème que ça résout
+
+Une boucle de codage LLM a besoin d'un **prompt système** : la consigne qui dit à l'agent *qui il est*, *ce qu'il doit faire*, *quand s'arrêter* et *ce qu'il n'a pas le droit de toucher*. La tentation évidente : le **rédiger à la main**, une jolie prose par agent.
+
+C'est exactement le piège que le determinism-first interdit (§6/§8). Un prompt rédigé à la main est :
+
+1. **Non reproductible** — deux personnes (ou deux humeurs) produisent deux prompts ; on ne peut plus rejouer ni content-adresser une session.
+2. **Une porte de fuite** — rien n'empêche d'y glisser un champ hors couche (une graine, une clé, un knob), ou d'**oublier** la frontière du mur. Le prompt cesse alors de refléter la couche gouvernée.
+
+BA04 rend le prompt **dérivé, pas rédigé** : une fonction pure des seuls champs déclarés.
+
+## Les idées-clés
+
+<Field name="Un template pur sur les SEULS champs déclarés" type="determinism-first, §6/§8">
+  Le prompt n'utilise que : le **rôle**, l'**objectif**, les **conditions d'arrêt**, la **frontière du mur en prose**, et les chemins **interdits** et **autorisés** *verbatim*. Rien d'autre. Mêmes entrées → **exactement les mêmes octets**. Un miroir fixture épingle qu'une couche donnée produit un **golden file** exact.
+</Field>
+
+<Field name="Changer un champ déclaré change le prompt" type="responsive">
+  Modifier le rôle, l'objectif, une condition d'arrêt ou un chemin autorisé **change** le prompt. Le prompt *reflète* fidèlement la couche : il n'y a pas de prose figée qui masquerait un changement de la SOURCE.
+</Field>
+
+<Field name="Aucun champ hors couche ne peut fuir" type="no leak, le mur">
+  Perturber un champ qui n'est **pas** une entrée du template — la graine, la température, le modèle, les outils résolus, les skills, les credentials — laisse le prompt **octet-identique**. Un secret ou un knob ne peut pas se glisser dans la prose : la propriété est *rejouée*, pas promise.
+</Field>
+
+<Field name="Le mur est toujours dans le prompt (défense en profondeur)" type="le mur, §2">
+  Les zones `kernel`, `mirrors`, `fitness` (et les préfixes de vérité sur disque) figurent **toujours** dans le prompt, verbatim, quelle que soit la couche. C'est le **troisième niveau** du mur : il est dans le prompt (niveau souple), dans le hook PreToolUse (deny-list), et dans les GRANTs Postgres (aucun droit d'écriture sur la vérité). Trois barrières, jamais une seule.
+</Field>
+
+## Ce que vous voyez dans le Workbench
+
+Le panneau **/agents** gagne une section **« SystemPrompt assemblé — AssembleSystemPrompt(impl) »** avec un bouton **« Assembler le prompt »**. Il assemble le prompt **deux fois** (mêmes entrées), puis une **troisième** fois avec un knob non déclaré perturbé (graine/température/modèle). Il affiche :
+
+- un badge **« octet-stable »** (les deux premières assemblages sont identiques) ;
+- un badge **« aucune fuite »** (le troisième, malgré le knob modifié, est **toujours** identique) ;
+- un badge **« mur présent »** (les zones noyau/miroirs figurent verbatim) ;
+- le **prompt assemblé** lui-même, en aperçu.
+
+Vous *voyez* donc, exécuté à l'écran, que le prompt est déterministe, qu'aucun champ hors couche ne fuit, et que le mur y est toujours.
+
+## Ce que ça ne fait pas
+
+- Ça n'**appelle aucun modèle** : `AssembleSystemPrompt` produit le *texte* du prompt ; piloter une vraie session LLM avec ce prompt est un pas ultérieur.
+- Ça n'**écrit aucune vérité** : c'est une fonction pure *sous* la ligne qui lit une projection et rend une chaîne. Aucune écriture au-dessus de la ligne, jamais.
+- Ça ne **remplace pas** les hooks ni les GRANTs : le prompt est le niveau *souple* du mur ; les deux autres niveaux (hook, GRANTs) restent les barrières dures.
