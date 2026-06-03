@@ -1,0 +1,64 @@
+---
+title: "BA07 · L'enforcer d'axe CAPACITÉ ToolAllowed — internals (Implémentation · Méta · Méta-méta)"
+description: "Détail d'implémentation de BA07 : ToolAllowed(impl, server, tool) → (allowed, *BlockReason) dans back/runtime/agentimpl/enforce.go, une fonction pure totale fail-closed (appartenance ensembliste sur impl.Tools) avec le nouveau code S13 AGENT_TOOL_NOT_BOUND, la même forme que MayWrite mais sur l'axe capacité. Le miroir property rapid (enforce_property_test.go) épingle allowed ⟺ tool ∈ impl.Tools + default-deny + déterminisme. Le twin TS toolAllowed (lib/agentlayer.ts) + sa sonde action-capable dans /agents (AgentsPanel.tsx) + 5 Vitest + 4 Playwright. Mirror-first, determinism-first."
+keywords: ["aidos", "krd", "BA07", "agentimpl", "ToolAllowed", "enforce.go", "AGENT_TOOL_NOT_BOUND", "BlockReason", "S13", "axe capacité", "MayWrite", "fail-closed", "default-deny", "appartenance ensembliste", "set-membership", "rapid", "property test", "miroir", "determinism-first", "twin TS", "toolAllowed", "sonde de capacité", "Playwright", "ADR 0009", "ADR 0010", "ADR 0011", "le mur", "internals"]
+---
+
+<Note>Côté implémentation — l'intérieur de la machine. Pour le concept sans code, voir [Pour les futurs utilisateurs → BA07](/steps/concept/ba07-enforcer-capacite).</Note>
+
+## En une phrase
+
+BA07 ajoute `ToolAllowed(impl, server, tool) → (allowed bool, *BlockReason)` — une fonction **pure, totale, fail-closed** (`back/runtime/agentimpl/enforce.go`) qui refuse tout `(server, tool)` absent de `impl.Tools` avec le nouveau code S13 `AGENT_TOOL_NOT_BOUND`, exactement la forme de `MayWrite` mais sur l'**axe capacité**.
+
+## Implémentation
+
+**Le miroir d'abord (rouge → vert).** `back/runtime/agentimpl/enforce_property_test.go` — un miroir property `rapid` écrit AVANT le code, rouge (compile-fail : `ToolAllowed` et `blockreason.CodeAgentToolNotBound` indéfinis). Il épingle la loi de BA07 :
+
+- `TestProp_ToolAllowed_TrueIffBound` — `allowed == true ⟺ (server, tool) ∈ impl.Tools` (la loi, sur un alphabet qui touche régulièrement le cas lié ET le cas non lié).
+- `TestProp_ToolAllowed_AllowCarriesNoBlockReason` — un verdict autorisé ne porte aucun BlockReason.
+- `TestProp_ToolAllowed_DenyCarriesAgentToolNotBound` — un refus porte `AGENT_TOOL_NOT_BOUND` + un `how_to_fix` non vide (jamais la prison).
+- `TestProp_ToolAllowed_DefaultDenyEmptyImpl` — un `impl` sans outils refuse TOUT couple (default-deny, confinement max).
+- `TestProp_ToolAllowed_Deterministic` — mêmes entrées → même verdict (la reproductibilité).
+
+**L'enforcer** — `back/runtime/agentimpl/enforce.go`.
+
+```
+type ToolDecision struct { Allowed bool; BlockReason *blockreason.BlockReason }
+
+func ToolAllowed(impl AgentImplementation, server, tool string) ToolDecision {
+    for _, rt := range impl.Tools {
+        if rt.Server == server && rt.Tool == tool { return ToolDecision{Allowed: true} }
+    }
+    br := blockreason.For(blockreason.CodeAgentToolNotBound)
+    return ToolDecision{Allowed: false, BlockReason: &br}
+}
+```
+
+- `ToolDecision` a la **même forme** que `agentlayer.WriteDecision` (l'axe zone) : `Allowed bool` + `*BlockReason` sur un refus.
+- Pure, totale, déterministe : aucune DB, aucune horloge, aucun rng, aucune I/O. Appartenance ensembliste, jamais un jugement.
+
+**Le nouveau code S13** — `back/runtime/blockreason/blockreason.go` (extension d'enum additive, change_type: refine, jamais une suppression — anti-overwrite §9) : `CodeAgentToolNotBound = "AGENT_TOOL_NOT_BOUND"`, son entrée dans le registre `reasons` (sévérité `blocking`, explication d'axe capacité, `how_to_fix` nommant `idée → miroir → /goal`), et son ajout à `codeOrder`. Le miroir property enum-driven existant (`TestEveryCodeHasNonEmptyResolutionPath`) valide **automatiquement** le nouveau code via `Codes()`.
+
+**Le twin TS + la sonde action-capable** — `front/web/lib/agentlayer.ts` (`toolAllowed`, `ToolDecision`, `AGENT_TOOL_NOT_BOUND_REASON` verbatim du registre Go) + son miroir de reproductibilité Vitest (`lib/agentlayer.test.ts`, 5 cas) + la **sonde d'axe CAPACITÉ** dans `components/AgentsPanel.tsx` (`ImplementationViewer`) : deux inputs `(server, tool)`, un bouton « Évaluer la capacité » qui **exécute** `toolAllowed(impl, …)`, et le rendu du verdict (badge autorisé, ou encadré refusé avec code + explication + how_to_fix). Themé (ADR 0010), bilingue (clés `capProbe*` FR/EN, ADR 0011).
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Deux axes, deux gates, une forme.** Le mur S04 est structurellement un *deny-list* (refuse les zones nommées) — il sait dire « pas le kernel », pas « seulement ces outils ». BA07 est un *allow-list fail-closed*. En réutilisant la forme `MayWrite` (entrée → `Allowed`+`BlockReason`), BA13 pourra composer les deux dans un verdict unique sans cas spéciaux.
+- **Appartenance ensembliste, jamais un jugement (determinism-first, §8).** Un agent qui « déciderait » s'il peut utiliser un outil serait un *gap de déterminisme* — bloquant comme un monstre. Le verdict est calculé à partir des bindings déclarés, jamais inféré. Le miroir de reproductibilité l'épingle sur les deux plans (Go + TS).
+- **Le refus est actionnable.** Le `how_to_fix` ne dit pas « non » et s'arrête : il nomme la *seule* porte (ajouter un binding `Enabled` à la couche, via idée → miroir → /goal). Le mur enseigne sa propre sortie.
+
+## Méta-méta — la garantie de niveau 3
+
+- **Une capacité déclarée est désormais appliquée.** Avant BA07, `impl.Tools` était du JSON inerte (`rg` confirmait qu'aucun MCP ne vérifiait les bindings). BA07 ferme l'axe capacité du périmètre : ce qui est déclaré rétrécissant (BA05) est maintenant *gardé* default-deny. Aucune autonomie n'est câblée avant la fermeture du périmètre (BA-E2).
+- **Aucune capacité headless (§7, ui-completeness).** L'op `ToolAllowed` est *atteignable ET exécutable* depuis un écran : la sonde de capacité s'exécute et rend son verdict, prouvé par 4 tests Playwright (présence + action-capable ; un outil lié → autorisé ; un outil non lié → `AGENT_TOOL_NOT_BOUND` + how_to_fix nommant la porte ; un couple inconnu → default-deny).
+- **Le mur tient — sur le second axe.** L'enforcer est un verdict pur sous la ligne : il n'exécute aucun agent, n'écrit aucune vérité, n'accorde aucun outil. Élargir une capacité reste impossible sans passer la porte gouvernée. « L'agent propose, exécute, explore — il ne déclare jamais seul ce qui est vrai », et désormais il ne touche jamais seul un outil qu'on ne lui a pas accordé.
+
+## Note d'évolution (anti-overwrite §9)
+
+BA06 affirmait « aucun bouton dans la vue Implémentation » (count 0). BA07 ajoute *un* bouton — la sonde d'enforcer — qui est un **verdict pur sous la ligne**, ni un run d'agent ni une écriture de vérité. Le test e2e BA06 est raffiné de « 0 bouton » vers « exactement 1 bouton, et c'est l'enforcer de capacité » — l'invariant protégé (aucun contrôle de *run*, aucune écriture de *vérité*) tient toujours.
+
+## Limites connues
+
+- La sonde évalue l'`impl` *projetée affichée* (mockée par `exampleLayers`, §6) ; quand le SELECT view `kernel.agent_layer` atterrira, l'enforcer et son verdict tiennent inchangés (l'entrée change, pas la fonction).
+- L'enforcer est l'axe capacité **seul** ; sa composition avec les axes zone/chemin/skill/budget/hook dans un `GateAction` à précédence unique arrive à BA13.
+- Le twin TS utilise le même `AGENT_TOOL_NOT_BOUND_REASON` que le Go (verbatim) ; l'autorité du registre BlockReason reste le Go (`back/runtime/blockreason`).

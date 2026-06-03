@@ -1,0 +1,58 @@
+---
+title: "BA07 · L'enforcer d'axe CAPACITÉ — un agent ne peut utiliser qu'un outil qu'on lui a accordé"
+description: "BA07 ajoute le SECOND axe du mur : après l'axe ZONE (le mur S04/S52 refuse les zones de vérité), l'axe CAPACITÉ refuse tout outil MCP non accordé. ToolAllowed(impl, server, tool) est une fonction pure totale, fail-closed (default-deny) : autorisé si et seulement si (server, tool) est un binding activé de l'implémentation résolue ; sinon le nouveau BlockReason S13 AGENT_TOOL_NOT_BOUND s'affiche, nommant la porte idée → miroir → /goal pour accorder un binding. C'est de l'appartenance ensembliste, jamais un jugement (determinism-first). Le panneau /agents gagne une sonde de capacité action-capable : saisir un (server, tool), exécuter l'enforcer, voir le verdict. Playwright prouve : un outil lié → autorisé ; un outil non lié → refusé avec AGENT_TOOL_NOT_BOUND + how_to_fix."
+keywords: ["aidos", "krd", "build-agent", "BA07", "agentimpl", "ToolAllowed", "axe capacité", "axe zone", "le mur", "AGENT_TOOL_NOT_BOUND", "BlockReason", "S13", "default-deny", "fail-closed", "appartenance ensembliste", "set-membership", "binding activé", "MCP", "idée → miroir → /goal", "MayWrite", "sonde de capacité", "action-capable", "/agents", "determinism-first", "§2", "§6", "§8"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → BA07](/steps/internals/ba07-enforcer-capacite).</Note>
+
+## En une phrase
+
+BA07 ajoute le **second axe du mur** : après l'axe ZONE (le mur refuse les *zones de vérité*), l'axe **CAPACITÉ** refuse tout *outil MCP* qu'un agent gouverné n'a pas explicitement reçu — `ToolAllowed(impl, server, tool)` est une fonction pure, fail-closed, qui dit **oui** uniquement si le couple est un binding activé de l'implémentation.
+
+## Le problème que ça résout
+
+Aux pas BA02–BA05, AIDOS a appris à **résoudre** la surface de capacité d'un agent : `impl.Tools` ne contient que les outils MCP que la couche gouvernée a marqués `Enabled` (la gouvernance ne peut que rétrécir). Mais c'était du **JSON inerte** : aucun gate ne vérifiait jamais « cet agent a-t-il le droit d'utiliser cet outil ? ». Une capacité **déclarée mais non appliquée** est du théâtre de gouvernance.
+
+Le mur S04/S52 existant (`MayWrite`) applique l'axe **ZONE** : il refuse les écritures au-dessus de la ligne (kernel / mirrors / fitness) et laisse passer le reste. C'est un *deny-list* — bon pour « les zones interdites sont d'accord », mais **insuffisant pour le confinement** : un build-agent ne doit utiliser QUE les outils qu'on lui a accordés. Ça demande un *allow-list fail-closed* : ce qui n'est pas explicitement permis est refusé.
+
+BA07 construit cet allow-list sur l'axe capacité, avant qu'aucune boucle d'autonomie n'existe.
+
+## Les idées-clés
+
+<Field name="Deux axes distincts du même mur" type="le mur, §2">
+  Le mur n'est pas qu'une chose. L'axe **ZONE** (`MayWrite`) protège *où* on écrit ; l'axe **CAPACITÉ** (`ToolAllowed`) protège *quels outils* on exerce. Deux invariants, deux gates, la même forme fail-closed (entrée → verdict + BlockReason).
+</Field>
+
+<Field name="Autorisé si et seulement si le couple est lié" type="appartenance ensembliste">
+  `ToolAllowed(impl, server, tool)` est **vrai exactement quand** `(server, tool)` est présent dans `impl.Tools` (un binding activé). C'est de l'**appartenance ensembliste** — un calcul, jamais un jugement. Aucune inférence, aucun « l'agent estime que… ».
+</Field>
+
+<Field name="Default-deny : l'inconnu est refusé" type="fail-closed">
+  Tout couple absent est **refusé**. Un agent sans aucun outil lié se voit refuser *tous* les outils (confinement maximal par défaut). On ne fuit jamais par omission : le défaut est le refus, jamais l'autorisation.
+</Field>
+
+<Field name="Un BlockReason actionnable : AGENT_TOOL_NOT_BOUND" type="S13, §44.5">
+  Un refus n'est jamais une prison. Le nouveau code S13 `AGENT_TOOL_NOT_BOUND` porte une explication et un **chemin de correction** (`how_to_fix`) qui nomme la seule porte pour accorder un outil : ajouter un binding `Enabled` à la couche gouvernée via **idée → miroir → /goal → approbation**. Jamais une écriture directe.
+</Field>
+
+<Field name="La gouvernance ne peut que rétrécir" type="le mur">
+  On n'élargit jamais une capacité sous la ligne. L'implémentation projetée est un **sous-ensemble prouvable** de la couche gouvernée ; `ToolAllowed` n'ajoute aucun outil — il refuse seulement ce que la projection n'a pas porté. Le seul moyen d'accorder un nouvel outil est au-dessus de la ligne.
+</Field>
+
+## Ce que vous voyez dans le Workbench
+
+Le panneau **/agents**, dans la vue « Implémentation projetée », gagne une **sonde d'axe CAPACITÉ** :
+
+- saisissez un **serveur MCP** et un **outil** ;
+- cliquez **« Évaluer la capacité »** — l'enforcer pur s'exécute contre l'implémentation résolue affichée ;
+- si le couple est un binding activé → un badge **« Autorisé »** ;
+- sinon → un encadré **« Refusé — axe CAPACITÉ »** avec le code `AGENT_TOOL_NOT_BOUND`, son explication, et le `how_to_fix` qui nomme la porte idée → miroir → /goal.
+
+C'est **action-capable** : l'op que BA07 développe a un contrôle qui l'**exécute** depuis l'écran (pas de capacité headless). Et c'est sûr pour le mur : l'enforcer est un verdict **pur, sous la ligne** — il n'exécute aucun agent et n'écrit aucune vérité.
+
+## Ce que ça ne fait pas
+
+- Ça ne **lance aucun run** : l'enforcer calcule un verdict, il n'exécute rien (l'autonomie arrive bien plus tard, le périmètre se ferme d'abord).
+- Ça n'**accorde aucun outil** : un refus ne s'ouvre que par la couche gouvernée (idée → miroir → /goal) — jamais depuis l'écran ni sous la ligne.
+- Ça n'**émet aucun jugement** : c'est de l'appartenance ensembliste pure ; mêmes entrées → même verdict, toujours.

@@ -181,7 +181,9 @@
               "steps/concept/ba05-resolution-bindings",
               "steps/internals/ba05-resolution-bindings",
               "steps/concept/ba06-mcp-agentimpl-viewer",
-              "steps/internals/ba06-mcp-agentimpl-viewer"
+              "steps/internals/ba06-mcp-agentimpl-viewer",
+              "steps/concept/ba07-enforcer-capacite",
+              "steps/internals/ba07-enforcer-capacite"
             ]
           }
         ]
