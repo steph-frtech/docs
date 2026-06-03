@@ -1,0 +1,60 @@
+---
+title: "BA09 · L'enforcer de CONFINEMENT — un agent ne touche que la racine, les hosts et les commandes qu'on lui a accordés"
+description: "BA09 ajoute le QUATRIÈME axe du mur : après l'axe ZONE (le mur S04/S52 refuse les zones de vérité), l'axe CAPACITÉ (BA07 refuse tout outil MCP non lié) et l'axe SKILL (BA08 refuse tout skill non accordé), l'axe CONFINEMENT refuse tout chemin, host réseau ou commande hors de la liste d'autorisation déclarée. PathAllowed(impl, target) est une allow-list fail-closed (default-DENY contre AllowedPaths, code AGENT_PATH_NOT_ALLOWED), DISTINCTE de la deny-list de zone Classify (les zones interdites). EgressAllowed/ExecAllowed confinent le réseau et l'exec (default-deny contre AllowedNetworkHosts/AllowedExec, codes AGENT_EGRESS_NOT_ALLOWED/AGENT_EXEC_NOT_ALLOWED). Le Bash de l'agent est lui-même gaté : toute commande passe par ExecAllowed, jamais un shell libre. C'est de l'appartenance par préfixe/ensembliste, jamais un jugement (determinism-first). Le panneau /agents gagne une sonde de chemin action-capable. Playwright prouve : un chemin sous AllowedPaths et hors ForbiddenPaths → autorisé ; tout le reste → refusé."
+keywords: ["aidos", "krd", "build-agent", "BA09", "agentimpl", "PathAllowed", "EgressAllowed", "ExecAllowed", "axe confinement", "axe zone", "axe capacité", "axe skill", "le mur", "allow-list", "deny-list", "Classify", "AGENT_PATH_NOT_ALLOWED", "AGENT_EGRESS_NOT_ALLOWED", "AGENT_EXEC_NOT_ALLOWED", "BlockReason", "S13", "default-deny", "fail-closed", "AllowedPaths", "ForbiddenPaths", "AllowedNetworkHosts", "AllowedExec", "préfixe", "idée → miroir → /goal", "sonde de chemin", "action-capable", "/agents", "Bash gaté", "determinism-first", "§2", "§6", "§8"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → BA09](/steps/internals/ba09-enforcer-confinement).</Note>
+
+## En une phrase
+
+BA09 ajoute le **quatrième axe du mur** : après les axes ZONE (refuser les *zones de vérité*), CAPACITÉ (BA07 refuse tout *outil MCP* non lié) et SKILL (BA08 refuse tout *skill* non accordé), l'axe **CONFINEMENT** refuse tout *chemin*, *host réseau* ou *commande* hors de la liste d'autorisation déclarée — `PathAllowed(impl, target)` est une **allow-list fail-closed** qui dit **oui** uniquement si le chemin est couvert par un préfixe `AllowedPaths` **et** hors `ForbiddenPaths`.
+
+## Le problème que ça résout
+
+Le mur S04/S52 (l'axe ZONE) est une **deny-list** : tout ce qui résout *au-dessus de la ligne de flottaison* (kernel / mirrors / fitness) est refusé, tout le reste passe. C'est juste pour « les zones de vérité interdites sont hors limites » — mais ce **n'est pas du confinement**. Un agent gouverné qui code l'app d'un utilisateur ne doit toucher **que l'arbre de l'app** (sa racine inscriptible accordée), ne joindre **que les hosts déclarés**, n'exécuter **que les commandes déclarées**. Une deny-list laisse passer *tout le reste* ; le confinement exige l'inverse : une **allow-list**, où l'inconnu est refusé.
+
+BA09 ajoute donc une allow-list fail-closed, **distincte** de la deny-list de zone. Un chemin peut être refusé par confinement (hors `AllowedPaths`) **tout en n'étant pas** au-dessus de la ligne — les deux invariants coexistent. Et le `Bash` de l'agent est lui-même gaté : toute commande passe par `ExecAllowed`, jamais un shell libre.
+
+## Les idées-clés
+
+<Field name="Quatre axes distincts du même mur" type="le mur, §2">
+  Le mur n'est pas qu'une chose. L'axe **ZONE** (`MayWrite`/`Classify`) protège *où* on écrit (deny-list) ; l'axe **CAPACITÉ** (`ToolAllowed`) *quels outils* ; l'axe **SKILL** (`SkillAllowed`) *quels skills* ; l'axe **CONFINEMENT** (`PathAllowed`/`EgressAllowed`/`ExecAllowed`) *quel périmètre* (chemin, réseau, exec) — une allow-list. Quatre invariants, la même forme fail-closed (entrée → verdict + BlockReason).
+</Field>
+
+<Field name="Allow-list ≠ deny-list" type="distinct de Classify">
+  La deny-list de zone refuse les *zones interdites* et laisse passer le reste. L'allow-list de confinement refuse *tout ce qui n'est pas explicitement autorisé*. Un chemin comme `tmp/scratch` n'est **pas** au-dessus de la ligne (la deny-list le laisse passer) — mais s'il n'est pas couvert par `AllowedPaths`, le confinement le **refuse**. Les deux gates coexistent.
+</Field>
+
+<Field name="Autorisé si et seulement si couvert ET non interdit" type="appartenance par préfixe">
+  `PathAllowed(impl, target)` est **vrai exactement quand** un préfixe d'`AllowedPaths` couvre le chemin **et** qu'aucun préfixe de `ForbiddenPaths` ne le couvre. C'est de l'**appartenance par préfixe** — un calcul, jamais un jugement.
+</Field>
+
+<Field name="Default-deny : l'inconnu est refusé" type="fail-closed">
+  Une `AllowedPaths` vide refuse **tout** chemin (confinement maximal). De même, une `AllowedNetworkHosts` vide refuse **tout** egress (aucun `curl`), une `AllowedExec` vide refuse **toute** commande (aucun sous-processus). On ne fuit jamais par omission : le défaut est le refus.
+</Field>
+
+<Field name="Le Bash de l'agent est lui-même gaté" type="exec confinement">
+  L'agent n'a jamais un shell libre. Toute commande qu'il voudrait lancer passe d'abord par `ExecAllowed` — refusée si elle n'est pas dans `AllowedExec`. C'est l'axe exec du confinement, fail-closed comme les autres.
+</Field>
+
+<Field name="Trois BlockReasons actionnables" type="S13, §44.5">
+  Un refus n'est jamais une prison. Les trois nouveaux codes S13 — `AGENT_PATH_NOT_ALLOWED`, `AGENT_EGRESS_NOT_ALLOWED`, `AGENT_EXEC_NOT_ALLOWED` — portent chacun une explication et un **chemin de correction** (`how_to_fix`) nommant la seule porte pour élargir le périmètre : ajouter la zone/host/commande à la couche gouvernée via **idée → miroir → /goal → approbation**. Jamais une écriture directe.
+</Field>
+
+## Ce que vous voyez dans le Workbench
+
+Le panneau **/agents**, dans la vue « Implémentation projetée », gagne une **sonde d'axe CONFINEMENT**, sœur des sondes de capacité (BA07) et de skill (BA08) :
+
+- saisissez un **chemin cible** ;
+- cliquez **« Évaluer le chemin »** — l'enforcer pur s'exécute contre l'implémentation résolue affichée ;
+- si le chemin est sous `AllowedPaths` et hors `ForbiddenPaths` → un badge **« Autorisé »** ;
+- sinon → un encadré **« Refusé — axe CONFINEMENT »** avec le code `AGENT_PATH_NOT_ALLOWED`, son explication, et le `how_to_fix` qui nomme la porte idée → miroir → /goal.
+
+C'est **action-capable** : l'op que BA09 développe a un contrôle qui l'**exécute** depuis l'écran (pas de capacité headless). Et c'est sûr pour le mur : l'enforcer est un verdict **pur, sous la ligne** — il n'exécute aucun agent et n'écrit aucune vérité.
+
+## Ce que ça ne fait pas
+
+- Ça ne **lance aucun run** : l'enforcer calcule un verdict, il n'exécute rien (l'autonomie arrive bien plus tard, le périmètre se ferme d'abord).
+- Ça n'**élargit aucun périmètre** : un refus ne s'ouvre que par la couche gouvernée (idée → miroir → /goal) — jamais depuis l'écran ni sous la ligne. La racine inscriptible est l'arbre de l'app, jamais `/kernel` ni `/mirrors`.
+- Ça n'**émet aucun jugement** : c'est de l'appartenance par préfixe / ensembliste pure ; mêmes entrées → même verdict, toujours.

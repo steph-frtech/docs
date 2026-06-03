@@ -1,0 +1,78 @@
+---
+title: "BA09 · L'enforcer de CONFINEMENT PathAllowed/EgressAllowed/ExecAllowed — internals (Implémentation · Méta · Méta-méta)"
+description: "Détail d'implémentation de BA09 : PathAllowed(impl, target) → (allowed, *BlockReason) dans back/runtime/agentimpl/enforce.go, une allow-list pure totale fail-closed (appartenance par préfixe sur AllowedPaths MINUS ForbiddenPaths) avec le nouveau code S13 AGENT_PATH_NOT_ALLOWED, DISTINCTE de la deny-list de zone Classify ; plus EgressAllowed/ExecAllowed (codes AGENT_EGRESS_NOT_ALLOWED/AGENT_EXEC_NOT_ALLOWED). Le miroir property rapid (enforce_property_test.go, props PathAllowed/Egress/Exec + distinct-de-la-zone) épingle allowed ⟺ (couvert ∧ non interdit) + default-deny + déterminisme. Le twin TS pathAllowed/egressDecision/execDecision (lib/agentlayer.ts) + sa sonde action-capable dans /agents (AgentsPanel.tsx) + 5 Vitest (62 au total) + 4 Playwright. Mirror-first, determinism-first."
+keywords: ["aidos", "krd", "BA09", "agentimpl", "PathAllowed", "EgressAllowed", "ExecAllowed", "enforce.go", "AGENT_PATH_NOT_ALLOWED", "AGENT_EGRESS_NOT_ALLOWED", "AGENT_EXEC_NOT_ALLOWED", "BlockReason", "S13", "axe confinement", "axe zone", "Classify", "allow-list", "deny-list", "MayWrite", "ToolAllowed", "SkillAllowed", "fail-closed", "default-deny", "préfixe", "AllowedPaths", "ForbiddenPaths", "rapid", "property test", "miroir", "determinism-first", "twin TS", "pathAllowed", "sonde de chemin", "Playwright", "ADR 0009", "ADR 0010", "ADR 0011", "le mur", "internals"]
+---
+
+<Note>Côté implémentation — l'intérieur de la machine. Pour le concept sans code, voir [Pour les futurs utilisateurs → BA09](/steps/concept/ba09-enforcer-confinement).</Note>
+
+## En une phrase
+
+BA09 ajoute `PathAllowed(impl, target) → (allowed bool, *BlockReason)` — une **allow-list pure, totale, fail-closed** (`back/runtime/agentimpl/enforce.go`) qui refuse tout chemin non couvert par `AllowedPaths` (ou couvert par `ForbiddenPaths`) avec le nouveau code S13 `AGENT_PATH_NOT_ALLOWED`, **distincte** de la deny-list de zone `Classify` ; plus `EgressAllowed`/`ExecAllowed` (axes réseau/exec, codes `AGENT_EGRESS_NOT_ALLOWED`/`AGENT_EXEC_NOT_ALLOWED`) — le 4ᵉ des quatre axes déclarés.
+
+## Implémentation
+
+**Le miroir d'abord (rouge → vert).** `back/runtime/agentimpl/enforce_property_test.go` — les propriétés `rapid` de BA09 écrites AVANT le code, rouges (compile-fail : `PathAllowed`, `EgressAllowed`, `ExecAllowed` et `blockreason.CodeAgentPathNotAllowed`/`…EgressNotAllowed`/`…ExecNotAllowed` indéfinis). Elles épinglent la loi de BA09 :
+
+- `TestProp_PathAllowed_TrueIffCoveredAndNotForbidden` — `allowed == true ⟺ (∃ a∈AllowedPaths: prefix(a,t)) ∧ (∄ f∈ForbiddenPaths: prefix(f,t))` (la loi du confinement, sur un alphabet qui touche couvert/non couvert/overlap-interdit).
+- `TestProp_PathAllowed_AllowCarriesNoBlockReason` — un verdict autorisé ne porte aucun BlockReason.
+- `TestProp_PathAllowed_DenyCarriesAgentPathNotAllowed` — un refus porte `AGENT_PATH_NOT_ALLOWED` + un `how_to_fix` non vide (jamais la prison).
+- `TestProp_PathAllowed_DefaultDenyEmptyImpl` — un `impl` sans `AllowedPaths` refuse TOUT chemin (default-deny, confinement max).
+- `TestProp_PathAllowed_Deterministic` — mêmes entrées → même verdict.
+- `TestProp_EgressAllowed_TrueIffDeclared` / `TestProp_ExecAllowed_TrueIffDeclared` — allow-list fail-closed sur `AllowedNetworkHosts`/`AllowedExec`, deny portant le bon code.
+- `TestProp_PathAllowed_DistinctFromZoneDenyList` — **l'invariant clé** : un chemin (`tmp/scratch`) qui n'est PAS au-dessus de la ligne (la deny-list le passe) est néanmoins refusé par confinement s'il est hors `AllowedPaths` — et l'invariant allow coexiste (un chemin sous `AllowedPaths` et hors `ForbiddenPaths` passe ; un chemin sous un préfixe `ForbiddenPaths` est refusé).
+
+**L'enforcer** — `back/runtime/agentimpl/enforce.go`.
+
+```
+type PathDecision struct { Allowed bool; BlockReason *blockreason.BlockReason }
+
+func coveredBy(prefixes []string, target string) bool {
+    if target == "" { return false }
+    for _, p := range prefixes {
+        if p == "" { continue }
+        if strings.HasPrefix(target, p) { return true }
+    }
+    return false
+}
+
+func PathAllowed(impl AgentImplementation, target string) PathDecision {
+    if coveredBy(impl.AllowedPaths, target) && !coveredBy(impl.ForbiddenPaths, target) {
+        return PathDecision{Allowed: true}
+    }
+    br := blockreason.For(blockreason.CodeAgentPathNotAllowed)
+    return PathDecision{Allowed: false, BlockReason: &br}
+}
+```
+
+- `EgressAllowed`/`ExecAllowed` (fonctions du paquet, à côté des méthodes booléennes éponymes sur `AgentImplementation`) **défèrent** aux allow-lists `agentlayer.EgressAllowed`/`ExecAllowed` (une `AllowedNetworkHosts`/`AllowedExec` vide refuse tout — fail-closed) et habillent le booléen d'un `EgressDecision`/`ExecDecision` portant le bon code S13 sur un refus.
+- `PathDecision`/`EgressDecision`/`ExecDecision` ont la **même forme** que `ToolDecision`/`SkillDecision`/`agentlayer.WriteDecision` : `Allowed bool` + `*BlockReason`.
+- Pure, totale, déterministe : aucune DB, aucune horloge, aucun rng, aucune I/O. Appartenance par préfixe/ensembliste, jamais un jugement.
+
+**Les trois nouveaux codes S13** — `back/runtime/blockreason/blockreason.go` (extension d'enum additive, change_type: refine, jamais une suppression — anti-overwrite §9) : `CodeAgentPathNotAllowed`/`CodeAgentEgressNotAllowed`/`CodeAgentExecNotAllowed`, leurs entrées dans le registre `reasons` (sévérité `blocking`, explication d'axe confinement nommant la distinction allow-list/deny-list et « le Bash est lui-même gaté », `how_to_fix` nommant `idée → miroir → /goal`), et leur ajout à `codeOrder`. Le miroir property enum-driven existant valide **automatiquement** les nouveaux codes via `Codes()` (aucun nouveau test d'enum à écrire).
+
+**Le twin TS + la sonde action-capable** — `front/web/lib/agentlayer.ts` (`pathAllowed`/`egressDecision`/`execDecision`, leurs `*Decision`, `AGENT_PATH_NOT_ALLOWED_REASON`/`…EGRESS…`/`…EXEC…` verbatim du registre Go) + son miroir de reproductibilité Vitest (`lib/agentlayer.test.ts`, 5 cas — 62 au total) + la **sonde d'axe CONFINEMENT** dans `components/AgentsPanel.tsx` (`ImplementationViewer`) : un input `chemin cible`, un bouton « Évaluer le chemin » qui **exécute** `pathAllowed(impl, …)`, et le rendu du verdict (badge autorisé, ou encadré refusé avec code + explication + how_to_fix). Themé (ADR 0010), bilingue (clés `pathProbe*` FR/EN, ADR 0011).
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Quatre axes, quatre gates, une forme.** Le mur S04 est un *deny-list* d'axe zone ; BA07/BA08 ont ajouté les *allow-lists* capacité/skill ; BA09 ajoute l'*allow-list* confinement (chemin/réseau/exec). En réutilisant la forme `Allowed`+`BlockReason`, BA13 pourra composer les axes dans un `GateAction` à précédence unique sans cas spéciaux.
+- **Confinement ≠ zone.** L'erreur facile serait de croire que « le chemin est sous la ligne » suffit. Non : la deny-list de zone refuse *les zones de vérité*, mais le confinement exige que l'agent ne touche QUE l'arbre de l'app. C'est l'invariant `DistinctFromZoneDenyList` — un chemin hors `AllowedPaths` est refusé même quand il n'est pas au-dessus de la ligne, les deux gates coexistent.
+- **Appartenance par préfixe, jamais un jugement (determinism-first, §8).** Un agent qui « déciderait » s'il peut écrire un chemin serait un *gap de déterminisme* — bloquant comme un monstre. Le verdict est calculé à partir des listes déclarées (`AllowedPaths`/`AllowedNetworkHosts`/`AllowedExec`), jamais inféré. Le miroir de reproductibilité l'épingle sur les deux plans (Go + TS).
+- **Le Bash est gaté à la source.** En refusant `ExecAllowed` par défaut (liste vide → tout refusé), l'agent n'a jamais un shell libre : c'est le confinement exec, fail-closed, et non une politique optionnelle.
+
+## Méta-méta — la garantie de niveau 3
+
+- **Le quatrième axe déclaré est désormais appliqué.** Avant BA09, `AllowedPaths`/`AllowedNetworkHosts`/`AllowedExec` étaient du JSON inerte. BA09 ferme l'axe confinement du périmètre : ce qui est déclaré rétrécissant (BA02/BA05) est maintenant *gardé* default-deny. Aucune autonomie n'est câblée avant la fermeture du périmètre (BA-E2).
+- **Aucune capacité headless (§7, ui-completeness).** L'op `PathAllowed` est *atteignable ET exécutable* depuis un écran : la sonde de chemin s'exécute et rend son verdict, prouvé par 4 tests Playwright (présence + action-capable ; un chemin sous `AllowedPaths`/hors `ForbiddenPaths` → autorisé ; un chemin hors `AllowedPaths` → `AGENT_PATH_NOT_ALLOWED` + how_to_fix nommant la porte ; un chemin sous un préfixe mur/`ForbiddenPaths` → refusé, distinct de l'allow-list).
+- **Le mur tient — sur le quatrième axe, distinct du premier.** L'enforcer est un verdict pur sous la ligne : il n'exécute aucun agent, n'écrit aucune vérité, n'élargit aucun périmètre. La deny-list de zone et l'allow-list de confinement coexistent ; élargir le périmètre reste impossible sans passer la porte gouvernée.
+
+## Note d'évolution (anti-overwrite §9)
+
+BA08 affirmait « exactement 2 boutons dans la vue Implémentation » (les sondes capacité + skill). BA09 ajoute *un* troisième bouton — la sonde de chemin — lui aussi un **verdict pur sous la ligne**, ni un run d'agent ni une écriture de vérité. Le test e2e BA06/BA07/BA08 est raffiné de « exactement 2 boutons » vers « exactement 3 boutons, et ce sont les enforcers de capacité, skill et confinement » — l'invariant protégé (aucun contrôle de *run*, aucune écriture de *vérité*) tient toujours.
+
+## Limites connues
+
+- La sonde évalue l'`impl` *projetée affichée* (mockée par les fixtures `agentlayer-data`, §6) ; quand le SELECT view `kernel.agent_layer` atterrira, l'enforcer et son verdict tiennent inchangés (l'entrée change, pas la fonction).
+- L'enforcer est l'axe confinement **seul** ; sa composition avec les axes zone/capacité/skill/budget/hook dans un `GateAction` à précédence unique arrive à BA13. Le confinement OS *réel* (la racine inscriptible montée, l'egress réseau borné, le cgroup/ulimit) — le miroir OS de cette allow-list — atterrit à BA17.
+- Le twin TS utilise les mêmes `AGENT_*_NOT_ALLOWED_REASON` que le Go (verbatim) ; l'autorité du registre BlockReason reste le Go (`back/runtime/blockreason`).
+- **Linear :** le MCP `linear-server` n'est pas authentifié dans cette session (OAuth requis) ; le suivi du pas BA09 (statut In Progress → Done) n'a pu être mis à jour automatiquement — OpenQuestion, sans blocage du pas (CLAUDE.md §11, best-effort).
