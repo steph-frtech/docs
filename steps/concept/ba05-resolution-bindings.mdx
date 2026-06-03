@@ -1,0 +1,59 @@
+---
+title: "BA05 · Résolution des bindings — la gouvernance ne peut que RÉTRÉCIR la surface de capacité"
+description: "BA05 ajoute ResolveTools / ResolveSkills / ResolveHooks : les fonctions PURES qui projettent les bindings déclarés d'une couche gouvernée (CoucheAgent) vers la surface de capacité résolue de l'implémentation. La loi prouvée : la gouvernance ne peut que RÉTRÉCIR la surface, jamais l'ÉLARGIR. Les outils ne dérivent QUE des OutilsMCPAutorises avec Enabled==true (un binding désactivé ou absent n'apparaît jamais) ; les skills QUE des SkillsAutorises activés ; les hooks des HooksObligatoires en préservant le drapeau Mandatory (un hook obligatoire survit toujours). Miroir property : ResolvedTools ⊆ bindings activés ; ResolvedSkills ⊆ skills activés ; un hook Mandatory survit toujours. C'est le fondement que l'application vérifiera : la surface de capacité de l'implémentation est un sous-ensemble PROUVABLE de la couche gouvernée."
+keywords: ["aidos", "krd", "build-agent", "BA05", "ResolveTools", "ResolveSkills", "ResolveHooks", "résolution des bindings", "surface de capacité", "rétrécir", "élargir", "sous-ensemble", "subset", "OutilsMCPAutorises", "SkillsAutorises", "HooksObligatoires", "Enabled", "Mandatory", "hook obligatoire", "MCP", "skill", "binding désactivé", "gouvernance", "déterministe", "pur", "miroir property", "narrowing", "AgentImplementation", "CoucheAgent", "le mur", "determinism-first", "S52", "§2", "§6", "§8"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → BA05](/steps/internals/ba05-resolution-bindings).</Note>
+
+## En une phrase
+
+BA05 ajoute **`ResolveTools` / `ResolveSkills` / `ResolveHooks`** : les fonctions pures qui résolvent les bindings déclarés d'une couche gouvernée vers la surface de capacité de l'implémentation — et qui ne peuvent que **rétrécir** cette surface, jamais l'élargir.
+
+## Le problème que ça résout
+
+Une couche gouvernée (`CoucheAgent`) déclare ce qu'un build-agent **a le droit** de faire : les outils MCP qu'il peut appeler, les skills qu'il peut rejouer, les hooks sous lesquels il doit tourner. Mais une déclaration n'est pas une exécution. Quand on projette la couche vers une implémentation runnable, une question se pose : **l'implémentation peut-elle gagner une capacité que la couche n'a pas accordée ?**
+
+La réponse KRD doit être **non, jamais** — et de façon **prouvable**, pas promise. Si l'implémentation pouvait surfacer un outil désactivé, ou inventer un skill, ou abandonner un hook obligatoire, alors la couche gouvernée ne gouvernerait plus rien : la surface réelle s'écarterait de la surface déclarée.
+
+BA05 ferme cette porte avec une loi unique : **la gouvernance ne peut que rétrécir la surface de capacité, jamais l'élargir.**
+
+## Les idées-clés
+
+<Field name="Les outils ne dérivent QUE des bindings activés" type="narrowing, §2">
+  `ResolveTools` ne retient que les `OutilsMCPAutorises` dont `Enabled == true`. Un binding **désactivé** ou **absent** n'apparaît **jamais** dans la surface résolue. La gouvernance a déclaré un outil puis l'a éteint ? Il disparaît de l'implémentation.
+</Field>
+
+<Field name="Les skills, pareil" type="narrowing">
+  `ResolveSkills` ne retient que les `SkillsAutorises` activés. Un skill désactivé ne peut pas être rejoué par l'agent.
+</Field>
+
+<Field name="Un hook obligatoire survit TOUJOURS" type="le mur, non-bypassable">
+  `ResolveHooks` projette les `HooksObligatoires` en **préservant le drapeau `Mandatory`**. Un hook obligatoire (le mur, par exemple) **survit toujours** à la projection — il ne peut pas être abandonné. La résolution n'invente jamais un hook que la SOURCE n'a pas déclaré.
+</Field>
+
+<Field name="Un sous-ensemble PROUVABLE" type="miroir property, §6/§8">
+  Le miroir property épingle, pour des milliers de couches tirées au hasard : `ResolvedTools ⊆ bindings activés` ; `ResolvedSkills ⊆ skills activés` ; chaque hook `Mandatory` survit. La propriété est **rejouée**, pas affirmée. C'est le fondement que l'application vérifiera plus tard : la surface de capacité réelle est un **sous-ensemble** de la couche gouvernée.
+</Field>
+
+<Field name="Déterministe, indépendant de l'ordre" type="determinism-first">
+  La résolution est **pure** (pas d'horloge, pas de hasard, pas d'I/O) et **triée canoniquement** : l'ordre des bindings dans la SOURCE ne change pas la projection, et les mêmes entrées donnent toujours la même sortie octet-stable.
+</Field>
+
+## Ce que vous voyez dans le Workbench
+
+Le panneau **/agents** gagne une section **« Bindings résolus — ResolveTools / ResolveSkills / ResolveHooks »** avec un bouton **« Résoudre les bindings »**. Il exécute la résolution depuis l'écran et affiche :
+
+- un badge **« Tools ⊆ bindings activés »** (aucun outil résolu hors des bindings activés) ;
+- un badge **« Skills ⊆ skills activés »** ;
+- un badge **« hook Mandatory survit »** (le hook obligatoire est toujours là) ;
+- un badge **« surface rétrécie »** (un binding désactivé a bien été exclu) ;
+- les listes des **outils**, **skills** et **hooks** résolus (★ = obligatoire).
+
+Vous *voyez* donc, exécuté à l'écran, que l'outil désactivé et le skill désactivé ont disparu, et que le hook obligatoire a survécu.
+
+## Ce que ça ne fait pas
+
+- Ça n'**appelle aucun modèle** : la résolution est une projection pure des bindings, pas une session.
+- Ça n'**écrit aucune vérité** : c'est une fonction pure *sous* la ligne qui lit une couche et rend une surface. Aucune écriture au-dessus de la ligne, jamais.
+- Ça ne **change pas** les droits de la couche : elle ne fait que les *projeter* fidèlement — en rétrécissant, jamais en élargissant.

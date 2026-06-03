@@ -1,0 +1,46 @@
+---
+title: "BA05 · Résolution des bindings — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail d'implémentation de BA05 : ResolveTools / ResolveSkills / ResolveHooks extraits dans back/runtime/agentimpl/bindings.go — des fonctions PURES qui projettent les bindings d'une CoucheAgent vers la surface de capacité résolue, en RÉTRÉCISSANT (jamais en élargissant). Les helpers, auparavant non exportés dans project.go (BA03), sont supersédés par extraction (anti-overwrite §9) ; Project délègue désormais aux fonctions exportées — une seule résolution. Le miroir ROUGE-d'abord bindings_property_test.go (rapid) : ResolvedTools ⊆ bindings activés, ResolvedSkills ⊆ skills activés, un hook Mandatory survit toujours, déterministe et indépendant de l'ordre. Le twin front lib/agentlayer.ts (resolveTools/resolveSkills/resolveHooks) + Vitest (47 tests, +5 BA05). La section /agents « Bindings résolus » action-capable + l'e2e Playwright (17 tests, +2 BA05). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "build-agent", "BA05", "ResolveTools", "ResolveSkills", "ResolveHooks", "back/runtime/agentimpl", "bindings.go", "project.go", "fonctions pures", "déterministe", "indépendant de l'ordre", "OutilsMCPAutorises", "SkillsAutorises", "HooksObligatoires", "Enabled", "Mandatory", "sous-ensemble", "subset", "rétrécir", "narrowing", "bindings_property_test", "rapid", "anti-overwrite", "supersede par extraction", "AgentImplementation", "CoucheAgent", "Project", "Vitest", "Playwright", "lib/agentlayer", "determinism-first", "S52", "§2", "§6", "§8", "§9"]
+---
+
+<Note>Côté implémentation — le détail interne. Pour le concept et l'usage, voir [Pour les futurs utilisateurs → BA05](/steps/concept/ba05-resolution-bindings).</Note>
+
+## En une phrase
+
+BA05 extrait **`ResolveTools` / `ResolveSkills` / `ResolveHooks`** dans `back/runtime/agentimpl/bindings.go` — des fonctions pures qui projettent les bindings d'une `CoucheAgent` vers la surface de capacité résolue de l'implémentation, en **rétrécissant** prouvablement (jamais en élargissant).
+
+## Implémentation
+
+<Steps>
+  <Step title="Le miroir property ROUGE d'abord">
+    `bindings_property_test.go` (rapid) épingle quatre invariants avant tout code exporté : (1) **`ResolveTools ⊆ bindings activés`** — chaque `ResolvedTool` correspond à un `OutilsMCPAutorises` avec `Enabled==true` ; un binding désactivé/absent n'apparaît jamais ; et chaque binding activé est bien présent (pas de drop silencieux) ; (2) **`ResolveSkills ⊆ skills activés`** ; (3) **`ResolveHooks` préserve `Mandatory`** — un hook obligatoire déclaré survit toujours, et la résolution n'invente aucun hook ; (4) **déterministe + indépendant de l'ordre** — résoudre deux fois, ou inverser l'ordre d'entrée, donne la même sortie triée canoniquement. ROUGE : sans les fonctions exportées, le paquet ne compile pas (`undefined: agentimpl.ResolveTools`).
+  </Step>
+  <Step title="bindings.go — l'extraction des résolveurs exportés">
+    `bindings.go` : `ResolveTools(bindings []agentlayer.MCPBinding) []ResolvedTool` ne retient que `b.Enabled`, dé-duplique, et trie par `(server, tool)`. `ResolveSkills(bindings []agentlayer.SkillBinding) []string` ne retient que les skills activés (trié/dé-dupliqué via `normalizePaths`). `ResolveHooks(policies []agentlayer.AgentHookPolicy) []ResolvedHook` projette chaque politique en préservant `Mandatory`, dé-duplique, trie par `(phase, hook, mandatory)`. Toutes **pures** (pas d'horloge, pas d'aléa, pas d'I/O) ; sortie `nil` si vide (forme canonique JSON `null`, stable).
+  </Step>
+  <Step title="Project délègue — une seule résolution (anti-overwrite §9)">
+    Les helpers non exportés `resolveTools`/`resolveSkills`/`resolveHooks` de `project.go` (BA03) sont **supersédés par extraction** : `Project` appelle désormais `ResolveTools`/`ResolveSkills`/`ResolveHooks`. Il y a **une** résolution, pas deux — la surface émise par l'émetteur est exactement celle que le miroir BA05 prouve rétrécissante. Le miroir byte-stable de BA03 (`agentimpl_emitter_property_test.go`) et le golden BA04 passent **inchangés** (le comportement est préservé, pas réécrit).
+  </Step>
+  <Step title="Le twin front + la section /agents action-capable">
+    `lib/agentlayer.ts` gagne `resolveTools`/`resolveSkills`/`resolveHooks` (byte-pour-byte du Go : mêmes filtres `enabled`, mêmes tris, préservation de `mandatory`), et `project()` y **délègue** (une seule résolution côté front aussi). La reproductibilité mirror `lib/agentlayer.test.ts` passe à **47 tests** (+5 BA05 : subset, déterminisme/ordre, mandatory survit, et un test prouvant que `project()` résout la même surface que les résolveurs autonomes). La donnée `BDD_WRITER` gagne un binding MCP **désactivé** (`changeset`) et un skill **désactivé** (`evolve`) pour rendre le rétrécissement *démontrable* à l'écran. Le panneau `/agents` gagne la section **« Bindings résolus »** avec le bouton **« Résoudre les bindings »** qui **exécute** la résolution et affiche les badges **Tools ⊆ activés**, **Skills ⊆ activés**, **hook Mandatory survit**, **surface rétrécie** + les listes résolues (★ = obligatoire). L'e2e `tests/e2e/agents.spec.ts` passe à **17 tests** (+2 BA05 prouvant l'exécution : la section est présente/pure ; le contrôle exécute, le binding désactivé est exclu, le hook obligatoire survit).
+  </Step>
+</Steps>
+
+## Méta — pourquoi c'est construit ainsi
+
+- **La résolution est une fonction pure, donc du code (§6/§8).** Filtrer des bindings activés, trier, préserver un drapeau : c'est du calcul déterministe, jamais du jugement d'agent. Le miroir property *rejoue* le sous-ensemble pour des milliers d'entrées au lieu de le promettre.
+- **« La gouvernance ne peut que rétrécir » est une loi de sécurité.** Si l'implémentation pouvait élargir la surface (surfacer un outil désactivé, inventer un skill, perdre un hook obligatoire), la couche gouvernée cesserait de gouverner. Le test exige `Résolu ⊆ Déclaré-activé` *et* « chaque hook Mandatory survit » — deux directions de la même loi.
+- **Une seule résolution (extraction, pas duplication).** Avant BA05, l'émetteur inlinait la résolution ; un second appelant (l'application, BA-E2) aurait pu en écrire une *autre*. L'extraction (anti-overwrite §9 : supersede-via-extraction, jamais un move silencieux) garantit qu'il n'existe qu'**une** définition, partagée par l'émetteur et tous les vérificateurs futurs.
+- **L'indépendance à l'ordre est une propriété, pas un hasard.** La sortie triée canoniquement assure que l'ordre des bindings dans la SOURCE ne fuit pas dans la projection — la projection reste content-adressable et byte-stable.
+
+## Méta-méta — la garantie de niveau 3
+
+BA05 ne touche **ni la fitness, ni le kernel-as-truth** : il ajoute des fonctions **sous la ligne** (`Resolve*`) et déplace, par extraction miroré, une logique déjà présente. Les garanties inviolables rendues exécutables : (1) **reproductibilité** — mêmes bindings → même surface (property : déterministe + indépendant de l'ordre) ; (2) **le mur tient** — un hook obligatoire (le mur) survit *toujours* à la projection, prouvé par property ; (3) **determinism-first** — la résolution est une fonction pure autoritaire, jamais un agent. La méta-loop **ajoute** un garde-fou (la surface prouvablement rétrécissante), elle n'en **retire** aucun (§9) ; les miroirs byte-stables de BA03 et le golden de BA04 passent inchangés.
+
+## Limites connues
+
+- **Pas de session LLM.** La résolution produit la *surface* de capacité ; instancier une vraie boucle qui *appelle* ces outils MCP est un pas ultérieur (BA-E2/BA-E3).
+- **L'application (BA-E2) reste à construire.** BA05 est le *fondement* prouvable du « subset » ; le vérificateur côté application qui re-prouve `surface réelle ⊆ couche gouvernée` à l'exécution viendra plus tard.
+- **`implContentHash` (front) n'est pas cryptographique.** Le twin front prouve la reproductibilité par égalité de structures ; le Go reste l'autorité.
+- **Linear non authentifié.** Si l'issue de suivi BA05 n'a pu être mise à jour (OAuth du MCP `linear-server` requis), c'est noté comme OpenQuestion, non bloquant.

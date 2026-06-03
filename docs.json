@@ -177,7 +177,9 @@
               "steps/concept/ba03-emetteur-project",
               "steps/internals/ba03-emetteur-project",
               "steps/concept/ba04-system-prompt",
-              "steps/internals/ba04-system-prompt"
+              "steps/internals/ba04-system-prompt",
+              "steps/concept/ba05-resolution-bindings",
+              "steps/internals/ba05-resolution-bindings"
             ]
           }
         ]
