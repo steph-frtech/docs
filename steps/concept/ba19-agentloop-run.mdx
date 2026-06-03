@@ -1,0 +1,41 @@
+---
+title: "BA19 · Lancer un run gouverné — la boucle agentloop et ses contrôles « Run »"
+description: "BA19 ouvre la porte de capacité sur la boucle agentloop : un serveur MCP qui pilote un run mono-agent sur un item rouge, gaté à la frontière transport (un run ne peut appeler qu'un outil que sa couche LIE), rend la timeline live des actions avec les verdicts de mur, et n'écrit jamais de vérité. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA19", "agentloop", "run gouverné", "MCP", "timeline", "frontière transport", "AGENT_TOOL_NOT_BOUND", "AGENT_WRITE_ABOVE_WATERLINE", "le mur", "determinism-first"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA19](/steps/internals/ba19-agentloop-run).</Note>
+
+## L'idée en une phrase
+
+BA19 vous donne le bouton **« Lancer un run »** : vous prenez un item *rouge* (un comportement encore à prouver), et l'agent qui code votre app le pilote vers le vert — sous surveillance. Chaque action qu'il tente passe au crible du **mur** ; vous voyez la **timeline live** des actions, et le run ne peut jamais écrire de vérité.
+
+## Ce qu'est un « run »
+
+Un *run* n'est pas une couche d'agent (ça, c'est sa configuration gouvernée). Un run est un **événement d'exécution**, sous la ligne de flottaison : il consomme un contexte, réclame un item rouge, et pilote une session de codage gouvernée en enregistrant un journal d'actions (l'AgentRun). Lancer un run **ne déclare aucune vérité** — c'est de la télémétrie, pas du noyau.
+
+## La frontière transport — « est-ce réel ? »
+
+Le point dur de BA19 : le contrôle de capacité n'est pas un simple `return false` au fond d'un test unitaire. L'enforcer est **sur le chemin d'appel réel**. Avant que la boucle ne demande la moindre action, le serveur vérifie que la couche de l'agent **lie** bien l'outil MCP visé. Si elle ne le lie pas, l'appel est **refusé à la frontière transport** avec `AGENT_TOOL_NOT_BOUND` — et aucun run ne s'exécute.
+
+C'est la différence entre « le code dit non » et « le mur tient pour de vrai » : ici, c'est le chemin d'appel lui-même qui refuse.
+
+## Ce que vous voyez à l'écran
+
+Le panneau **/agents** porte la section « Lancer un run ». Vous choisissez un scénario et vous lancez :
+
+- **Happy** — l'agent écrit dans l'arbre `app/` (sous la ligne, autorisé) et fait passer le miroir rouge au vert : la timeline rend les actions, le run atteint un terminal vert calculé, et l'étiquette « n'écrit aucune vérité » reste vraie.
+- **Kernel-write** — l'agent tente une écriture dans le noyau : cette action est **REFUSÉE en place** avec `AGENT_WRITE_ABOVE_WATERLINE`, son effet n'atterrit jamais, et le run continue. Même là, **aucune vérité** n'est écrite au-dessus de la ligne.
+- **Outil non lié** (case à cocher) — le run vise un outil que sa couche ne lie pas : **REFUSÉ à la frontière transport** (`AGENT_TOOL_NOT_BOUND`), aucune action ne tourne.
+
+Chaque refus affiche son `BlockReason` actionnable — un *comment corriger*, jamais une impasse.
+
+## Le mur, en clair
+
+- **Lancer est sous la ligne** : ça enregistre un AgentRun (télémétrie), jamais une vérité.
+- **Toute vérité que le run *proposerait*** passe par `propose → ChangeSet → approbation` (à venir) — il n'existe délibérément aucun bouton ici qui écrirait le noyau, les miroirs ou la fitness.
+- **Une action en zone interdite est refusée en place** : le mur tient même au milieu d'un run.
+
+## Ce que ça vous garantit
+
+Vous pouvez lancer l'agent sur un vrai item rouge et **regarder** ce qu'il fait, action par action, avec le verdict du mur sur chacune. Une tentative d'écrire la vérité est barrée à la source ; un appel vers un outil non autorisé est barré sur le chemin réel. Le run propose, il ne gouverne jamais — et il n'écrit jamais ce qui est vrai.
