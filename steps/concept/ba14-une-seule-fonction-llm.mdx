@@ -1,0 +1,38 @@
+---
+title: "BA14 · « Une seule fonction LLM » — la règle arch-fitness"
+description: "BA14 rend « le LLM isolé à une exception gatée » un invariant ARCHITECTURAL appliqué : une règle déterministe (un scan d'imports, pas un agent) refuse au build que tout paquet autre que back/runtime/agentloop/provider importe un SDK LLM. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA14", "arch-fitness", "depguard", "une seule fonction LLM", "provider", "determinism-first", "le mur"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA14](/steps/internals/ba14-une-seule-fonction-llm).</Note>
+
+## L'idée en une phrase
+
+Dans AIDOS, **le LLM est une exception gatée** : on ne l'appelle que pour ce qu'aucune fonction déterministe ne sait faire. BA14 transforme cette intention — répétée comme de la prose à chaque pas — en un **invariant architectural appliqué** : un **seul** paquet a le droit d'importer le SDK d'un modèle ; tout autre import fait **échouer le build**.
+
+## Le problème que ça résout
+
+Le « determinism-first » dit : ce qui peut être une fonction pure (parser, comparer, scorer, rendre, valider) **doit** être du code, jamais un appel à un modèle. Tant que cette règle reste de la prose, un pas ultérieur pourrait **saupoudrer un second appel LLM** quelque part — et chaque « determinism-first ✓ » par-pas continuerait de passer. La promesse « le LLM, à un seul endroit » serait *aspirationnelle*, jamais *vérifiée*.
+
+BA14 la rend **vérifiée au build**. C'est le garde qui empêche la dérive silencieuse.
+
+## Comment ça marche, vu de loin
+
+- Il existe **un seul paquet autorisé** — le *provider* : la couture (l'interface) par laquelle toute la boucle atteint un modèle. Le SDK du modèle ne vit **que là**.
+- Une **règle déterministe** lit le graphe d'imports du module (un simple scan, **pas un agent**) et signale tout paquet — autre que le provider — qui importe un SDK LLM.
+- Cette règle est **rouge d'abord** : un test d'injection de faute ajoute un import de SDK ailleurs et vérifie que la règle **bascule au rouge**. Sans cette preuve, la règle serait morte.
+
+<Note>Aujourd'hui aucun SDK n'est encore câblé : le provider déclare la **couture** pour que le reste de la boucle soit écrit contre une interface dès le départ. Quand un vrai SDK arrivera, son import vivra **là et nulle part ailleurs** — l'invariant est déjà appliqué, il ne peut pas fuir.</Note>
+
+## Ce que vous voyez à l'écran
+
+Sur le panneau **/agents** du Workbench, sous l'arbitre determinism-first, une commande **« Vérifier l'isolation du LLM »** :
+
+- par défaut, le graphe est propre → **vert** : aucun SDK LLM hors du provider, l'invariant tient ;
+- cochez **« Injection de faute »** → la commande ajoute un second import de SDK dans un paquet ordinaire → **rouge**, avec le code `LLM_SDK_IMPORT_OUTSIDE_PROVIDER`, le paquet fautif et l'import incriminé.
+
+C'est la démonstration vivante : la règle **bascule** quand on viole l'invariant. Une règle, pas une promesse.
+
+## Élargir l'exception ? C'est un changement de vérité
+
+Autoriser un **deuxième** importateur n'est pas une édition discrète : c'est un changement de vérité qui passe par `idée → miroir → /goal → approbation`. La policy (« qui peut importer le SDK ») est déclarée **au-dessus de la ligne** ; la règle, en dessous, ne fait que l'appliquer.

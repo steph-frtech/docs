@@ -1,0 +1,50 @@
+---
+title: "BA14 · « Une seule fonction LLM » — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de BA14 : CheckLLMIsolation(graph, policy) → []Violation, la règle arch-fitness déterministe (équivalent depguard) qui interdit l'import d'un SDK LLM hors de back/runtime/agentloop/provider. ScanModule (go/parser) construit le graphe vivant ; Run/Eval produit le verdict pass/fail ; arch-fitness.json déclare la policy ; le miroir fixture (fault-injection arch) + le miroir property (reproductibilité/totalité/soundness/complétude) + le twin TS checkLlmIsolation + le miroir Vitest (+4) + la sonde /agents action-capable + Playwright (+3). Les trois plans."
+keywords: ["aidos", "krd", "build-agent", "BA14", "agentloop", "archfitness.go", "CheckLLMIsolation", "ScanModule", "Policy", "ImportGraph", "Violation", "provider", "LLM_SDK_IMPORT_OUTSIDE_PROVIDER", "depguard", "go-arch-lint", "go/parser", "rapid", "fast-check", "Vitest", "miroir", "le mur", "determinism-first", "§2", "§6", "§8"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet. Pour la vue concept (sans code), voir [Pour les futurs utilisateurs → BA14](/steps/concept/ba14-une-seule-fonction-llm).</Note>
+
+mirror record : `reflects=BA14-llm-isolation`, `test_kind=fixture+property`, `cert_language=go+rapid+fast-check`, `liveness=alive`, `authority=below`.
+
+## En une phrase
+
+`CheckLLMIsolation(graph, policy) → []Violation` est la **règle arch-fitness déterministe** (l'équivalent depguard/go-arch-lint exprimé comme fonction pure Go) qui renvoie tout paquet — autre que `back/runtime/agentloop/provider*` — important un SDK LLM. Elle rend « le LLM isolé à une exception gatée » un **invariant architectural appliqué au build**, pas 25 répétitions de prose.
+
+## Implémentation
+
+Fichiers : `back/runtime/agentloop/archfitness.go` (la règle + `ScanModule`), `back/runtime/agentloop/run.go` (le verdict runnable `Run`/`Eval`), `back/runtime/agentloop/provider/provider.go` (l'unique exception gatée — la couture `Provider`), `back/runtime/agentloop/arch-fitness.json` (la policy déclarée). Twin : `front/web/lib/agentlayer.ts` (`checkLlmIsolation`).
+
+- **`Policy`** déclare l'invariant comme DONNÉE : `LLMSDKPrefixes` (les préfixes d'import considérés SDK LLM) et `AllowedImporters` (le **seul** ensemble de paquets autorisés — le provider). `DefaultPolicy()` est la policy vivante d'AIDOS (aucun SDK encore câblé : la règle pré-applique la couture).
+- **`ImportGraph` / `PackageImports`** : le graphe d'imports du module — l'entrée de la règle. Fourni par une fixture, ou construit depuis le disque par `ScanModule`.
+- **`CheckLLMIsolation(g, p)`** : pour chaque paquet non-couvert par `AllowedImporters`, pour chaque import qui matche un préfixe SDK → une `Violation{Package, Import, BlockReason}`. Résultat en **ordre de graphe** (déterministe, stable). `matchesAnyPrefix` est **segment-aware** : `a/b` matche `a/b` et `a/b/c` mais **pas** `ab/c` (un `strings.HasPrefix` brut matcherait à tort le dernier).
+- **`ScanModule(dir, modulePrefix)`** : le constructeur déterministe autoritaire du graphe vivant — l'équivalent depguard. Il marche l'arbre, parse chaque `.go` avec `go/parser` en `ImportsOnly` (rapide, sans type-check), exclut `_test.go` (l'invariant contraint le code de production ; les miroirs BA14 citent les préfixes SDK comme **littéraux**, jamais comme imports), saute `vendor`/`testdata`/dotdirs, puis matérialise un graphe **trié** (paquets + imports) — donc déterministe quel que soit l'ordre de parcours du FS.
+- **`Run`/`Eval` + `Verdict`** : `Run = Eval ∘ ScanModule` ; `Verdict{Passed, Violations, ScannedModule}`. `Passed` ⟺ aucune violation. C'est le point d'entrée unique que la CLI, l'outil MCP et le panneau Workbench appellent — **une** policy déclarée.
+- **`provider`** : le paquet de l'**unique exception gatée**. Il déclare l'interface `Provider.Generate(ctx, Request) → Response` — la couture par laquelle la boucle atteint un LLM. Aucun SDK n'y est encore importé ; quand un vrai SDK arrivera, son import vivra ICI et nulle part ailleurs.
+- **`arch-fitness.json`** : la policy déclarée (l'équivalent config depguard/go-arch-lint). Un test de parité (`config_test.go`) garantit que le JSON et `DefaultPolicy()` ne dérivent jamais — une seule vérité déclarée.
+- **`LLM_SDK_IMPORT_OUTSIDE_PROVIDER`** : le code de violation, avec un `BlockReason` actionnable (explication + `how_to_fix` non-vide : `route_through_provider`, `prefer_deterministic`, `widen_via_goal`) — jamais une prison (KRD §44.5).
+
+Le miroir ROUGE d'abord :
+
+- `archfitness_fixture_test.go` (state→cmd→event) : le graphe propre **passe** (0 violation) ; **FAULT INJECTION** — un second import de SDK dans un paquet ordinaire **bascule la règle au rouge** (1 violation nommant paquet + import + code) ; le provider (et ses sous-paquets) peut importer le SDK sans violation ; plusieurs fautifs ⇒ plusieurs violations en ordre déterministe ; **le module VIVANT** (`ScanModule("..", …)`) **tient** l'invariant (le mur tient sur le disque, pas qu'en fixture).
+- `archfitness_property_test.go` (rapid) : reproductibilité (mêmes (graphe, policy) ⇒ mêmes violations, deux fois) ; totalité (jamais de panic) ; **soundness** (toute violation rapportée est un vrai import SDK depuis un paquet non-autorisé) ; **complétude** (aucun raté silencieux — chaque paire (paquet, import) fautive est rapportée).
+- `run_fixture_test.go` : le verdict runnable — le module vivant **passe** ; un import injecté **fait échouer** le verdict en nommant le fautif.
+- `config_test.go` : `arch-fitness.json` ≡ `DefaultPolicy()` (pas de double-typage).
+- Le twin Vitest `agentlayer.test.ts` (+4) : graphe propre 0 violation ; **FAULT INJECTION** rouge avec le code ; provider autorisé ; reproductibilité + soundness (fast-check).
+
+`go test ./runtime/agentloop/...` vert ; `./runtime/...` ./hooks/... vert (prior-green intact) ; `go build ./...` clean ; Vitest **91/91** (+4) ; tsc 0 ; biome clean ; Playwright `agents.spec.ts` **50/50** (+3 BA14 ; le compte de boutons de l'`impl-viewer` passe 6→7 — BA14 ajoute la commande `llm-iso-run`, un verdict pur sous la ligne).
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Une règle, pas de la prose (gap J2).** Un invariant répété en prose n'empêche rien : un pas peut sprinkler un 2ᵉ LLM et tous les checks par-pas passeront. Exprimé comme **règle de build** (un scan d'imports), il bascule au rouge dès la violation. C'est le garde qui rend « une seule exception gatée » *applicable* plutôt qu'aspirationnel.
+- **Un scan d'imports EST une fonction pure.** Vérifier un graphe d'imports appartient exactement à la famille déterministe de depguard ; donc ça **doit** être du code, jamais « un LLM qui lit les imports ». La règle qui *impose* le determinism-first est elle-même déterministe — il serait contradictoire qu'elle défère à un jugement.
+- **La couture d'abord.** Le provider existe avant tout SDK : la boucle est écrite contre une interface dès le départ. L'invariant est appliqué *avant* qu'un SDK arrive, donc il ne peut jamais fuir au câblage.
+- **Sous la ligne, le mur intact.** Le paquet n'écrit aucune vérité. La `Policy` est l'intention **au-dessus de la ligne** projetée en check **en dessous** ; élargir l'exception est un changement de vérité (`idée → miroir → /goal`), jamais une édition discrète.
+- **Segment-aware, pas substring.** Le matcher de préfixe est conscient des segments de chemin pour ne pas confondre `a/b` et `ab/c` — un faux positif (ou négatif) sur un préfixe ferait mentir l'invariant.
+
+## Méta-méta — l'invariant sur les invariants
+
+- **Le determinism-first se referme sur lui-même.** BA12 a fait de l'arbitre par-action une fonction pure ; BA14 ajoute le verrou **architectural** : non seulement chaque action défère au code quand il existe, mais **structurellement** un seul paquet peut même *atteindre* un LLM. La discipline « le LLM est l'exception gatée » devient un fait du graphe d'imports, vérifiable mécaniquement, pas une convention.
+- **L'auto-application.** Le test `TestCheckLLMIsolation_LiveModule_Holds` fait scanner par AIDOS son **propre** module et prouve que l'invariant tient *sur lui-même* — la règle se mesure à la réalité du disque, pas seulement à des fixtures. C'est la même boucle que le self-test du harnais : prouver, par injection de faute, que le garde est vivant.
+- **Anti-Goodhart.** Le « passed » n'est pas déclaré : il est **calculé** par un scan reproductible. Un futur pas ne peut pas « cocher » l'invariant en prose ; il faut que le graphe d'imports le respecte réellement, sinon le build casse.

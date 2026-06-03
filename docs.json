@@ -195,7 +195,9 @@
               "steps/concept/ba12-arbitre-determinism-first",
               "steps/internals/ba12-arbitre-determinism-first",
               "steps/concept/ba13-gate-action-composee",
-              "steps/internals/ba13-gate-action-composee"
+              "steps/internals/ba13-gate-action-composee",
+              "steps/concept/ba14-une-seule-fonction-llm",
+              "steps/internals/ba14-une-seule-fonction-llm"
             ]
           }
         ]
