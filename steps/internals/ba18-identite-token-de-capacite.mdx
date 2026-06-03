@@ -1,0 +1,35 @@
+---
+title: "BA18 · Identité/auth de l'agent vers les serveurs MCP — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de BA18 : CapabilityToken + MintToken/MintTokenFor/VerifyToken (back/runtime/agentimpl/identity.go) — le token EST le content-address (records.Hash ∘ records.Canonicalize) du corps d'identité (la LayerRef = CoucheAgent@version) ; côté boucle PresentedToken/ActAsIdentity (back/runtime/agentloop/identity.go) ; les miroirs property+fixture + le jumeau TS mintToken/verifyToken."
+keywords: ["aidos", "krd", "BA18", "CapabilityToken", "MintToken", "VerifyToken", "PresentedToken", "ActAsIdentity", "content-hash", "owner_agent", "AGENT_IDENTITY_UNVERIFIED", "determinism-first", "le mur"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet. Pour la vue concept, voir [Pour les futurs utilisateurs → BA18](/steps/concept/ba18-identite-token-de-capacite).</Note>
+
+## En une phrase
+
+BA18 prouve l'identité de l'agent vers les serveurs MCP (gap K3) : la boucle présente le **content-hash de sa projection** (`AgentImplementation`) comme **token de capacité**, et chaque serveur re-dérive le token attendu pour la `CoucheAgent@version` qu'on lui demande de servir et n'accepte l'appel **que si** le token lie le processus à exactement cette identité — `owner_agent`/`owner` est PROUVÉ, jamais déclaré par la chaîne d'appel.
+
+## Implémentation
+
+Le cœur pur vit dans `back/runtime/agentimpl/identity.go` ; le câblage boucle dans `back/runtime/agentloop/identity.go`.
+
+- **`CapabilityToken`** — le content-address 64-hex de l'identité de l'agent. Ce n'est PAS un secret bearer à garder : c'est une dérivation qu'un serveur recalcule indépendamment de l'identité qu'il attend ; présenter un token pour une identité ne peut jamais authentifier comme une autre, car le hash diffère.
+- **Le corps d'identité (`identityBody(layerRef)`)** — la forme JSON canonique minimale sur laquelle le token hashe : UNIQUEMENT la `LayerRef` (= `CoucheAgent@version`), sous un discriminant `"kind": "agent_capability_token"` qui namespace l'adresse. L'identité est **la couche**, pas les knobs runtime mutables : deux projections de la même `CoucheAgent@version` partagent un token ; une `@version` différente est une identité différente. Réutilise `records.Canonicalize` puis `records.Hash` (le schéma de content-address S01/S02), exactement comme `agentrun.Record`.
+- **`MintToken(a AgentImplementation) CapabilityToken`** — le token que la boucle présente à CHAQUE appel MCP : le content-hash de son identité (sa `LayerRef`). PUR et TOTAL — même identité ⇒ même token. La boucle ne peut pas minter un token pour une identité qu'elle ne projette pas (la `LayerRef` vient de la SOURCE gouvernée, content-addressée).
+- **`MintTokenFor(layerRef string) CapabilityToken`** — le jumeau côté serveur : le token qu'un serveur ATTEND pour une `CoucheAgent@version` donnée. Le serveur ne fait jamais confiance à un `owner` auto-déclaré ; il re-dérive le token que le détenteur de cette identité présenterait, et compare.
+- **`VerifyToken(presented, expectedLayerRef) IdentityVerdict`** — le gate déterministe que tout serveur MCP exécute avant d'honorer un appel : le token présenté est accepté UNIQUEMENT quand il égale `MintTokenFor(expectedLayerRef)`. Un token vide, malformé (pas un content-hash), ou minté pour une AUTRE identité échouent tous l'égalité et sont refusés fail-closed avec `AGENT_IDENTITY_UNVERIFIED` (le `BlockReason` du registre S13, `how_to_fix` non vide — jamais une prison).
+- **Côté boucle** (`back/runtime/agentloop/identity.go`) — `PresentedToken(in DriveInput) = MintToken(in.Impl)` : ce que la boucle offre comme preuve. `ActAsIdentity(in, expectedLayerRef) = VerifyToken(PresentedToken(in), expectedLayerRef)` : le garde côté boucle qui prouve, AVANT que la boucle ne tente d'agir comme une `CoucheAgent@version`, que son token la lie à exactement cette identité — le critère de done descendu au grain de l'appel.
+- **Les miroirs** — `identity_fixture_test.go` (les 5 cas : token valide accepté ; token manquant refusé + `how_to_fix` ; token malformé refusé ; token d'une AUTRE identité refusé ; le token EST le content-hash, `@version`-sensible) + `identity_property_test.go` (reproductibilité `MintToken` ; le token lie EXACTEMENT une `LayerRef` ; vide/junk ne vérifie jamais). Côté agentloop, `identity_fixture_test.go` + `identity_property_test.go` prouvent `PresentedToken`/`ActAsIdentity` et la cohérence présentateur↔serveur (`PresentedToken == MintTokenFor`). Le jumeau TS (`front/web/lib/agentlayer.ts`) porte `mintToken`/`mintTokenFor`/`verifyToken`/`CODE_AGENT_IDENTITY_UNVERIFIED`, prouvés par Vitest + fast-check.
+
+## Méta — pourquoi c'est construit ainsi
+
+Le token n'invente rien : il **réutilise** le content-address de l'OS (`records.Canonicalize` ∘ `records.Hash`), exactement le schéma qui versionne déjà toute vérité. C'est délibéré — une identité d'agent EST une adresse de contenu de la couche qu'il projette, donc la même machinerie qui rend une `CoucheAgent@version` immuable rend le token infalsifiable. Hasher sur la **seule** `LayerRef` (pas les knobs) est aussi un choix : on authentifie *qui est l'agent* (sa couche gouvernée), pas *comment il tourne ce jour-là* (température, seed) — deux runs de la même couche sont la même identité.
+
+La symétrie `MintToken` / `MintTokenFor` est le point clé du modèle : le serveur ne *reçoit* jamais d'autorité, il la **recalcule**. C'est l'inverse exact d'un champ `owner_agent` auto-déclaré dans la requête — qui serait forgeable par construction. Le serveur lit le token, re-dérive le token de l'identité qu'il attend, compare : pas de jugement, pas de génération, une simple égalité de deux content-hashes.
+
+## Méta-méta — l'invariant que ça garde vivant
+
+> **L'identité du writer est prouvée, pas déclarée par la chaîne.**
+
+`owner_agent` non forgeable n'est pas une politique qu'on espère respectée : c'est une **propriété** que le miroir rejoue sur toute paire d'identités (`TestProp_Identity_BindsExactlyOneIdentity` : un token vérifie contre SA `LayerRef` et est refusé pour toute autre ; `TestProp_Identity_EmptyOrJunkNeverVerifies` : fail-closed). `determinism-first` est tenu au sens fort — `MintToken`/`VerifyToken` sont des fonctions pures de hashing+égalité, jamais un « agent d'authentification » : un LLM dans ce chemin serait un trou de détermisme qui **bloque le pas**, au même titre qu'un monstre ou une capacité headless. Le token est dérivé, total, sans horloge ni I/O — même entrée, même verdict, indéfiniment.

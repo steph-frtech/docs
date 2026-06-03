@@ -1,0 +1,34 @@
+---
+title: "BA18 · L'identité de l'agent — le content-hash comme token de capacité"
+description: "BA18 prouve l'identité de l'agent vers les serveurs MCP. La boucle présente le content-hash de sa projection comme token de capacité ; chaque serveur re-dérive le token attendu pour la CoucheAgent@version qu'on lui demande de servir et n'accepte l'appel que si le token lie le processus appelant à exactement cette identité. owner_agent est PROUVÉ, jamais déclaré par la chaîne d'appel. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA18", "identité", "token de capacité", "content-hash", "owner_agent", "MCP", "AGENT_IDENTITY_UNVERIFIED", "le mur", "determinism-first"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA18](/steps/internals/ba18-identite-token-de-capacite).</Note>
+
+## L'idée en une phrase
+
+Quand l'agent qui code votre app parle à un serveur de l'OS (un serveur MCP), il doit **prouver qui il est** — pas le déclarer. BA18 fait de l'**empreinte** de l'agent (le content-hash de sa configuration gouvernée) un **token de capacité** : le serveur ne croit jamais sur parole le `owner_agent` annoncé, il recalcule lui-même le token que le vrai détenteur de cette identité présenterait, et n'accepte l'appel que s'ils correspondent.
+
+## Pourquoi prouver et pas déclarer
+
+Si un appel disait simplement « je suis l'agent X » dans un champ du message, n'importe quel processus pourrait écrire ce champ et **se faire passer** pour X. La vérité de l'OS AIDOS vit au-dessus de la ligne, et seul le bon propriétaire doit pouvoir agir en son nom. BA18 ferme ce trou : l'identité est **dérivée** d'un token que la boucle ne peut pas forger pour une autre identité.
+
+- Le token est le **content-hash** de l'identité de l'agent — c'est-à-dire de sa `CoucheAgent@version`, la couche gouvernée et versionnée qu'il projette.
+- Le serveur connaît l'identité qu'il *attend* ; il recalcule le hash de cette identité, et compare.
+- Présenter le token d'une **autre** identité ne marche pas : le hash diffère, donc la comparaison échoue.
+- Ne présenter **aucun** token ne marche pas non plus : c'est refusé d'office (fail-closed).
+
+## Ce que vous voyez à l'écran
+
+Le panneau **/agents** porte un contrôle « Présenter & vérifier le token ». Un sélecteur vous laisse jouer trois cas :
+
+- **Sa propre identité** — la boucle présente le bon token : l'appel est **ACCEPTÉ**, le token lie le processus à exactement cette `CoucheAgent@version`.
+- **Une autre identité** — la boucle présente un token volé, minté pour une autre couche : l'appel est **REFUSÉ** avec `AGENT_IDENTITY_UNVERIFIED`. `owner_agent` n'est pas forgeable.
+- **Aucun token** — vide : **REFUSÉ** fail-closed.
+
+Chaque refus affiche son `BlockReason` actionnable (un *comment corriger*, jamais une impasse).
+
+## Ce que ça vous garantit
+
+Quand un agent agit au nom d'une identité dans AIDOS, c'est **parce qu'il la détient**, pas parce qu'il l'a annoncée. Le serveur n'écrit jamais un propriétaire auto-déclaré : il lit le token, re-dérive l'identité attendue, et compare. Un imposteur ne peut pas usurper le `owner_agent` d'un autre agent — l'identité du writer est **prouvée**, c'est une brique de plus du mur.
