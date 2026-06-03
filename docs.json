@@ -191,7 +191,9 @@
               "steps/concept/ba10-enforcer-hooks-obligatoires",
               "steps/internals/ba10-enforcer-hooks-obligatoires",
               "steps/concept/ba11-compteur-cout-gate-budget",
-              "steps/internals/ba11-compteur-cout-gate-budget"
+              "steps/internals/ba11-compteur-cout-gate-budget",
+              "steps/concept/ba12-arbitre-determinism-first",
+              "steps/internals/ba12-arbitre-determinism-first"
             ]
           }
         ]

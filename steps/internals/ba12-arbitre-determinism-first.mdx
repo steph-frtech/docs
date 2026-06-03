@@ -1,0 +1,53 @@
+---
+title: "BA12 · L'arbitre determinism-first Arbitrate — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de BA12 : Arbitrate(action) → Verdict{DeterministicTool | LLMGated}, un classifieur pur total qui encode la table de mapping de la SKILL determinism-first EN CODE (diff→jj/Myers, search→rg, format→biome/gofmt, codegen→émetteurs S34, validate→validateurs kernel). L'intent est classifié depuis la STRUCTURE (tool + args), jamais depuis le label (gap D1) ; si un outil déterministe existe, jamais LLMGated (gap D3). ArbitrateGated bloque le determinism gap avec le code S13 AGENT_DETERMINISM_GAP. Le miroir fixture+property arbiter_property_test.go + arbiter_fixture_test.go + le twin TS arbitrate/arbitrateGated + le miroir Vitest. La sonde /agents action-capable. Les trois plans : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "build-agent", "BA12", "agentimpl", "arbiter.go", "Arbitrate", "ArbitrateGated", "determinism-first", "intent par structure", "DeterministicTool", "LLMGated", "AGENT_DETERMINISM_GAP", "blockreason", "S13", "rapid", "fast-check", "Vitest", "miroir", "le mur", "§6", "§8"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet. Pour la vue concept (sans code), voir [Pour les futurs utilisateurs → BA12](/steps/concept/ba12-arbitre-determinism-first).</Note>
+
+mirror record : `reflects=BA12-arbiter`, `test_kind=property+fixture`, `cert_language=rapid+fast-check`, `liveness=alive`, `authority=below`.
+
+## En une phrase
+
+`Arbitrate(action) → Verdict` est un **classifieur pur total** : il mappe la **structure** d'une action (`tool` + `args`) vers une famille d'outil déterministe (`diff`/`search`/`format`/`codegen`/`validate`) ou, à défaut, vers `LLMGated` ; `ArbitrateGated` en fait le verdict-mur que la boucle appelle, bloquant le *determinism gap* avec `AGENT_DETERMINISM_GAP`.
+
+## Implémentation
+
+Fichier : `back/runtime/agentimpl/arbiter.go`. Twin : `front/web/lib/agentlayer.ts` (`arbitrate` / `arbitrateGated`).
+
+- **`AgentAction`** porte la STRUCTURE : `Tool string`, `Args []string`, plus `DisplayedIntent string` (le label fourni par le modèle — **jamais lu** par l'arbitre) et `RequestedLLM bool` (le signal de la boucle).
+- **`Verdict`** : `Kind VerdictKind` (`VerdictDeterministicTool | VerdictLLMGated`), `Tool string` (la famille routée, vide si LLMGated), `BlockReason *blockreason.BlockReason` (toujours nil depuis `Arbitrate`).
+- **`classify(a) string`** est le cœur pur : un `switch` sur `a.Tool` puis sur le **head** des args (`bash` → `git diff`/`jj diff` → `ToolDiff`, `rg`/`grep` → `ToolSearch`, `gofmt`/`biome`/`go-arch-lint` → `ToolFormat` ; `aidos` → `project`/`emit` → `ToolCodegen`, `check`/`validate` → `ToolValidate`, `diff` → `ToolDiff`). Il lit **uniquement** `Tool` et `Args`. Total : tout input non reconnu renvoie `""`.
+- **`Arbitrate(a)`** : si `classify(a) != ""` → `DeterministicTool{Tool}` ; sinon → `LLMGated`. C'est le théorème D3 par construction : un outil déterministe existant ⇒ jamais `LLMGated`.
+- **`ArbitrateGated(a)`** : renvoie un `*BlockReason` **ssi** `a.RequestedLLM ∧ Arbitrate(a).Kind == DeterministicTool` — le determinism gap. Sinon nil (l'outil déterministe utilisé sans LLM, ou la vraie génération gatée).
+- **Le code S13** : `CodeAgentDeterminismGap = "AGENT_DETERMINISM_GAP"` ajouté à l'enum, au registre `reasons` (explanation + `how_to_fix` de longueur ≥ 1 nommant l'outil déterministe et la porte /goal) et à `codeOrder` (extension additive, `refine`).
+
+Le miroir ROUGE d'abord :
+
+- `arbiter_property_test.go` (rapid) : déterminisme ; **le label ne change pas le verdict** (la propriété centrale D1, re-tirage adversarial du `DisplayedIntent`) ; **deterministic-tool-wins** (une structure déterministe n'est jamais LLMGated même quand elle prétend l'être) ; structure-routes ; LLMGated résiduel ; le gap bloque ; le code est enregistré.
+- `arbiter_fixture_test.go` : la table de la SKILL transcrite en lignes `structure → (kind, tool)` + le re-labelling inerte sur une structure fixe.
+- Le twin Vitest `agentlayer.test.ts` (fast-check) miroir verdict-pour-verdict : table de mapping, résiduel LLMGated, re-label D1 (property), det-tool-wins, `arbitrateGated` bloque/laisse passer.
+
+`go test ./runtime/agentimpl ./runtime/blockreason` vert ; Vitest 80/80 ; tsc 0 ; biome clean ; Playwright `agents.spec.ts` 45/45 (+5 BA12, bouton-count 5→6).
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Intent par structure, jamais par label (D1)** : un verdict qui dépendrait d'un champ que le modèle remplit serait gameable — l'agent re-labelliserait pour échapper. La structure (`tool` + `args`) est ce que la boucle exécute *réellement* ; c'est le seul invariant non manipulable.
+- **Le code gagne (D3)** : `LLMGated` est strictement le **résiduel**. C'est la traduction littérale de « si une option déterministe existe, prends-la et rends-la autoritaire » (§6).
+- **L'arbitre est pur** : un arbitre du déterminisme non déterministe serait une contradiction. Aucun LLM, aucune horloge, aucune base — un arbre de décision total.
+- **Sous la ligne, le mur intact** : `Arbitrate`/`ArbitrateGated` n'écrivent rien et n'exécutent aucun agent ; la sonde /agents les exécute directement (verdict pur), jamais une écriture de vérité.
+
+## Méta-méta — la garantie de niveau 3
+
+Le miroir property+fixture est la garantie : *ré-étiqueter l'intent affiché d'une action ne PEUT PAS changer le verdict de `Arbitrate` — seule la structure le peut ; et si un outil déterministe existe pour la structure, `Arbitrate` ne renvoie JAMAIS `LLMGated`*. La propriété D1 (rapid `TestArbitrate_LabelCannotChangeVerdict`, fast-check `re-labelling … cannot change the verdict`) est l'anti-Goodhart : elle interdit la triche par label. La propriété D3 (`TestArbitrate_DeterministicToolWins`) interdit le LLM par confort. Ensemble, elles font de la prose de la SKILL une **loi exécutable** : la boucle refusera une action LLM là où un outil déterministe existe.
+
+## Note d'évolution (anti-overwrite §9)
+
+BA11 affirmait « exactement 5 boutons dans la vue Implémentation » (capacité + skill + chemin + hooks + budget). BA12 ajoute *un* sixième contrôle — le gate d'arbitrage (un `select` d'action + un input de label + une checkbox LLM + un bouton) — lui aussi un **verdict pur sous la ligne**, ni un run d'agent ni une écriture de vérité. L'assertion e2e passe de 5 à 6 ; l'invariant protégé (aucun contrôle de *run*, aucune écriture de *vérité* dans la vue Implémentation) tient toujours. L'extension du registre `blockreason` est additive (`refine`, jamais une suppression).
+
+## Limites connues
+
+- L'arbitre **classifie**, il ne **route** pas encore : la boucle qui consulte `ArbitrateGated` avant chaque action et exécute l'outil déterministe est plus tard (BA16/BA27). OpenQuestion documentée, pas un blocage.
+- La table de mapping couvre les familles nommées par la SKILL ; un nouvel outil déterministe (par ex. un differ AST structurel dédié) s'ajoute par extension du `switch` — additif, jamais une suppression.
+- Linear : l'issue `BA12 · …` n'a pas pu être déplacée (MCP `linear-server` non authentifié, OAuth requis) — OpenQuestion best-effort, non bloquante.

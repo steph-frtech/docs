@@ -1,0 +1,62 @@
+---
+title: "BA12 · L'arbitre determinism-first — l'intent est classifié par la STRUCTURE de l'action, jamais par le label"
+description: "BA12 ajoute l'ARBITRE determinism-first Arbitrate(action) → DeterministicTool | LLMGated : il encode la table de mapping de la SKILL determinism-first EN CODE (diff→jj/Myers, search→rg, format→biome/gofmt, codegen→émetteurs S34, validate→validateurs kernel). L'intent est classifié depuis la STRUCTURE de l'action (nom d'outil + args), JAMAIS depuis un label fourni par le modèle. Ré-étiqueter l'intent affiché d'une action ne PEUT PAS changer le verdict — seule la structure le peut. Si un outil déterministe existe pour la structure, Arbitrate ne renvoie JAMAIS LLMGated : le code gagne, l'agent défère. Une action LLM là où un outil déterministe existe est un determinism gap qui BLOQUE (code AGENT_DETERMINISM_GAP). La prose de la SKILL devient du code autoritaire."
+keywords: ["aidos", "krd", "build-agent", "BA12", "agentimpl", "arbiter", "Arbitrate", "determinism-first", "intent par structure", "label", "DeterministicTool", "LLMGated", "diff", "jj", "Myers", "rg", "biome", "gofmt", "émetteurs S34", "validateurs kernel", "determinism gap", "AGENT_DETERMINISM_GAP", "BlockReason", "S13", "le code gagne", "le mur", "idée → miroir → /goal", "§6", "§8"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → BA12](/steps/internals/ba12-arbitre-determinism-first).</Note>
+
+## En une phrase
+
+BA12 donne au build-agent un **arbitre determinism-first** : avant toute action, `Arbitrate` décide — depuis la seule **STRUCTURE** de l'action (le nom d'outil + ses args) — s'il existe un **outil déterministe** qui fait déjà le travail (un `diff`, une recherche, un format, une génération de code, une validation). Si oui, l'action **doit** l'emprunter ; le LLM n'est plus une option. Ré-étiqueter l'intent affiché de l'action ne change **rien** : seule sa structure compte.
+
+## Le problème que ça résout
+
+Le mandat **determinism-first** (CLAUDE.md §6/§8) dit : *tout ce qui peut être une fonction pure déterministe DOIT être du code, jamais un agent/LLM*. Mais tant que ce mandat reste de la **prose**, rien n'empêche un agent de confier un `diff` au LLM (« fais-moi un diff intelligent »), ou une recherche, ou une génération de code — exactement ce que la loi interdit. Pire : un agent pourrait **mentir sur son intent** — appeler `git diff` mais déclarer « génération irréductible » pour échapper au gate.
+
+BA12 ferme deux failles précises :
+
+- **Le label manipulable (gap D1).** Si le verdict dépendait du **label** que le modèle déclare, l'agent pourrait le re-labelliser pour contourner la règle. BA12 classifie l'intent depuis la **STRUCTURE** (`tool` + `args`) — une action dont l'outil est `bash git diff` *est* structurellement un diff, quel que soit l'intent revendiqué.
+- **Le LLM par confort (gap D3).** Si un outil déterministe existe, l'arbitre ne renvoie **jamais** `LLMGated` : le code gagne, l'agent défère. Le LLM redevient l'**exception gatée**, réservée à la génération irréductible.
+
+## Les idées-clés
+
+<Field name="L'intent par STRUCTURE, jamais par label" type="gap D1">
+  Le verdict est calculé depuis `(tool, args)` **uniquement**. Le `displayedIntent` (le label fourni par le modèle) est porté pour l'écran et la télémétrie, mais l'arbitre **ne le lit jamais**. Ré-étiqueter une action ne peut pas déplacer son verdict — c'est la propriété centrale, pinnée par le miroir.
+</Field>
+
+<Field name="La table de la SKILL devient du code" type="prose → loi autoritaire">
+  La table de mapping du mandat determinism-first est transcrite **verbatim en code** : `diff → jj/Myers`, `search → rg`, `format → biome/gofmt/go-arch-lint`, `codegen → émetteurs S34`, `validate → validateurs kernel`. La prose de la SKILL n'est plus un vœu : c'est une fonction qui refuse une action LLM là où un outil déterministe existe.
+</Field>
+
+<Field name="Le code gagne, l'agent défère" type="gap D3">
+  Si la structure mappe vers un outil déterministe, `Arbitrate` renvoie `DeterministicTool` avec l'outil routé — **jamais** `LLMGated`. Même si l'action *prétend* être générative, le code l'emporte. `LLMGated` est le **résiduel** : seule une structure sans outil déterministe (la vraie génération) y aboutit.
+</Field>
+
+<Field name="Le determinism gap BLOQUE" type="AGENT_DETERMINISM_GAP">
+  La forme gatée que la boucle appelle (`ArbitrateGated`) refuse une action qui voudrait passer par le LLM **alors qu'un outil déterministe existe** pour sa structure. C'est un *determinism gap* — un agent qui fait ce qu'une fonction pure pourrait faire — et il bloque l'action avec le `BlockReason` `AGENT_DETERMINISM_GAP`.
+</Field>
+
+<Field name="L'arbitre est lui-même déterministe" type="§8">
+  Le classifieur qui impose le determinism-first est lui-même une **fonction pure totale** — un arbre de décision sur `(tool, args)`, sans base, sans horloge, sans rng, sans LLM. Mêmes entrées → même verdict. Il serait absurde qu'un arbitre du déterminisme soit non déterministe.
+</Field>
+
+## Ce que vous voyez dans le Workbench
+
+Le panneau **/agents**, dans la vue « Implémentation projetée », gagne un **gate d'arbitrage**, sœur des sondes de capacité (BA07), de skill (BA08), de chemin (BA09), du gate de hooks (BA10) et du gate de budget (BA11) :
+
+- choisissez une **action** parmi des exemples (`bash git diff`, `bash rg …`, `gofmt …`, `aidos project`, `aidos check`, `llm write docs`) ;
+- saisissez un **intent affiché** quelconque (par ex. « laisser le LLM générer le diff ») ;
+- cochez éventuellement **« LLM demandé »** ;
+- cliquez **« Arbitrer l'action »** — le gate pur `arbitrate` s'exécute sur la structure ;
+- une structure déterministe affiche **« Outil déterministe → diff »** (et reste là **quel que soit** le label) ; une vraie génération affiche **« LLMGated »** ;
+- cocher « LLM demandé » sur une structure déterministe affiche un encadré **« Bloqué — determinism gap »** avec le code `AGENT_DETERMINISM_GAP` et son `how_to_fix`.
+
+C'est **action-capable** : l'op que BA12 développe a un contrôle qui l'**exécute** depuis l'écran (pas de capacité headless). C'est sûr pour le mur : le gate est un verdict **pur, sous la ligne** — il n'exécute aucun agent et n'écrit aucune vérité.
+
+## Ce que ça ne fait pas
+
+- Ça ne **câble pas encore l'arbitre dans la boucle** : `Arbitrate` est le gate pur ; la boucle qui consulte l'arbitre **avant chaque action** et route vers l'outil déterministe, c'est plus tard (la coquille de boucle BA16/BA27).
+- Ça n'**exécute pas les outils** : l'arbitre nomme la **famille** d'outil déterministe (diff/search/format/codegen/validate), il ne lance ni `jj` ni `rg` ; la boucle lie le binaire.
+- Ça ne **devine aucun intent** : c'est un arbre de décision fixe sur la structure ; il n'y a pas de modèle qui « comprend » l'action.
+- Ça ne **lance aucun LLM** : pas de modèle vivant dans l'arbitre.
