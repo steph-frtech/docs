@@ -1,0 +1,86 @@
+---
+title: "BA13 · Le gate composé GateAction — un seul verdict, tous les axes, en précédence : le périmètre prouvé fermé"
+description: "BA13 compose TOUS les enforcers (BA07–BA12) en une seule fonction pure GateAction(impl, action, meter, hookVerdicts) → Decision, avec une PRÉCÉDENCE explicite : Arbitrate (déterminisme) d'abord → zone (Classify deny) → chemin (PathAllowed allow) → confinement réseau/exec → capacité (ToolAllowed) → skill (SkillAllowed) → budget (CheckBudget) → hook (HooksSatisfied). Le hook PreToolUse S04 gate les appels d'outils d'une AgentImplementation gouvernée via cette fonction. Chaque violation d'axe renvoie le bon BlockReason depuis le MÊME gate, dans l'ordre de précédence. Toujours aucune autonomie — le périmètre est prouvé fermé. Le panneau /agents rend l'aperçu live « ce qui serait refusé »."
+keywords: ["aidos", "krd", "build-agent", "BA13", "agentimpl", "GateAction", "Decision", "précédence", "Arbitrate", "zone", "Classify", "PathAllowed", "ToolAllowed", "SkillAllowed", "EgressAllowed", "ExecAllowed", "CheckBudget", "HooksSatisfied", "BlockReason", "périmètre fermé", "interceptor", "le mur", "PreToolUse", "S04", "fail-closed", "§2", "§6", "§8"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → BA13](/steps/internals/ba13-gate-action-composee).</Note>
+
+## En une phrase
+
+BA13 prend les **huit enforcers** construits un par un (capacité, skill, chemin, réseau, exec, hooks, budget, déterminisme) et les **compose en un seul verdict** : `GateAction`. Une action ne passe que si **tous** les axes applicables passent ; sur la **première** violation dans un ordre de **précédence** fixe, le gate renvoie le bon `BlockReason`. Le périmètre du build-agent est désormais **prouvé fermé** — un seul gate, consulté avant chaque action.
+
+## Le problème que ça résout
+
+Jusqu'ici, chaque axe déclaré d'un agent gouverné avait son propre enforcer pur (`ToolAllowed`, `SkillAllowed`, `PathAllowed`, `EgressAllowed`/`ExecAllowed`, `HooksSatisfied`, `CheckBudget`, `Arbitrate`). Mais ils vivaient **côte à côte** : rien ne les consultait ensemble, dans un ordre garanti, comme la boucle devra le faire. Or :
+
+- **L'ordre compte.** Une action qui viole *plusieurs* axes à la fois (par ex. une écriture kernel hors-allow-list, sur budget dépassé, demandée au LLM) doit renvoyer **un** verdict — lequel ? Sans précédence déclarée, le verdict serait arbitraire et non reproductible.
+- **Le mur est un *interceptor*, pas un tampon post-hoc.** En S52 le mur stampait les actions *après coup* ; BA13 en fait un verdict **unique** que le hook PreToolUse S04 consulte **avant** que l'action ne s'exécute — pour une `AgentImplementation` gouvernée, pas seulement pour Claude Code.
+
+## La précédence (la colonne vertébrale)
+
+L'ordre n'est pas cosmétique : il fait partie du contrat. Une action est jugée, dans cet ordre exact, et le **premier** axe qui refuse l'emporte :
+
+<Steps>
+  <Step title="Déterminisme (Arbitrate) — d'ABORD">
+    Cette action a-t-elle même le droit d'être pilotée par le LLM, ou un outil déterministe la régit-il ? Un *determinism gap* domine tout le reste (gap D3).
+  </Step>
+  <Step title="Zone (Classify — deny-list)">
+    Une écriture au-dessus de la ligne de flottaison (kernel / mirrors / fitness) est refusée — **avant** l'allow-list de chemin, pour qu'une écriture kernel dans un `AllowedPaths` trop large déclenche bien l'axe ZONE.
+  </Step>
+  <Step title="Chemin (PathAllowed — allow-list)">
+    Le confinement : le chemin est-il couvert par la racine inscriptible déclarée de l'agent ?
+  </Step>
+  <Step title="Réseau / exec (EgressAllowed / ExecAllowed)">
+    Le host est-il un host déclaré (vide ⇒ aucun egress) ? La commande est-elle dans l'allow-list (vide ⇒ aucun subprocess) ?
+  </Step>
+  <Step title="Capacité (ToolAllowed)">
+    L'outil MCP `(server, tool)` est-il un binding activé ?
+  </Step>
+  <Step title="Skill (SkillAllowed)">
+    Le skill est-il lié ?
+  </Step>
+  <Step title="Budget (CheckBudget)">
+    Le coût mesuré est-il sous le cap effectif (`min` des deux budgets déclarés — le plus serré gagne) ?
+  </Step>
+  <Step title="Hook (HooksSatisfied) — l'acceptation du tour">
+    Chaque hook obligatoire a-t-il tourné ET est-il vert ?
+  </Step>
+</Steps>
+
+## Les idées-clés
+
+<Field name="Un seul verdict, tous les axes" type="GateAction → Decision">
+  `GateAction(impl, action, meter, budgets, rate, hookVerdicts)` renvoie une `Decision` : `Allowed` quand tout passe ; sinon `Allowed:false` + l'axe qui a refusé (`DeniedAxis`) + son `BlockReason`. Un seul appel, là où il y avait huit fonctions séparées.
+</Field>
+
+<Field name="L'arbitre est DEDANS le gate" type="gap D3">
+  Le déterminisme n'est pas un passage à part : `Arbitrate` est le **premier** axe du verdict unique. Re-labelliser l'intent affiché ne change rien — seule la structure compte, à l'intérieur du gate comme dehors.
+</Field>
+
+<Field name="La zone précède le chemin" type="deny avant allow">
+  Le deny-list (zones de vérité interdites) est vérifié **avant** l'allow-list de confinement. Une écriture kernel reste un `AGENT_WRITE_ABOVE_WATERLINE`, jamais mal-codée en « hors-confinement ».
+</Field>
+
+<Field name="Le hook S04 gate l'agent gouverné" type="interceptor-ready">
+  Le hook PreToolUse existant ne se contente plus de classifier la zone : pour une `AgentImplementation` gouvernée, il consulte `GateAction` — tous les axes, en précédence. Le mur devient un **interceptor à verdict unique**.
+</Field>
+
+<Field name="Total et fail-closed" type="§2/§8">
+  Chaque axe n'est vérifié que si ses entrées sont présentes (une action sans cible saute l'axe chemin, etc.), donc le gate est **total** sur n'importe quelle forme d'action ; et chaque axe est fail-closed (ce qui n'est pas explicitement permis est refusé).
+</Field>
+
+## Ce que vous voyez dans le Workbench
+
+Le panneau **/agents**, vue « Implémentation projetée », gagne l'**aperçu live « ce qui serait refusé »** : le **même** bouton qui exécute l'arbitre exécute aussi le **gate composé** sur l'implémentation résolue. Le verdict composé s'affiche :
+
+- une action déterministe et dans les bornes affiche **« Périmètre composé : autorisé (tous les axes passent) »** ;
+- une action qui viole un axe affiche l'encadré rouge nommant l'**axe** qui a refusé (par ex. `determinism`) et son code `BlockReason` (`AGENT_DETERMINISM_GAP`).
+
+C'est **action-capable** : l'op que BA13 développe a un contrôle qui l'**exécute** depuis l'écran (pas de capacité headless). C'est sûr pour le mur : le gate est un verdict **pur, sous la ligne** — il n'exécute aucun agent et n'écrit aucune vérité.
+
+## Ce que ça ne fait pas
+
+- Ça n'accorde **toujours aucune autonomie** : il n'y a pas encore de boucle qui *exécute* un agent. BA13 **prouve le périmètre fermé** ; la coquille de boucle qui appelle `GateAction` avant chaque action est plus tard (BA15+).
+- Ça n'**exécute aucun outil** ni aucun LLM : c'est un verdict pur composé d'enforcers purs.
+- Ça ne **change aucune règle** : la précédence et les axes sont déclarés ; le gate ne fait que les composer dans l'ordre.

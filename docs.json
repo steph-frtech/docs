@@ -193,7 +193,9 @@
               "steps/concept/ba11-compteur-cout-gate-budget",
               "steps/internals/ba11-compteur-cout-gate-budget",
               "steps/concept/ba12-arbitre-determinism-first",
-              "steps/internals/ba12-arbitre-determinism-first"
+              "steps/internals/ba12-arbitre-determinism-first",
+              "steps/concept/ba13-gate-action-composee",
+              "steps/internals/ba13-gate-action-composee"
             ]
           }
         ]

@@ -1,0 +1,54 @@
+---
+title: "BA13 · Le gate composé GateAction — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de BA13 : GateAction(impl, action, meter, h, b, rate, hookVerdicts) → Decision, la composition pure totale de TOUS les enforcers BA07–BA12 dans une précédence explicite (Arbitrate → zone Classify → PathAllowed → Egress/Exec → ToolAllowed → SkillAllowed → CheckBudget → HooksSatisfied). Le hook PreToolUse S04 gate une AgentImplementation gouvernée via EvaluateGoverned → GateAction. Le miroir fixture gate_fixture_test.go (chaque axe + précédence) + le miroir property gate_property_test.go (reproductibilité, totalité, déterminisme-gap-domine) + le twin TS gateAction/GateDecision + le miroir Vitest (+7) + la sonde /agents action-capable + Playwright (+2). Les trois plans : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "build-agent", "BA13", "agentimpl", "gate.go", "GateAction", "Decision", "Action", "PrecedenceAxes", "EvaluateGoverned", "pretooluse", "S04", "Arbitrate", "Classify", "PathAllowed", "ToolAllowed", "SkillAllowed", "EgressAllowed", "ExecAllowed", "CheckBudget", "HooksSatisfied", "BlockReason", "rapid", "fast-check", "Vitest", "miroir", "le mur", "§2", "§6", "§8"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet. Pour la vue concept (sans code), voir [Pour les futurs utilisateurs → BA13](/steps/concept/ba13-gate-action-composee).</Note>
+
+mirror record : `reflects=BA13-gateaction`, `test_kind=fixture+property`, `cert_language=go+rapid+fast-check`, `liveness=alive`, `authority=below`.
+
+## En une phrase
+
+`GateAction(impl, action, meter, h, b, rate, hookVerdicts) → Decision` est la **composition pure totale** des huit enforcers BA07–BA12 dans une **précédence explicite** ; il renvoie la première violation (axe + `BlockReason`) ou un verdict autorisé. Le hook PreToolUse S04 le consulte pour une `AgentImplementation` gouvernée — le mur devient un **interceptor à verdict unique**.
+
+## Implémentation
+
+Fichiers : `back/runtime/agentimpl/gate.go` (le gate), `back/hooks/pretooluse/gate.go` (le pont hook). Twin : `front/web/lib/agentlayer.ts` (`gateAction` / `GateDecision`).
+
+- **`Action`** porte la structure que chaque axe lit : `AgentAction` (l'input structurel de l'arbitre), `Target` (zone + chemin), `Server`/`Tool` (capacité), `Skill`, `Host` (egress), `Exec`. Un champ à sa valeur zéro = « cet axe ne s'applique pas » → l'axe est sauté ; d'où la **totalité** sur n'importe quelle forme.
+- **`Decision`** : `Allowed bool`, `DeniedAxis string` (l'axe qui a refusé, pour l'écran + télémétrie), `BlockReason *blockreason.BlockReason`.
+- **`PrecedenceAxes`** : la liste exportée des neuf noms d'axes dans l'ordre (`determinism, zone, path, egress, exec, capacity, skill, budget, hook`) — une source unique pour l'écran et le miroir.
+- **`GateAction`** applique la précédence : `ArbitrateGated` d'abord ; puis `wall.Classify(Target)` (deny-list ZONE) **avant** `PathAllowed` (allow-list) ; puis `EgressAllowed`/`ExecAllowed` ; puis `ToolAllowed` ; puis `SkillAllowed` ; puis `CheckBudget` (`min` des caps, BA11) ; puis `HooksSatisfied` (verdicts du binaire, BA10). Chaque axe garde sa condition de présence (`if act.Target != ""`, …). `adaptWallReason` convertit le `wall.BlockReason` (le classifieur single-sourcé émet sa propre forme) vers le `blockreason.BlockReason` canonique en préservant le code `AGENT_WRITE_ABOVE_WATERLINE`.
+- **Le pont hook** `back/hooks/pretooluse/gate.go` : `GovernedEvent` = un événement PreToolUse + le contexte gouverné (`Impl`, `Action`, `Meter`, budgets, rate, `HookVerdicts`) ; `EvaluateGoverned(ev) → agentimpl.Decision` **délègue** à `GateAction`. La composition vit **une seule fois** (dans `agentimpl`) ; le hook n'adapte que l'événement. Le comportement bare-zone (`Evaluate`/`Classify`) reste inchangé — les miroirs de régression `wall_bdd_test`/`wall_property_test` passent inchangés (anti-overwrite §9).
+
+Le miroir ROUGE d'abord :
+
+- `gate_fixture_test.go` (state→cmd→event) : le happy-path autorisé ; **chaque** violation d'axe (déterminisme, zone, chemin, egress, exec, capacité, skill, budget, hook) renvoie le bon code depuis le **même** gate ; la **précédence** (Arbitrate domine quand zone+budget+gap coexistent ; zone précède chemin).
+- `gate_property_test.go` (rapid) : reproductibilité (mêmes entrées ⇒ même `Decision`, deux fois) ; totalité (jamais de panic sur input arbitraire) ; `DeniedAxis ∈ PrecedenceAxes ⟺ refusé` ; le determinism gap **domine** tout autre axe simultané.
+- `back/hooks/pretooluse/gate_test.go` : le hook gate une impl gouvernée via le même verdict (happy-path autorisé, écriture au-dessus de la ligne refusée à l'axe zone, outil non-lié refusé).
+- Le twin Vitest `agentlayer.test.ts` (+7) : happy-path ; chaque axe ; précédence Arbitrate-first ; zone-avant-chemin ; **re-label inerte sur le gate composé** (intent par structure) ; reproductibilité (fast-check) ; `PRECEDENCE_AXES` nomme les neuf axes.
+
+`go test ./runtime/agentimpl ./runtime/blockreason ./hooks/pretooluse` vert ; `./runtime/...` vert (prior-green intact) ; `go build ./...` clean ; Vitest **87/87** (+7) ; tsc 0 ; biome clean ; Playwright `agents.spec.ts` **47/47** (+2 BA13).
+
+## Méta — pourquoi c'est construit ainsi
+
+- **La précédence fait partie du contrat.** Une action multi-violante doit renvoyer **un** verdict reproductible ; l'ordre déclaré (gap D3 : Arbitrate d'abord) le garantit. Le verdict ne dépend pas de l'ordre d'évaluation accidentel mais d'une précédence pinnée par le miroir.
+- **Zone (deny) avant chemin (allow).** Ce sont deux invariants distincts (S04 deny-list de zone vs BA09 allow-list de confinement). Les vérifier dans le bon ordre évite qu'une écriture kernel dans un `AllowedPaths` trop large soit mal-codée en confinement — la zone est la vérité interdite, prioritaire.
+- **Single-sourced.** La composition n'existe qu'une fois (`GateAction`) ; le hook ne fait qu'**adapter** l'événement. Pas de seconde copie de la précédence à dériver à la main — single source of truth (la même discipline qu'OQ-S52-wall résolu en BA03).
+- **Sous la ligne, le mur intact.** `GateAction` n'écrit rien et n'exécute aucun agent ; il *compose* des enforcers purs. La sonde /agents l'exécute directement (verdict pur) ; toute écriture de vérité passe toujours par `propose → ChangeSet → approbation`.
+- **Determinism-first.** Un gate qui *impose* le determinism-first ne peut pas lui-même déférer à un jugement : `GateAction` est pur, total, sans horloge/rng/IO/LLM — il ne fait que composer des fonctions pures dans un ordre fixe.
+
+## Méta-méta — la garantie de niveau 3
+
+Le miroir fixture+property est la garantie : *chaque violation d'axe (écriture au-dessus de la ligne, hors-AllowedPaths, outil hors-bande, skill non lié, egress non déclaré, dépassement de budget, action LLM régie par un outil déterministe) renvoie le bon `BlockReason` depuis le MÊME gate, dans l'ordre de précédence*. La propriété `TestGateAction_DeterminismGapDominates` (rapid) + `precedence: arbitrate is FIRST` (Vitest) prouvent que l'axe déterminisme domine — l'anti-Goodhart au grain de l'action composée. La reproductibilité (`TestGateAction_Reproducible`) prouve qu'aucune entrée cachée (horloge, rng) ne fuit dans le verdict. Ensemble, elles font du périmètre un objet **prouvé fermé** : avant toute autonomie (BA15+), tout ce qu'un agent peut tenter est déjà déclaré, déjà gaté fail-closed, et composé dans un verdict unique reproductible.
+
+## Note d'évolution (anti-overwrite §9)
+
+BA12 affirmait « exactement 6 boutons dans la vue Implémentation » (capacité + skill + chemin + hooks + budget + arbitre). BA13 n'**ajoute aucun bouton** : le gate composé **réutilise** le même bouton « Arbitrer l'action » — le verdict composé s'affiche à côté du verdict d'arbitrage. Le compte de boutons reste **6** ; l'invariant protégé (aucun contrôle de *run*, aucune écriture de *vérité* dans la vue Implémentation) tient toujours. Une seule clé i18n ajoutée (`arbiterGateComposedAllowed`, FR+EN) — extension additive. Le pont hook `EvaluateGoverned` est un **ajout** ; le chemin bare-zone du hook (`Evaluate`/`Classify`) est inchangé et ses miroirs de régression passent inchangés.
+
+## Limites connues
+
+- Le gate **compose et juge**, il n'**exécute** pas : la boucle qui appelle `GateAction` avant chaque action et exécute l'action sur vert est plus tard (BA15/BA16). OpenQuestion documentée, pas un blocage — c'est précisément l'intention « toujours aucune autonomie ».
+- Le câblage *réel* du hook S04 (lire un `GovernedEvent` depuis un transport vivant) attend la boucle BA15+ ; `EvaluateGoverned` est la primitive pure prête, exercée par son test unitaire mais pas encore sur un chemin transport (forward-dependency by-design).
+- Linear : l'issue `BA13 · …` n'a pas pu être déplacée (MCP `linear-server` non authentifié, OAuth requis) — OpenQuestion best-effort, non bloquante.
