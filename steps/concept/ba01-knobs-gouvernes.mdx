@@ -1,0 +1,43 @@
+---
+title: "BA01 · Les knobs gouvernés — temperature, seed, egress, exec vivent dans la couche, jamais dans un providerCfg"
+description: "BA01 étend la SOURCE AgentSpec (la CoucheAgent de S52) par la porte légale idée → miroir → /goal — jamais une écriture kernel directe : le propose émet une Proposal Status=proposed requérant une autorité humaine (S16). Les nouveaux champs DÉCLARÉS au-dessus de la ligne dont la projection et le replay dépendent : Temperature, MaxTurns, Seed (ou Seed dérivé déterministiquement Hash(impl‖pack‖item), jamais un RNG), AllowedNetworkHosts (vide → aucun egress), AllowedExec (vide → aucun subprocess), ResourceLimits, MaxConcurrency. Un knob de comportement vit dans la couche gouvernée, JAMAIS dans un providerCfg ; les défauts vides sont le confinement maximal, fail-closed. Un knob non déclaré est un determinism gap qui bloque le pas."
+keywords: ["aidos", "krd", "build-agent", "BA01", "AgentSpec", "CoucheAgent", "knob", "knob gouverné", "temperature", "max_turns", "seed", "DeriveSeed", "replay", "AllowedNetworkHosts", "AllowedExec", "ResourceLimits", "MaxConcurrency", "egress", "subprocess", "confinement", "fail-closed", "providerCfg", "le mur", "idée → miroir → /goal", "Proposal", "proposed", "autorité humaine", "déterminisme", "determinism gap", "S16", "S52", "§2", "§6", "§8"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → BA01](/steps/internals/ba01-knobs-gouvernes).</Note>
+
+## En une phrase
+
+BA01 ajoute à la **`CoucheAgent`** (la couche gouvernée de S52) les **knobs de comportement** dont la **projection** et le **replay** dépendent — temperature, max-turns, seed, hôtes réseau autorisés, exec autorisés, limites de ressources, concurrence — et il les pose **dans la couche gouvernée, au-dessus de la ligne**, **jamais** dans un `providerCfg`. Un **knob non déclaré** est un **écart de déterminisme** : on ne peut pas rejouer ce qu'on n'a pas déclaré.
+
+## Le problème que ça résout
+
+Quand un agent code votre application, son comportement dépend de réglages : à quelle température échantillonne-t-il ? Combien de tours peut-il prendre ? Quelle graine (seed) fixe sa reproductibilité ? Vers quels hôtes a-t-il le droit de sortir sur le réseau ? Quels sous-processus peut-il lancer ? Combien de mémoire, de CPU, de temps ? Combien d'agents en parallèle ?
+
+Si ces réglages vivent dans un **`providerCfg`** (la config du fournisseur LLM, à côté de la clé d'API et de l'endpoint), ils deviennent **invisibles à la gouvernance** : personne ne les a déclarés comme une vérité, personne ne les approuve, et **un run n'est plus rejouable** — on ne sait pas avec quel seed il a tourné. BA01 répond en faisant de chaque knob une **vérité gouvernée** : il vit sur l'`AgentSpec`, au-dessus de la ligne, et son ajout passe par la **porte légale** (idée → miroir → /goal → approbation humaine), jamais par une écriture directe.
+
+## Les idées-clés
+
+<Field name="Un knob de comportement vit dans la couche, jamais dans un providerCfg" type="le mur, §2">
+  La **frontière** est nette : un `providerCfg` ne porte **que** l'endpoint et la clé résolus (du credential). **Tout** ce qui change le *comportement* — temperature, seed, max-turns, confinement — vit sur l'`AgentSpec` (la couche gouvernée). Un knob smuggle dans un providerCfg serait à la fois une fuite hors gouvernance et un écart de déterminisme.
+</Field>
+
+<Field name="Les défauts vides sont le confinement MAXIMAL (fail-closed)" type="sécurité par défaut">
+  `AllowedNetworkHosts` **vide** ⇒ **aucun egress** : l'agent ne peut joindre aucun hôte. `AllowedExec` **vide** ⇒ **aucun subprocess** : l'agent ne peut lancer aucune commande. Le défaut n'ouvre **jamais** : il **ferme**. Pour autoriser un hôte ou une commande, il faut le **déclarer** explicitement — une allow-list, jamais une deny-list.
+</Field>
+
+<Field name="Le seed est déterministe, jamais un RNG" type="replay">
+  Le **replay** d'un run dépend de sa graine. Si aucune graine n'est épinglée, BA01 la **dérive déterministiquement** : `Hash(impl‖pack‖item)` — le même triplet (implémentation, ContextPack, item de travail) donne **toujours** la même graine. Jamais un générateur aléatoire : un seed tiré au hasard serait irrejouable.
+</Field>
+
+<Field name="L'extension passe par la porte légale — jamais une écriture kernel directe" type="idée → miroir → /goal">
+  Ajouter ces champs à la SOURCE `AgentSpec`, c'est **changer une vérité**. Cela ne se fait **jamais** par une écriture directe dans le kernel : on **propose** l'extension (une `Proposal` au statut `proposed`) qui doit traverser idée → miroir → /goal et obtenir une **autorité humaine** (S16). L'agent **propose**, l'humain **admet**.
+</Field>
+
+## Ce que vous voyez à l'écran
+
+Sur la route **`/agents`** du Workbench, chaque carte d'agent affiche désormais ses **knobs gouvernés** : température, tours max, graine (épinglée ou « dérivée »), concurrence max, limites de ressources, et — surtout — la posture de **confinement** : « **aucun egress** » et « **aucun subprocess** » quand les allow-lists sont vides (le `bdd-writer`, confiné au maximum), ou la liste explicite des hôtes/commandes autorisés (l'`executor`). Un bouton **« Vérifier l'egress »** et un bouton **« Vérifier l'exec »** exécutent la décision pure et montrent le verdict **refusé** — la preuve, depuis l'écran, que les défauts vides verrouillent.
+
+## En une ligne
+
+> **Tout ce qui change le comportement de l'agent est déclaré dans sa couche gouvernée, au-dessus de la ligne ; les défauts ferment ; le seed se rejoue ; et l'extension se propose, elle ne s'écrit jamais.**

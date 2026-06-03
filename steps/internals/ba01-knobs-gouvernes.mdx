@@ -1,0 +1,52 @@
+---
+title: "BA01 · Les knobs gouvernés — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail d'implémentation de BA01 : l'extension de la SOURCE AgentSpec (back/kernel/agentlayer) par les knobs de comportement Temperature/MaxTurns/Seed/AllowedNetworkHosts/AllowedExec/ResourceLimits/MaxConcurrency, le nouveau type ResourceLimits, validateKnobs (garde de plage fail-closed câblé dans Validate, kind-aware), EgressAllowed/ExecAllowed (allow-lists pures, défaut vide = aucun egress/aucun subprocess), DeriveSeed (Hash(impl‖pack‖item) via records.Hash, jamais un RNG) + SeedFor. Les miroirs ROUGE-d'abord : knobs_property_test.go (rapid — confinement par défaut, plages fail-closed, DeriveSeed déterministe, extension proposée jamais écrite) + knobs_fixture_test.go. Le twin front lib/agentlayer (egressAllowed/execAllowed/deriveSeed/validateKnobs) + Vitest, le panneau /agents action-capable (section knobs + boutons de vérification de confinement) et l'e2e Playwright. La réutilisation de records.Hash (S01/S02) et la porte propose (S52). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "build-agent", "BA01", "agentlayer", "AgentSpec", "knob", "Temperature", "MaxTurns", "Seed", "DeriveSeed", "SeedFor", "AllowedNetworkHosts", "AllowedExec", "ResourceLimits", "MaxConcurrency", "EgressAllowed", "ExecAllowed", "validateKnobs", "Validate", "fail-closed", "confinement", "providerCfg", "records.Hash", "rapid", "Vitest", "Playwright", "déterminisme", "determinism gap", "back/kernel/agentlayer", "lib/agentlayer", "le mur", "Propose", "proposed", "S01", "S02", "S16", "S52", "§2", "§6", "§8"]
+---
+
+<Note>Côté implémentation — le détail interne. Pour le concept et l'usage, voir [Pour les futurs utilisateurs → BA01](/steps/concept/ba01-knobs-gouvernes).</Note>
+
+## En une phrase
+
+BA01 étend la struct `AgentSpec` de `back/kernel/agentlayer` par sept knobs de comportement, ajoute le type `ResourceLimits`, et trois fonctions **pures** — `EgressAllowed` / `ExecAllowed` (allow-lists, défaut vide = fail-closed) et `DeriveSeed` (`Hash(impl‖pack‖item)`, jamais un RNG) — câblées par `validateKnobs` dans `Validate` (garde de plage fail-closed). L'extension passe par la porte légale (le `Propose` de S52 rend toujours `proposed`), jamais une écriture kernel directe.
+
+## Implémentation
+
+<Steps>
+  <Step title="L'extension de la SOURCE AgentSpec (above the line)">
+    `AgentSpec` gagne `Temperature float64`, `MaxTurns int`, `Seed string`, `AllowedNetworkHosts []string`, `AllowedExec []string`, `ResourceLimits ResourceLimits`, `MaxConcurrency int`. Le nouveau type `ResourceLimits{MaxMemoryMB, MaxCPUMillis, MaxWallSeconds int}` porte les caps cgroup/ulimit. **Tous** sont sur la couche gouvernée — **jamais** sur un providerCfg (qui ne portera, en BA03, que l'endpoint/credential résolu). Comme le `body` de `kernel.agent_layer` est `jsonb`, **aucune migration DDL** n'est requise : les nouveaux champs atterrissent dans la colonne existante (expand-only, le mur intact).
+  </Step>
+  <Step title="EgressAllowed / ExecAllowed — allow-lists pures, fail-closed">
+    `EgressAllowed(spec, host) bool` et `ExecAllowed(spec, cmd) bool` sont des vérifications d'appartenance pures : une allow-list **vide refuse tout** (aucun egress / aucun subprocess par défaut — confinement maximal). Match exact (host insensible à la casse). Ce sont les axes de confinement réseau/exec déclarés ici ; BA09 les câblera dans `GateAction`.
+  </Step>
+  <Step title="DeriveSeed / SeedFor — le seed déterministe (jamais un RNG)">
+    `DeriveSeed(impl, pack, item) string` réutilise `records.Hash` (le content-address S01/S02) sur `impl‖pack‖item` séparés par l'**ASCII US (0x1f)** — un séparateur qui ne peut apparaître dans un content-hash, donc pas de collision par concaténation. Le même triplet rend **toujours** la même graine. `SeedFor(spec, impl, pack, item)` résout la graine effective : la `Seed` épinglée si présente, sinon la dérivée. Aucune source d'aléa : c'est l'autorité du replay (le miroir de reproductibilité l'épingle).
+  </Step>
+  <Step title="validateKnobs câblé dans Validate — garde de plage fail-closed, kind-aware">
+    `validateKnobs(spec)` (pure, totale) refuse `Temperature` hors [0,2], `MaxTurns < 0`, `MaxConcurrency < 0`, et tout axe `ResourceLimits` négatif — avec des erreurs typées (`ErrTemperatureRange`…). Elle est appelée par `Validate(CoucheAgent)`. **Kind-aware** : les plages tiennent pour les trois `LayerKind` ; les allow-lists vides sont le défaut valide le plus confiné (pas une plage — le confinement est appliqué par `EgressAllowed`/`ExecAllowed`).
+  </Step>
+  <Step title="Les miroirs (ROUGE d'abord → green)">
+    `knobs_property_test.go` (rapid) : (1) défauts vides = confinement max (egress + exec refusés) ; (1b) l'allow-list est exacte ; (2) `Validate` refuse les plages hors-bornes ; (3) `DeriveSeed` déterministe et dépendant de chaque composante ; (6) l'extension est **proposée** (`Status=proposed` + autorité humaine non vide), jamais écrite ; (4) un agent ne s'auto-admet jamais le knob. `knobs_fixture_test.go` : la fixture `bdd-writer` knobful valide, confine par défaut, refuse les plages. Côté front, `lib/agentlayer.test.ts` (Vitest, le twin) et l'e2e `tests/e2e/agents.spec.ts` (la section knobs + les vérifications de confinement à l'écran).
+  </Step>
+  <Step title="Le twin front + le panneau /agents action-capable">
+    `lib/agentlayer.ts` gagne `egressAllowed`/`execAllowed`/`deriveSeed`/`seedFor`/`validateKnobs` (purs, déterministes — `deriveSeed` est un content-address FNV-1a stable, même intention que `lib/context-pack.ts`, le côté Go restant l'autorité SHA-256). Le panneau `/agents` affiche les knobs par carte (température, tours, seed épinglé/dérivé, concurrence, ressources, réseau/exec avec les badges « aucun egress » / « aucun subprocess ») et **exécute** une vérification de confinement (boutons `check-egress` / `check-exec`) montrant le verdict **refusé** — action-capable, lecture-seule côté vérité (le mur).
+  </Step>
+</Steps>
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Déterminisme-first, partout.** Chaque capacité de BA01 est une **fonction pure autoritaire** : confiner (allow-list), dériver un seed (hash), valider une plage. Aucun chemin LLM — un seed « tiré par un agent » ou un confinement « jugé par un agent » serait un **determinism gap** qui bloque le pas. Le seed est `Hash(impl‖pack‖item)`, **jamais** `math/rand`. Le miroir de reproductibilité (property : même triplet → même seed) le prouve.
+- **Le knob vit dans la couche, jamais dans un providerCfg.** C'est la frontière du mur sur l'axe comportement. Poser les knobs sur `AgentSpec` (au-dessus de la ligne) et **rien** sur le providerCfg garantit qu'un run est gouverné et rejouable. BA03 le scellera côté émetteur (`Project` ignore tout champ de cfg qui n'est pas credential/endpoint).
+- **Fail-closed par défaut.** Le vide **ferme** (aucun egress, aucun subprocess). Ouvrir exige une **déclaration explicite** — la posture de sécurité par défaut, jamais l'inverse.
+- **Expand-only, pas de migration.** Le `body jsonb` absorbe les nouveaux champs ; aucune DDL, aucun GRANT touché. L'anti-overwrite (§9) tient : on **ajoute** des champs à la SOURCE par la porte légale, on ne réécrit rien.
+
+## Méta-méta — la garantie de niveau 3
+
+BA01 ne touche **ni la fitness ni le mur** : il les **réutilise**. L'extension de la SOURCE `AgentSpec` est elle-même soumise au mur — `kernel.agent_layer` reste SELECT-only à l'agent, et l'ajout des knobs passe par `idée → miroir → /goal → approbation humaine` (le `Propose` rend `proposed`, jamais `admitted` ; l'agent ne s'auto-admet jamais). La garantie inviolable : **aucun knob ne peut être smuggle hors gouvernance** (pas dans un providerCfg), et **aucun défaut n'ouvre** (le vide confine). La méta-loop **ajoute** un garde-fou (la déclaration des knobs gouvernés), elle n'en retire aucun.
+
+## Limites connues
+
+- **Câblage de confinement différé.** `EgressAllowed`/`ExecAllowed` sont les axes déclarés ; leur câblage dans le gate d'action runtime est BA09 (`GateAction`).
+- **Parité de seed front/back.** Le `deriveSeed` du twin front est un content-address FNV-1a stable (id d'affichage/replay déterministe) ; le côté Go (`records.Hash`, SHA-256) reste l'**autorité**. La parité octet-à-octet n'est pas requise pour l'affichage ; le replay autoritaire est Go.
+- **Pas de migration / hook / MCP nouveau** — le `body jsonb` absorbe l'extension, le mur S04 et la porte propose S52 sont réutilisés tels quels.
+- **Linear non authentifié.** L'issue de suivi BA01 n'a pu être mise à jour (OAuth du MCP `linear-server` requis) — noté comme OpenQuestion, non bloquant.

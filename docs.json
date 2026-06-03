@@ -169,7 +169,9 @@
               "steps/concept/s51-harness-economics",
               "steps/internals/s51-harness-economics",
               "steps/concept/s52-couche-agent",
-              "steps/internals/s52-couche-agent"
+              "steps/internals/s52-couche-agent",
+              "steps/concept/ba01-knobs-gouvernes",
+              "steps/internals/ba01-knobs-gouvernes"
             ]
           }
         ]
