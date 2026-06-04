@@ -1,0 +1,39 @@
+---
+title: "BA30 · Passerelle RunToSignal + identité-par-pattern — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de BA30 : la passerelle RunToSignal(run, thresholds) → (PatternSignal, bool) (back/runtime/agentloop/runtosignal.go) classe un run en FailureClass (still_red/abandoned/blocked/green_hollow/none), dérive le code de refus dominant + la classe de cause, et content-adresse l'identité du signal sur le PATTERN — pas l'id du run — pour que deux runs du même mode collapsent (gap I2). ToObserveInput → reality.Observe → reality.Signal portant la taint incident_derived ; reality.ToKernel refuse toujours (gap I1). Outil MCP agentloop_run_to_signal (read-only), jumeau TS, sous-section /agents, miroirs rapid + fixture + fast-check + Playwright."
+keywords: ["aidos", "krd", "BA30", "agentloop", "RunToSignal", "Classify", "FailureClass", "PatternSignal", "Severity", "SignalThresholds", "ToObserveInput", "reality", "Observe", "Signal", "ToKernel", "incident_derived", "identité-par-pattern", "Recurrence", "cause_sketch", "hypothèse", "agentloop_run_to_signal", "MCP", "gap I1", "gap I2", "le mur", "read-only", "determinism-first", "rapid", "fast-check", "ADR 0009", "ADR 0010", "ADR 0011"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet. Pour la vue concept, voir [Pour les futurs utilisateurs → BA30](/steps/concept/ba30-run-to-signal).</Note>
+
+## En une phrase
+
+BA30 est la **passerelle** `RunToSignal(run, thresholds) → (PatternSignal, bool)` qui rebranche les runs d'agent sur le moteur de retour-réalité S43 : un run `still_red`/`abandoned`/`blocked`, ou un run `green` de forme anormale (thrashing-contre-le-mur, gap de déterminisme), devient une `reality.Signal` portant la taint `incident_derived` ; un run vert ordinaire donne `(_, false)`. L'identité du signal est content-adressée sur le **pattern** (classe d'échec + code de refus dominant + classe de cause), **jamais** l'id du run — pour que deux runs distincts du même mode **collapsent** et que `Recurrence` puisse grimper (gap I2).
+
+## Implémentation
+
+Le moteur vit dans `back/runtime/agentloop/runtosignal.go` (la passerelle dépend d'`agentrun` et importe `reality` ; `reality` n'importe pas `agentloop` — pas de cycle). Pur, total, déterministe : pas d'horloge, pas de rng, pas d'I/O, jamais de LLM.
+
+- **`Classify(run, th) → FailureClass`** — un `switch` total sur `run.Result`. `still_red`/`abandoned`/`blocked` mappent directement ; `green` mappe sur `ClassGreenHollow` ssi `isHollowGreen` (le compte de refus de mur atteint `th.ThrashRefusals`, **ou** un refus `AGENT_DETERMINISM_GAP` est présent — un `Arbitrate→LLMGated` qui affleure), sinon `ClassNone`.
+- **`dominantRefusalCode(run)`** — réutilise `refusalsOf` (BA29) ; le code le plus fréquent, départage lexical pour le déterminisme. Vide quand le run n'a aucun refus.
+- **`causeClass(class, code)`** — bucket grossier et stable de la cause (`determinism_gap`, `wall_thrash`, `refused_<code>`, `budget_breach`, `goal_unmet`).
+- **`RunToSignal`** — `ClassNone ⇒ (PatternSignal{}, false)`. Sinon le `Pattern = "<class>|<code>|<cause>"`, la sévérité (`high` pour les échecs, `low` pour `green_hollow`), le `Signal.Operation = "agent_run:<class>"` et `Signal.Error` **dérivés du pattern** (jamais l'id du run/goal), le `CauseSketch` flaggé `HYPOTHESIS`, et la `Provenance` (« agent run R … on goal G ») qui porte l'id **hors** de l'adresse de contenu.
+- **`(ps PatternSignal) ToObserveInput()`** — construit l'entrée de `reality.Observe` **entièrement à partir du pattern** : `Ref = ps.Pattern` (pas un `#NNNN`, pas un id de run), `Taint = [incident_derived]`. Deux runs du même pattern produisent donc le **même** `incident.ID` → `reality.Observe` ré-observe la même identité → `Recurrence` grimpe.
+
+La surface MCP : `agentloop_run_to_signal` (`back/mcp/agentloop/runtosignal.go`, ADR 0009 — un outil = une op) classe les scénarios déclarés, appelle `reality.Observe` pour exposer l'`incident_id` récurrent et `reality.ToKernel` pour prouver le refus ; `wrote_truth` toujours `false`. Le jumeau front `lib/agentloop-runtosignal.ts` réplique `classify`/`runToSignal`/`runsToSignals` ; la sous-section `/agents` « Signals » (`data-testid="signals"`) rend le tableau classe/sévérité/pattern/hypothèse + la récurrence par pattern, thémée (ADR 0010) + bilingue FR/EN (ADR 0011).
+
+Miroirs (tous VERTS) : `runtosignal_property_test.go` (9 propriétés rapid : reproductibilité, échec⇒signal, vert-ordinaire⇒rien, vert-creux⇒low, taint incident_derived, identité-par-pattern collapse, patterns distincts diffèrent, honnêteté hypothèse + refus noyau), `runtosignal_fixture_test.go` (6 lignes N2), `agentloop-runtosignal.test.ts` (11 fast-check), `agents.spec.ts` BA30 (2 Playwright e2e : run signalé + récurrence×2 collapse, vert sans signal).
+
+## Méta
+
+Pourquoi l'identité-par-pattern, et pas l'id du run ? Parce que `reality.Observe` content-adresse l'incident sur `Ref+Signal+CauseSketch+Taint+LinkedBranches`. Si l'un de ces champs portait l'id du run, **chaque** run produirait une identité fraîche, `reality.Observe` ré-observerait sans cesse un « nouvel » incident, et `Recurrence` resterait coincé à 1 (gap I2). En dérivant **tout** l'`ObserveInput` du pattern, on garantit que *le même mur heurté dix fois* devient *un signal récurrent de récurrence 10*. L'id du run survit dans la `Provenance` (prose pour l'humain), hors de l'adresse.
+
+Le `green_hollow` (gap I1) est l'autre subtilité : un run **vert** est un succès — mais un succès qui s'est cogné au mur ou qui a affleuré un gap de déterminisme cache une dette. On l'émet en **moindre sévérité** : il prévient sans crier au feu. Les seuils (`SignalThresholds`) sont **déclarés** (au-dessus de la ligne, §8 « weights declared, never learned »), jamais appris — `DefaultThresholds()` les fige.
+
+Déterminisme-first : la classification est un **tally + un switch**, jamais un agent « juge ce run ». Le `cause_sketch` est une **hypothèse** explicite, jamais une assertion falsifiable — l'humain écrit l'assertion au `/goal`. Le mur tient par construction : `reality.ToKernel(inc)` refuse **toujours** l'arête directe incident→noyau (`REALITY_CANNOT_DECLARE_TRUTH`), et la propriété d'honnêteté le re-prouve sur l'incident que la passerelle alimente.
+
+## Méta-méta
+
+BA30 ferme le **chaînon manquant** du retour-réalité pour l'agent-de-build : `reality.{Observe,Learn,ToIdea}` existait depuis S43, mais aucune arête ne le reliait à un `AgentRun`. La passerelle est une **réutilisation verbatim** — aucune nouvelle surface noyau, aucun nouveau code de `BlockReason`, aucun nouveau type de réalité : seulement la traduction `run → reality.Signal`. C'est l'illustration du principe « réutiliser, ne pas réinventer » poussé jusqu'au bout : la passerelle n'ajoute qu'un classifieur pur et une fonction de projection.
+
+Au méta-méta, BA30 rend l'agent-de-build **sujet** de la même boucle d'apprentissage que la production : ses propres pannes (et ses succès creux) deviennent des **idées candidates** que l'humain peut promouvoir en vérités — fermant la boucle « le système apprend du **monde**, pas de lui-même », où *le monde* inclut désormais le comportement observé de l'agent qui code AIDOS. Et l'identité-par-pattern garantit que cet apprentissage **s'agrège** au lieu de se disperser : la récurrence est ce qui distingue un incident d'un accident.

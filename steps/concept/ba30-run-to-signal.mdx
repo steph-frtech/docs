@@ -1,0 +1,41 @@
+---
+title: "BA30 · Du run d'agent au signal de réalité — vue depuis l'écran"
+description: "BA30 rebranche les runs d'agent sur la boucle de retour-réalité. Un run qui échoue, qui est abandonné faute de budget, ou même un run VERT à forme anormale (qui se cogne au mur, qui retombe sur du jugement LLM là où du code suffirait) devient un signal que le système peut apprendre. Et deux runs distincts qui échouent de la même manière se RASSEMBLENT en un seul signal récurrent. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA30", "signal", "réalité", "RealityMirror", "run d'agent", "échec", "abandonné", "vert-creux", "récurrence", "identité-par-pattern", "incident", "hypothèse", "le mur", "déterminisme", "gap I1", "gap I2"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA30](/steps/internals/ba30-run-to-signal).</Note>
+
+## L'idée en une phrase
+
+Quand un agent rate sa mission — ou la réussit mais d'une **manière inquiétante** —, AIDOS transforme ce run en un **signal de réalité** que la boucle externe sait digérer : l'échec d'un agent devient une **idée candidate**, jamais une vérité décrétée.
+
+## Le problème que ça règle
+
+AIDOS possède déjà un moteur de **retour-réalité** : un incident de production devient une idée DRAFT (`incident → /learn → idée → miroir → /goal → humain`). Mais jusqu'ici, **un run d'agent raté n'alimentait rien**. Un agent qui n'arrive jamais à fermer son goal, qui épuise son budget, ou qui se cogne sans cesse au mur, c'était du bruit perdu — alors que c'est exactement le genre de **panne récurrente** dont la boucle de réalité est faite pour apprendre.
+
+BA30 est cette **passerelle**. Elle lit un run terminé et décide : « est-ce un signal ? ». Si oui, elle le met dans la **forme** que la boucle de réalité connaît déjà.
+
+## Trois familles de runs deviennent un signal
+
+- **Le run échoué** (`still_red`) — l'agent a fini sans fermer son goal. Le rouge a survécu.
+- **Le run abandonné** (`abandoned`) — un budget (jetons, minutes, horloge) a sauté en cours de route.
+- **Le run vert… mais creux** — l'agent a *réussi*, mais sa forme alarme : il s'est cogné au mur de façon répétée (thrashing), ou il a dû retomber sur du jugement LLM là où un outil déterministe aurait dû exister. C'est un succès qui cache une dette. Ce signal est de **moindre sévérité** — il prévient, il n'alarme pas.
+
+Un **run vert ordinaire** ne produit **aucun** signal. AIDOS n'invente pas d'incident là où tout s'est bien passé.
+
+## La clé : deux runs qui ratent pareil ne font qu'un signal
+
+C'est la décision centrale de BA30. L'identité d'un signal n'est **pas** l'identifiant du run — c'est son **pattern** : la classe d'échec, le code de refus dominant, la classe de cause. Ainsi **deux runs distincts** qui échouent de la **même manière** se **rassemblent** en un **seul** signal récurrent.
+
+Sans cela, le compteur de **récurrence** resterait coincé à 1 : la réalité ré-observerait à chaque fois une « nouvelle » panne, et personne ne verrait que *le même mur est heurté dix fois*. L'identité-par-pattern, c'est ce qui fait grimper la récurrence — et la récurrence, c'est le signal qu'une panne mérite l'attention de l'humain.
+
+## Ce que le signal n'est jamais
+
+Le signal porte une **hypothèse** de cause (« le noyau est peut-être incomplet ici »), jamais une vérité. AIDOS ne décrète pas que le noyau a tort : c'est une **décision de vérité**, au-dessus de la ligne, qui reste à l'humain. La passerelle **propose** ; elle ne gouverne pas. La seule sortie reste : `idée → miroir → /goal → approbation`.
+
+## Où vous le voyez
+
+Sur l'écran **Agents → « Signals »**, un bouton classe les runs en signaux. Le tableau montre, pour chaque run, sa classe, sa sévérité, son pattern, l'hypothèse de cause, et la preuve que **le noyau refuse toujours** (aucune vérité écrite). Une section « récurrence par pattern » montre les runs distincts qui se rassemblent — la récurrence qui grimpe, sous vos yeux.
+
+<Note>BA30 est une **lecture** : la passerelle n'écrit aucune vérité. Un run-devenu-signal est une **observation**, remontée par la porte idea-intake, jamais une écriture du noyau.</Note>

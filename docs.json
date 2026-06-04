@@ -227,7 +227,9 @@
               "steps/concept/ba28-replay-redact",
               "steps/internals/ba28-replay-redact",
               "steps/concept/ba29-ledger",
-              "steps/internals/ba29-ledger"
+              "steps/internals/ba29-ledger",
+              "steps/concept/ba30-run-to-signal",
+              "steps/internals/ba30-run-to-signal"
             ]
           }
         ]
