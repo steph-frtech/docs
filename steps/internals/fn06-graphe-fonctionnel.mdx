@@ -1,0 +1,51 @@
+---
+title: "FN06 · Le graphe fonctionnel de l'app émise — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail de FN06 : front/web/lib/emitters.ts gagne layoutCallGraph(graph, affected) → LaidOutGraph{nodes []LaidOutNode{name, calls, x, y, affected}, edges []LaidOutEdge, width, height} — fonction PURE et TOTALE de l'index FN05 (CallGraph) + le sous-graphe affecté : profondeur = plus longue chaîne d'appel vers une feuille (les appelants au-dessus), colonnes triées, une arête par (fonction → appelé), chaque nœud flagué affecté ou non. Déterministe (même graphe + même sélection → tracé byte-identique), total (index vide → canevas vide, jamais de throw). Le panneau /emitters (EmittersPanel.tsx) gagne une section « Graphe fonctionnel de l'app émise » : bouton VISUALISER (rend un SVG thémé — nœuds = boîtes, appels = flèches, data-graph-hash/-nodes/-edges) + bouton SURLIGNER (affectedSubgraph sur la 1re fonction, nœuds data-affected). Échantillon EMITTED_FUNCTIONAL_GO (slice checkout fonctionnel) dans emitters-data.ts. Miroir reproductibilité (emitters.test.ts, fast-check) : layout unique par nœud, une arête par paire, flag affecté = sélection ContextRouter, déterminisme byte-identique, totalité. Deux e2e Playwright (VISUALISE rend le SVG ; HIGHLIGHT marque le sous-graphe). i18n FR/EN. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "FN06", "graphe fonctionnel", "visualisation", "layoutCallGraph", "LaidOutGraph", "LaidOutNode", "LaidOutEdge", "SVG", "EmittersPanel", "emitters.ts", "emitters-data.ts", "EMITTED_FUNCTIONAL_GO", "callGraphIndex", "affectedSubgraph", "ContextRouter", "S33", "profondeur d'appel", "content-addressed", "fast-check", "emitters.test.ts", "reproducibilité", "Playwright", "data-graph-hash", "data-affected", "thémé", "ADR 0010", "bilingue", "ADR 0011", "fail-closed", "ADR 0036", "le mur", "§2", "§6", "§8", "Linear"]
+---
+
+<Note>Côté implémentation — le détail interne. Pour le concept et l'usage, voir [Pour les futurs utilisateurs → FN06](/steps/concept/fn06-graphe-fonctionnel).</Note>
+
+## En une phrase
+
+FN06 ajoute, dans `front/web/lib/emitters.ts`, une fonction **pure et totale** `layoutCallGraph(graph, affected)` qui rend la **géométrie** du graphe fonctionnel (positions par profondeur d'appel + arêtes + flag affecté), et le panneau `/emitters` la **dessine en SVG** — prouvée par un miroir de reproductibilité (même graphe → même tracé) et deux e2e Playwright.
+
+## Implémentation
+
+<Steps>
+  <Step title="Le miroir de reproductibilité écrit en PREMIER (rouge)">
+    Dans `emitters.test.ts`, un `describe("layoutCallGraph (FN06 …)")` porte le critère **rouge-d'abord** : chaque nœud est posé **une seule fois** avec des coordonnées **finies et positives** ; **une arête par paire** `(fonction → appelé)` entre nœuds posés (`a→b`, `a→c`, `b→c` sur la chaîne) ; le flag `affected` vaut **exactement** l'appartenance au sous-graphe affecté (`affectedSubgraph`) ; **déterminisme** (même graphe + même sélection → tracé JSON byte-identique, via fast-check) ; **totalité** (index vide → canevas vide, jamais de throw). Avant l'implémentation, `layoutCallGraph`/`LaidOutGraph` sont indéfinis — le vrai rouge (vérifié : 5 tests échouent, « layoutCallGraph is not a function »).
+  </Step>
+  <Step title="Le tracé pur — layoutCallGraph">
+    `layoutCallGraph(g, affected)` est une **fonction pure** de l'index FN05 (`CallGraph`) + le sous-graphe affecté. Elle calcule pour chaque nœud sa **profondeur** = plus longue chaîne d'appel vers une feuille (DFS mémoïsé ; termine car le graphe est acyclique, garanti par FN04), pose les appelants **au-dessus** de leurs appelés, trie chaque colonne, émet une `LaidOutEdge` par appelé, et flagge chaque `LaidOutNode.affected`. Pas d'horloge, pas d'aléa, pas de mesure DOM : la géométrie vient de constantes déclarées (`colWidth`/`rowHeight`/`margin`). Index vide → `{nodes:[], edges:[], width:0, height:0}`.
+  </Step>
+  <Step title="L'échantillon du code émis — EMITTED_FUNCTIONAL_GO">
+    Les projections d'entité (struct/DDL/types) n'ont **aucune fonction** — leur graphe est vide (l'honnête verdict de FN05). Pour avoir un graphe **réel** à dessiner, `emitters-data.ts` ajoute `EMITTED_FUNCTIONAL_GO` : un échantillon du **code émis** en style fonctionnel (le slice checkout — `priceLine`, `applyDiscount`, `total`), portant le marqueur AIDOS, pur, sans globale, acyclique (le mandat FN02). Littéral statique → graphe et empreinte reproductibles.
+  </Step>
+  <Step title="L'écran action-capable — la section graphe SVG">
+    `EmittersPanel.tsx` gagne une section **« Graphe fonctionnel de l'app émise »** (`data-testid="functional-graph"`) avec deux contrôles. **VISUALISER** (`visualise-graph`) lance `layoutCallGraph` (sans sélection) et rend un **SVG** thémé : nœuds = `<rect>` + `<text>` (boîtes), appels = `<line>` fléchées (`marker`), avec `data-graph-hash` (= l'empreinte FN05), `data-graph-nodes`, `data-graph-edges`. **SURLIGNER** (`visualise-graph-affected`) recalcule avec `affectedSubgraph(graph, [première fonction])` et marque chaque nœud `data-affected="true|false"` (couleur d'accent pour les affectés). Thémé (ADR 0010, tokens — jamais de hex), bilingue (ADR 0011, FR/EN via `next-intl`).
+  </Step>
+  <Step title="Les e2e Playwright">
+    `tests/e2e/emitters.spec.ts` gagne deux tests. « VISUALISE renders the emitted functional graph as an SVG (FN06) » : clique VISUALISER, attend le SVG visible, vérifie `data-graph-nodes="3"`, `data-graph-edges="3"`, `data-graph-hash` (64 hex), et la présence des trois nœuds-fonctions. « HIGHLIGHT marks the affected sub-graph (FN06) » : clique SURLIGNER, vérifie qu'`applyDiscount` (1re fonction triée) et son appelant `total` sont `data-affected="true"`, et que `priceLine` (non dépendant) est `false`. Les 8 specs `/emitters` passent.
+  </Step>
+</Steps>
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Pourquoi un *tracé* pur, et pas un layout de bibliothèque dynamique.** Le critère de done est « même code → même graphe » *jusqu'au rendu*. Une lib de layout force-directed (positions issues d'une simulation, parfois non déterministe) trahirait ce contrat. `layoutCallGraph` est une fonction pure du graphe : positions par **profondeur d'appel** (un invariant structurel, pas une mesure visuelle), donc le tracé est reproductible et content-addressé sur la **même empreinte** que l'index FN05.
+- **Pourquoi réutiliser `callGraphIndex`/`affectedSubgraph` (FN05), et ne rien réindexer.** FN06 est la **facette visualisation** de la vérité que FN05 indexe déjà. Le panneau calcule l'index une fois (`useMemo`), puis le tracé est une pure transformation géométrique : pas de second analyseur de code, pas de risque de dérive entre la liste FN05 et le dessin FN06.
+- **Pourquoi un échantillon de code émis dédié.** Les entités projetées n'ont pas de fonctions ; visualiser leur graphe (vide) ne montrerait rien. `EMITTED_FUNCTIONAL_GO` donne un graphe **réel** (le slice checkout fonctionnel) — fidèle au scope FN « le code ÉMIS seulement » et au mandat FN02 (pur, acyclique).
+- **Pourquoi profondeur = plus longue chaîne vers une feuille.** Empiler les appelants au-dessus de leurs appelés rend la structure « chaque fonction = une couche » immédiatement lisible : on voit les couches du haut (entrées) vers le bas (primitives). La profondeur *maximale* (et non la première trouvée) place chaque nœud sous **tous** ses appelants, sans croisement de profondeur.
+
+## Méta-méta — la garde sur la garde
+
+- **FN06 n'AJOUTE qu'une capacité (§5).** La visualisation s'ajoute à l'index FN05 et aux règles FN04 ; elle ne retire ni n'assouplit aucune garde. Le mur, le red-set, le bounded-context de S33 restent inchangés ; FN06 ne fait que *montrer* le sous-graphe que le router sélectionnerait.
+- **Le tracé est calculé, jamais déclaré (§8).** Ni `layoutCallGraph`, ni les boutons ne lisent une confiance d'agent : la géométrie est le résultat d'une fonction pure. Un « LLM qui dessine le graphe » serait une **fracture de déterminisme** qui bloquerait le step (la pureté EST le mandat de déterminisme appliqué au rendu, CLAUDE.md §6/§8) — la fonction de tracé est autoritative, le miroir fast-check pinne « même graphe → même tracé ».
+- **ui-completeness — pas de capacité headless (§7).** Le graphe se dessine *et* se manipule depuis l'écran : VISUALISER l'exécute, SURLIGNER exécute la sélection du ContextRouter ; deux e2e Playwright prouvent que chaque contrôle **s'exécute** et rend un résultat. Aucune capacité FN06 n'est inatteignable depuis une vis.
+- **Le mur tient (§2).** Le tracé est du code sous la ligne ; il lit l'index (dérivé de `gen/`) et dessine sans écrire `kernel`/`mirrors`/`fitness`. L'écran montre ; il ne fait jamais écrire de vérité.
+
+## OpenQuestions
+
+- **OQ-FN06-cross-file** : le graphe dessiné est **intra-fichier** (l'index FN05 l'est). Un graphe inter-fichiers sur tout l'arbre `gen/` (résolution des appels qualifiés `pkg.Fn`) hérite de l'OQ-FN05-cross-file : à dessiner quand l'émetteur produira plusieurs fichiers liés. Forward-dependency, ne bloque pas FN06.
+- **OQ-FN06-interactive** : le tracé est statique (positions par profondeur). Des raffinements interactifs — sélection d'un nœud arbitraire à surligner, zoom/pan, repli des couches — sont utiles pour de grosses apps émises, à ouvrir comme idée quand un graphe émis dépassera une poignée de fonctions. La capacité « visualiser + surligner le sous-graphe affecté » est complète et action-capable ; l'interactivité avancée est l'OQ. Ne bloque pas FN06.
+- **OQ-FN06-linear** : le `linear-server` MCP n'est pas authentifié dans cette session (OAuth requis, non complétable depuis un exécuteur isolé) ; l'issue `FN06 · …` (projet AIDOS `aidos-2a9085453be8`, label `step`) n'a pu être créée/déplacée en `In Progress`/`Done` par l'agent — à faire au prochain run authentifié (CLAUDE.md §11, best-effort, ne bloque pas le step).
