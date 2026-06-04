@@ -1,0 +1,53 @@
+---
+title: "FN02 · Le mandat « code émis fonctionnel » — pureté, zéro globale, graphe d'appel acyclique, sur l'arbre gen/ seulement"
+description: "FN02 grave un MANDAT (pas du code) : tout le code que AIDOS émet pour votre application — sous back/gen/ uniquement — doit être FONCTIONNEL : chaque fonction pure (même entrée → même sortie, aucun effet ni état caché), AUCUNE variable globale mutable, et un graphe d'appel ACYCLIQUE (chaque fonction = une couche = un nœud). C'est le determinism-first appliqué à la SORTIE : un code pur est, par construction, déterministe et reproductible. L'ADR 0036 définit les trois invariants émis (EMITTED_FUNCTION_PURE, EMITTED_NO_GLOBAL_MUTABLE, EMITTED_CALL_GRAPH_ACYCLIC), tranche leur PORTÉE (gen/ uniquement — jamais le moteur AIDOS lui-même), et exige qu'ils soient des gates DÉTERMINISTES fail-closed (go-arch-lint/depguard), jamais un jugement LLM. FN03 les rend exécutables (émetteurs + miroir de pureté), FN04 les arme en règles arch-fitness fault-injectées."
+keywords: ["aidos", "krd", "functional", "FN02", "mandat", "code émis", "fonctionnel pur", "fonction pure", "zéro globale", "no-global", "graphe d'appel acyclique", "EMITTED_FUNCTION_PURE", "EMITTED_NO_GLOBAL_MUTABLE", "EMITTED_CALL_GRAPH_ACYCLIC", "gen/", "portée", "arch-fitness", "fail-closed", "déterminisme", "determinism-first", "ADR 0036", "le mur", "S34", "§84", "§6", "§8"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail des décisions de l'ADR, voir [Pour moi → FN02](/steps/internals/fn02-mandat-fonctionnel).</Note>
+
+## En une phrase
+
+FN02 **grave un mandat** (un ADR, pas du code) : tout le code que **AIDOS émet pour votre application** — et **seulement** lui, l'arbre `back/gen/` — doit être **fonctionnel** : chaque fonction **pure**, **aucune variable globale mutable**, un **graphe d'appel acyclique**. C'est le **determinism-first appliqué à la sortie** : un code pur est, par construction, déterministe et reproductible.
+
+## Le problème que ça résout
+
+FN01 (le spike) a prouvé que c'était **faisable** : ré-émettre le slice checkout en style pur-fonctionnel, **byte-identique** à l'émetteur impératif, **reproductible**, **zéro globale** — verdict **GO**.
+
+Un verdict GO *autorise* mais ne *grave* rien. Avant que de nouveaux émetteurs (FN03) ou des règles automatiques (FN04) existent, il faut **écrire la règle dans le marbre** : *quels* invariants exactement, et — surtout — *jusqu'où* ils s'appliquent. C'est le rôle d'un ADR : une décision tracée, datée, opposable. FN02 **est** cet ADR (`0036`).
+
+## Les idées-clés
+
+<Field name="Un mandat, pas un package — comme determinism-first" type="§6">
+  FN02 ne livre **pas** de code. Il grave une **règle** au même rang que le mandat determinism-first : « tout ce qui peut être une fonction pure DOIT l'être ». Ici, appliqué au **code généré**. Les neuf étapes du contrat d'un step ne changent pas ; le mandat **ajoute** une garde, il n'en retire aucune.
+</Field>
+
+<Field name="Les trois invariants émis" type="ADR 0036">
+  **`EMITTED_FUNCTION_PURE`** — chaque fonction émise rend la même sortie pour la même entrée, sans effet de bord. **`EMITTED_NO_GLOBAL_MUTABLE`** — aucune variable mutable au niveau paquet (les tables sont construites et **retournées par valeur**, jamais un `var` de module). **`EMITTED_CALL_GRAPH_ACYCLIC`** — le graphe d'appel est acyclique : chaque fonction est **une couche, un nœud**, sans cycle caché.
+</Field>
+
+<Field name="La PORTÉE est tranchée : gen/ uniquement" type="la décision centrale">
+  Le mandat s'applique **exclusivement** au code **émis** (`back/gen/` : vos structs, votre DDL, vos types, vos handlers). Il **ne** s'applique **pas** au moteur AIDOS lui-même (`back/runtime`, `back/kernel`, le Workbench) : AIDOS est un OS **impératif** qui *émet* du **fonctionnel**. Cette frontière est la décision que porte l'ADR ; les règles de FN04 ne regarderont que `gen/`.
+</Field>
+
+<Field name="Une règle déterministe fail-closed, jamais un jugement LLM" type="determinism-first, §8">
+  Les trois invariants seront des **gates déterministes** (marche d'AST, détection de cycle, `go-arch-lint`/`depguard`) — **fail-closed** : un doute → rouge. Jamais « un LLM qui décide si le code a l'air fonctionnel ». Un agent qui jugerait à la place d'une fonction serait une fracture de déterminisme.
+</Field>
+
+<Field name="Élargir la portée = changer une vérité" type="le mur, §2">
+  Le chemin couvert, la liste des invariants et le seuil fail-closed sont des **vérités déclarées**. Les modifier passe par **idée → miroir → /goal → approbation humaine** — jamais une édition silencieuse.
+</Field>
+
+## Les trois invariants (résumé)
+
+| invariant | ce qu'il exige | comment il sera prouvé (FN03/FN04) |
+| --- | --- | --- |
+| `EMITTED_FUNCTION_PURE` | sortie = f(entrées), aucun effet/état caché | miroir property : ré-émission byte-identique, N rejeux |
+| `EMITTED_NO_GLOBAL_MUTABLE` | aucun `var` mutable de paquet dans `gen/` | règle arch-fitness fail-closed + fault-injection |
+| `EMITTED_CALL_GRAPH_ACYCLIC` | graphe d'appel sans cycle | détection de cycle déterministe + fault-injection |
+
+## Ce que FN02 NE fait pas (la suite)
+
+- **FN03** *rend exécutable* le mandat : il reforme les émetteurs pour **produire** du Go/DDL/TS pur et grave le **miroir de pureté** (rouge d'abord).
+- **FN04** *arme* les trois invariants en **règles arch-fitness fail-closed** sur `back/gen/`, avec **fault-injection** (injecter une globale ou un cycle → la règle passe rouge).
+- **FN05** consomme le graphe acyclique garanti comme **index call-graph** fourni en contexte à l'agent.

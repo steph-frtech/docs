@@ -1,0 +1,50 @@
+---
+title: "FN02 · Le mandat fonctionnel du code émis — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail de FN02 : un step SANS package (un mandat gravé, comme determinism-first). Le livrable est l'ADR 0036, accepté, qui (1) pose le mandat « le code émis est fonctionnel » comme le determinism-first appliqué à la SORTIE ; (2) définit trois invariants émis — EMITTED_FUNCTION_PURE (sortie=f(entrées), ré-émission byte-identique), EMITTED_NO_GLOBAL_MUTABLE (aucun var mutable au scope paquet, tables retournées par valeur), EMITTED_CALL_GRAPH_ACYCLIC (graphe d'appel sans cycle, une fonction = une couche = un nœud) ; (3) TRANCHE la portée à back/gen/ uniquement — jamais le moteur AIDOS (back/runtime, back/kernel, front/web restent impératifs) ; (4) exige que les invariants soient des gates DÉTERMINISTES fail-closed (go-arch-lint/depguard, marche d'AST, détection de cycle) dans l'esprit de l'actuelle CheckLLMIsolation (arch-fitness.json), jamais un jugement LLM ; (5) verrouille l'élargissement de portée derrière idée → miroir → /goal. FN03 rend les invariants exécutables (émetteurs + miroir de pureté), FN04 les arme (règles arch-fitness fault-injectées), FN05 consomme le graphe acyclique. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "functional", "FN02", "mandat", "ADR 0036", "code émis", "fonction pure", "no-global", "graphe acyclique", "EMITTED_FUNCTION_PURE", "EMITTED_NO_GLOBAL_MUTABLE", "EMITTED_CALL_GRAPH_ACYCLIC", "gen/", "portée", "arch-fitness", "arch-fitness.json", "CheckLLMIsolation", "go-arch-lint", "depguard", "fail-closed", "fault-injection", "déterminisme", "determinism-first", "le mur", "idée → miroir → /goal", "S34", "S46", "§84", "§6", "§8", "Linear"]
+---
+
+<Note>Côté implémentation — le détail interne. Pour le concept et l'usage, voir [Pour les futurs utilisateurs → FN02](/steps/concept/fn02-mandat-fonctionnel).</Note>
+
+## En une phrase
+
+FN02 est un step **sans package** : son livrable est l'**ADR 0036**, accepté, qui grave le **mandat « le code émis est fonctionnel »**, définit ses **trois invariants** (`EMITTED_FUNCTION_PURE`, `EMITTED_NO_GLOBAL_MUTABLE`, `EMITTED_CALL_GRAPH_ACYCLIC`), **tranche leur portée à `back/gen/` uniquement**, et exige qu'ils soient des **gates déterministes fail-closed** (jamais un jugement LLM).
+
+## Implémentation
+
+<Steps>
+  <Step title="Un step-mandat, pas un step-code (comme determinism-first)">
+    FN02 ne crée aucun package Go ni aucune route. Le determinism-first (CLAUDE.md §6) est lui aussi un **mandat** sans package — une règle que tout le code respecte. FN02 est son équivalent **pour la sortie** : il s'écrit comme une **décision tracée** (`docs/adr/0036-fn02-emitted-functional-mandate.md`), opposable à FN03/FN04/FN05.
+  </Step>
+  <Step title="La décision 1 — la pureté EST le determinism-first appliqué à la sortie">
+    L'ADR pose l'équivalence : un code émis **pur** (sortie = fonction des seules entrées, aucun état caché) est, par construction, **déterministe et reproductible** (même entrée → mêmes octets — exactement le déterminisme S34). Le mandat se hisse donc au rang de determinism-first ; il **ajoute** une garde (méta-loop §5), n'altère aucun des neuf `phases` du contrat de step.
+  </Step>
+  <Step title="La décision 2 — les trois invariants émis">
+    `EMITTED_FUNCTION_PURE` : chaque fonction émise rend la même sortie pour la même entrée, sans effet de bord ; conséquence directe → **ré-émission byte-identique** (FN03 rejoue l'émission N fois). `EMITTED_NO_GLOBAL_MUTABLE` : aucun `var` mutable au niveau paquet ; les tables (le `typeBindings()` du spike, substitut du `var typeMap` impératif) sont **retournées par valeur** ; `const`/types immuables restent permis. `EMITTED_CALL_GRAPH_ACYCLIC` : composition explicite, pas de cycle ni de récursion mutuelle cachée — chaque fonction = une couche = un nœud.
+  </Step>
+  <Step title="La décision 3 — la PORTÉE tranchée : back/gen/ uniquement">
+    C'est **la** décision centrale. Le mandat s'applique **exclusivement** à l'arbre émis (`back/gen/` : structs Go/sqlc, DDL, types TS, handlers, composants Next). Il **ne** s'applique **pas** au moteur AIDOS (`back/runtime`, `back/kernel`, `back/archive`, `front/web`), qui reste **impératif** : AIDOS *émet* du fonctionnel. Toute règle FN04 **scope son chemin sur `back/gen/`**. Note de cohérence gravée dans l'ADR : l'émetteur *source* (`back/runtime/generators/emit.go`) vit **hors** `gen/` — ce sont ses *sorties* qui doivent être pures, pas son propre style.
+  </Step>
+  <Step title="La décision 4 — gates déterministes fail-closed, jamais un LLM">
+    Les trois invariants seront, en FN04, des vérifications **déterministes** (marche d'AST Go pour `token.VAR` au scope paquet, analyse d'effets, détection de cycle) outillées par `go-arch-lint`/`depguard` — dans l'esprit **exact** de l'actuelle `CheckLLMIsolation` (`back/runtime/agentloop`, config `arch-fitness.json` de BA14). **Fail-closed** : un doute → rouge. Aucune n'est « un LLM qui juge si c'est fonctionnel » (fracture de déterminisme, §8).
+  </Step>
+  <Step title="La décision 5 — élargir la portée = changer une vérité">
+    Le chemin (`back/gen/`), la liste des trois invariants et le seuil fail-closed sont des **vérités déclarées**. Les modifier passe par **idée → miroir → /goal → approbation** (le mur, §2), jamais une édition silencieuse — comme l'`allowed_importers` de la règle LLM. FN04 épinglera par un test property la **parité** entre cette liste et `arch-fitness.json`.
+  </Step>
+  <Step title="Le mur + le tracking">
+    FN02 écrit un **document de décision** (provenance), pas le `kernel`/`mirrors`/`fitness` : le mur est intact. Côté tracking (CLAUDE.md §11), l'issue Linear `FN02 · …` (label `adr`, projet AIDOS) doit passer `Done` — bloquée ici par l'OAuth non authentifié (voir OpenQuestion).
+  </Step>
+</Steps>
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Pourquoi un ADR avant le code.** FN01 a prouvé la faisabilité ; un GO *autorise* sans *graver*. Coder FN03/FN04 sans avoir tranché la **portée** mènerait à un mandat flou (s'applique-t-il au moteur ?). L'ADR fixe la frontière `gen/` **une fois**, opposable aux trois steps suivants — la décision est faite à froid, pas improvisée au build.
+- **Pourquoi « la pureté = determinism-first ».** Le projet a déjà un mandat de déterminisme sur **les gestes qui codent AIDOS** et **le runtime**. FN02 ferme le troisième plan (CLAUDE.md §6) : le **code émis**. L'équivalence n'est pas rhétorique — un émetteur pur *est* l'implémentation de S34, et le miroir de reproductibilité de FN03 est la même preuve que celle du spike.
+- **Pourquoi fail-closed et non un jugement.** « Ce code a-t-il l'air fonctionnel ? » posé à un LLM est exactement l'anti-pattern que determinism-first interdit : une fonction (AST walk, détection de cycle) le décide sans ambiguïté. L'ADR ancre cette exigence pour que FN04 ne puisse pas dériver vers un juge probabiliste.
+
+## Méta-méta — la garde sur la garde
+
+- **Le mandat ne peut qu'AJOUTER une garde.** Comme tout artefact (§5), FN02 ajoute `EMITTED_*` au filet ; il ne retire ni n'assouplit aucune règle existante. Un futur step qui voudrait *réduire* la portée devrait passer par idée → miroir → /goal — il ne peut pas le faire en éditant l'ADR en douce.
+- **La portée verrouillée empêche un sur-mandat silencieux.** En gravant « `gen/` uniquement », l'ADR empêche qu'un step ultérieur applique par dérive la pureté au moteur AIDOS (ce qui le casserait). La frontière est une vérité déclarée, donc protégée par le mur.
+- **Les forward-dependencies sont de la provenance, jamais comblées en douce.** L'ADR liste ses OpenQuestions (la portée de la pureté côté handlers à I/O ; Linear non authentifié). Ce sont des dépendances avant assumées qui **chaînent** FN03 — elles ne bloquent pas FN02, elles documentent ce qui reste à trancher.
+- **L'idée n'est pas auto-justifiante.** FN02 ne « décrète » pas que le code émis *est* fonctionnel ; il en fait une **cible mesurable** que FN03 (miroir property rouge d'abord) et FN04 (fault-injection rouge d'abord) devront **prouver**. Le mandat est une promesse falsifiable, pas une affirmation.
