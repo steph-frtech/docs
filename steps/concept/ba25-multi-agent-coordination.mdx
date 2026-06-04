@@ -1,0 +1,52 @@
+---
+title: "BA25 · L'équipe d'agents qui se coordonne sans jamais se marcher dessus — vue depuis l'écran"
+description: "BA25 fait travailler une équipe de N agents ensemble dans l'ordonnanceur, sous l'OrchestrationPolicy de BA24 : deux agents qui veulent la même cible sont sérialisés (le perdant attend, son travail n'est jamais jeté), le plafond de concurrence déclaré n'est jamais dépassé, et le hand-off par dépendances se déroule de bout en bout (A passe à l'agent rôle-A, B reste bloqué jusqu'à ce que A finisse, puis passe à l'agent rôle-B). Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA25", "coordination", "multi-agent", "équipe", "ordonnanceur", "scheduler", "lease", "MaxConcurrency", "concurrence", "conflit", "même-cible", "même-fichier", "sérialiser", "hand-off", "dépendances", "lost-update", "merge-semantic", "mirror-first", "le mur", "determinism-first"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA25](/steps/internals/ba25-multi-agent-coordination).</Note>
+
+## L'idée en une phrase
+
+BA24 a écrit les **règles** de coordination d'une équipe. BA25 les fait **vivre dans l'ordonnanceur** : plusieurs agents tirent du travail en même temps, et personne ne se marche dessus — ni sur le même fichier, ni au-delà du plafond, ni dans le mauvais ordre.
+
+## Une équipe qui tire le travail à plusieurs
+
+Jusqu'ici l'ordonnanceur servait **un** flux : il prenait la tête mirror-first de la file et la confiait à l'agent du bon rôle. BA25 ouvre la porte à **N agents** qui contendent pour la même file, sous l'OrchestrationPolicy épinglée par le run.
+
+À chaque « tick », l'ordonnanceur décide qui travaille sur quoi — et applique trois règles qui garantissent qu'aucun travail n'est perdu et qu'aucune règle n'est dépassée.
+
+## Règle 1 — on ne dépasse jamais le plafond déclaré
+
+La policy déclare un **plafond de concurrence** (MaxConcurrency). BA25 le fait respecter à la lettre : s'il y a dix items prêts mais que le plafond est de deux, **seuls deux** leases vivent à la fois. Le nombre appliqué est *exactement* le nombre déclaré — jamais un plafond fantôme qu'on croirait actif sans qu'il le soit. L'écran l'affiche en clair : « leases live : 2 / cap déclaré 2 ».
+
+## Règle 2 — deux agents sur le même fichier, ça se sérialise
+
+Deux items prêts touchent la **même cible** (le même fichier) ? On ne les laisse pas filer en parallèle — ce serait deux écritures concurrentes, donc une mise à jour perdue. BA25 **sérialise** : un seul des deux prend le lease (celui que la règle mirror-first désigne comme passant en premier), l'**autre attend**.
+
+Le point qui compte : **le perdant n'est pas jeté**. Il reste là, prêt, et passera dès que la cible se libère. Puis le résultat se **fusionne** (la gesture `merge-semantic` rejoue chaque miroir sur le résultat fusionné — un miroir rouge bloque). Zéro travail perdu, jamais une course, jamais un tirage au sort.
+
+## Règle 3 — le hand-off par dépendances se déroule tout seul
+
+C'est la chorégraphie de l'équipe. Imaginez deux items : A (un miroir, sans dépendance) et B (une projection, qui dépend de A). Deux rôles distincts dans l'équipe : un rédacteur de miroirs, un exécuteur.
+
+- **Tick 1** : A part chez l'agent rôle-A (le rédacteur de miroirs). B, lui, est **bloqué** — sa dépendance A n'est pas encore résolue.
+- A finit (le miroir est posé). On marque A résolu.
+- **Tick 2** : B **se débloque** et part chez l'agent rôle-B (l'exécuteur).
+
+Le hand-off complet, prouvé à l'écran : chaque agent travaille sur ce qui correspond à son rôle, dans le bon ordre, sans qu'un humain ait à pousser quoi que ce soit.
+
+## Ce qu'on ne voit jamais arriver
+
+- **deux leases vivants sur le même fichier** au même instant — impossible (règle 2) ;
+- **plus de leases que le plafond déclaré** — impossible (règle 1) ;
+- **un item travaillé avant que ses dépendances soient prêtes** — impossible (le hand-off) ;
+- **du travail jeté** quand deux agents se télescopent — impossible (le perdant attend).
+
+## Le mur tient pour chaque membre
+
+L'orchestration **coordonne** — elle ne décrète rien. Elle ne pose aucune transition elle-même : seul le rôle ordonnanceur, par son écriture dédiée, transforme un item « ouvert » en « réclamé ». Aucun membre de l'équipe ne peut écrire une vérité du noyau ; le mur tient pour chacun, exactement comme pour un agent seul. L'écran agit (il fait tourner les ticks, déclenche le hand-off, réinitialise), mais tout ce qui touche la vérité passe par la grande porte.
+
+## Ce que ça vous garantit
+
+L'équipe d'agents qui construit votre app travaille **à plusieurs, en parallèle, sans collision** : le plafond que vous avez déclaré est respecté au lease près, deux agents ne corrompent jamais le même fichier, et les étapes s'enchaînent dans l'ordre des dépendances — toute seule, sans pilotage humain. Une coordination que vous pouvez regarder se dérouler, tick par tick, à l'écran.

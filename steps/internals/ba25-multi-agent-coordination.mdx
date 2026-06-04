@@ -1,0 +1,49 @@
+---
+title: "BA25 · ScheduleTeam — coordination multi-agent dans l'ordonnanceur — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de BA25 : ScheduleTeam (back/runtime/scheduler/team.go) étend le planner pur de BA22 à N agents sous une OrchestrationPolicy — MaxConcurrency enforcée (gap F1), conflit même-cible sérialisé via agentlayer.ResolveConflict (le perdant attend, zéro lost-update, gap F2), hand-off piloté par dépendances à travers des rôles distincts. Le jumeau TS scheduleTeam dans lib/scheduler.ts, la sous-section scheduler-team de /agents, le miroir fixture+property rapid (au-plus-un-lease, concurrence déclarée, au-plus-un-par-cible), le miroir de reproductibilité fast-check, l'e2e Playwright."
+keywords: ["aidos", "krd", "BA25", "ScheduleTeam", "scheduler", "runtime", "OrchestrationPolicy", "ResolveConflict", "MaxConcurrency", "gap F1", "gap F2", "hand-off", "dépendances", "lease", "lost-update", "at-most-one-lease", "merge-semantic", "mirror-first", "le mur", "determinism-first", "rapid", "fast-check", "ADR 0010", "ADR 0011"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet. Pour la vue concept, voir [Pour les futurs utilisateurs → BA25](/steps/concept/ba25-multi-agent-coordination).</Note>
+
+## En une phrase
+
+BA25 ajoute `ScheduleTeam` (`back/runtime/scheduler/team.go`) : le planner PUR de BA22 étendu à **N agents contendants** sous une `OrchestrationPolicy`. Il enforce `MaxConcurrency` (gap F1), **sérialise** un conflit même-cible via `agentlayer.ResolveConflict` (le perdant ATTEND, zéro lost-update, gap F2) et pilote le **hand-off par dépendances** à travers des rôles distincts. Pur, total, `now` injecté ; il n'écrit aucune vérité — le mur tient pour chaque membre.
+
+## Implémentation
+
+Le planner vit dans `back/runtime/scheduler/team.go` ; le jumeau TS dans `front/web/lib/scheduler.ts` (`scheduleTeam`) ; le panneau dans `front/web/components/SchedulerSection.tsx` (sous-section `scheduler-team`).
+
+- **`ScheduleTeam(queue, agents, policy, now, leaseUntil) → TeamScheduleResult`** — `TeamScheduleResult` porte `Queue` (la file après le tick), `Assignments` (les leases produits) et `Conflicts []agentlayer.ConflictResolution` (les conflits même-cible sérialisés ce tick). Les trois phases, dans l'ordre :
+  1. **EXPIRE + BLOCK/UNBLOCK** — identique à BA22 `Schedule` : on récupère les leases morts (`claimed→open` quand `lease_until < now`, epoch monotone NON réinitialisé) puis on recalcule la barrière de dépendances (un item ne lease que si *toutes* ses deps sont `resolved`, sinon `blocked`). Réutilisé, jamais réimplémenté.
+  2. **SÉRIALISATION DU CONFLIT (gap F2)** — parmi les items leasables, deux qui partagent une cible non vide sont un conflit : `agentlayer.ResolveConflict(contenderOf(head), contenderOf(rival))` (l'ordre total du kernel : `MirrorRank` puis content-hash puis agent) désigne le vainqueur ; le **perdant est retiré du set leasable de ce tick** (il reste `open`, il ATTEND). On ré-évalue alors la tête sans lui. La cible déjà tenue par un lease vivant est aussi exclue (`liveTargets`) — **au plus un lease vivant par cible à tout instant**.
+  3. **LEASE sous le cap (gap F1)** — on staffe les items leasables restants mirror-first, role-matched (`MatchRole`), chaque agent marqué busy pour le tick, en **s'arrêtant dès que `MaxConcurrency` leases vivants** (préexistants + frais) est atteint. Un `MaxConcurrency` de 0 = « non borné par la policy ».
+- **`contenderOf(e QueueEntry)`** — projette un item dans le `ClaimContender` du kernel ; l'`Agent` et le `ContentHash` portent l'`ItemID` (un identifiant total et stable), de sorte que le tie-break est total et que `Loser.Agent` permet de retrouver l'item perdant.
+- **`QueueEntry.Target`** — nouveau champ (`omitempty`) : la cible de rendu (ex. le chemin du fichier). Deux items qui nomment la même cible conflictent ; le `Schedule` mono-agent de BA22 l'ignore (pas de contention de cible).
+- **Le jumeau TS `scheduleTeam`** — verbatim : mêmes trois phases, même `liveTargets`, même appel à `resolveConflict`, même tri stable des assignments et des conflits. Pur, `now` SUPPLIED.
+- **Le panneau action-capable** (`SchedulerSection.tsx`, `scheduler-team`) — un roster de 3 agents (un bdd-writer, deux executors) sous `BA25_POLICY` (`maxConcurrency: 2`) ; une file-germe A (miroir) / B (projection dep A) / x1 (projection, `src/shared.go`) / x2 (operation_action, `src/shared.go`). **Tick** (`team-tick-button`) fait tourner `scheduleTeam` et replie la file ; **Résoudre A** (`team-resolve-a-button`) marque A résolu (déclenche le hand-off) ; **Réinitialiser** (`team-reset-button`) re-germe. La file (`team-queue`), la concurrence live-vs-cap (`team-concurrency`) et les conflits sérialisés (`team-conflicts`, `team-no-conflict`) s'affichent. Thémé (ADR 0010, tokens) + bilingue FR/EN (ADR 0011, next-intl).
+- **Les miroirs** :
+  - *Fixture rapid* (`back/runtime/scheduler/team_fixture_test.go`, N2) — (1) hand-off à travers rôles distincts (A lease au bdd-writer, B bloqué, puis B lease à l'executor après résolution de A) ; (2) `MaxConcurrency=1` ⇒ exactement 1 lease vivant, à la tête ; (3) conflit même-cible sérialisé (x1 mirror-first gagne, x2 attend, `Conflicts[0]` = `SameTarget` + `serialise_then_merge`) ; (4) un item live-leasé n'est jamais re-leasé.
+  - *Property rapid* (`back/runtime/scheduler/team_property_test.go`, N1) — déterminisme (mêmes entrées ⇒ sortie identique) ; **concurrence déclarée** (live ≤ max(cap, préLive) — le scheduler ne *crée* jamais un lease au-delà du cap) ; **au-plus-un-lease-par-item** (aucun id réclamé deux fois ; un item live préexistant garde son lease) ; **zéro-lost-update** (au plus un lease vivant par cible non vide) ; **never-lease-blocked** (un item fraîchement leasé a toutes ses deps résolues).
+  - *Reproductibilité fast-check* (`front/web/lib/scheduler.test.ts`, N1) — le jumeau `scheduleTeam` : hand-off, cap respecté, conflit sérialisé, et une property déterminisme + cap + au-plus-un-par-cible (29 tests verts au total).
+  - *E2e Playwright* (`tests/e2e/agents.spec.ts`, bloc BA25, N0) — contrôles présents + file ouverte ; un tick coordonne (A claimed, B blocked, x1 claimed, x2 open, conflit `serialise_then_merge`, concurrence = 2) ; le hand-off complet (B lease après résolution de A) ; Reset re-germe.
+
+Vérifié vert : `go test ./runtime/scheduler/` (fixture+property), `gofmt -l` clean, `go vet` clean, `npx vitest run lib/scheduler.test.ts` (29 passés), `tsc --noEmit` clean, `biome` clean, et les 4 cas Playwright BA25 verts.
+
+## Méta
+
+**Pourquoi étendre `Schedule` plutôt qu'un nouveau planner from scratch ?** Parce que les phases EXPIRE + BLOCK/UNBLOCK sont *exactement* celles de BA22 : les réimplémenter serait deux implémentations d'une même règle (et deux occasions de diverger). BA25 les réutilise et n'ajoute que ce qui est neuf à la coordination multi-agent : la sérialisation du conflit et le plafond. Une règle, une implémentation, le code fait foi.
+
+**Pourquoi réutiliser `agentlayer.ResolveConflict` au lieu d'un tie-break local ?** Parce que BA24 a déjà gravé l'ordre total (mirror-first, content-hash, agent) comme la *vérité* du tie-break dans le kernel. Le runtime ne réinvente pas la règle : il l'importe. C'est le même principe que `MatchRole` lisant les specs déclarées — l'autorité de l'ordre vit au-dessus de la ligne, le runtime l'applique.
+
+**Pourquoi le cap se mesure sur les leases *préexistants + frais* ?** Parce que `MaxConcurrency` borne la concurrence *réelle*, pas seulement ce qu'un tick ajoute. Un tick qui démarre avec un lease vivant et un cap de 2 ne peut en créer qu'**un** de plus. Le plafond est un invariant sur l'état, pas sur le delta. La property l'épingle avec un plafond `max(cap, préLive)` : un état sous le cap reste sous le cap ; un état déjà au-dessus (entrée malformée) n'est jamais aggravé.
+
+**Pourquoi le perdant *attend* au lieu de se faire jeter ?** C'est le cœur zéro-lost-update (gap F2). Jeter le travail du perdant — ou tirer à pile ou face, ou demander à un LLM — perdrait une mise à jour. `ScheduleTeam` ne fait que décaler le perdant d'un tick : il reste `open`, sa cible se libère, il passe. Puis `merge-semantic` fusionne (un miroir rouge bloque). Aucun travail perdu, jamais une course.
+
+## Méta-méta
+
+BA25 boucle la coordination multi-agent sur les trois invariants AIDOS.
+
+- **Le mur (NIVEAU 3).** L'orchestration coordonne ; elle n'écrit aucune vérité. `ScheduleTeam` *calcule* des transitions (`open→claimed`) et des assignments — la coquille impure les applique sous le rôle `aidos_scheduler` (UPDATE sur exactement quatre colonnes, BA20). Le mur tient pour **chaque membre** : aucun agent ne transitionne (INSERT+SELECT seulement) ; seul l'ordonnanceur pose un lease. Une équipe ne dilue jamais le mur.
+- **Determinism-first.** Tout ce qui *peut* être une fonction pure l'**est** et fait foi : la sérialisation du conflit (l'ordre total du kernel), l'enforcement du cap (un comptage), le hand-off (la barrière de dépendances). Aucun LLM dans la boucle de l'ordonnanceur ; `now` est injecté par le tick driver (la seule coquille impure). Les miroirs de reproductibilité (rapid + fast-check) épinglent : même entrée ⇒ même sortie. Un arbitrage-par-LLM serait une faille de déterminisme qui bloquerait le step.
+- **Anti-Goodhart.** Le plafond est déclaré (BA01/BA24) et borné — on ne peut pas le gonfler pour « passer plus de monde ». L'ordre du conflit (mirror-first, content-hash) est déclaré, jamais appris. Et la coordination d'un run est figée par la policy épinglée (BA24) : la mesure ne peut pas bouger sous le test. Une équipe qui se coordonne reste aussi gouvernable qu'un agent seul.

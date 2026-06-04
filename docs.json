@@ -217,7 +217,9 @@
               "steps/concept/ba23-dispatch-panel",
               "steps/internals/ba23-dispatch-panel",
               "steps/concept/ba24-orchestration-policy",
-              "steps/internals/ba24-orchestration-policy"
+              "steps/internals/ba24-orchestration-policy",
+              "steps/concept/ba25-multi-agent-coordination",
+              "steps/internals/ba25-multi-agent-coordination"
             ]
           }
         ]
