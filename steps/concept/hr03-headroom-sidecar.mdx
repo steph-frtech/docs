@@ -1,0 +1,41 @@
+---
+title: "HR03 · L'adaptateur headroom en sidecar + le théorème d'invariance du gate"
+description: "HR03 branche l'outil chopratejas/headroom comme un SECOND adaptateur du port ContextCompressor (HR02, ADR 0035), en sidecar via son MCP — et prouve le théorème porteur : le verdict GateAction est INVARIANT à la compression. Comprimer l'entrée LLM avant le modèle ne change RIEN de ce que le gate décide. La structure de l'action survit à retrieve∘compress (les faits porteurs survivent, HR02), donc la même action structurelle est dérivée, donc le même verdict. La compression est l'exception gatée de determinism-first : jamais autoritaire, le gate ne lui défère jamais. Le mur tient : pur, lecture seule, hors truth-store."
+keywords: ["aidos", "krd", "headroom", "sidecar", "MCP", "ContextCompressor", "port", "adaptateur", "replaceable", "ADR 0035", "GateAction", "invariance du gate", "compression invariante", "faits porteurs", "retrieve compress", "déterminisme", "le mur", "determinism-first", "exception gatée", "HR02", "HR03", "HR04", "agentloop", "budget", "plafond"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → HR03](/steps/internals/hr03-headroom-sidecar).</Note>
+
+## En une phrase
+
+HR03 branche l'outil `headroom` comme **second adaptateur** du port `ContextCompressor` (HR02), en **sidecar** via son MCP, et prouve le **théorème d'invariance** : comprimer l'entrée du LLM avant le modèle **ne change rien** de ce que le **gate** (le verdict `GateAction`) décide.
+
+## Le problème que ça résout
+
+HR04 va câbler le compresseur **avant `GenerateAction`** dans la boucle agent. C'est dangereux : si comprimer le prompt changeait la **décision du gate** (autoriser/refuser une action), on aurait troqué des tokens contre une **faille de sécurité**. HR03 ferme cette porte **avant** de câbler quoi que ce soit : il prouve, par un miroir, que la compression est **invisible** au gate.
+
+## Les idées-clés
+
+<Field name="Le théorème d'invariance" type="même structure → même verdict">
+  Le gate lit la **structure** de l'action (la cible d'écriture, l'outil MCP lié, le skill…), jamais le texte du prompt. Comme `retrieve∘compress` **préserve les faits porteurs** (HR02), l'action **dérivée** du prompt est identique avant et après compression — donc le verdict `GateAction` est **le même**. C'est le critère de done de HR03.
+</Field>
+
+<Field name="headroom en sidecar, derrière le même port" type="adaptateur replaceable">
+  `headroom` se branche comme un **second `ContextCompressor`** — exactement la même interface qu'en HR02. Son I/O concret vit dans un **serveur MCP** (`back/mcp/headroom`, la porte de capacité, ADR 0009) ; un double **déterministe** (`FakeSidecar`) rend le contrat prouvable sans le binaire. C'est un **adaptateur**, jamais une vérité (CLAUDE.md §3).
+</Field>
+
+<Field name="La compression est l'exception gatée" type="determinism-first">
+  Comprimer l'entrée LLM est typiquement ce qu'on confierait à un agent (« résume ce contexte »). HR03 le refuse comme **autorité** : le gate est une **fonction pure** qui ne **défère jamais** à la compression. Le miroir de reproductibilité (même prompt → même verdict, 100×) le prouve.
+</Field>
+
+<Field name="Sous la ligne — lecture seule" type="le mur">
+  L'adaptateur et le serveur MCP sont **purs** : ils lisent le prompt, rendent un compacté + un handle, et le **gate-check** ne fait que **composer** des fonctions pures. Aucune écriture de vérité (`kernel` / `mirrors` / `fitness`), pas de DB, pas d'horloge. La compression étend la marge **sous** le cap ; elle ne le **relève jamais**.
+</Field>
+
+## Ce que vous voyez à l'écran
+
+La route Workbench **/context-compression** gagne un bouton **« Prouver l'invariance du gate »** : vous cliquez, et l'écran dérive l'action du prompt, calcule le verdict du gate **sur l'original** et **après `retrieve∘compress`**, puis affiche les deux verdicts côte à côte et un **badge d'invariance** (`data-invariant="true"`). Tout est calculé par le **jumeau pur** (déterministe, sans LLM), le même que le théorème Go.
+
+## Et après
+
+HR04 câble le compresseur dans `agentloop.Drive` **avant `GenerateAction`** et l'intègre au budget : un `AgentRun` rejoué **avec et sans** compression donne le **même verdict d'actions**, les tokens mesurés baissent, et le cap n'est **jamais relevé**. HR03 est ce qui rend ce câblage **sûr**.

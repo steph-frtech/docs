@@ -235,7 +235,9 @@
               "steps/concept/hr01-spike-headroom",
               "steps/internals/hr01-spike-headroom",
               "steps/concept/hr02-context-compressor",
-              "steps/internals/hr02-context-compressor"
+              "steps/internals/hr02-context-compressor",
+              "steps/concept/hr03-headroom-sidecar",
+              "steps/internals/hr03-headroom-sidecar"
             ]
           }
         ]

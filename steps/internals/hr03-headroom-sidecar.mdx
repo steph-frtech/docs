@@ -1,0 +1,69 @@
+---
+title: "HR03 · Internals — l'adaptateur sidecar, le serveur MCP headroom, le miroir d'invariance du gate"
+description: "Internals HR03 (le journal de build). Implémentation : SidecarCompressor (second ContextCompressor derrière le port HR02) + FakeSidecar déterministe dans back/runtime/headroom ; DeriveAction (extracteur pur, whitespace-robuste) qui dérive la structure d'action des faits porteurs du prompt ; le miroir property rapid (headroom_property_test.go) écrit ROUGE d'abord, qui prouve que GateAction est invariant à la compression ; le serveur MCP back/mcp/headroom (headroom_compress/retrieve/gate_check) ; le jumeau TS (deriveAction/gate/gateInvariant) + fast-check ; la section /context-compression actionnable + e2e Playwright. Méta : pourquoi rendre la dérivation explicite, pourquoi le mur tient, pourquoi le sidecar. Méta-méta : determinism-first — le gate ne défère jamais à la compression."
+keywords: ["aidos", "krd", "headroom", "sidecar", "SidecarCompressor", "FakeSidecar", "DeriveAction", "DerivedAction", "GateAction", "invariance", "miroir property", "rapid", "headroom_property_test.go", "MCP", "back/mcp/headroom", "headroom_gate_check", "fast-check", "jumeau", "Playwright", "/context-compression", "determinism-first", "le mur", "lecture seule", "ADR 0035", "HR02", "HR03", "HR04", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — tout le détail. La page concept est [ici](/steps/concept/hr03-headroom-sidecar).</Note>
+
+## Implémentation
+
+HR03 ajoute un package dédié **`back/runtime/headroom/`** (l'adaptateur + le théorème) et un serveur MCP **`back/mcp/headroom/`** (la porte de capacité). Le port HR02 et son `ReferenceCompressor` byte-lossless sont réutilisés tels quels.
+
+<CodeGroup>
+```go adaptateur (back/runtime/headroom/headroom.go)
+// SidecarCompressor est un SECOND ContextCompressor (le port HR02) derrière un Sidecar.
+type Sidecar interface {
+	Compress(prompt string) (rctx.Compacted, rctx.Handle)
+	Retrieve(handle rctx.Handle) string
+}
+type SidecarCompressor struct{ Side Sidecar }
+
+var _ rctx.ContextCompressor = SidecarCompressor{} // c'EST un ContextCompressor
+
+// FakeSidecar : le double DÉTERMINISTE — délègue au ReferenceCompressor byte-lossless.
+type FakeSidecar struct{}
+```
+```go dérivation (back/runtime/headroom/headroom.go)
+// DeriveAction extrait la STRUCTURE de l'action des faits porteurs du prompt.
+// PURE, TOTALE, WHITESPACE-ROBUSTE : lit un flux de tokens (pas ligne-à-ligne),
+// donc lit les mêmes marqueurs sur l'original ET sur sa forme retrieve∘compress
+// (qui est Normalize'd — les sauts de ligne deviennent des espaces).
+func DeriveAction(prompt string) DerivedAction { /* allowed_paths:/tool:/skill:/host:/exec: */ }
+```
+</CodeGroup>
+
+- **`SidecarCompressor`** est un **second `ContextCompressor`** : il forwarde au `Sidecar` (l'outil `headroom`, branché en sidecar). Aucune logique propre — donc les invariants byte-lossless / reproductible / faits-porteurs de HR02 tiennent verbatim. `FakeSidecar` délègue au `ReferenceCompressor` déterministe : le contrat est prouvable **sans** le binaire.
+- **`DeriveAction`** est le **chaînon** du théorème : la boucle dérive une action de la structure portée par le prompt ; on rend cette dérivation **explicite et déterministe**. Détail porteur : elle est **whitespace-robuste** (scan de tokens, pas ligne-à-ligne) — parce que `Retrieve` rend la forme **`Normalize`d** (les sauts de ligne collapsent en espaces). Le test l'a attrapé **rouge** : une première version ligne-à-ligne dérivait une action vide après retrieve. C'est le rouge→vert.
+- **Le miroir property** (`headroom_property_test.go`, **rapid**) — écrit **rouge d'abord** (il nomme `SidecarCompressor`/`DeriveAction` et appelle le **vrai** `agentimpl.GateAction` avant que le package compile). Il épingle :
+  1. **`GateAction(DeriveAction(prompt)) == GateAction(DeriveAction(Retrieve(Compress(prompt))))`** — le **théorème** : même verdict (même `Allowed` + même axe refusé + même code de BlockReason) ;
+  2. l'**action dérivée** est byte-identique après `retrieve∘compress` (le lemme structurel) ;
+  3. les **faits porteurs** survivent **à travers l'adaptateur** (pas seulement le port nu) ;
+  4. le verdict du gate est **reproductible 100×** à travers l'adaptateur (determinism-first).
+  Le générateur tire des prompts dont la cible / l'outil / le skill **varient** (autorisé **et** chaque refus d'axe : zone, path, capacity, skill) — le théorème est donc **non-trivial**.
+- **Le serveur MCP** (`back/mcp/headroom/`, ADR 0009) expose trois outils : `headroom_compress` (compacté + handle + réduction + lossless), `headroom_retrieve` (ré-expansion CCR), et **`headroom_gate_check`** — le théorème **appelable comme un outil** : dérive + gate avant et après `retrieve∘compress`, rend les deux verdicts + `invariant`.
+- **Le jumeau TS** (`front/web/lib/context-compressor.ts`) ajoute `deriveAction` / `gate` / `gateInvariant`, couverts par **fast-check** (mêmes invariants, axes prompt-dérivables dans la même précédence). La section **/context-compression** gagne un bouton **« Prouver l'invariance du gate »** lié à `gateInvariant`, avec badge `data-invariant`. L'**e2e Playwright** prouve que le bouton **exécute** et que le badge passe à `true`.
+
+## Méta — pourquoi ces choix
+
+<AccordionGroup>
+<Accordion title="Pourquoi rendre la dérivation prompt→action EXPLICITE (DeriveAction) ?">
+Parce que le gate lit une **structure d'action**, pas un prompt. Pour prouver « comprimer le prompt ne change pas le verdict », il faut un pont **déterministe** entre les deux : `DeriveAction` *est* ce pont. Le théorème se réduit alors à « `DeriveAction` est invariant sous `retrieve∘compress` », ce qui tient parce que les marqueurs **sont** des faits porteurs (HR02). Sans cette dérivation explicite, l'invariance resterait une intuition non prouvée.
+</Accordion>
+<Accordion title="Pourquoi un FakeSidecar plutôt que le vrai binaire headroom ?">
+Pour rendre le contrat **prouvable sans process externe** (le double déterministe, façon BA17). Le `FakeSidecar` délègue au `ReferenceCompressor` byte-lossless ; quand le vrai `headroom` arrivera, on le branche derrière le **même** `Sidecar`, et les outils MCP + le mur tiennent inchangés. C'est la discipline « `replaceable` derrière un port ».
+</Accordion>
+<Accordion title="Pourquoi prouver l'invariance AUSSI sur les refus, pas seulement le happy-path ?">
+Parce qu'un théorème qui ne tiendrait que sur « tout est autorisé » serait creux. Le générateur force des actions **refusées** (un outil non lié → axe `capacity`, une cible `/kernel/` → axe `zone`) et prouve que le **même refus** revient avant et après compression. L'invariance vaut sur **tout** le codomaine du gate.
+</Accordion>
+</AccordionGroup>
+
+## Méta-méta — la loi que ça sert
+
+**Determinism-first : le gate ne défère jamais à la compression.** Comprimer l'entrée LLM est l'**exception gatée** (ce serait commode de confier à un agent). HR03 grave que cette exception n'est **jamais autoritaire** : le `GateAction` est une fonction **pure**, et son verdict est prouvé **invariant** à ce que la compression fasse. Le miroir de reproductibilité (100× même verdict) **interdit** qu'un non-déterminisme se glisse entre la compression et la décision. Un agent qui déciderait à la place du gate serait un *gap* de déterminisme — ici, il n'y en a pas.
+
+**Le mur tient sans rien dire.** L'adaptateur, le serveur MCP et le `gate_check` sont **sous la ligne** : ils lisent un prompt, **composent** des fonctions pures, n'écrivent **aucune** vérité (`kernel` / `mirrors` / `fitness`). La compression n'est pas une porte dérobée vers le truth-store ni un moyen de **relever** le cap : elle étend la marge **sous** le plafond, et le gate la rend inoffensive.
+
+<Note>OpenQuestion **OQ-HR03-linear** : le MCP `linear-server` n'était pas authentifié dans la session de build (OAuth requis) ; l'issue `HR03 · …` n'a pas pu être déplacée par l'agent (CLAUDE.md §11, best-effort) — à faire au prochain run authentifié.</Note>
+
+<Note>OpenQuestion **OQ-HR03-sidecar-proc** : le binaire `headroom` réel n'est pas branché en process (le `FakeSidecar` byte-lossless le remplace) ; le `Sidecar` process-backed est à câbler quand le binaire est disponible — le contrat, les outils MCP et le mur sont inchangés. Forward-dependency, ne bloque pas l'étape.</Note>
