@@ -1,0 +1,47 @@
+---
+title: "HR01 (interne) · Sonder retrieve∘compress dans /spike/headroom/ — Implémentation · Méta · Méta-méta"
+description: "Journal interne du spike HR01. Module Go isolé aidos.spike/headroom (n'importe pas back/), confiné à /spike/headroom/ (cliquet OFF, T0, jetable). Modélise deux modes de compression DÉTERMINISTES (sans LLM) : reference-replacement byte-lossless (handles §N réversibles, spans 1..8 mots) et restatement-drop lossy ; mesure tokens avant/après + fidélité des faits porteurs sur un ContextPack S33, un transcript BA17 et une session longue (la cible réaliste). Verdict Decide() calculé : GO (84,1 % lossless sur large_session, round-trip exact, zéro fait porteur perdu). Tests : losslessness, carrier-survival, reproductibilité 100× (mirror determinism-first). OpenQuestions HR01-1..4."
+keywords: ["aidos", "krd", "spike", "headroom", "HR01", "retrieve compress", "reference-replacement", "lossless", "handles", "faits porteurs", "déterminisme", "reproductibilité", "Decide", "verdict", "go/no-go", "/spike/headroom", "module isolé", "ContextPack", "transcript", "large_session", "OpenQuestion", "spike-gate", "tokens", "S33", "BA17", "§84"]
+---
+
+<Info>Page **« Pour moi »** — le journal de bord interne, tout y est. Concept lisible : [Pour les futurs utilisateurs → HR01](/steps/concept/hr01-spike-headroom).</Info>
+
+## Implémentation
+
+**Où.** Tout sous `/spike/headroom/` — un **module Go isolé** (`module aidos.spike/headroom`, `go.mod` propre) qui **n'importe pas** `back/`. C'est volontaire : un spike est **jetable** (KRD §84) ; rien ne doit pouvoir graduer par inadvertance, et le module réel n'est pas pollué.
+
+**Les fichiers.**
+
+- `fixture.go` — les **prompts AIDOS réels** rendus en texte (ce que le modèle reçoit vraiment) : `ContextPackPrompt` (un `ContextPack` S33 du goal `checkout-apply-promo`), `TranscriptPrompt` (un transcript build-agent BA17), et `LargeContextPrompt()` (la **cible réaliste** : 12 itérations qui ré-envoient le pack + un transcript grossissant). `CarrierFacts()` énumère les **10 faits porteurs** à préserver.
+- `compress.go` — le mode **lossless** : `Compress` remplace les **spans répétés** (longueur 1..8 mots, `maxPhrase`) par des handles `§N` réversibles, **longest-first** (le gros gain est dans les phrases répétées, pas les mots) ; `Retrieve` ré-expanse. Par construction `Retrieve(Compress(x)) == Normalize(x)` **exactement** — la perte zéro est **prouvée**, pas espérée. Déterministe : handles assignés par (savings décroissant, lexicographique).
+- `lossy.go` — le mode **lossy** rule-based : `CompressLossy` supprime des **redites déclarées** (`redundantSpans` — le boilerplate du mur répété par tour, etc.) ; **non** byte-réversible ; `MeasureLossy` **assertе** la survie des faits porteurs.
+- `measure.go` — `EstimateTokens` (~4 char/token), `Measure`/`Fidelity`/`MeasureLossy`, et surtout **`Decide()`** : calcule le `Verdict` go/no-go sur les trois prompts, **piloté par `large_session`** (la cible réaliste). `ReductionFloor = 0.15` est le **seuil déclaré** (KRD §8, jamais appris).
+- `measure_test.go` — la **preuve exécutable** de falsifiabilité : `TestSpikeVerdict` (imprime le rapport), `TestLosslessRoundTrip`, `TestCarrierFactsSurvive`, `TestLossyPreservesCarriers`, `TestReproducible` (rejoue 100×).
+- `cmd/verdict/main.go` — imprime mesures + verdict (`go run ./cmd/verdict`).
+
+**Résultat mesuré.** `large_session` : **6578 → 1045 tokens (84,1 %)**, round-trip exact, **0** fait porteur perdu (lossless **et** lossy). `context_pack` 9,9 %, `transcript` 11,0 %. **`Decide().Go == true`**, rationale : un mode déterminisme-safe (lossless) dépasse déjà le plancher sur grand contexte → poursuivre vers HR02.
+
+**Determinism-first.** Le probe est une **fonction pure** : aucun LLM, aucune horloge, aucun rng. La mesure et le verdict sont **reproductibles** (`TestReproducible` : même entrée → même verdict, 100 itérations). C'est le **mirror de reproductibilité** imposé par le mandat §6 — un spike de compression dont la mesure ne serait pas reproductible serait une mesure sans valeur.
+
+## Méta
+
+**Pourquoi un spike, et pourquoi maintenant.** HEADROOM est une **idée séduisante** (« 60–95 % de tokens en moins ») mais **fuzzy** : le gain réel sur *nos* prompts, et le risque sur le **déterminisme du gate**, étaient inconnus. KRD §84 dit exactement quoi faire d'une intention fuzzy : la **spiker** (cliquet OFF, T0, jetable) jusqu'à la rendre **falsifiable**, *avant* de payer un miroir. HR01 est ce spike, et la roadmap en fait un **spike-gate** : s'il conclut « gain non rentable » ou « déterminisme menacé », **le sujet entier s'arrête** — refuser à bon escient est un succès, pas un échec.
+
+**La décision de conception qui compte : deux modes, pas un.** La tentation était de modéliser *un* compresseur et d'annoncer un chiffre. Mais headroom mêle **deux natures** : un reference-replacement **réversible** (gain modeste mais sûr) et une summarization **sémantique lossy** (gros gain, risquée). Les confondre aurait produit un verdict malhonnête. Le spike les **sépare** et **pilote le go/no-go sur le mode lossless** (déterminisme-safe) — ce qui donne un GO **défendable** : on poursuit *parce qu'un mode sûr suffit déjà*, pas parce qu'on croit au mode risqué.
+
+**Le verdict est calculé, jamais déclaré (§8, anti-Goodhart).** `Decide()` ne lit aucune confiance d'agent : il tombe d'un seuil déclaré ∧ round-trip lossless ∧ zéro carrier perdu. Un GO incohérent (perte d'un carrier malgré GO) fait **échouer** `TestSpikeVerdict`. On ne peut pas forcer le verdict.
+
+**Les OpenQuestions (jamais comblées en douce).**
+
+- **OQ-HR01-1** — le mode **lossy** (60–95 %) est non byte-réversible ; il ne touchera la boucle qu'**après** un miroir property de fidélité des faits porteurs + invariance du verdict `GateAction` (HR03).
+- **OQ-HR01-2** — le **tokenizer** est une heuristique offline ; ratios fiables, absolus approximatifs ; recompter au vrai tokenizer (HR03/HR04).
+- **OQ-HR01-3** — le spike **modélise** headroom ; HR03 branche le **vrai** MCP derrière le port HR02.
+- **OQ-HR01-4** — sur **petit** prompt le gain lossless est modeste ; HR04 doit comprimer l'**entrée cumulée**, pas chaque fragment.
+
+## Méta-méta
+
+**Ce que HR01 dit du système qui se construit lui-même.** Un OS qui prétend « le contexte est l'antidote à la dérive » doit pouvoir **comprimer ce contexte sans mentir**. HR01 prouve que la **forme** du contexte AIDOS (un `ContextPack` content-adressé + un transcript déterministe) est **compressible sans perte** — parce qu'elle est **structurée et répétitive par conception**. Le pack est l'antidote ; sa **compressibilité lossless** est une propriété **émergente** de sa structure, et c'est un signe que la structure est bonne.
+
+**La compression n'est jamais autorisée à enjamber le mur.** Le spike inscrit, dès l'amont, la règle qui gouvernera HR02–HR05 : on comprime **l'entrée du LLM**, jamais la **vérité** ; on **étend la marge sous** le cap, on ne **relève jamais** le plafond ; et tout mode lossy reste **subordonné** à un miroir de fidélité. La compression est un **outil replaceable derrière un port** (ADR à HR02), jamais une autorité — exactement comme un agent (S52) **propose** mais ne **déclare** jamais seul.
+
+**Le déterminisme d'abord, même pour un gain de tokens.** Le réflexe paresseux serait « laisse un LLM résumer le contexte ». HR01 refuse : il **modélise** la compression en **code déterministe**, mesure de façon **reproductible**, et n'admet le LLM (mode lossy) que comme **exception gatée** par un miroir. C'est le mandat determinism-first appliqué jusque dans une optimisation de coût : *ce qui peut être une fonction pure doit l'être ; le LLM est l'exception, jamais la commodité.*

@@ -231,7 +231,9 @@
               "steps/concept/ba30-run-to-signal",
               "steps/internals/ba30-run-to-signal",
               "steps/concept/ba31-incident-to-idea",
-              "steps/internals/ba31-incident-to-idea"
+              "steps/internals/ba31-incident-to-idea",
+              "steps/concept/hr01-spike-headroom",
+              "steps/internals/hr01-spike-headroom"
             ]
           }
         ]

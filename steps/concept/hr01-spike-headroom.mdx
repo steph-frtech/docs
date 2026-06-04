@@ -1,0 +1,55 @@
+---
+title: "HR01 · Spike headroom — comprimer le contexte avant le LLM, sans perdre les faits porteurs"
+description: "HR01 est un SPIKE de nécessité (KRD §84 : cliquet OFF, rigueur T0, jetable) confiné à /spike/headroom/. Il sonde le gain réel de tokens de retrieve∘compress sur de vrais prompts AIDOS (un ContextPack S33 + un transcript build-agent BA17) et prouve, de façon déterministe et sans appeler de LLM, que la compression préserve les FAITS PORTEURS (le goal, les miroirs rouges, le mur, la stop condition, le pack_hash). Verdict calculé, jamais déclaré : GO — sur la cible réaliste (session longue qui ré-envoie le pack + le transcript grossissant) le reference-replacement BYTE-LOSSLESS atteint 84,1 % de réduction en round-trippant exactement, donc un mode déterminisme-safe existe. OpenQuestion : les gains 60–95 % annoncés exigent une summarization LOSSY qui devra être encadrée d'un miroir de fidélité (HR03) avant de toucher la boucle. Si le spike avait conclu « gain non rentable / déterminisme menacé », le sujet HEADROOM se serait arrêté là."
+keywords: ["aidos", "krd", "spike", "headroom", "compression de contexte", "retrieve compress", "tokens", "ContextPack", "transcript", "faits porteurs", "lossless", "reference-replacement", "déterminisme", "go/no-go", "spike-gate", "/spike", "cliquet OFF", "rigueur T0", "le mur", "HR01", "HR02", "HR03", "S33", "BA17", "§84", "plafond budget", "OpenQuestion"]
+---
+
+<Note>Côté concept — aucune ligne de code graduée (un spike est **jetable**). Pour le détail d'implémentation, voir [Pour moi → HR01](/steps/internals/hr01-spike-headroom).</Note>
+
+## En une phrase
+
+HR01 est un **spike de nécessité** (KRD §84 : **cliquet OFF, rigueur T0, jetable**) confiné à `/spike/headroom/`. Il répond à une seule question avant qu'on dépense le moindre miroir : **`retrieve∘compress` réduit-il vraiment les tokens sur des prompts AIDOS, sans perdre les faits porteurs — et un mode déterminisme-safe existe-t-il ?** Verdict **calculé, jamais déclaré** : **GO**.
+
+## Le problème que ça résout
+
+Quand un agent code longtemps, on lui **ré-envoie** à chaque appel le `ContextPack` (l'antidote à la dérive) **et** tout le transcript qui grossit. Le **plafond budget** (S51/BA11/BA27) approche vite ; le mur boilerplate, le `goal`, le `bounded_context`, la stop condition reviennent des dizaines de fois. L'idée HEADROOM : **comprimer l'entrée du LLM** (60–95 % de tokens), de façon **réversible**. Mais une compression qui efface un **fait porteur** ferait **inventer** l'agent ou **enjamber le mur** ; et une compression non déterministe casserait l'invariance du gate. Le spike doit donc **mesurer**, pas espérer.
+
+## Les idées-clés
+
+<Field name="Un spike, pas une fonctionnalité" type="KRD §84 — cliquet OFF">
+  HR01 n'ajoute **aucune** vérité au noyau, **aucun** miroir, **aucun** code réel. Tout vit sous `/spike/headroom/` et sera **jeté** ; `/harvest` proposera, `/goal` figera, le vrai port sera **réécrit** à HR02. Le mur reste intact : zéro écriture `kernel` / `mirrors` / `fitness`.
+</Field>
+
+<Field name="On comprime l'ENTRÉE du LLM, jamais la vérité" type="branchement ciblé">
+  La compression ne se branche que sur l'**entrée modèle** (`ContextPack` + transcript), **jamais** sur les entrées déterministes ni le truth-store. Elle **étend la marge sous** le cap budget ; elle ne **relève jamais** le plafond.
+</Field>
+
+<Field name="Faits porteurs préservés — assertés, pas supposés" type="fidélité">
+  Dix faits porteurs (le `goal_id`, le `bounded_context`, les deux miroirs rouges, les `allowed_paths`, le mur `/kernel/**` + `/mirror/**`, le contrat croisé `PaymentGateway@hash`, la stop condition, le `pack_hash`) doivent **survivre** à `retrieve∘compress`. Le spike le **vérifie** ; il ne le suppose pas.
+</Field>
+
+<Field name="Le verdict est calculé, jamais déclaré" type="KRD §8 — anti-Goodhart">
+  Le go/no-go n'est pas une opinion : il tombe d'un seuil **déclaré** (plancher de réduction) ∧ round-trip lossless ∧ zéro fait porteur perdu. Si l'une manque → **NO-GO**, et le sujet HEADROOM **s'arrête** (spike-gate de la roadmap).
+</Field>
+
+## Ce que le spike a mesuré (déterministe, sans LLM)
+
+| prompt | tokens avant → après (lossless) | réduction | faits porteurs perdus | round-trip exact |
+|---|---|---|---|---|
+| `context_pack` (par appel) | 385 → 347 | 9,9 % | 0 | oui |
+| `transcript` (par appel) | 317 → 282 | 11,0 % | 0 | oui |
+| **`large_session`** (cible réaliste) | **6578 → 1045** | **84,1 %** | **0** | **oui** |
+
+Sur un **appel isolé** le gain est modeste ; c'est sur le **contexte cumulé** (la session longue qui ré-envoie le pack) que `headroom` paie — et c'est exactement là qu'il est conçu pour agir.
+
+## Verdict : GO
+
+Sur le prompt réaliste, le **reference-replacement byte-lossless** atteint **84,1 %** de réduction **en round-trippant exactement** (`Retrieve(Compress(x)) == x`) et **sans perdre un seul fait porteur**. Un mode **déterminisme-safe** existe donc → on poursuit vers **HR02** (ADR « compression replaceable » + port `ContextCompressor`).
+
+## Les questions restées ouvertes (OpenQuestions)
+
+- **Le mode lossy / 60–95 %.** Les gains élevés annoncés exigent une summarization **sémantique (LLM), non byte-réversible**. Elle **ne doit pas** toucher la boucle tant que **HR03** ne l'aura pas encadrée d'un **miroir de fidélité** des faits porteurs + invariance du verdict `GateAction`.
+- **Le tokenizer.** Le spike estime ~4 caractères/token (tokenizer réel indisponible hors-ligne) : les **ratios** sont fiables, les absolus approximatifs ; HR03/HR04 recompteront avec le tokenizer du provider.
+- **L'adaptateur réel.** Le spike **modélise** `headroom` ; HR03 branchera le vrai MCP derrière le port HR02 et re-mesurera l'invariance.
+
+<Note>Si ce spike avait conclu « gain non rentable » ou « déterminisme menacé », le sujet HEADROOM se serait **arrêté là** — c'est le rôle d'un spike-gate : refuser à bon escient.</Note>
