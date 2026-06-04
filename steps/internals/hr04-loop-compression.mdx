@@ -1,0 +1,69 @@
+---
+title: "HR04 · Internals — le compresseur dans agentloop.Drive, MeasureTokens, le miroir fixture économie"
+description: "Internals HR04 (le journal de build). Implémentation : DriveInput.Compressor (port ContextCompressor optionnel) + ScriptedTurn.Prompt (l'entrée LLM du tour) + MeasureTokens (compteur de tokens PUR) + turnDelta/turnTokenCost qui résolvent le coût en tokens à travers la compression dans back/runtime/agentloop/compression.go ; le câblage devant GenerateAction (meter.Tally(turnDelta(...))) ; le miroir fixture (compression_loop_fixture_test.go) écrit ROUGE d'abord — même verdict d'actions avec/sans compression, tokens ↓, CheckBudget cohérent, cap jamais relevé ; le jumeau TS (measureTokens/replayEconomy) + fast-check ; la section /context-compression actionnable + e2e Playwright. Méta : pourquoi mesurer depuis le prompt, pourquoi un Compressor optionnel, pourquoi le cap est byte-identique. Méta-méta : determinism-first — un compte est un compte, jamais un agent ; la compression n'est jamais autoritaire."
+keywords: ["aidos", "krd", "headroom", "agentloop", "Drive", "DriveWithEconomics", "DriveInput", "Compressor", "ScriptedTurn", "Prompt", "MeasureTokens", "turnDelta", "turnTokenCost", "GenerateAction", "RunMeter", "Tally", "CheckBudget", "EffectiveTokensCap", "budget", "cap", "miroir fixture", "compression_loop_fixture_test.go", "rapid", "fast-check", "measureTokens", "replayEconomy", "jumeau", "Playwright", "/context-compression", "determinism-first", "le mur", "ADR 0035", "BA11", "BA27", "S51", "HR02", "HR03", "HR04", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — tout le détail. La page concept est [ici](/steps/concept/hr04-loop-compression).</Note>
+
+## Implémentation
+
+HR04 ajoute un fichier **`back/runtime/agentloop/compression.go`** (le compteur pur + la résolution du coût) et étend la boucle **`back/runtime/agentloop/drive.go`** (deux nouveaux champs + un point de câblage). Le port HR02 et le `ReferenceCompressor` (et l'adaptateur HR03 `SidecarCompressor`) sont réutilisés tels quels — la boucle ne voit que l'interface `ContextCompressor`.
+
+<CodeGroup>
+```go le compteur pur + la résolution du coût (compression.go)
+// MeasureTokens : le compteur de tokens PUR et DÉTERMINISTE — un compte de
+// tokens whitespace, PAS un tokenizer LLM, PAS un agent. Monotone sous compression.
+func MeasureTokens(s string) int { return len(strings.Fields(s)) }
+
+// turnTokenCost résout le coût en tokens du tour, en appliquant la compression :
+//   - Prompt vide              ⇒ Cost.Tokens déclaré (chemin pré-HR04, préservé)
+//   - Prompt, PAS de Compressor ⇒ MeasureTokens(Prompt)            (la baseline « sans »)
+//   - Prompt, un Compressor     ⇒ MeasureTokens(Compress(Prompt))  (le coût « avec », ≤ baseline)
+func turnTokenCost(c rctx.ContextCompressor, turn ScriptedTurn) int { /* … */ }
+```
+```go le câblage DEVANT GenerateAction (drive.go)
+// PROJECT le coût du tour sur le compteur — l'axe TOKEN est mesuré À TRAVERS le
+// compresseur (turnDelta) AVANT la génération. Un tour qui pousserait le run
+// au-delà du cap est refusé AVANT de démarrer ; son coût n'atterrit jamais.
+projected := meter.Tally(turnDelta(in.Compressor, turn))
+if bv := agentimpl.CheckBudget(projected, in.HarnessBudget, in.Goal.Budgets, in.RatePerToken); !bv.WithinBudget {
+    // … halt pré-appel, Result:abandoned, le compteur reste AU/sous le cap …
+}
+```
+</CodeGroup>
+
+- **`DriveInput.Compressor`** est le port `ContextCompressor` **optionnel** (`nil` ⇒ pas de compression, **tous** les fixtures pré-HR04 préservés). Non-`nil` ⇒ chaque tour est comprimé devant `GenerateAction` et le compteur est chargé du compte **compacté**. C'est `replaceable` (CLAUDE.md §3) et l'**exception gatée** de determinism-first : jamais autoritaire — le verdict du gate y est **invariant** (HR03).
+- **`ScriptedTurn.Prompt`** porte l'**entrée LLM** que le tour donnerait à la génération. Quand il est présent, le coût en tokens est **mesuré** depuis ce prompt (compacté si un compresseur est branché, brut sinon) ; vide, on retombe sur le `Cost.Tokens` déclaré.
+- **`MeasureTokens`** est un **compte de tokens pur** : `MeasureTokens(Compress(p)) ≤ MeasureTokens(p)` pour tout `p` (la compression n'enlève que des tokens). C'est l'unité que la fixture prouve baisser, **sans** que le cap bouge.
+- **Le câblage** : un seul point change dans la boucle — `meter.Tally(turn.Cost)` devient `meter.Tally(turnDelta(in.Compressor, turn))`. **Tout** le reste (le halt pré-appel BA27, l'axe budget du gate BA11, `CheckBudget`, le feed `economics.Evaluate`) est inchangé : il voit un compteur **plus bas**, donc le run sit **plus loin** sous le **même** cap.
+- **Le miroir fixture** (`compression_loop_fixture_test.go`) — écrit **rouge d'abord** (il nomme `DriveInput.Compressor`, `ScriptedTurn.Prompt`, `MeasureTokens` avant qu'ils existent ; le build échoue ⇒ c'est le rouge du goal). Il épingle, en triples `state → command → events` :
+  1. **même verdict d'actions** — un run rejoué avec/sans compression enregistre la même suite de verdicts (le théorème HR03 dans la boucle) ;
+  2. **tokens mesurés ↓** — le compteur est **strictement plus bas** avec compression sur un prompt répétitif ;
+  3. **`CheckBudget` cohérent ∧ cap jamais relevé** — la fixture décisive : un cap **entre** les deux coûts ; **sans** compression le run **dépasse** (abandonné), **avec** il **tient** sous le **même** cap (vert) — parce qu'il dépense **moins**, et le `EffectiveTokensCap` est **byte-identique** dans les deux cas (asserté) ;
+  4. **reproductibilité** — même entrée ⇒ même `(run, meter)`, deux fois.
+- **Le jumeau TS** (`front/web/lib/context-compressor.ts`) ajoute `measureTokens` + `replayEconomy`, couverts par **fast-check** (mêmes invariants). La section **/context-compression** gagne un bouton **« Rejouer le run (avec / sans compression) »** lié à `replayEconomy`, avec un badge `data-same` (mêmes verdicts), les tokens avant/après, et un badge `data-cap-raised="false"`. L'**e2e Playwright** prouve que le bouton **exécute** et que les badges/tokens sont corrects.
+
+## Méta — pourquoi ces choix
+
+<AccordionGroup>
+<Accordion title="Pourquoi MESURER les tokens depuis le prompt plutôt que de déclarer un coût ?">
+Parce que tout l'intérêt de HR04 est de **constater** l'économie. Si la fixture déclarait un coût plat, la compression n'aurait rien à mordre. En mesurant depuis l'**entrée LLM réelle** — brute sans compresseur, compactée avec — le coût **dépend** de la compression, et la baisse devient **prouvable** (et la marge sous le cap, **visible**). La baseline « sans » est `MeasureTokens(Prompt)` ; le coût « avec » est `MeasureTokens(Compress(Prompt))`.
+</Accordion>
+<Accordion title="Pourquoi un Compressor OPTIONNEL (nil-able) sur DriveInput ?">
+Pour ne **rien casser**. La boucle BA15/BA27 et tous ses fixtures scriptent un coût en tokens plat ; un `Compressor` `nil` (et un `Prompt` vide) **retombe** sur ce comportement, verbatim. HR04 est **additif** : la compression est un câblage qu'on **branche**, jamais une réécriture du chemin. C'est aussi ce qui permet à la fixture de **comparer** le même run avec et sans, en ne changeant qu'un champ.
+</Accordion>
+<Accordion title="Pourquoi asserter que le EffectiveTokensCap est byte-identique des deux côtés ?">
+Parce que c'est **le** critère « le cap n'est jamais relevé ». La tentation serait de croire qu'« avec compression, le run tient » signifie qu'on a desserré le plafond. La fixture prouve le contraire : le `EffectiveTokensCap` (le `min()` S29/S51) est **calculé identique** avec et sans compresseur. Le run tient **uniquement** parce qu'il dépense moins de tokens — la marge s'étend **sous** un plafond **immobile**.
+</Accordion>
+</AccordionGroup>
+
+## Méta-méta — la loi que ça sert
+
+**Determinism-first : un compte est un compte, jamais un agent.** Mesurer des tokens est exactement le genre de tâche qu'on confierait par paresse à un appel de modèle (« combien de tokens ça fait ? »). HR04 grave que c'est une **fonction pure** (`MeasureTokens`) — même entrée → même compte, sans I/O, sans LLM. Et la **compression** elle-même, l'exception gatée, n'est **jamais autoritaire** : elle change les tokens mesurés, **jamais** le verdict du gate (prouvé invariant en HR03, re-prouvé dans la boucle ici). Le miroir de reproductibilité interdit qu'un non-déterminisme se glisse dans la boucle.
+
+**Le mur tient sans rien dire.** `Drive` n'écrit **aucune** vérité : l'`AgentRun` qu'il rend est **sous la ligne** (télémétrie), et le compresseur est **pur** (lit un prompt, rend un compacté). La compression n'est **pas** une porte vers le truth-store, et **pas** un moyen de **relever** le cap : relever un plafond reste un `idée → miroir → /goal`. Elle étend la marge **sous** le plafond, et le gate la rend inoffensive.
+
+<Note>OpenQuestion **OQ-HR04-linear** : le MCP `linear-server` n'était pas authentifié dans la session de build (OAuth requis) ; l'issue `HR04 · …` n'a pas pu être déplacée par l'agent (CLAUDE.md §11, best-effort) — à faire au prochain run authentifié.</Note>
+
+<Note>OpenQuestion **OQ-HR04-provider** : le câblage HR04 branche le compresseur sur le chemin de la boucle (`turnDelta` devant `GenerateAction`), mais le générateur d'actions reste le **mock scripté** (`ScriptedGenerator`) ; le branchement sur le **provider réel** (BA17) — où le `Prompt` du tour vient du transcript vivant — reste à câbler. Forward-dependency, ne bloque pas l'étape.</Note>

@@ -1,0 +1,41 @@
+---
+title: "HR04 · Le compresseur câblé dans la boucle, devant GenerateAction"
+description: "HR04 câble le port ContextCompressor (HR02/HR03, ADR 0035) dans agentloop.Drive AVANT GenerateAction, et l'intègre au budget (S51/BA11/BA27). Un AgentRun rejoué AVEC et SANS compression donne le MÊME verdict d'actions (le théorème d'invariance du gate, HR03), les tokens mesurés BAISSENT, le gate budgétaire reste cohérent, et le cap n'est JAMAIS relevé : la compression étend la marge SOUS le plafond, elle ne le déplace pas. La mesure des tokens est une fonction pure (un compte de tokens, jamais un agent) — determinism-first. Le mur tient : pur, lecture seule, hors truth-store."
+keywords: ["aidos", "krd", "headroom", "compression", "ContextCompressor", "agentloop", "Drive", "GenerateAction", "budget", "cap", "plafond", "CheckBudget", "RunMeter", "tokens", "marge", "même verdict d'actions", "invariance du gate", "determinism-first", "MeasureTokens", "le mur", "lecture seule", "ADR 0035", "BA11", "BA27", "S51", "HR02", "HR03", "HR04", "HR05"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → HR04](/steps/internals/hr04-loop-compression).</Note>
+
+## En une phrase
+
+HR04 **câble** le compresseur dans la boucle de l'agent — **devant `GenerateAction`** — et l'**intègre au budget** : un `AgentRun` rejoué **avec** et **sans** compression donne le **même verdict d'actions**, les **tokens baissent**, et le **cap n'est jamais relevé**.
+
+## Le problème que ça résout
+
+HR02 a posé le **port** (comprimer/récupérer), HR03 a prouvé que comprimer **ne change pas** ce que le gate décide. Mais tant que le compresseur n'est **branché nulle part**, il ne fait rien gagner. HR04 le met **sur le chemin réel** : à chaque tour, juste **avant** de demander la prochaine action au modèle, la boucle comprime l'entrée LLM et **mesure** le coût en tokens sur le prompt **compacté**. La marge sous le plafond budgétaire s'étend — sans toucher au plafond.
+
+## Les idées-clés
+
+<Field name="Devant GenerateAction" type="sur le chemin">
+  Le compresseur s'intercale **avant** la génération de l'action : la boucle comprime le prompt, puis **charge le compteur** (`RunMeter`) du nombre de tokens **mesuré** sur le prompt compacté — toujours ≤ le compte brut (la compression ne fait qu'**enlever** des tokens). Tout le reste de la boucle (le halt pré-appel, l'axe budget du gate, `CheckBudget`, le feed économique) voit simplement un compteur **plus bas**.
+</Field>
+
+<Field name="Même verdict d'actions" type="le théorème HR03, prouvé dans la boucle">
+  Un `AgentRun` rejoué **avec** et **sans** compression enregistre **exactement** la même suite de verdicts d'actions (même type, même cible, autorisé/refusé, même code de blocage). La compression change les **tokens mesurés**, jamais ce que le **gate décide** : l'action dérivée du prompt survit à `retrieve∘compress` (HR03).
+</Field>
+
+<Field name="Le cap n'est JAMAIS relevé" type="la marge sous le plafond">
+  La compression **étend la marge sous le cap** — elle ne le **relève pas**. Un run qui dépasserait le plafond **sans** compression peut tenir **avec** elle, parce qu'il dépense **moins** de tokens, **jamais** parce que le plafond aurait bougé : le `EffectiveTokensCap` (le `min()` des budgets S29/S51, BA11) est **byte-identique** dans les deux cas. Relever un cap reste un `/goal`, jamais une compression.
+</Field>
+
+<Field name="Le compte de tokens est une fonction pure" type="determinism-first">
+  La mesure des tokens (`MeasureTokens`) est un **compte de tokens** déterministe — **pas** un appel de tokenizer LLM, **pas** un agent. Même entrée → même compte. Le miroir de reproductibilité épingle : même `AgentRun` (et même compteur) à chaque rejeu.
+</Field>
+
+## Ce que vous voyez à l'écran
+
+La route Workbench **/context-compression** gagne un bouton **« Rejouer le run (avec / sans compression) »** : vous cliquez, et l'écran **rejoue** le prompt courant comme un tour de boucle, deux fois — sans puis avec compression. Il affiche un **badge « même verdict d'actions »** (`data-same="true"`), les **tokens mesurés avant / après** (le compacté strictement plus bas), les **tokens économisés**, et un **badge « le cap n'est jamais relevé »** (`data-cap-raised="false"`). Tout est calculé par le **jumeau pur** (déterministe, sans LLM), le même que la boucle Go.
+
+## Et après
+
+HR05 ajoute au panneau **/agents** une section **« Compression / économie »** : les tokens avant/après **par run**, pour voir l'économie réelle s'accumuler sur les `AgentRun` enregistrés.
