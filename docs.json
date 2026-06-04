@@ -239,7 +239,9 @@
               "steps/concept/hr03-headroom-sidecar",
               "steps/internals/hr03-headroom-sidecar",
               "steps/concept/hr04-loop-compression",
-              "steps/internals/hr04-loop-compression"
+              "steps/internals/hr04-loop-compression",
+              "steps/concept/hr05-compression-economy",
+              "steps/internals/hr05-compression-economy"
             ]
           }
         ]

@@ -1,0 +1,68 @@
+---
+title: "HR05 · Internals — perRunEconomy, la section /agents « Compression / économie », l'e2e Playwright"
+description: "Internals HR05 (le journal de build). Implémentation : perRunEconomy + RunPrompts/RunEconomy/PerRunEconomy dans front/web/lib/context-compressor.ts (la projection PURE qui fanne replayEconomy par run + l'agrégat) ; le miroir de reproductibilité (context-compressor.test.ts, fast-check/vitest) écrit ROUGE d'abord — tokens avant/après par run, agrégat cohérent, tous verdicts invariants, déterminisme ; la section « Compression / économie » dans components/AgentsPanel.tsx (bouton « Mesurer l'économie par run » → tableau une-ligne-par-run + total) ; les chaînes fr/en (ADR 0011) ; l'e2e Playwright (tests/e2e/agents.spec.ts). Méta : pourquoi par run, pourquoi data-cap-raised par ligne, pourquoi une projection plutôt qu'un nouvel algorithme. Méta-méta : determinism-first — une projection est une fonction pure, jamais un agent ; tout se fait par écran, jamais headless ; le mur tient (lecture seule)."
+keywords: ["aidos", "krd", "headroom", "perRunEconomy", "RunPrompts", "RunEconomy", "PerRunEconomy", "replayEconomy", "context-compressor.ts", "AgentsPanel", "/agents", "Compression / économie", "tokens avant/après", "par run", "AgentRun", "projection pure", "data-cap-raised", "data-all-invariant", "fast-check", "vitest", "Playwright", "agents.spec.ts", "next-intl", "fr.json", "en.json", "determinism-first", "ui-completeness", "le mur", "lecture seule", "ADR 0010", "ADR 0011", "HR02", "HR03", "HR04", "HR05", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — tout le détail. La page concept est [ici](/steps/concept/hr05-compression-economy).</Note>
+
+## Implémentation
+
+HR05 est une étape **Workbench** : elle n'ajoute **aucune** logique de compression, elle **projette** l'économie HR04 **par run** et la **rend à l'écran** sur le panneau `/agents`. Une seule fonction nouvelle (`perRunEconomy`, une projection pure), une section dans `AgentsPanel`, ses chaînes bilingues et un e2e Playwright.
+
+<CodeGroup>
+```ts la projection PURE (front/web/lib/context-compressor.ts)
+// RunPrompts : un AgentRun enregistré = un id + les prompts par tour + le cap déclaré du run.
+export interface RunPrompts { id: string; prompts: string[]; cap: number; }
+
+// perRunEconomy fanne replayEconomy (HR04) SUR CHAQUE run (dans l'ordre d'entrée) et somme
+// les compteurs. Une projection : AUCUNE nouvelle logique de compression, elle réutilise
+// replayEconomy run par run. Pure, déterministe (mêmes runs ⇒ même rapport), jamais un LLM.
+export function perRunEconomy(runs: RunPrompts[]): PerRunEconomy {
+  const rows = runs.map((r) => ({ id: r.id, economy: replayEconomy(r.prompts, r.cap) }));
+  // … somme tokensPlain/tokensCompressed, allVerdictsSame = ∀ row, row.economy.verdictsSame …
+}
+```
+```ts le rendu PAR RUN (front/web/components/AgentsPanel.tsx)
+// Une ligne par run : tokens AVANT > APRÈS, badge verdict-invariant, data-cap-raised="false".
+<tr data-testid={`economy-row-${row.id}`}
+    data-cap-raised={row.economy.capRaised ? "true" : "false"}
+    data-before={row.economy.tokensPlain}
+    data-after={row.economy.tokensCompressed}>
+  {/* … run · avant · après · −économie · verdict invariant/divergent … */}
+</tr>
+// + l'agrégat data-total-before / data-total-after + badge « le cap n'est jamais relevé »
+```
+</CodeGroup>
+
+- **`perRunEconomy`** (et ses types `RunPrompts` / `RunEconomy` / `PerRunEconomy`) est la seule unité nouvelle : elle **fanne** `replayEconomy` (HR04) sur chaque run et **somme** les compteurs en un agrégat. Elle n'ajoute **aucune** compression — elle réutilise le jumeau pur. `allVerdictsSame` est vrai ssi **chaque** run est invariant à la compression (le théorème HR03, par run).
+- **Le miroir de reproductibilité** (`context-compressor.test.ts`, fast-check/vitest) — écrit **rouge d'abord** (il importe `perRunEconomy` / `RunPrompts` avant qu'ils existent ; le typecheck/vitest échoue ⇒ c'est le rouge du goal). Deux scénarios : (1) **tokens avant/après par run** — chaque ligne a `tokensCompressed < tokensPlain`, `tokensSaved > 0`, `capRaised === false` ; l'agrégat `totalPlain`/`totalCompressed`/`totalSaved` est la **somme** des lignes ; `allVerdictsSame === true` ; (2) **déterminisme** — `perRunEconomy(RUNS)` égale `perRunEconomy(RUNS)` (une projection pure, jamais un LLM).
+- **La section** (`AgentsPanel.tsx`, `data-testid="compression-economy"`) est **action-capable** (CLAUDE.md §7) : un bouton **« Mesurer l'économie par run »** (`data-testid="economy-measure"`) exécute `perRunEconomy` sur des runs récents (chacun un `ContextPack` répétitif + son cap déclaré) et rend le **tableau** (une ligne par run) + l'**agrégat**. Read-only jusqu'au clic — **aucune** capacité headless (`ui-completeness`).
+- **Les chaînes** (`messages/fr.json` + `messages/en.json`, ADR 0011) — la section porte ses libellés `economy*` en **français** (par défaut) et en **anglais** ; thémée sur les tokens ADR 0010 (`bg-card`, `text-primary`, `border-border`, jamais de hex).
+- **L'e2e Playwright** (`tests/e2e/agents.spec.ts`, describe `HR05`) — prouve que la section est **présente** et **read-only** avant le clic, que le bouton **exécute**, qu'**une ligne par run** montre `before > after` avec `data-cap-raised="false"`, que le rapport est `data-all-invariant="true"`, et que l'**agrégat** montre `total-before > total-after`. 107/107 du fichier `agents.spec.ts` verts (105 prior + 2 HR05).
+
+## Méta — pourquoi ces choix
+
+<AccordionGroup>
+<Accordion title="Pourquoi montrer l'économie PAR run plutôt qu'un seul total ?">
+Parce que c'est ce que demande le critère HR05 (« tokens avant/après **par run** ») et parce que l'économie est une **propriété de chaque run** : un run très répétitif gagne beaucoup, un run déjà compact gagne peu. Un seul total masquerait la dispersion. Le tableau une-ligne-par-run rend chaque `AgentRun` **comparable**, et l'agrégat donne quand même le cumul. C'est aussi pourquoi `perRunEconomy` **garde** les lignes au lieu de seulement sommer.
+</Accordion>
+<Accordion title="Pourquoi data-cap-raised PAR ligne, et un badge agrégat ?">
+Parce que « le cap n'est jamais relevé » est une garantie **par run** (chaque run a son propre cap). Exposer `data-cap-raised="false"` sur **chaque** ligne permet à l'e2e de l'asserter run par run — pas seulement globalement. Le badge agrégat le redit pour l'œil humain. La valeur vient toujours de `replayEconomy` (qui pose `capRaised: false` par construction), jamais d'un calcul refait dans le panneau.
+</Accordion>
+<Accordion title="Pourquoi une projection plutôt qu'un nouvel algorithme de compression ?">
+Parce que HR05 est une étape de **visualisation**, pas de capacité. Toute la compression et son invariance sont déjà prouvées (HR02/HR03/HR04). Réécrire ne ferait que créer un **deuxième** chemin à garder cohérent — un risque de monstre. `perRunEconomy` se contente de **fanner** `replayEconomy` : un seul algorithme reste autoritaire, la section ne fait que le **rendre**.
+</Accordion>
+</AccordionGroup>
+
+## Méta-méta — la loi que ça sert
+
+**Determinism-first : une projection est une fonction pure, jamais un agent.** Calculer « combien chaque run a économisé » est exactement le genre de résumé qu'on confierait par paresse à un modèle. HR05 grave que c'est une **fonction pure** (`perRunEconomy`) — mêmes runs → même rapport, sans I/O, sans LLM — et que l'écran l'**exécute** (le jumeau pur), il ne décrit pas un calcul fait ailleurs. Le miroir de reproductibilité interdit qu'un non-déterminisme s'y glisse.
+
+**Tout se fait par écran, jamais headless (`ui-completeness`).** L'économie n'est pas un nombre caché dans un log : il y a un **bouton** qui la **mesure** et un tableau qui la **montre**, sur le panneau où l'on gouverne les agents. Chaque capacité de l'étape a un contrôle qui l'exécute, prouvé par l'e2e Playwright.
+
+**Le mur tient sans rien dire.** La section est **lecture seule** : `perRunEconomy` lit les prompts qu'on lui passe et rend un rapport ; elle n'écrit **aucune** vérité (`/kernel/**`, `/mirror/**`, `/fitness`), et la compression n'est **pas** une porte vers le truth-store ni un moyen de relever un cap. Elle rend visible une marge **sous** des plafonds **immobiles**.
+
+<Note>OpenQuestion **OQ-HR05-linear** : le MCP `linear-server` n'était pas authentifié dans la session de build (OAuth requis) ; l'issue `HR05 · …` n'a pas pu être déplacée par l'agent (CLAUDE.md §11, best-effort) — à faire au prochain run authentifié.</Note>
+
+<Note>OpenQuestion **OQ-HR05-runs** : la section mesure l'économie sur des `RunPrompts` de démonstration (des `ContextPack` répétitifs représentatifs), pas sur les transcripts vivants des `AgentRun` réels — ceux-ci viennent du provider (BA17), dont le branchement reste une forward-dependency (cf. OQ-HR04-provider). Ne bloque pas l'étape.</Note>

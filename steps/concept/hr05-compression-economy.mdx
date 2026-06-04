@@ -1,0 +1,41 @@
+---
+title: "HR05 · La section « Compression / économie » du panneau /agents"
+description: "HR05 ajoute au panneau /agents la section « Compression / économie » : pour chaque run récent, les tokens AVANT et APRÈS compression de l'entrée LLM. La projection perRunEconomy (le jumeau d'économie HR04, fanné par run) calcule, DEPUIS L'ÉCRAN, une ligne par AgentRun (tokens avant > tokens après) plus l'agrégat — et atteste que le verdict du gate reste invariant et que le cap n'est JAMAIS relevé. Thémée ADR 0010, bilingue ADR 0011. Le mur tient : pure, déterministe, lecture seule, hors truth-store."
+keywords: ["aidos", "krd", "headroom", "compression", "économie", "/agents", "Workbench", "perRunEconomy", "tokens avant/après", "par run", "AgentRun", "ContextCompressor", "invariance du gate", "cap jamais relevé", "marge sous le plafond", "determinism-first", "le mur", "lecture seule", "ADR 0010", "ADR 0011", "HR02", "HR03", "HR04", "HR05"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → HR05](/steps/internals/hr05-compression-economy).</Note>
+
+## En une phrase
+
+HR05 ajoute au panneau **/agents** une section **« Compression / économie »** : pour **chaque run récent**, les **tokens avant et après** compression de l'entrée LLM — l'économie réelle, ligne par ligne, plus l'agrégat.
+
+## Le problème que ça résout
+
+HR02 a posé le **port** (comprimer/récupérer), HR03 a prouvé que comprimer **ne change pas** ce que le gate décide, HR04 a **câblé** le compresseur dans la boucle et prouvé que les tokens baissent sans relever le cap. Mais l'économie restait dans une fixture et un panneau de démonstration (`/context-compression`). HR05 la **rend visible là où on regarde les agents** : sur le panneau `/agents`, **par run**, on voit combien de tokens chaque `AgentRun` aurait coûté **sans** compression et combien il coûte **avec** — l'économie cumulée devient lisible d'un coup d'œil.
+
+## Les idées-clés
+
+<Field name="Tokens avant/après PAR run" type="une ligne par AgentRun">
+  La section affiche un **tableau** : une **ligne par run récent**, avec les tokens **avant** (sans compression) et **après** (avec), et l'**économie** (la différence). Chaque ligne est calculée par la projection pure `perRunEconomy`, qui fanne le jumeau d'économie HR04 (`replayEconomy`) **sur chaque run** — la même mesure que la boucle Go, exécutée **depuis l'écran**.
+</Field>
+
+<Field name="Le verdict reste invariant" type="le théorème HR03, par run">
+  La section atteste que **tous** les runs gardent le **même verdict** avec et sans compression (`data-all-invariant="true"`). La compression change les **tokens mesurés**, jamais ce que le **gate décide** — exactement comme dans la boucle (HR04). Si un seul run divergeait, le badge basculerait — ce qui n'arrive pas, le théorème HR03 tient.
+</Field>
+
+<Field name="Le cap n'est JAMAIS relevé" type="par ligne">
+  Chaque ligne porte `data-cap-raised="false"` : la compression **étend la marge sous le cap** de ce run, elle ne le **relève pas**. L'agrégat affiche aussi un badge **« le cap n'est jamais relevé »**. Relever un plafond reste un `/goal`, jamais une compression.
+</Field>
+
+<Field name="L'agrégat" type="l'économie cumulée">
+  Sous le tableau, un **total** : la somme des tokens avant → la somme des tokens après, et l'**économie totale** sur tous les runs. C'est l'économie réelle que la compression a fait gagner sur l'ensemble des `AgentRun` enregistrés.
+</Field>
+
+## Ce que vous voyez à l'écran
+
+Sur la route Workbench **/agents**, la section **« Compression / économie »** porte un bouton **« Mesurer l'économie par run »**. Vous cliquez, et l'écran **mesure** l'économie de chaque run récent : un **tableau** une-ligne-par-run (Run · Avant · Après · Économie · Verdict), où chaque ligne montre les **tokens avant > après**, un badge **« verdict invariant »**, et porte `data-cap-raised="false"`. En dessous, le **total** (avant → après) avec l'**économie cumulée** et le badge **« le cap n'est jamais relevé »**. Tout est calculé par la **projection pure** (déterministe, sans LLM), la même mesure que la boucle Go. Thémée sur les tokens ADR 0010 ; bilingue (ADR 0011).
+
+## Et après
+
+HR05 clôt la **verticale headroom** côté Workbench : le port (HR02), l'invariance (HR03), le câblage budget (HR04) et l'économie visible par run (HR05). La compression de contexte est désormais un outil `replaceable` derrière un port, prouvé sans effet sur le gate, et son économie est lisible run par run — sans jamais relever un plafond ni écrire une vérité.
