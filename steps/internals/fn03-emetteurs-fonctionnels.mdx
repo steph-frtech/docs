@@ -1,0 +1,53 @@
+---
+title: "FN03 · Les émetteurs fonctionnels + le miroir de pureté — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail de FN03 : la réforme pur-fonctionnelle de l'émetteur AIDOS (back/runtime/generators/emit.go) et son miroir de pureté. (1) emit.go perd sa variable globale mutable var typeMap : la table close devient un constructeur pur typeBindings() retourné par valeur ; un knownType() couvre la validation ; mapFields() remplace les boucles mutant un strings.Builder par un map/fold sur slices immuables ; les trois renderers (renderGoSqlc/renderPgDDL/renderTSTypes) reçoivent la table en paramètre et composent par strings.Join. (2) La sortie reste BYTE-IDENTIQUE (tous les tests de parité S34 — fixture, materialized, roundtrip — restent verts). (3) Le miroir de pureté (emitters_purity_property_test.go, rapid) prouve, rouge d'abord puis vert : re-émission byte-identique sur 16 rejeux (P1), aucun var mutable ni init() dans le Go émis via parse AST (P2/P3), et l'émetteur réformé ne tient plus de var typeMap (P4, le test rouge-d'abord). (4) Le jumeau TS lib/emitters.ts gagne proveEmittedPurity() + un test vitest ; le panneau /emitters un bouton « Prouver la pureté » + un e2e Playwright. Déterministe (marche d'AST), jamais un jugement LLM. Le mur est intact. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "functional", "FN03", "émetteurs", "emit.go", "generators", "typeBindings", "var typeMap", "knownType", "mapFields", "renderGoSqlc", "renderPgDDL", "renderTSTypes", "miroir de pureté", "emitters_purity_property_test", "rapid", "EMITTED_FUNCTION_PURE", "EMITTED_NO_GLOBAL_MUTABLE", "ré-émission byte-identique", "déterminisme", "S34", "proveEmittedPurity", "lib/emitters.ts", "Prouver la pureté", "Playwright", "AST", "go/parser", "fail-closed", "ADR 0036", "le mur", "§6", "§8", "Linear"]
+---
+
+<Note>Côté implémentation — le détail interne. Pour le concept et l'usage, voir [Pour les futurs utilisateurs → FN03](/steps/concept/fn03-emetteurs-fonctionnels).</Note>
+
+## En une phrase
+
+FN03 **réforme** `back/runtime/generators/emit.go` en style pur-fonctionnel (la globale `var typeMap` devient le constructeur pur `typeBindings()` threadé par valeur ; les boucles mutant un `strings.Builder` deviennent un `mapFields` + `strings.Join`), **sans changer un seul octet** de sortie (parité S34 préservée), et grave un **miroir de pureté** (rapid) qui prouve — rouge d'abord — la ré-émission byte-identique et l'absence de var mutable de module.
+
+## Implémentation
+
+<Steps>
+  <Step title="Le miroir de pureté écrit en PREMIER (rouge)">
+    `back/runtime/generators/emitters_purity_property_test.go` (rapid) porte quatre propriétés. La preuve rouge-d'abord est **P4** (`TestEmitterRendererHoldsNoMutableBindingTable`) : elle parse `emit.go` (`go/parser`) et **échoue** si une déclaration `var` au scope paquet subsiste — contre l'émetteur impératif, elle est **rouge** (elle détecte `var typeMap`).
+  </Step>
+  <Step title="La réforme — la globale devient un constructeur pur">
+    `var typeMap = map[string]typeBinding{…}` (scope paquet, mutable) est remplacé par `func typeBindings() map[string]typeBinding { return map[string]typeBinding{…} }` — la table close **retournée par valeur** (substitut fonctionnel exact du spike FN01). Un helper `knownType(typ string) bool` couvre la validation (`generators.go` n'appelle plus `typeMap[...]`).
+  </Step>
+  <Step title="La réforme — le rendu devient map/fold, plus de Builder muté">
+    `mapFields(fields, renderLine)` est le **cœur fonctionnel** : un `map` pur sur les champs → lignes rendues, sans accumulateur. Les trois renderers (`renderGoSqlc`, `renderPgDDL`, `renderTSTypes`) reçoivent désormais la table `tb map[string]typeBinding` **en paramètre** (threadée, pas globale) et composent par `strings.Join` au lieu de `b.WriteString(...)`. `render(s, t, hash)` construit la table une fois (`tb := typeBindings()`) et la passe — graphe d'appel explicite et acyclique.
+  </Step>
+  <Step title="La sortie reste BYTE-IDENTIQUE (parité S34)">
+    La réforme est purement **structurelle** : `renderGoSqlc` produit la même chaîne (même header, même `package …gen`, même import `pgtype` conditionnel, même struct gofmt'é via `format.Source`), idem DDL/TS. Tous les tests de parité existants (`emitters_fixture_test.go`, `api_materialized_test.go`, `migration_roundtrip_test.go`, la property `TestProp_Determinism`) **restent verts** — le déterminisme S34 est préservé.
+  </Step>
+  <Step title="Les propriétés de pureté (P1–P3) au vert">
+    **P1** `TestProp_Emitted_ReEmissionByteIdentical` : ré-émet 16 fois la même entité, exige des octets identiques à chaque rejeu, et vérifie qu'`Emit` **ne mute pas** la slice de champs du caller (pureté d'entrée). **P2/P3** `TestProp_Emitted_NoGlobalMutableVar` : parse le Go **émis** et exige zéro `var` au scope paquet et aucun `init()` (effet caché) — fail-closed : un Go émis qui ne parse pas est rouge. `TestProp_Emitted_ProjectByteIdentical` couvre le fan-out complet (composition des renderers).
+  </Step>
+  <Step title="Le jumeau TS + l'écran action-capable">
+    `front/web/lib/emitters.ts` gagne `proveEmittedPurity(s, t, rounds=16)` (re-émet N rounds, retourne `byteIdentical` calculé, fail-closed) + un test vitest (property + cas Order). Le panneau `/emitters` (`EmittersPanel.tsx`) gagne un bouton **« Prouver la pureté »** par carte (`data-testid="prove-purity-<target>"`) et un verdict `data-pure="true|false"` ; un e2e Playwright (`tests/e2e/emitters.spec.ts`) prouve que le contrôle **s'exécute** et rend `data-pure="true"` sur les trois cibles. i18n FR/EN ajoutée.
+  </Step>
+</Steps>
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Pourquoi réformer l'émetteur source, alors que l'ADR scope `gen/`.** L'ADR 0036 §3 note que c'est la *sortie* (`gen/`) qui doit être pure, pas le style de l'émetteur. Mais §Conséquences charge explicitement FN03 de « réformer l'émetteur pour *produire* du pur » : la réforme rend l'émetteur **incapable** de produire un global (il n'en a plus lui-même), et donne un patron pur réutilisable. P4 épingle cette réforme — c'est le seul invariant que l'ancien code **violait**, donc le vrai rouge-d'abord.
+- **Pourquoi un miroir property (rapid) et non un test d'exemple.** La pureté est un **∀** (pour *toute* entité bien formée). rapid échantillonne l'espace des entités ; le miroir vaut sur la classe, pas sur un cas. C'est la forme « invariant » des trois formes de miroir (CLAUDE.md §1).
+- **Pourquoi parser le Go émis plutôt que faire confiance.** Le miroir ne *croit* pas l'émetteur sur parole : il **parse** la sortie (`go/parser`) et inspecte l'AST. C'est determinism-first appliqué à la vérification elle-même — la garde de FN04 (arch-fitness) en préfiguration, mais ici prouvant que l'émetteur **ne peut pas** produire de violation.
+- **Pourquoi 16 rejeux et pas 2.** Deux rejeux attrapent une non-déterminisme grossier (clock/RNG). Un accumulateur partagé subtil peut ne diverger qu'au-delà : le spike FN01 rejouait pour exposer tout état caché ; FN03 garde cette rigueur (`reEmitRounds = 16`, déclaré, pas aléatoire).
+
+## Méta-méta — la garde sur la garde
+
+- **FN03 n'AJOUTE qu'une garde (§5).** Le miroir de pureté s'ajoute aux sept propriétés S34 existantes ; il n'en retire ni n'en assouplit aucune. La réforme préserve **tous** les tests de parité — un octet de sortie qui changerait serait un échec, pas un progrès (§9 anti-overwrite : on ne réécrit pas un artefact émis sans ChangeSet).
+- **La preuve est calculée, jamais déclarée (§8).** Ni le miroir Go ni le bouton « Prouver la pureté » ne lisent une confiance d'agent : `byteIdentical` est le résultat d'une comparaison d'octets, `data-pure` celui d'une marche d'AST. Le « done » de FN03 (rouge → vert ∧ parité intacte) est computé.
+- **Le mur tient (§2).** Le miroir et le jumeau TS sont du code sous la ligne ; ils certifient la sortie sans écrire `kernel`/`mirrors`/`fitness`. L'émetteur reste SELECT-only sur le kernel.
+- **Forward-dependency assumée, jamais comblée en douce.** La pureté côté handlers à I/O (OQ-FN02-effets-IO) n'est **pas** tranchée par FN03 : l'émetteur actuel ne produit que entité/DDL/types (sans effet), où l'invariant le plus fort tient. Le raffinement « functional core, imperative shell » reste une OpenQuestion pour un step ultérieur (idée → miroir → /goal) — elle chaîne, elle ne bloque pas.
+
+## OpenQuestions
+
+- **OQ-FN03-handlers-IO** : la pureté côté handlers/composants émis (qui *doivent* faire de l'I/O) n'est pas couverte — l'émetteur actuel n'émet pas encore de handlers. Quand il le fera, l'invariant deviendra « pur sauf effets déclarés en frontière » (héritée d'OQ-FN02-effets-IO), à porter par idée → miroir → /goal. Forward-dependency, ne bloque pas FN03.
+- **OQ-FN03-linear** : le `linear-server` MCP n'est pas authentifié dans cette session (OAuth requis, non complétable depuis un exécuteur isolé) ; l'issue `FN03 · …` (projet AIDOS `aidos-2a9085453be8`, label `step`) n'a pu être créée/déplacée en `Done` par l'agent — à faire au prochain run authentifié (CLAUDE.md §11, best-effort, ne bloque pas le step).

@@ -245,7 +245,9 @@
               "steps/concept/fn01-spike-fonctionnel",
               "steps/internals/fn01-spike-fonctionnel",
               "steps/concept/fn02-mandat-fonctionnel",
-              "steps/internals/fn02-mandat-fonctionnel"
+              "steps/internals/fn02-mandat-fonctionnel",
+              "steps/concept/fn03-emetteurs-fonctionnels",
+              "steps/internals/fn03-emetteurs-fonctionnels"
             ]
           }
         ]

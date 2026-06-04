@@ -1,0 +1,51 @@
+---
+title: "FN03 · Les émetteurs deviennent fonctionnels — la pureté du code émis, prouvée"
+description: "FN03 rend EXÉCUTABLE le mandat de FN02 : l'émetteur d'AIDOS (back/runtime/generators) est réformé en style pur-fonctionnel (plus de variable globale mutable typeMap ; la table de types est RETOURNÉE par un constructeur pur et threadée par valeur ; le rendu est un map/fold sur des slices immuables, plus aucune mutation de strings.Builder), et un MIROIR DE PURETÉ (test property) prouve, rouge d'abord puis vert : chaque fonction émise est pure (même entrée → même sortie), aucune var mutable de module dans le code émis, et la ré-émission est byte-identique sur N rejeux (le déterminisme S34 préservé). Le panneau Workbench /emitters gagne un bouton « Prouver la pureté » qui rejoue l'émission 16 fois et affiche le verdict. Le tout est déterministe (marche d'AST, jamais un jugement LLM) ; le mur est intact (aucune vérité écrite)."
+keywords: ["aidos", "krd", "functional", "FN03", "émetteurs", "code émis", "fonction pure", "miroir de pureté", "EMITTED_FUNCTION_PURE", "EMITTED_NO_GLOBAL_MUTABLE", "ré-émission byte-identique", "déterminisme", "S34", "typeBindings", "no-global", "back/gen/", "Workbench", "Prouver la pureté", "ADR 0036", "le mur", "§6", "§8"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail des décisions et du miroir, voir [Pour moi → FN03](/steps/internals/fn03-emetteurs-fonctionnels).</Note>
+
+## En une phrase
+
+FN03 **réforme l'émetteur** d'AIDOS pour qu'il **produise** du code **pur-fonctionnel** (plus de variable globale, plus d'accumulateur mutant), et grave un **miroir de pureté** qui **prouve** — rouge d'abord — que chaque fonction émise est **pure** et que la **ré-émission est byte-identique**.
+
+## Le problème que ça résout
+
+FN02 a **gravé le mandat** (ADR 0036) : le code émis sous `back/gen/` doit être fonctionnel. Mais un mandat sans preuve est un vœu.
+
+FN03 le rend **exécutable** sur deux fronts :
+
+1. **L'émetteur lui-même est réformé.** L'ancien émetteur tenait une **variable globale mutable** (`var typeMap = …`) au scope paquet et **mutait** un `strings.Builder` pour accumuler la sortie. FN03 supprime les deux : la table de types est désormais **retournée par un constructeur pur** (`typeBindings()`) et **threadée par valeur** dans chaque renderer ; le rendu est un **map/fold** sur des slices immuables. L'émetteur n'a plus d'état caché — sa sortie est une fonction de sa seule entrée.
+
+2. **Un miroir de pureté prouve l'invariant.** Un test property (le miroir) ré-émet la **même** entité **16 fois** et vérifie que chaque rejeu est **byte-identique** ; il parse le Go émis et vérifie qu'il ne déclare **aucune** variable mutable de module ni `init()` caché. Écrit **rouge d'abord** (contre l'émetteur d'avant), il passe **vert** après la réforme.
+
+## Les idées-clés
+
+<CardGroup cols={2}>
+  <Card title="Pureté = même entrée → même sortie">
+    Une fonction émise pure n'a aucun effet de bord ni état caché : ré-évaluée, elle rend la même valeur. Conséquence directe : la **ré-émission est byte-identique** (le déterminisme S34, rejoué N fois, pas seulement deux).
+  </Card>
+  <Card title="Zéro variable globale mutable">
+    L'ancien `var typeMap` partagé disparaît : la table close des types est **construite et retournée par valeur**, threadée explicitement. Plus rien à muter, plus d'aliasing partagé.
+  </Card>
+  <Card title="Le miroir est rouge AVANT le code">
+    Le miroir de pureté est écrit en premier et **échoue** contre l'émetteur impératif (il détecte le `var typeMap`). On code la réforme jusqu'au vert — jamais l'inverse (red → green → refactor).
+  </Card>
+  <Card title="Déterministe, jamais un LLM">
+    Le verdict « est-ce pur ? » est une **marche d'AST** (parse du Go émis, recherche de `var` au scope paquet) — fail-closed, reproductible. Jamais « un LLM qui juge si c'est fonctionnel » (§8 determinism-first).
+  </Card>
+</CardGroup>
+
+## Le voir à l'écran
+
+Le panneau **`/emitters`** du Workbench gagne, sur chaque carte de projection (go-sqlc · pg-ddl · ts-types), un bouton **« Prouver la pureté »**. Il rejoue l'émission **16 fois** via le jumeau déterministe (`lib/emitters.ts`, byte-identique au Go) et affiche le **verdict** : *Pur — 16 ré-émissions byte-identiques*. Aucune I/O, aucun LLM : la preuve est **calculée** à l'écran, exactement comme le miroir côté Go.
+
+## Le mur
+
+FN03 n'écrit **aucune vérité**. L'émetteur **lit** l'AST d'entité (SELECT-only sur le `kernel`) et **écrit** seulement des projections **sous la ligne** (`back/gen/`, `front/web/gen/`). Le miroir de pureté est du **code sous la ligne** : il *certifie* la sortie, il ne grave rien. La frontière `back/gen/` (tranchée par l'ADR 0036) reste inchangée : la réforme touche le *style* de l'émetteur source, pas la portée du mandat.
+
+## La suite
+
+- **FN04** arme les trois invariants en **règles arch-fitness fail-closed** (`go-arch-lint`/`depguard`) sur `back/gen/`, avec **fault-injection** (injecter une globale → la règle passe rouge).
+- **FN05** consomme le **graphe d'appel acyclique** comme index de contexte d'agent (complète le ContextRouter S33).
