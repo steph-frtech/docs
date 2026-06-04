@@ -219,7 +219,9 @@
               "steps/concept/ba24-orchestration-policy",
               "steps/internals/ba24-orchestration-policy",
               "steps/concept/ba25-multi-agent-coordination",
-              "steps/internals/ba25-multi-agent-coordination"
+              "steps/internals/ba25-multi-agent-coordination",
+              "steps/concept/ba26-agentrun-replay",
+              "steps/internals/ba26-agentrun-replay"
             ]
           }
         ]

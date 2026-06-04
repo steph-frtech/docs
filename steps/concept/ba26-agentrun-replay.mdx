@@ -1,0 +1,47 @@
+---
+title: "BA26 · Rejouer un run d'agent à l'identique — vue depuis l'écran"
+description: "BA26 étend le schéma d'un run d'agent pour qu'il soit rejouable : le run gagne l'empreinte de son implémentation (impl), une graine déterministe (seed) et une référence au transcript du modèle. C'est une NOUVELLE version du record, ajoutée par la grande porte — jamais une mutation du hash existant ; un ancien run sans graine reste lisible. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA26", "rejeu", "replay", "AgentRun", "run d'agent", "seed", "graine", "impl", "transcript", "reproductibilité", "content-addressed", "append-only", "supersede-via-version", "anti-overwrite", "mirror-first", "le mur", "determinism-first"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA26](/steps/internals/ba26-agentrun-replay).</Note>
+
+## L'idée en une phrase
+
+Pour pouvoir **rejouer** plus tard un run d'agent exactement comme il s'est passé, BA26 ajoute au run trois informations : **de quoi** il est parti (l'empreinte de l'agent), **avec quelle graine** il a tourné, et **où** retrouver les réponses du modèle.
+
+## Pourquoi un run doit pouvoir être rejoué
+
+Un run d'agent, c'est ce qui s'est passé quand un agent a tourné une fois sur un bout de travail rouge. AIDOS l'enregistre déjà : chaque action, le verdict du mur, le résultat. Mais cet enregistrement, jusqu'ici, ne permettait pas de **refaire** le run à l'identique — il manquait trois choses :
+
+- **l'empreinte de l'implémentation** (`impl`) — quel agent, exactement, a tourné (son modèle, sa température, ses outils, ses confinements) ;
+- **la graine** (`seed`) — le grain de hasard figé qui rend le run reproductible (déclaré à l'avance, ou dérivé de façon déterministe de l'agent + du contexte + de l'item) ;
+- **la référence au transcript** — où retrouver les réponses du modèle, pour ne pas avoir à rappeler un LLM vivant lors du rejeu.
+
+Avec ces trois champs, un run devient **rejouable** : on pourra le refaire pas à pas et vérifier qu'il retombe sur le même résultat. (Le rejeu lui-même arrive à l'étape suivante ; BA26 pose le schéma qui le rend possible.)
+
+## La règle d'or : on n'efface jamais le passé
+
+Ajouter des champs à un enregistrement, c'est délicat : on pourrait casser tous les anciens runs déjà enregistrés. BA26 fait l'inverse — il **ajoute par la grande porte**, jamais par effet de bord :
+
+- un **ancien run sans graine** reste **parfaitement lisible** — son empreinte d'identité ne bouge pas d'un poil ;
+- un **nouveau run** porte les trois champs, et c'est une **nouvelle version** de la forme du record.
+
+Autrement dit : l'extension est **annoncée et additive**. Rien de ce qui existait n'est réécrit ; on superpose une nouvelle version par-dessus l'ancienne. C'est la discipline anti-réécriture d'AIDOS : on ajoute, on ne mute jamais en passant.
+
+## Ce que vous voyez à l'écran
+
+Le panneau « Enveloppe de rejeu » de l'écran des agents vous laisse construire un run dans les deux modes :
+
+- **Run legacy (sans graine)** — pas d'empreinte, pas de graine, pas de transcript. L'écran montre « — » pour les trois, et confirme que le run reste **lisible** et **cohérent**.
+- **Nouveau run (rejouable)** — l'empreinte de l'agent, une graine **dérivée** automatiquement, et la référence au transcript. L'écran confirme que l'enveloppe est **cohérente** (un transcript ne va jamais sans son empreinte ni sa graine).
+
+Vous basculez d'un mode à l'autre, vous cliquez « Construire le run », et vous voyez l'enveloppe se remplir — ou rester vide pour un run legacy.
+
+## Le ledger n'est pas un coffre à secrets
+
+Un journal bit-à-bit reproductible de chaque run serait un **stock durable de secrets** si on y recopiait tout le contexte (le code de votre app, son environnement, ses clés). BA26 n'enregistre qu'une **référence** au transcript ; la rédaction effective des champs sensibles (pour que rien de confidentiel ne se retrouve en clair dans le journal) est posée à l'étape suivante. La porte est ouverte pour le rejeu, sans transformer le journal en fuite.
+
+## Ce que ça vous garantit
+
+Chaque run que l'agent construit pour votre app pourra être **rejoué à l'identique** — même point de départ, même graine, mêmes réponses — pour comprendre, déboguer ou prouver ce qui s'est passé. Et cette capacité s'ajoute **sans rien casser** : vos anciens runs restent lisibles, et le journal reste sous le mur — un run n'est jamais une vérité du noyau, juste la trace de ce qui s'est passé.
