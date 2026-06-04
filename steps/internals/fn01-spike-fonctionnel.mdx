@@ -1,0 +1,53 @@
+---
+title: "FN01 · Le spike fonctionnel — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail d'implémentation de FN01 : le module Go CONFINÉ /spike/functional/ (aidos.spike/functional, go.mod isolé, n'importe pas back/). EmitFunctional est le pipeline PUR top-level : typeBindings() retourne la table de types par valeur (substitut fonctionnel du var typeMap global de l'émetteur impératif), renderGo/renderDDL/renderTS sont des fonctions pures qui fold/concat (strings.Join) sur des slices immuables via mapFields (higher-order), composées explicitement — graphe d'appel acyclique documenté. measure.go fixe les octets attendus (dump live de back/runtime/generators) et computeMeasure/Decide calculent le verdict (parité byte ∧ reproductibilité ∧ zéro globale). Les miroirs ROUGE-d'abord (funcemit_test.go) : TestByteParity{Go,DDL,TS}, TestReproducible (100×, le miroir de reproductibilité), TestNoGlobalMutableVar (AST walk : aucun var au niveau paquet), TestConfinement (aucun import steph-frtech/aidos), TestVerdictIsGo. Fault-injection prouvée. cmd/verdict imprime le verdict. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "functional", "FN01", "spike", "spike/functional", "aidos.spike/functional", "EmitFunctional", "typeBindings", "renderGo", "renderDDL", "renderTS", "mapFields", "higher-order", "fonction pure", "no-global", "graphe acyclique", "computeMeasure", "Decide", "Report", "byte parity", "TestByteParity", "TestReproducible", "TestNoGlobalMutableVar", "TestConfinement", "TestVerdictIsGo", "fault-injection", "go/format", "strings.Join", "déterminisme", "determinism-first", "confinement", "le mur", "cmd/verdict", "S34", "S46", "§84", "§6", "§8"]
+---
+
+<Note>Côté implémentation — le détail interne. Pour le concept et l'usage, voir [Pour les futurs utilisateurs → FN01](/steps/concept/fn01-spike-fonctionnel).</Note>
+
+## En une phrase
+
+FN01 vit dans `/spike/functional/`, un **module Go isolé** (`aidos.spike/functional`, `go.mod` propre, n'importe pas `back/`). Son cœur est `EmitFunctional(Entity) Projection` — un pipeline **pur** qui thread la table de types **retournée par valeur** (`typeBindings()`, le substitut du `var typeMap` global) à travers trois renderers purs (`renderGo`/`renderDDL`/`renderTS`) composés explicitement. `measure.go` épingle les octets attendus (dump live de l'émetteur impératif) et `Decide` calcule **GO** ssi parité-byte ∧ reproductibilité ∧ zéro globale.
+
+## Implémentation
+
+<Steps>
+  <Step title="Le module confiné (le mur, §84)">
+    `spike/functional/go.mod` déclare `module aidos.spike/functional` — un module **autonome**, jamais lié à `back/`. Le slice est **copié** (`slice.go` : `orderSlice()` reconstruit `Order` = id/total/discount, le `ExampleOrder` de S34) plutôt qu'importé : la sonde ne couple rien et ne pollue rien. `TestConfinement` scanne les imports et échoue si l'un contient `steph-frtech/aidos`.
+  </Step>
+  <Step title="typeBindings() — la table de types RETOURNÉE par valeur (pas un global)">
+    L'émetteur impératif (`back/runtime/generators/emit.go`) tient `var typeMap = map[string]typeBinding{…}` au scope **paquet** — une globale. FN01 la remplace par `typeBindings() map[string]binding`, un **constructeur pur** : il retourne la table fermée par valeur, threadée explicitement dans la composition. Deux appels donnent deux maps égales et indépendantes — aucun état mutable partagé.
+  </Step>
+  <Step title="mapFields — le cœur fonctionnel (higher-order, pas de mutation d'accumulateur)">
+    Là où l'impératif fait `for { b.WriteString(...) }` sur un `strings.Builder`, FN01 utilise `mapFields(fields, render func(Field) string) []string` : un **map pur** qui applique le renderer par-champ (passé en paramètre — fonction d'ordre supérieur) et retourne un slice de lignes. Le texte final est un `strings.Join` (fold). Aucun accumulateur muté.
+  </Step>
+  <Step title="renderGo / renderDDL / renderTS — trois fonctions pures">
+    Chacune est `(Entity, map[string]binding) → string`, sans effet de bord. `renderGo` reconstruit la source puis passe `go/format.Source` (le gofmt déterministe, pur). `renderDDL`/`renderTS` foldent les lignes. Les octets sont calibrés pour égaler **exactement** la sortie impérative connue (header protégé + `source:` hash épinglé, ordre des champs trié par nom, `pgtype.Numeric`, identifiants quotés).
+  </Step>
+  <Step title="EmitFunctional — la composition explicite (graphe acyclique documenté)">
+    `EmitFunctional(e)` appelle `typeBindings()` puis les trois renderers et retourne une `Projection{Go, DDL, TS}` par valeur. Le graphe d'appel est **acyclique** et documenté en commentaire : `EmitFunctional → {typeBindings, renderGo→[sortedFields,mapFields,header,goName], renderDDL→[…,quote], renderTS→[…]}`. Aucune récursion mutuelle.
+  </Step>
+  <Step title="measure.go — le verdict CALCULÉ (déterministe, sans LLM)">
+    `expectedGo`/`expectedDDL`/`expectedTS` sont les octets connus de l'émetteur impératif (capturés par un **dump live** de `back/runtime/generators` au build de FN01 — enregistrés, jamais inventés). `computeMeasure(replays)` lance le pipeline, compare byte-à-byte, et rejoue N fois pour la reproductibilité. `Decide(Measure) Verdict` rend **GO** ssi `AllParity() ∧ Reproducible ∧ GlobalMutableVars==0` — sinon **NO-GO**. `Report(N)` bundle le tout pour `cmd/verdict`.
+  </Step>
+  <Step title="Les miroirs (ROUGE d'abord → green) + fault-injection">
+    `funcemit_test.go` : `TestByteParity{Go,DDL,TS}` (parité byte sur les trois cibles), `TestReproducible` (100 rejeux identiques — **le miroir de reproductibilité**, determinism-first), `TestNoGlobalMutableVar` (un **AST walk** sur funcemit/slice/measure.go qui échoue si un `GenDecl` `token.VAR` existe au niveau paquet — la preuve structurale du no-global), `TestConfinement` (aucun import du moteur), `TestVerdictIsGo` (le verdict calculé est GO). **Fault-injection prouvée** au build : injecter un `var` global → `TestNoGlobalMutableVar` ROUGE ; casser un séparateur DDL → `TestByteParityDDL` ROUGE ; restauré → vert. Les miroirs sont vivants.
+  </Step>
+  <Step title="cmd/verdict — imprimer le verdict">
+    `go run ./cmd/verdict` imprime la table de parité et le `Verdict.Rationale` calculé. Reproduire l'ensemble : `cd spike/functional && go test ./... && go run ./cmd/verdict`.
+  </Step>
+</Steps>
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Mirror-first, même dans un spike.** Le cliquet est OFF (T0, jetable), mais la question reste **falsifiable** : les tests sont écrits avant le renderer et **échouent en rouge** sans lui. Le verdict est **calculé** (`Decide` lit des octets), jamais une opinion d'agent — `§8`, anti-Goodhart.
+- **La pureté EST le determinism-first appliqué à la sortie.** Le mandat « tout ce qui peut être une fonction pure DOIT l'être » (`§6`) se lit ici à la lettre : la table de types passe d'un `var` global à un **retour de fonction**, le rendu passe d'une **mutation de Builder** à un **fold immuable**. Le miroir de reproductibilité (même entrée → même sortie, 100×) est la preuve canonique.
+- **Le no-global est vérifié structurellement, pas jugé.** `TestNoGlobalMutableVar` est un **AST walk** déterministe — un `go/parser` qui cherche un `token.VAR` au niveau paquet. Pas de jugement LLM « ce code a-t-il l'air fonctionnel ? ». FN04 promeut cette idée en règle arch-fitness fail-closed (depguard/go-arch-lint) sur le vrai `gen/`.
+- **Confinement = le mur appliqué à l'exploration.** Un module isolé qui n'importe pas `back/` garantit qu'aucune sonde ne fuit dans le moteur. `/harvest` proposera la leçon ; `/goal` figera ; rien ici ne gradue tout seul.
+
+## Méta-méta — la garde sur la garde
+
+- **Le spike-gate est non-gameable.** Le sujet FN entier est conditionné à ce verdict : NO-GO ⇒ arrêt. Comme `Decide` lit la **parité byte** (un fait reproductible) et non une déclaration, l'agent ne peut pas se forcer un GO. Le gate mesure ce que le mandat exige — il ne peut pas être satisfait par un proxy.
+- **Les questions ouvertes sont de la provenance, jamais comblées en douce.** `doc.go` liste cinq OpenQuestions (portée Order-only, source_hash épinglé, copie vs vrai gen/, acyclicité documentée vs vérifiée, Linear non authentifié). Ce sont des **dépendances avant (forward)** assumées — elles ne bloquent pas FN01, elles **chaînent** explicitement FN03/FN04/FN05.
+- **Un spike ne crée pas de dette de vérité.** Comme rien ne gradue, il n'y a pas de miroir orphelin ni de vérité sans miroir à trimmer plus tard : le module entier sera **réécrit** quand la leçon sera figée. La sonde paie son propre nettoyage.

@@ -1,0 +1,51 @@
+---
+title: "FN01 · Le spike fonctionnel — ré-émettre le slice checkout en fonctions pures, zéro globale, et mesurer si c'est faisable"
+description: "FN01 est un spike CONFINÉ (cliquet OFF, jetable) qui pose une question falsifiable : un émetteur peut-il produire le slice checkout (l'entité Order de S46/S34 → struct Go / DDL Postgres / interface TS) en style PUR-FONCTIONNEL — chaque renderer une fonction pure, ZÉRO variable globale mutable, composition explicite (graphe d'appel acyclique) — SANS perdre le déterminisme S34 (sortie byte-identique à l'émetteur impératif) ? Le verdict est CALCULÉ, jamais déclaré : il lit des octets (parité byte sur les trois cibles, reproductibilité sur 100 rejeux, zéro globale introduite), pas une opinion. Verdict : GO → le sujet FN se poursuit (FN02 : ADR du mandat fonctionnel)."
+keywords: ["aidos", "krd", "functional", "FN01", "spike", "émetteur", "fonctionnel pur", "fonction pure", "zéro globale", "no-global", "composition explicite", "graphe d'appel acyclique", "slice checkout", "Order", "go-sqlc", "pg-ddl", "ts-types", "parité byte", "déterminisme", "determinism-first", "reproductibilité", "verdict", "go/no-go", "spike-gate", "le mur", "confinement", "S34", "S46", "§84", "§6", "§8"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FN01](/steps/internals/fn01-spike-fonctionnel).</Note>
+
+## En une phrase
+
+FN01 est un **spike** — une sonde **jetable**, **confinée** à `/spike/functional/`, cliquet **OFF** — qui répond à une seule question falsifiable : peut-on ré-émettre le **slice checkout** (l'entité `Order` de S46/S34) en **style pur-fonctionnel** (chaque fonction pure, **zéro variable globale mutable**, composition explicite) **sans perdre le déterminisme S34** ? La réponse est **calculée**, pas déclarée : **GO**.
+
+## Le problème que ça résout
+
+Le sujet **FN** porte un mandat ambitieux pour le **code que AIDOS émet** (votre application, pas le moteur d'AIDOS lui-même) : que chaque fonction émise soit **pure**, qu'il n'y ait **aucune variable globale mutable**, et que le code forme un **graphe de fonctions acyclique** (l'esprit *Understand-Anything* : une fonction = une couche = un nœud de graphe).
+
+Avant d'écrire un tel mandat dans le marbre (un ADR, des règles arch-fitness, de nouveaux émetteurs), il faut **prouver que c'est faisable** — et surtout que la **pureté ne casse pas le déterminisme** que S34 garantit déjà (le même source émet toujours les **mêmes octets**). C'est exactement le rôle d'un spike : rendre l'intention **falsifiable** avant qu'elle n'approche le noyau. Si le spike disait **NO-GO**, le sujet FN **s'arrêterait** là.
+
+## Les idées-clés
+
+<Field name="Un spike est jetable et confiné — il ne gradue jamais" type="le mur, §84">
+  Tout le code de FN01 vit dans `/spike/functional/`, un **module Go isolé** qui n'importe **rien** du moteur AIDOS. Rien ici ne devient une vérité : `/harvest` proposera, `/goal` figera, et les **vrais** émetteurs seront re-formés plus tard (FN02+). Le **mur** est intact — aucune écriture dans le noyau, les miroirs ou la fitness.
+</Field>
+
+<Field name="La question est falsifiable — le verdict est CALCULÉ, jamais déclaré" type="§8, anti-Goodhart">
+  Le verdict **go/no-go** ne lit pas une opinion : il lit des **octets**. **GO** exige trois conditions mesurées — parité **byte-identique** avec l'émetteur impératif sur les **trois** cibles (Go/DDL/TS), **reproductibilité** sur 100 rejeux (même entrée → même sortie), et **zéro globale** introduite. Si l'une manque, c'est **NO-GO** et le sujet s'arrête.
+</Field>
+
+<Field name="La pureté EST le mandat de déterminisme appliqué à la sortie" type="determinism-first, §6">
+  L'émetteur impératif d'aujourd'hui tient une **table de types globale** (`var typeMap`) et **mute** un accumulateur pour construire le texte. La version fonctionnelle supprime les deux : la table est **retournée par une fonction pure** et passée explicitement, et le rendu est un **fold/map/concat** sur des données immuables. Une fonction pure donne **toujours** la même sortie pour la même entrée — c'est précisément ce que le déterminisme S34 demande.
+</Field>
+
+<Field name="Un graphe de fonctions pures est un cadeau pour le futur" type="valeur, FN05">
+  Quand chaque fonction est pure et que la composition est explicite, le **graphe d'appel** de l'application émise devient un objet lisible — exactement l'**index call-graph** que FN05 fournira comme contexte à l'agent (en complément du ContextRouter S33). La faisabilité prouvée ici ouvre cette valeur.
+</Field>
+
+## Le verdict (mesuré)
+
+| cible | parité byte vs impératif | reproductible (100×) | globales introduites |
+| --- | --- | --- | --- |
+| `go-sqlc` (struct Go) | OUI | OUI | 0 |
+| `pg-ddl` (DDL Postgres) | OUI | OUI | 0 |
+| `ts-types` (interface TS) | OUI | OUI | 0 |
+
+**VERDICT : GO.** La ré-émission pur-fonctionnelle reproduit le slice checkout **byte-identique** sur les trois cibles, est reproductible, et n'introduit aucune globale — le **déterminisme S34 est préservé** et le coût est comparable. Le sujet FN se poursuit vers **FN02** (l'ADR du mandat fonctionnel).
+
+## Ce que FN01 NE fait pas (les questions ouvertes)
+
+- **Portée** : le spike ne réémet que l'entité `Order` (3 cibles). Les **opérations** (createOrder) et les **contrôles/actions** (boutons) ne sont pas couverts — FN03 étendra la pureté à toutes les cibles.
+- **Vrai code** : le spike **copie** le slice au lieu d'importer le moteur (isolation module). FN03 travaillera sur l'arbre `gen/` réel ; FN04 remplacera la vérification structurale par une **règle arch-fitness fail-closed** (jamais un jugement LLM).
+- **Suite** : le verdict GO ne *fige* rien — il **autorise** seulement FN02 à ouvrir l'ADR.
