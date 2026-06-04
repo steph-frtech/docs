@@ -1,0 +1,43 @@
+---
+title: "BA22 · Les leases qui s'éteignent tout seuls — et l'écriture en retard qui se fait refuser"
+description: "BA22 donne un cœur battant à l'ordonnanceur : à chaque tick il loue le travail à un agent pour une durée bornée, récupère tout seul les leases d'agents morts (sans clic humain), et refuse l'écriture d'un agent réveillé trop tard dont le lease a expiré — pas de travail perdu. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA22", "lease", "expire", "tick", "ordonnanceur", "scheduler", "fencing", "epoch", "AGENT_LEASE_FENCED", "dépendance", "blocked", "determinism-first", "le mur"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA22](/steps/internals/ba22-lease-engine).</Note>
+
+## L'idée en une phrase
+
+BA20 a créé le rôle qui réclame un travail, BA21 a choisi quel agent le prend. BA22 ajoute le **temps** : un lease *dure*, il *expire*, et il *fence* — il met une barrière contre l'agent qui revient trop tard.
+
+## Un lease, c'est un travail prêté pour un temps borné
+
+Quand l'ordonnanceur confie un item de travail rouge à un agent, il ne le lui donne pas pour toujours : il le lui **loue** jusqu'à une heure précise. Tant que le lease est vivant, l'item est à cet agent et à personne d'autre. C'est ce qui empêche deux agents de travailler la même chose en même temps.
+
+## Le tick : le cœur qui bat tout seul
+
+L'ordonnanceur a un **rythme** — un tick. À chaque battement, il regarde la file et applique des règles simples :
+
+- **il récupère les leases morts.** Si un agent a pris un item mais que son lease est expiré (l'heure est passée), l'item redevient disponible — **sans qu'un humain clique sur quoi que ce soit**. C'est la garantie anti-agent-mort : un agent qui plante ne bloque pas son travail pour toujours.
+- **il respecte les dépendances.** Un item qui dépend d'un autre non encore terminé reste *bloqué* — on ne le loue pas tant que son amont n'est pas résolu. Dès que l'amont est fait, il se débloque au tick suivant.
+- **il loue la tête mirror-first** au bon agent (la règle de BA21).
+
+Personne n'a besoin de surveiller : le tick fait le ménage à chaque battement.
+
+## Le fencing : l'écriture en retard est refusée
+
+Voici le scénario que BA22 rend impossible. Un agent A prend un item, puis se fige (une pause, un GC, un réseau lent). Son lease expire ; l'ordonnanceur le récupère et le re-loue à un agent B, qui se met au travail. Puis A se réveille et tente d'écrire son ancien résultat.
+
+Sans garde-fou, l'écriture de A **écraserait** le travail de B — un *lost-update*. BA22 attache à chaque lease un numéro qui ne fait que monter (un *epoch*). Quand A revient, son epoch est **périmé** : l'écriture est **refusée**, avec un message clair — `AGENT_LEASE_FENCED`. A doit re-demander le travail avant d'écrire. Le travail de B est sauf.
+
+## Ce que vous voyez à l'écran
+
+Le panneau **/agents**, sous la section ordonnanceur, porte « Moteur lease/expire + fencing » :
+
+- **Lancer un tick** — exécute un battement sur une file de démo : un lease d'agent mort y est récupéré tout seul, et un item qui dépend d'un miroir non résolu reste *bloqué*.
+- **Résoudre le miroir** puis re-ticker — l'item dépendant se débloque et se loue.
+- **Vérifier le fence** — saisissez l'epoch d'une écriture : un epoch périmé est refusé (`AGENT_LEASE_FENCED`), l'epoch vivant passe.
+
+## Ce que ça vous garantit
+
+Un agent qui plante ne gèle pas son travail : le tick le récupère, seul. Un travail qui en attend un autre ne démarre jamais trop tôt. Et un agent réveillé en retard ne peut jamais écraser le travail de celui qui a repris à sa place — l'écriture périmée est refusée, pas avalée. L'ordonnanceur devient un cœur qui bat, sûr contre le temps.
