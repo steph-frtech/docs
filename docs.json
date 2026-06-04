@@ -225,7 +225,9 @@
               "steps/concept/ba27-economics-loop",
               "steps/internals/ba27-economics-loop",
               "steps/concept/ba28-replay-redact",
-              "steps/internals/ba28-replay-redact"
+              "steps/internals/ba28-replay-redact",
+              "steps/concept/ba29-ledger",
+              "steps/internals/ba29-ledger"
             ]
           }
         ]

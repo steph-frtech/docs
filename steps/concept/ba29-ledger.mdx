@@ -1,0 +1,42 @@
+---
+title: "BA29 · Le ledger fidèle-à-la-réalité — vue depuis l'écran"
+description: "BA29 prouve qu'un run d'agent a fait DANS LA RÉALITÉ exactement ce qu'il a enregistré. Rejouer un run prouve que l'enregistrement se re-dérive — pas que le run réel y a correspondu : un effet de bord oublié (un écrit bash non noté) ne change pas le hash. Le ledger réconcilie un journal d'effets INDÉPENDANT, capturé à la frontière, contre les actions enregistrées. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA29", "ledger", "journal", "réconciliation", "fidélité", "effet de bord", "effect-log", "frontière", "boundary", "auditable", "replay", "refus", "BlockReason", "le mur", "déterminisme", "gap H2"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA29](/steps/internals/ba29-ledger).</Note>
+
+## L'idée en une phrase
+
+AIDOS vérifie qu'un agent a fait **dans la réalité** exactement ce qu'il a **enregistré** avoir fait — en confrontant son journal à ce que le système a réellement vu se produire.
+
+## Pourquoi le replay ne suffit pas
+
+À l'étape précédente (BA28), AIDOS savait **rejouer** un run : le re-dériver à l'identique depuis ce qu'il en avait enregistré. Si le replay redonne le même identifiant, l'enregistrement est **fidèle à lui-même**.
+
+Mais cela ne prouve qu'une chose : que l'**enregistrement** est cohérent. Pas que le **run réel** a fait ce que l'enregistrement dit. Imaginez un agent qui écrit un fichier en douce — un effet de bord lancé via un script — **sans le noter** dans son journal. Le journal reste parfaitement cohérent, son identifiant ne bouge pas, le replay dit « tout va bien ». Et pourtant le run a fait quelque chose qu'il a caché. C'est une **brèche de fidélité** que le replay seul ne voit pas.
+
+## Capturer les effets à la frontière
+
+BA29 ajoute un **journal d'effets indépendant**. Chaque écriture sur le disque, chaque appel à un outil sortant est noté **à la frontière** — par le système lui-même, là où l'effet se produit réellement, **pas** par l'auto-rapport de l'agent. C'est le point clé : si l'on demandait à l'agent de noter ses propres effets, un agent qui ment (ou qui oublie) passerait au travers. La frontière, elle, voit tout ce qui sort.
+
+## Réconcilier : le run a-t-il dit la vérité ?
+
+Le **ledger** confronte alors les deux : pour chaque action enregistrée, y a-t-il un effet correspondant à la frontière ? Et pour chaque effet vu à la frontière, y a-t-il une action enregistrée ?
+
+- Un effet **sans** action enregistrée = un effet de bord caché (**la trahison**).
+- Une action enregistrée **sans** effet réel = une écriture annoncée que le monde n'a jamais vue.
+
+Un run est déclaré **auditable** seulement s'il **se re-dérive** (replay) **et** **réconcilie** (effets). Les deux preuves ensemble, pas une seule.
+
+## Ce que vous voyez à l'écran
+
+Sur le panneau **/agents**, la section « Ledger » propose un bouton **Interroger le ledger**. Au clic, une table apparaît : une ligne par run, avec son verdict de replay, sa réconciliation, et le verdict final **auditable / non auditable**. Un run fidèle est vert sur toute la ligne. Un run trahi — qui a produit un effet jamais enregistré — affiche sa **dérive** (le chemin de l'écrit caché) et passe **non auditable**, alors même que son replay est correct. En dessous, les **refus** sont comptés par code : combien de fois le mur a refusé une écriture au-dessus de la ligne de flottaison, avec la marche à suivre pour la traiter proprement.
+
+## Ce que le ledger ne fait pas
+
+Le ledger **ne corrige rien** et **n'écrit aucune vérité**. C'est une **surface en lecture seule**. Une brèche de fidélité est une **observation** : elle remonte par la porte d'entrée des idées (le chemin idée → miroir → /goal → approbation humaine), jamais par une écriture directe du noyau. Le mur reste intact.
+
+## Pourquoi c'est du code, pas un jugement
+
+Réconcilier deux journaux, c'est un **diff** : un appariement déterministe d'ensembles. Compter les refus, c'est une **somme**. Aucun de ces calculs ne demande à un modèle de « comparer les logs » — ce serait un trou de déterminisme. Même entrée → même verdict, toujours.
