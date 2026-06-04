@@ -1,0 +1,54 @@
+---
+title: "FN05 · L'index du graphe d'appel du code émis — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail de FN05 : back/runtime/agentloop/callgraphindex.go ajoute CallGraphIndex(filename, src) → CallGraph{Package, Nodes []CallNode{Name, Calls}, Hash} — fonction pure et totale du code émis, content-addressée via records.Hash(Canonicalize(...)) (le schéma S01/S02), nœuds + appelés triés. Réutilise l'ensemble de nœuds fermé intra-fichier de firstCallCycleNode (FN04) : même graphe que la règle d'acyclicité. AffectedSubgraph(index, changé) calcule la clôture des DÉPENDANTS (arêtes inversées callee→callers) — ce que le ContextRouter (S33) consomme pour cibler le sous-graphe affecté ; termine car le graphe est acyclique (FN04). Hors-portée (pas de marqueur) ou parse en erreur → index vide (fail-closed, jamais inventer un nœud). Miroir property (callgraphindex_property_test.go, rapid) : reproductibilité (même code → même graphe → même empreinte), totalité, ordre canonique, porte de portée, et AffectedSubgraph reproductible/réflexif/trié. Miroir fixture (callgraphindex_fixture_test.go) : formes concrètes (chaîne a→b→c) + ripple des dépendants. Outil MCP agentloop_callgraph_index (ADR 0009, lecture seule). Jumeau TS lib/emitters.ts : callGraphIndex() + affectedSubgraph() + tests fast-check ; bouton /emitters « Indexer le graphe d'appel » + e2e Playwright. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "FN05", "call-graph", "callgraphindex.go", "CallGraphIndex", "CallGraph", "CallNode", "AffectedSubgraph", "dépendants", "arêtes inversées", "ContextRouter", "S33", "Understand-Anything", "go/parser", "ast.Inspect", "CallExpr", "firstCallCycleNode", "records.Hash", "Canonicalize", "content-addressed", "rapid", "fast-check", "callgraphindex_property_test", "callgraphindex_fixture_test", "agentloop_callgraph_index", "MCP", "lib/emitters.ts", "callGraphIndex", "affectedSubgraph", "Indexer le graphe d'appel", "Playwright", "fail-closed", "ADR 0036", "le mur", "§2", "§6", "§8", "Linear"]
+---
+
+<Note>Côté implémentation — le détail interne. Pour le concept et l'usage, voir [Pour les futurs utilisateurs → FN05](/steps/concept/fn05-index-graphe-appel).</Note>
+
+## En une phrase
+
+FN05 ajoute, dans `back/runtime/agentloop/callgraphindex.go`, une fonction **pure et totale** `CallGraphIndex(filename, src)` qui rend l'**index content-addressé** du graphe d'appel d'un fichier émis, et `AffectedSubgraph(index, changé)` qui calcule la **clôture des dépendants** consommée par le **ContextRouter** (S33) — prouvées par un miroir property (même code → même graphe) et des fixtures de forme.
+
+## Implémentation
+
+<Steps>
+  <Step title="Le miroir property écrit en PREMIER (rouge)">
+    `callgraphindex_property_test.go` (rapid) porte le critère de done **rouge-d'abord** : même `(nom, src)` → **index identique** (`reflect.DeepEqual`) **et même empreinte** ; **totalité** (jamais de panic sur des octets arbitraires) ; **ordre canonique** (nœuds triés, appelés triés) ; **porte de portée** (source non marquée → index vide) ; et `AffectedSubgraph` **reproductible**, **réflexif** (un nœud changé apparaît dans son propre sous-graphe) et **trié**. `callgraphindex_fixture_test.go` pinne les formes concrètes. Avant l'implémentation, les fichiers ne compilent pas (`CallGraphIndex`/`CallNode`/`AffectedSubgraph` indéfinis) — le vrai rouge.
+  </Step>
+  <Step title="L'index pur — CallGraphIndex">
+    Sur une source émise (porte de portée `IsEmittedProjection`, réutilisée de FN04), `CallGraphIndex` parse (`go/parser`, `SkipObjectResolution`) puis construit, pour chaque fonction top-level, l'ensemble de ses appelés **restreints aux fonctions définies dans le fichier** — exactement l'ensemble de nœuds fermé que `firstCallCycleNode` (FN04) utilise, via `ast.Inspect` sur les `CallExpr` dont le `Fun` est un `Ident` défini. Les nœuds et leurs appelés sont **triés** ; le résultat est `CallGraph{Package, Nodes []CallNode{Name, Calls}, Hash}`.
+  </Step>
+  <Step title="L'adresse de contenu — réutilise le schéma S01/S02">
+    `hashCallGraph` content-adresse l'index sur son encodage canonique via `records.Canonicalize` + `records.Hash` (SHA-256 sur du JSON à clés triées) — le **même schéma** que le hash du ContextPack et le `source_hash` des entités. Le champ `Hash` est mis à zéro avant le hash (une valeur ne se hashe pas elle-même). Même graphe → empreinte identique.
+  </Step>
+  <Step title="Le sélecteur du router — AffectedSubgraph">
+    `AffectedSubgraph(index, changé)` construit les **arêtes inversées** (callee → callers), puis fait un parcours depuis les symboles changés **présents dans l'index** (les inconnus sont ignorés — jamais inventer une cible) et collecte la **clôture des dépendants** : tous ceux qui appellent un nœud changé, directement ou par une chaîne. Trié, dédupliqué, pur. **Termine** car le graphe émis est garanti **acyclique** (FN04).
+  </Step>
+  <Step title="L'outil MCP">
+    Le serveur MCP `agentloop` gagne `agentloop_callgraph_index` (ADR 0009 : tout op backend = un outil MCP), lecture seule : il rend les nœuds + l'empreinte de l'index d'une source émise, et — si `changed` est fourni — le sous-graphe affecté. Hors-portée / illisible → index vide.
+  </Step>
+  <Step title="Le jumeau TS + l'écran action-capable">
+    `front/web/lib/emitters.ts` gagne `callGraphIndex(goSource)` + `affectedSubgraph(graph, changed)` (jumeaux déterministes : scan source ligne-à-ligne — `func` top-level, appelés intra-fichier — hash canonique, fail-closed/hors-portée si pas de marqueur) + des tests vitest (property + cas concrets : ripple `c → {a,b,c}`). Le panneau `/emitters` (`EmittersPanel.tsx`) gagne un bouton **« Indexer le graphe d'appel »** sur la carte go-sqlc (`data-testid="call-graph-go-sqlc"`) rendant l'index (`data-callgraph-hash`, `data-callgraph-nodes`) + le sous-graphe affecté (`data-callgraph-affected`) ; un e2e Playwright prouve que le contrôle **s'exécute** et rend un index content-addressé. i18n FR/EN ajoutée.
+  </Step>
+</Steps>
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Pourquoi réutiliser l'ensemble de nœuds de FN04.** L'objectif demande l'index « du code émis » et la garantie d'acyclicité de FN04 le sous-tend. En réutilisant l'**ensemble de nœuds fermé intra-fichier** (les fonctions définies dans le fichier, exactement comme `firstCallCycleNode`), l'index et la règle d'acyclicité voient **le même graphe** : la garantie de FN04 (acyclique) devient la garantie de terminaison de `AffectedSubgraph`.
+- **Pourquoi remonter les DÉPENDANTS, et pas les dépendances.** Le router veut savoir « si je change `c`, que dois-je recharger ? ». La réponse est : tous ceux qui **dépendent** de `c` (l'appellent, transitivement), car leur comportement peut changer. C'est la clôture **vers le haut** (arêtes inversées), pas la clôture des appelés. La fixture `c → {a, b, c}` (chaîne `a → b → c`) le pinne.
+- **Pourquoi content-adresser l'index.** « Même code → même graphe » se prouve le plus directement par une **empreinte stable** : deux indexations du même code donnent la même empreinte. En réutilisant `records.Hash(Canonicalize(...))`, l'index atterrit sous le **même schéma d'adresse** que tout artefact content-addressé d'AIDOS (le ContextPack que le router émet déjà).
+- **Pourquoi index vide hors-portée / illisible, et pas une erreur.** L'index est un **contexte**, pas une garde : un fichier non émis ou illisible n'a simplement pas de graphe d'appel AIDOS à offrir. Renvoyer le vide (jamais inventer un nœud) respecte la règle d'honnêteté ; la *garde* fail-closed sur l'illisible reste la règle FN04 `EMITTED_UNPARSEABLE`.
+
+## Méta-méta — la garde sur la garde
+
+- **FN05 n'AJOUTE qu'une capacité (§5).** L'index et `AffectedSubgraph` s'ajoutent aux règles FN04 et au ContextRouter S33 ; ils ne retirent ni n'assouplissent aucune garde. Le router peut désormais cibler plus finement, mais le red-set, le bounded-context et le mur de S33 restent inchangés.
+- **Le graphe est calculé, jamais déclaré (§8).** Ni `CallGraphIndex`, ni `AffectedSubgraph`, ni le bouton, ni l'outil MCP ne lisent une confiance d'agent : l'index est le résultat d'une marche d'AST, le sous-graphe affecté un parcours déterministe. Un « LLM qui lit le code pour en déduire le graphe » serait une fracture de déterminisme qui bloquerait le step (CLAUDE.md §6/§8) — la fonction pure est autoritative.
+- **Le mur tient (§2).** L'index est du code sous la ligne ; il lit `gen/` et rapporte le graphe sans écrire `kernel`/`mirrors`/`fitness`. Le ContextRouter *consomme* l'index pour compiler un ContextPack ; il ne fait jamais écrire de vérité.
+- **Même schéma d'adresse que le reste.** Le hash de l'index réutilise `records.Hash`/`Canonicalize` : pas de schéma d'adresse parallèle qui pourrait dériver. Le jumeau TS reproduit le même hash canonique pour l'écran (la facette dynamique byte-identique est, elle, la facette de FN03).
+
+## OpenQuestions
+
+- **OQ-FN05-cross-file** : l'index est aujourd'hui **intra-fichier** (l'ensemble de nœuds fermé de la couche émise, aligné sur FN04). Un graphe d'appel **inter-fichiers** sur tout l'arbre `gen/` (résolution des appels qualifiés `pkg.Fn`) est un raffinement utile au router pour des apps émises multi-fichiers — à ouvrir comme idée quand l'émetteur produira plusieurs fichiers liés. Forward-dependency, ne bloque pas FN05.
+- **OQ-FN05-router-wire** : FN05 fournit l'index et `AffectedSubgraph` que le ContextRouter **peut** consommer (prouvé par les miroirs) ; le câblage effectif dans la compilation du ContextPack de S33 (charger le sous-graphe affecté dans le pack) est un raffinement de la pipeline du router, à trancher quand un goal ciblera l'app émise. La capacité est complète et action-capable ; l'intégration au pipeline est l'OQ. Ne bloque pas FN05.
+- **OQ-FN05-linear** : le `linear-server` MCP n'est pas authentifié dans cette session (OAuth requis, non complétable depuis un exécuteur isolé) ; l'issue `FN05 · …` (projet AIDOS `aidos-2a9085453be8`, label `step`) n'a pu être créée/déplacée en `In Progress`/`Done` par l'agent — à faire au prochain run authentifié (CLAUDE.md §11, best-effort, ne bloque pas le step).

@@ -249,7 +249,9 @@
               "steps/concept/fn03-emetteurs-fonctionnels",
               "steps/internals/fn03-emetteurs-fonctionnels",
               "steps/concept/fn04-regles-arch-fitness",
-              "steps/internals/fn04-regles-arch-fitness"
+              "steps/internals/fn04-regles-arch-fitness",
+              "steps/concept/fn05-index-graphe-appel",
+              "steps/internals/fn05-index-graphe-appel"
             ]
           }
         ]
