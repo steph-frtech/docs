@@ -1,0 +1,38 @@
+---
+title: "BA31 · Du signal à l'idée DRAFT — la boucle apprend du monde"
+description: "BA31 ferme la boucle : un run d'agent échoué, abandonné ou vert-creux traverse reality.Observe → Learn → ToIdea et devient une idée DRAFT — PROPOSÉE, jamais appliquée. La seule porte légale reste idée → miroir → /goal → approbation ; aucune écriture du noyau. Et une admission FORGÉE en mémoire est refusée à l'apply. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA31", "idée DRAFT", "réalité", "RealityMirror", "Observe", "Learn", "ToIdea", "incident", "run d'agent", "durcir-le-harnais", "le mur", "PROPOSAL_NOT_ADMITTED", "provenance vérifiée", "admission forgée", "gap J1", "déterminisme", "récurrence"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA31](/steps/internals/ba31-incident-to-idea).</Note>
+
+## L'idée en une phrase
+
+BA31 **ferme la boucle** : le signal qu'un run produit (BA30) traverse le moteur de retour-réalité et ressort en **idée DRAFT** — une candidate-vérité **proposée**, jamais figée. Le système apprend de ses propres pannes, par la seule porte légale, sans jamais toucher le noyau.
+
+## Le problème que ça règle
+
+BA30 fabrique le signal ; mais un signal qui ne va nulle part ne sert à rien. AIDOS possède déjà le moteur de destination — `reality.Observe → Learn → ToIdea` — qui sait transformer un incident en idée DRAFT. BA31 est **le tuyau** qui branche le signal sur ce moteur. Un run raté devient un **incident récurrent**, l'incident devient une **idée**, et l'idée attend l'humain — exactement comme un incident de production.
+
+## Le chemin, bout à bout
+
+1. Un run échoue, est abandonné, ou réussit mais d'une **manière creuse** (il se cogne au mur, il retombe sur du jugement LLM).
+2. La passerelle BA30 en fait un **signal** dont l'identité est le **pattern** (pas l'id du run).
+3. BA31 **observe** ce signal comme un incident — adressé par son contenu, donc **deux runs qui ratent pareil tombent sur le même incident**.
+4. L'incident est **appris** en une idée DRAFT, dont la provenance pointe vers l'incident, et dont l'intention est l'**hypothèse** de cause.
+5. L'idée attend : `idée → miroir → /goal → approbation`. Personne ne l'applique automatiquement.
+
+## La récurrence fait surgir une idée « durcir-le-harnais »
+
+Comme l'identité est le pattern, **deux runs distincts** du même mode d'échec **se rassemblent** en un seul incident récurrent. Quand le même mur est heurté run après run, la récurrence grimpe — et fait émerger une idée de **durcissement du harnais** : « peut-être que cette zone du noyau est incomplète ». C'est l'humain qui décidera, au /goal.
+
+## Le mur tient — deux fois
+
+- **L'on-ramp PROPOSE, il n'applique jamais.** L'arête directe « incident → noyau » est **toujours refusée** (`REALITY_CANNOT_DECLARE_TRUTH`). Juger que le monde a raison contre le noyau est une décision de vérité, au-dessus de la ligne, qui reste à l'humain.
+- **L'apply ne croit jamais sur parole.** Une boucle bugguée — ou malveillante — peut **fabriquer en mémoire** une proposition marquée « admise ». La porte d'apply ne lit **jamais** ce champ : elle **re-dérive** le verdict depuis le graphe d'autorité (qui a réellement approuvé ?). Une « admission » forgée sans approbation réelle est **refusée** (`PROPOSAL_NOT_ADMITTED`).
+
+## Où vous le voyez
+
+Sur l'écran **Agents → « Learnings »**, un bouton dérive les idées des runs : le tableau montre, pour chaque run, l'idée DRAFT produite (statut `draft`), son hypothèse, et la preuve que **le noyau refuse toujours** l'arête directe. Une section « récurrence par incident » montre les runs distincts qui se rassemblent. Et deux boutons d'**apply** : l'un **forge** une admission (refusée), l'autre montre une **admission réelle** (acceptée parce que l'approbateur a réellement accordé) — la preuve, sous vos yeux, que c'est le verdict re-dérivé qui compte, jamais le champ déclaré.
+
+<Note>BA31 est une **lecture** + une **proposition** : rien n'est écrit dans le noyau. Une idée DRAFT doit encore **acquérir son miroir** au /goal pour exister comme vérité.</Note>

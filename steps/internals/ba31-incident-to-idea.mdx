@@ -1,0 +1,42 @@
+---
+title: "BA31 · Du signal à l'idée DRAFT — internals"
+description: "Internals de BA31 : la passerelle RunToDraft (RunToSignal → reality.Observe → Learn → ToIdea → ideas.Idea DRAFT) et la porte d'apply à provenance vérifiée ApplyGate (gap J1, PROPOSAL_NOT_ADMITTED). Trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "build-agent", "BA31", "RunToDraft", "ApplyGate", "reality", "Observe", "Learn", "ToIdea", "ideas.Idea", "DRAFT", "authority.Decide", "PROPOSAL_NOT_ADMITTED", "REALITY_CANNOT_DECLARE_TRUTH", "le mur", "provenance vérifiée", "déterminisme", "gap J1", "identité-par-pattern"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet. Pour la vue concept, voir [Pour les futurs utilisateurs → BA31](/steps/concept/ba31-incident-to-idea).</Note>
+
+## En une phrase
+
+BA31 branche le signal d'un run (BA30) sur le moteur de retour-réalité S43 pour produire une `ideas.Idea` **DRAFT** — proposée, jamais appliquée —, et re-asserte le mur **deux fois** : l'arête directe incident→noyau reste toujours refusée, et l'apply re-dérive l'admission depuis l'autorité S16 au lieu de croire le champ `Status` auto-déclaré.
+
+## Implémentation
+
+Deux fonctions pures, totales, dans `back/runtime/agentloop/incident_to_idea.go` :
+
+- **`RunToDraft(run, thresholds) → (DraftFromRun, error)`** — le pipeline. Il appelle `RunToSignal` (BA30) ; un run vert ordinaire renvoie `{Signalled:false}` (aucune idée inventée). Sinon il enchaîne `reality.Observe(ps.ToObserveInput())` → `reality.Learn(inc)` → `reality.LearnedIncident` (l'incident pointe vers l'idée) → `reality.ToKernel(inc)` (le refus toujours présent). Le résultat porte l'idée DRAFT (`Status=draft`, provenance `incident:<pattern>`), `WroteKernel=false`, et `ToKernelRefusal` (`REALITY_CANNOT_DECLARE_TRUTH`).
+- **`ApplyGate(graph, proposal, granted) → ApplyDecision`** — la porte à provenance vérifiée (gap J1). Elle **ignore** `proposal.Status` et appelle `authority.Decide(graph, truth, granted)` ; admise **seulement** si le verdict re-dérivé est `admitted`. Sinon : `{Admitted:false, Refusal: PROPOSAL_NOT_ADMITTED}`.
+
+Le code de refus `PROPOSAL_NOT_ADMITTED` est ajouté au registre fermé `back/runtime/blockreason/blockreason.go` (extension additive, `change_type: refine` — jamais une suppression), forme actionnable complète (code/severity/explanation/how_to_fix nommant la porte S16).
+
+Surface MCP (`back/mcp/agentloop`, ADR 0009 — un outil = une op) : `agentloop_run_to_draft` (la classification per-run + l'incident récurrent + l'idée DRAFT) et `agentloop_apply_gate` (le verdict re-dérivé). Les deux sont read-only, `wrote_truth` toujours false.
+
+Front : le jumeau `front/web/lib/agentloop-incident-to-idea.ts` (`runToDraft`/`runsToLearnings`/`applyGate`, jumeaux des fonctions Go) + la sous-section « Learnings » de `/agents` (data-testid `learnings`, `apply-gate`) — thémée (ADR 0010) + bilingue FR/EN (ADR 0011), action-capable.
+
+Miroirs (tous VERTS) : la fixture N2 (`incident_to_idea_fixture_test.go`, 7 lignes incl. abandonné→DRAFT+no-kernel-write, vert ordinaire→aucune idée, vert-creux→DRAFT basse sévérité, pattern récurrent→un incident, admission forgée refusée, admission réelle acceptée, cause=hypothèse) ; la property rapid (`incident_to_idea_property_test.go`, reproductibilité + signalé⇒DRAFT+no-kernel-write + forgé-jamais-admis + admission-réelle-passe) ; le jumeau front fast-check (11 tests) ; le Playwright e2e (3 cas).
+
+## Méta
+
+**Pourquoi `RunToDraft` réutilise verbatim le moteur S43 plutôt que de réécrire une mini-version ?** Parce que le retour-réalité est **déjà** la seule porte légale du monde vers le noyau (`incident → /learn → idée → miroir → /goal`). Inventer une seconde porte serait un trou dans le mur. BA31 n'ajoute **aucune** surface kernel : seulement la passerelle. L'idée DRAFT produite est la *même forme* qu'une idée née d'un incident de prod — l'humain ne voit pas la différence, et c'est voulu.
+
+**Pourquoi l'`ApplyGate` ne lit jamais `proposal.Status` (gap J1) ?** Parce que l'agent **construit ses structs librement** : un champ que l'agent remplit n'est jamais une preuve. La transition `proposed→admitted` vit en S16 (`authority.Decide`), et l'apply la **re-dérive** depuis le graphe d'autorité + les rôles réellement accordés. Une boucle bugguée qui forge `Status:"admitted"` se heurte au même mur qu'une boucle malveillante — fail-closed. C'est l'application, au niveau de l'apply, de « la provenance est prouvée, jamais déclarée » (cf. l'identité prouvée de BA18).
+
+**Pourquoi `WroteKernel` et `ToKernelRefusal` sont des champs explicites du résultat ?** Pour rendre la garantie **testable** : un miroir asserte que tout run signalé porte `WroteKernel=false` et le refus `REALITY_CANNOT_DECLARE_TRUTH`. Le mur n'est pas une promesse de commentaire — c'est une valeur vérifiée.
+
+## Méta-méta
+
+BA31 est le **dernier pas** de la méta-boucle build-agent (BA-E7) : le système améliore **son propre harnais** depuis ses échecs **et** ses verts-creux, mais **uniquement** en proposant. C'est la matérialisation, sur le plan de l'agent-codeur, du principe KRD : *le système apprend du MONDE, pas de lui-même* — et il apprend **par la porte**, jamais en passant.
+
+Deux invariants méta-méta tiennent ici :
+- **Determinism-first** : le pipeline est un *tuyau* (un switch + des appels purs), jamais un agent LLM « décide si ce run mérite une idée ». La décision d'admission est `authority.Decide` (un algorithme), jamais un jugement. Tout porte un miroir de reproductibilité (même entrée → même sortie).
+- **La méta-boucle ne fait qu'AJOUTER des garde-fous** (§5) : `PROPOSAL_NOT_ADMITTED` est un cran de plus, jamais le retrait d'un cran. La boucle qui apprend de ses pannes ne peut, par construction, desserrer le mur — elle ne peut que proposer un mur plus serré, à charge pour l'humain de l'accepter au /goal.
