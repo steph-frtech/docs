@@ -215,7 +215,9 @@
               "steps/concept/ba22-lease-engine",
               "steps/internals/ba22-lease-engine",
               "steps/concept/ba23-dispatch-panel",
-              "steps/internals/ba23-dispatch-panel"
+              "steps/internals/ba23-dispatch-panel",
+              "steps/concept/ba24-orchestration-policy",
+              "steps/internals/ba24-orchestration-policy"
             ]
           }
         ]

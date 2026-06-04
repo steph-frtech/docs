@@ -1,0 +1,46 @@
+---
+title: "BA24 · La politique d'orchestration qui ne change pas en cours de route — vue depuis l'écran"
+description: "BA24 donne à une couche orchestration une OrchestrationPolicy déclarée : arbitrage de claim, fan-out/fan-in, politique de conflit même-fichier, et MaxConcurrency + caps par rôle. La policy est une vérité au-dessus du mur (proposée via idée→miroir→/goal, jamais une écriture vivante) ; un run l'épingle pour toute sa durée (immutabilité par-run) ; et un conflit même-cible se résout par règle — mirror-first puis content-hash — jamais par une course qui jetterait le travail du perdant. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA24", "orchestration", "policy", "OrchestrationPolicy", "arbitrage", "fan-out", "fan-in", "concurrence", "MaxConcurrency", "caps par rôle", "conflit", "lost-update", "merge-semantic", "immutabilité", "par-run", "épingle", "mirror-first", "le mur", "determinism-first"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA24](/steps/internals/ba24-orchestration-policy).</Note>
+
+## L'idée en une phrase
+
+BA23 a posé l'ordonnanceur à l'écran pour **un** flux. BA24 monte d'un cran : il décrit comment **une équipe d'agents se coordonne** — et grave cette coordination dans une politique qui ne peut pas changer en douce pendant qu'un run tourne.
+
+## Une couche qui en orchestre d'autres
+
+En KRD, un agent n'est jamais une autorité : c'est une **couche gouvernée**. Il en existe trois sortes — un agent seul, une équipe d'agents, et une **orchestration** (qui coordonne agents et équipes). BA24 donne enfin à l'orchestration ce qui lui manquait : une **OrchestrationPolicy** déclarée, qui dit comment l'équipe travaille ensemble.
+
+La policy déclare quatre choses :
+
+- **l'arbitrage de claim** — qui passe en premier quand deux agents veulent la même cible ;
+- le **fan-out / fan-in** — comment l'équipe étale le travail puis le rassemble (séquentiel, parallèle, pipeline) ;
+- la **politique de conflit même-fichier** — quoi faire quand deux agents touchent le même fichier ;
+- le **plafond de concurrence** (MaxConcurrency) **et les caps par rôle** — combien d'agents peuvent travailler en même temps, globalement et par rôle.
+
+Et le `Validate` devient **conscient du kind** : une orchestration **exige** une policy *et* une équipe non vide ; un simple agent ne doit *pas* en porter. On ne peut pas se tromper de forme.
+
+## Le cap déclaré, jamais un cap fantôme
+
+Le plafond de concurrence n'est pas un chiffre en l'air : la policy ne peut **jamais** dépasser le plafond déjà déclaré sur l'agent (le knob de BA01). Si vous écrivez une policy qui autorise 5 agents en parallèle alors que l'agent n'en permet que 2, elle est rejetée. Le nombre qu'un run applique est **toujours le nombre déclaré** — pas un plus grand venu de nulle part.
+
+## On n'adapte pas une orchestration en plein vol
+
+Voici le cœur de BA24. Quand un run démarre, il **épingle la version** de la policy — exactement comme un run épingle la version de son agent. Pour toute la durée du run, cette version est **gelée**. Si quelqu'un essaie de modifier la policy en cours de route, le système le voit (la version vive diverge de l'épingle) et le **refuse** : tout changement est une **nouvelle proposition** (idée → miroir → /goal), jamais une retouche en direct. L'écran le montre : tentez une édition mid-run, et le panneau affiche « édition interdite ».
+
+## Un conflit ne se règle jamais à la course
+
+Deux agents veulent écrire la même cible ? BA24 ne tire pas à pile ou face, et ne demande pas à un LLM d'arbitrer. Le conflit se **sérialise** (un agent à la fois sur la cible, via le lease) puis se **fusionne** par la gesture `merge-semantic` (qui rejoue chaque miroir sur le résultat fusionné — un miroir rouge bloque).
+
+La seule chose que tranche l'arbitre, c'est **qui passe en premier** : d'abord la couche la plus *mirror-first* (le miroir d'abord), puis, à égalité, l'empreinte de contenu. C'est une règle **totale et déterministe** : la même paire donne toujours le même gagnant, peu importe l'ordre. Et surtout — **le perdant attend, son travail n'est jamais jeté**. Zéro mise à jour perdue.
+
+## Le mur tient
+
+La policy est une **vérité** : elle vit au-dessus du mur. La modifier depuis l'écran **propose** un changement (idée → miroir → /goal requérant l'autorité humaine) — jamais une écriture directe dans le noyau. L'arbitrage de conflit, lui, ne décide que d'un *ordre* : il n'écrit aucune vérité. L'orchestration coordonne ; elle ne décrète rien.
+
+## Ce que ça vous garantit
+
+L'équipe d'agents qui construit votre app travaille sous des règles **écrites, bornées et stables** : un plafond de concurrence qu'on ne peut pas gonfler en douce, une coordination qu'on ne peut pas changer en plein run, et des conflits réglés par une règle qui ne perd jamais de travail. Tout ce qui touche la vérité passe par la grande porte ; tout le reste reste sous la ligne.
