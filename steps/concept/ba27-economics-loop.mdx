@@ -1,0 +1,48 @@
+---
+title: "BA27 · Le compteur live et l'arrêt-sur-budget dans la boucle — vue depuis l'écran"
+description: "BA27 câble un compteur de coût vivant dans la boucle de l'agent : tokens, minutes de CI et temps d'horloge s'accumulent AU FUR, et le budget est vérifié AVANT chaque tour — un tour qui dépasserait le plafond est refusé avant même de démarrer. Le coût mesuré du run terminé nourrit ensuite l'économie du harnais. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA27", "compteur", "budget", "halt-on-budget", "arrêt sur budget", "anti-runaway", "tokens", "économie du harnais", "coût mesuré", "pré-call", "déterminisme", "le mur", "abandonné"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA27](/steps/internals/ba27-economics-loop).</Note>
+
+## L'idée en une phrase
+
+Pendant qu'un agent travaille, AIDOS **compte ce qu'il dépense** au fur et à mesure, et **l'arrête net** dès qu'il s'apprête à franchir le plafond que vous avez déclaré — sans jamais le laisser le dépasser.
+
+## Pourquoi un compteur dans la boucle
+
+Un agent qui code votre app consomme des ressources réelles : des tokens (le carburant du modèle), des minutes de CI, du temps. Sans garde-fou, un agent bloqué ou parti en boucle pourrait brûler tout votre budget en silence. BA27 met un **compteur vivant** au cœur de la boucle : à chaque tour, il additionne ce que le tour a coûté.
+
+Mais compter ne suffit pas — il faut **savoir s'arrêter**. Et le moment où l'on s'arrête est crucial.
+
+## La règle d'or : refuser AVANT de dépasser, jamais après
+
+C'est le point le plus important de BA27. AIDOS ne laisse pas l'agent dépasser le plafond pour le constater ensuite. Avant chaque tour, il **projette** ce que ce tour coûterait, et si le total franchirait le plafond, il **refuse le tour avant qu'il ne démarre** :
+
+- le tour qui aurait fait déborder **ne s'exécute pas** ;
+- son coût **n'entre jamais** dans le compteur ;
+- le run est marqué **abandonné**, en nommant l'axe dépassé (tokens, temps, CI…).
+
+Conséquence : le compteur **ne franchit jamais** le plafond. Pas « il déborde un peu puis on coupe » — il s'arrête **au plafond ou avant**. C'est l'anti-emballement (« anti-runaway ») prouvé avant l'appel, pas après les dégâts.
+
+## Le plafond le plus serré gagne
+
+Vous pouvez déclarer un budget à deux endroits : celui du **/goal** (la limite anti-emballement) et celui de la **cellule** (l'économie du harnais). BA27 prend toujours **le plus serré des deux** comme limite effective. Relever l'un sans toucher l'autre ne desserre rien — la limite la plus stricte fait foi.
+
+## Ce que vous voyez à l'écran
+
+Le panneau « Compteur live & arrêt-sur-budget » de l'écran des agents vous laisse lancer la boucle dans deux configurations :
+
+- **Cap serré** — le plafond est si bas que le deuxième tour le dépasserait. Vous cliquez « Lancer la boucle » : le run s'**abandonne**, et l'écran montre que le compteur est **tenu au plafond** (jamais franchi).
+- **Cap large** — la boucle va jusqu'au bout et **réussit** (verte). L'écran montre le coût total consommé.
+
+Dans les deux cas, le coût mesuré du run est ensuite **présenté à l'économie du harnais**, qui dit s'il reste **dans le budget** de la cellule ou s'il est **signalé** (trop cher pour sa valeur).
+
+## L'économie du harnais voit enfin un run
+
+Jusqu'ici, l'économie d'AIDOS (« plus une contrainte coûte cher, plus elle doit justifier sa valeur ») n'avait jamais vu le coût réel d'un run d'agent. BA27 ferme ce trou : le coût mesuré du run terminé **nourrit** l'évaluation économique. Un run trop coûteux sans justification est **signalé** — un avis, pas un blocage.
+
+## Ce que ça vous garantit
+
+Votre budget est **respecté à la lettre** : un agent ne dépasse jamais le plafond que vous avez fixé, parce qu'on refuse le tour de trop **avant** qu'il ne coûte quoi que ce soit. Et chaque run laisse une trace honnête de ce qu'il a dépensé, qui alimente l'économie d'AIDOS pour décider si la dépense en valait la peine. Le tout est **déterministe** : le même run, dans les mêmes conditions, s'arrête exactement au même endroit — et relever un plafond reste une décision humaine (un /goal), jamais un geste de l'agent.

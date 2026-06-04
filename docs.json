@@ -221,7 +221,9 @@
               "steps/concept/ba25-multi-agent-coordination",
               "steps/internals/ba25-multi-agent-coordination",
               "steps/concept/ba26-agentrun-replay",
-              "steps/internals/ba26-agentrun-replay"
+              "steps/internals/ba26-agentrun-replay",
+              "steps/concept/ba27-economics-loop",
+              "steps/internals/ba27-economics-loop"
             ]
           }
         ]
