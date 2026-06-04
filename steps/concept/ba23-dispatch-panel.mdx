@@ -1,0 +1,43 @@
+---
+title: "BA23 · La file de travail qui se dispatche toute seule — vue depuis l'écran"
+description: "BA23 sort l'ordonnanceur du moteur et le pose à l'écran : un panneau « File & dispatch » sur /agents montre la file en ordre mirror-first, qui possède quoi, quel lease court, qui est bloqué sur quoi, et quels agents sont libres. Un bouton « Dispatch next » lance un tick ; « Reclaim expired » récupère les leases morts. Tout passe par un serveur MCP scheduler, sous la ligne, sans jamais toucher la vérité. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA23", "dispatch", "file", "queue", "ordonnanceur", "scheduler", "MCP", "tick", "lease", "reclaim", "famine", "starvation", "mirror-first", "blocked", "dépendance", "le mur", "determinism-first"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA23](/steps/internals/ba23-dispatch-panel).</Note>
+
+## L'idée en une phrase
+
+BA22 a donné un cœur battant à l'ordonnanceur. BA23 le rend **visible et actionnable** : un panneau qui montre la file de travail et deux boutons pour la faire avancer — le tout exposé comme un outil que la machine peut appeler, pas seulement un humain.
+
+## Une file que vous pouvez enfin regarder
+
+Jusqu'ici, l'ordonnanceur travaillait dans l'ombre. BA23 ouvre la porte : sur la page **/agents**, le panneau « File & dispatch » affiche la file de travail rouge **dans l'ordre mirror-first** (le miroir d'abord, puis les projections, puis le reste), et pour chaque item :
+
+- son **statut** (ouvert, réclamé, bloqué, résolu),
+- son **propriétaire** (l'agent qui le tient, s'il est loué),
+- son **epoch de lease** (le numéro qui empêche les écritures en retard),
+- ses **dépendances** (ce qu'il attend avant de pouvoir démarrer).
+
+À côté, la liste des **agents libres par rôle** — qui est disponible pour prendre le prochain travail.
+
+## Deux boutons qui font tout
+
+Le panneau n'est pas un tableau de bord à regarder : il **agit**.
+
+- **Dispatch next** — lance un tick d'ordonnancement. La file avance : la tête mirror-first est louée au bon agent, un item bloqué reste bloqué tant que son amont n'est pas résolu, et un lease d'agent mort est récupéré sur le champ.
+- **Reclaim expired** — récupère les leases périmés. C'est le même battement : un agent qui a planté ne gèle plus son travail, l'item redevient disponible **sans qu'aucun humain n'ait à intervenir**.
+
+Et si jamais la tête de file demande un rôle qu'aucun agent libre n'assure, le panneau lève une **alerte famine** : « l'équipe est mal staffée pour ce travail ». Le dispatcher peut être parfaitement gouverné *et* honnêtement signaler qu'il est coincé.
+
+## Une porte que la machine aussi peut pousser
+
+Derrière les boutons, il y a un **serveur MCP `scheduler`** : `scheduler.tick` (lance un tick et applique les transitions) et `scheduler.assignments` (lit qui tient quoi). Cela veut dire que le dispatch n'est pas réservé au clic humain — n'importe quel outil de l'écosystème peut demander un tick. C'est la règle AIDOS : *chaque opération du back est aussi un outil MCP, sans exception*.
+
+## Le mur tient
+
+Dispatcher du travail, c'est écrire des **leases** et de la **télémétrie** — des choses *sous la ligne*. BA23 n'écrit jamais une vérité (ni le noyau, ni les miroirs, ni la fitness). Toutes les décisions viennent du planificateur pur de BA22 ; le serveur ne fait que les *séquencer* et les *appliquer* sous le rôle réservé `aidos_scheduler`. Le rôle agent, lui, ne peut toujours pas transitionner — le mur est intact.
+
+## Ce que ça vous garantit
+
+Vous *voyez* enfin le travail s'ordonnancer : qui prend quoi, qui attend quoi, qui manque à l'appel. Un clic dispatche le prochain item ; un autre récupère ce qu'un agent mort a laissé tomber — sans surveillance. Et tout ce qui se passe à l'écran reste sous la ligne : l'ordonnanceur dispatche, il ne décrète jamais la vérité.

@@ -1,0 +1,49 @@
+---
+title: "BA23 · Serveur MCP scheduler + panneau Queue & Dispatch — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de BA23 : le serveur MCP scheduler (scheduler_tick, scheduler_assignments, scheduler_fence) — la coquille impure qui séquence le planificateur PUR Schedule de BA22 et applique les transitions sous le rôle aidos_scheduler (sous la ligne, jamais de vérité), le panneau « File & dispatch » de /agents (file mirror-first, statut/owner/lease/epoch, deps bloquées, agents libres par rôle, alerte famine), les contrôles action-capables Dispatch next + Reclaim expired, le miroir journey Godog, le miroir de reproductibilité rapid, le test transport-integration, et l'e2e Playwright."
+keywords: ["aidos", "krd", "BA23", "scheduler MCP", "scheduler_tick", "scheduler_assignments", "scheduler_fence", "Schedule", "dispatch", "tick", "lease", "reclaim", "famine", "starvation", "still_red", "gap E3", "AGENT_LEASE_FENCED", "mirror-first", "le mur", "determinism-first", "Godog", "rapid", "ADR 0009", "MCP"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet. Pour la vue concept, voir [Pour les futurs utilisateurs → BA23](/steps/concept/ba23-dispatch-panel).</Note>
+
+## En une phrase
+
+BA23 livre le **serveur MCP `scheduler`** (`back/mcp/scheduler`) — la coquille impure qui expose les opérations de l'ordonnanceur comme outils MCP (ADR 0009) — et le panneau **« File & dispatch »** de `/agents` : la file en ordre mirror-first, statut/owner/lease/epoch par item, les items bloqués sur dépendances non résolues, les agents libres par rôle, l'alerte famine, et deux contrôles action-capables (**Dispatch next** lié à `scheduler.tick`, **Reclaim expired**). Toute la décision vient du planificateur PUR `Schedule` de BA22 ; la coquille ne fait que séquencer + appliquer sous le rôle `aidos_scheduler` (sous la ligne, jamais de vérité).
+
+## Implémentation
+
+Le serveur vit dans `back/mcp/scheduler/main.go` ; le panneau dans `front/web/components/SchedulerSection.tsx` (sous-section `scheduler-dispatch`).
+
+- **`scheduler_tick(now, lease_until, [queue], [agents]) → tickOutput`** — la capacité de dispatch. Elle exige un `now` et un `lease_until` *fournis* (aucune horloge arg-less dans le chemin MCP — la seule horloge sanctionnée est le `Driver` daemon de BA22), appelle le `Schedule` PUR (BA22) sur la file + le roster courants (ou des overrides fournis), **applique** le résultat via un `Applier` (sous la ligne), puis replie la file transitionnée dans l'état du serveur (le tick suivant planifie dessus). Elle renvoie une `rowView` par item (item_id / layer / status / owner / lease_until / lease_epoch / dependencies) + les assignments + un éventuel `StarvationSignal`. C'est la couture que l'`Applier` production câblera sur l'`UPDATE` du rôle `aidos_scheduler` (les quatre colonnes de transition) ; ici un `captureApplier` mémoire capture le résultat (la couture testable).
+- **`scheduler_assignments() → assignmentsOutput`** — lecture seule : les `AgentAssignment` (`leased | running | released | expired`) que le dernier tick a produits.
+- **`scheduler_fence(write_epoch, current_epoch) → fenceOutput`** — expose le `Fence` déterministe de BA22 comme outil : une écriture d'epoch périmé (ou futur) est refusée avec `AGENT_LEASE_FENCED`. Le gate est *sur le chemin d'appel*, pas un retour de test unitaire.
+- **L'anti-famine (gap E3)** — après le tick, la coquille calcule la tête mirror-first des items `open` (`HeadOf` sur les ouverts) et, si elle ne peut être staffée (`DetectStarvation`, BA21), surface le signal `still_red` dans `tickOutput.Starvation`. Le panneau le rend en alerte ; le daemon BA22 compte les vrais ticks, l'outil MCP est single-shot (`ticksWaited=1`, `threshold=1`).
+- **Le panneau action-capable** (`SchedulerSection.tsx`) — une `dispatchQueue` *évolutive* (les ticks successifs s'enchaînent) sur la fixture canonique : un miroir, une projection qui en dépend (bloquée), un item d'agent mort (`lease_until` 11:00 < `now` 12:00, epoch 2). **Dispatch next** (`dispatch-next-button`) et **Reclaim expired** (`dispatch-reclaim-button`) appellent tous deux `runDispatch` → `schedule(...)` (le jumeau TS pur de BA22) puis replient la file ; **Résoudre le miroir** flip l'amont en `resolved` (le dépendant se débloque au tick suivant) ; **Réinitialiser**. La file s'affiche en table (`dispatch-queue`, lignes `dispatch-row-<itemId>`), les agents libres par rôle (`dispatch-free-agents`), le compte d'assignments (`dispatch-assignments`), et l'alerte famine (`dispatch-starve-alert`). Thémé (ADR 0010, tokens), bilingue FR/EN (ADR 0011, next-intl).
+- **Les miroirs** :
+  - *Journey Godog* (`back/mcp/scheduler/journey_bdd_test.go` + `tests/runtime/scheduler-dispatch.feature`, N0) — un tick à travers `scheduler.tick` récupère le lease d'agent mort (re-loué epoch 3), garde la projection `blocked`, loue le miroir role-matché ; résoudre l'amont + re-ticker débloque ; une écriture epoch 1 contre epoch courant 2 est fencée `AGENT_LEASE_FENCED` ; les assignments se lisent après un tick.
+  - *Reproductibilité rapid* (`repro_property_test.go`, N1) — même `(now, lease_until)` ⇒ même `tickOutput` (la coquille MCP n'ajoute aucun non-déterminisme) ; et invariant structurel : un item à dépendances non résolues n'est jamais `claimed`.
+  - *Transport-integration* (`transport_integration_test.go`) — le serveur MCP RÉEL monté sur un transport in-memory : `scheduler_tick` dispatche bout-en-bout sur le fil (dead reclaim epoch 3, proj blocked, mirror claimed role-matché), `scheduler_assignments` relit, `scheduler_fence` refuse l'epoch périmé. C'est l'assertion « est-ce réel ? » : la capacité est *atteignable ET exécutable* sur le transport.
+  - *e2e Playwright* (`tests/e2e/agents.spec.ts`, bloc BA23, 4 cas) — contrôles présents ; Dispatch next gate le dépendant + récupère le lease mort (epoch 3) + loue la tête ; résoudre + re-dispatcher débloque la projection ; Reclaim expired récupère le lease mort.
+
+## Méta — pourquoi c'est construit ainsi
+
+Trois décisions structurantes.
+
+**La coquille est mince ; toute la décision reste dans le pur `Schedule`.** Le serveur MCP n'invente aucune règle : `now`/`lease_until` lui sont *fournis*, il appelle le planificateur PUR de BA22, applique, et reflète. C'est ce qui rend `scheduler_tick` rejouable à l'octet (le miroir rapid le prouve) et garde la frontière impure réduite à l'`Applier` + à l'entrée du `now`. Un dispatcher qui *jugerait* par LLM l'expiration, le gate ou le casting serait un trou de déterminisme qui bloque le pas.
+
+**Chaque opération du back est un outil MCP (ADR 0009).** Le dispatch n'est pas un bouton réservé à l'humain : `scheduler_tick`, `scheduler_assignments` et `scheduler_fence` sont des outils que tout l'écosystème peut appeler. Le test transport-integration prouve que l'enforcer (l'application sous la ligne) et le fence sont *sur le chemin d'appel*, sur le fil — pas un retour faké. C'est l'« est-ce réel ? » de l'ADR 0009.
+
+**Le panneau est action-capable, pas read-only (ui-completeness).** Chaque opération que BA23 développe a un contrôle lié à elle, atteignable *et* exécutable depuis `/agents` : Dispatch next/Reclaim expired bound à `schedule`, l'alerte famine surface `still_red`, la file montre le verdict du gate. Aucune capacité headless. Et le mur tient : ces contrôles écrivent des leases/télémétrie sous la ligne — jamais une vérité (qui passerait par propose → ChangeSet).
+
+## Méta-méta — l'invariant que ça garde vivant
+
+> **L'ordonnanceur est entièrement pilotable depuis un écran et depuis un outil MCP — un clic (ou un appel) dispatche le prochain travail et récupère ce qu'un agent mort a lâché, sans humain — et rien de ce dispatch ne touche jamais la vérité.**
+
+BA23 fait passer l'ordonnanceur de « moteur invisible » à « dispatcher gouverné, visible, actionnable », mais le mur de S52/BA20/BA22 reste vrai à chaque tick : la coquille ne réclame jamais pour le rôle agent, n'écrit aucun schéma de vérité, et applique sous le seul rôle `aidos_scheduler` (UPDATE des quatre colonnes de transition, SELECT sur `kernel.agent_layer`). La défense en profondeur tient sur trois plans inchangés : `Fence` (Go) ⟺ `fence` (TS) ⟺ le garde `WHERE lease_epoch = $writeEpoch` de l'`UPDATE`. Le miroir de reproductibilité rejoue « même `(now, lease_until)` ⇒ même `tickOutput` » : la couche MCP n'ajoute aucune incertitude — elle séquence une fonction pure.
+
+## Limites connues (OpenQuestions, par conception)
+
+- **L'`Applier` production (UPDATE Postgres réel) reste à câbler.** BA23 livre la coquille MCP avec un `captureApplier` mémoire (la couture testable) ; l'`Applier` qui émet le vrai `UPDATE` du rôle `aidos_scheduler` sur `runtime.red_work_queue` (avec le garde `WHERE lease_epoch = $writeEpoch`) est branché au pas qui consomme la base sous ce rôle. Le `Fence`/`scheduler_fence` de BA23 est le miroir Go de ce garde SQL. Différé structurel, OpenQuestion documentée — n'empêche pas le pas.
+- **Persistance Postgres des miroirs.** Les miroirs journey + property de BA23 sont matérialisés comme tests exécutables (`journey_bdd_test.go`, `scheduler-dispatch.feature`, `repro_property_test.go`, `transport_integration_test.go`) ; leur persistance dans le schéma `mirrors` est back-fillée au pas qui consomme ce schéma (exception bootstrap, S06). N'empêche pas le pas.
+- **Suivi Linear.** Le MCP `linear-server` requiert une authentification OAuth non disponible dans cette session ; le déplacement de l'issue `BA23` vers `In Progress`/`Done` est noté comme OpenQuestion (best-effort, CLAUDE.md §11) — n'empêche pas le pas.
+- **La coordination multi-agent est BA24/BA25.** BA23 dispatche un agent par item par tick ; l'arbitrage de N agents contendants sous une `OrchestrationPolicy` est BA24/BA25. Surface ouverte au pas qui en a besoin.
