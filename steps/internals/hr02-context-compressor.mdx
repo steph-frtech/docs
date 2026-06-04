@@ -1,0 +1,60 @@
+---
+title: "HR02 · Internals — le port ContextCompressor, l'implémentation de référence, le miroir property"
+description: "Internals HR02 (le journal de build). Implémentation : l'interface Go ContextCompressor + Compacted + Handle dans back/runtime/context/compressor.go, l'implémentation de référence déterministe byte-lossless (reference-replacement reconstruite proprement depuis le spike HR01), le miroir property rapid (compressor_property_test.go) qui épingle Retrieve∘Compress=identité, le handle point-fixe, le déterminisme 100×, les faits porteurs ; le jumeau TS (lib/context-compressor.ts) + fast-check ; la route /context-compression actionnable + l'e2e Playwright ; ADR 0035. Méta : pourquoi un port plutôt qu'un outil, pourquoi lossless d'abord, pourquoi le mur tient. Méta-méta : determinism-first appliqué à une compression — l'exception gatée n'est jamais autoritaire."
+keywords: ["aidos", "krd", "ContextCompressor", "port", "compressor.go", "ReferenceCompressor", "Compacted", "Handle", "rapid", "miroir property", "Retrieve Compress identité", "point fixe", "byte-lossless", "determinism-first", "le mur", "lecture seule", "ADR 0035", "fast-check", "jumeau", "Playwright", "/context-compression", "HR02", "HR03", "HR04", "headroom", "replaceable", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — tout le détail. La page concept est [ici](/steps/concept/hr02-context-compressor).</Note>
+
+## Implémentation
+
+Le port vit dans **`back/runtime/context/compressor.go`** (le même package que le ContextRouter S33 — la compression est le voisin naturel du compilateur de contexte).
+
+<CodeGroup>
+```go interface (back/runtime/context/compressor.go)
+type ContextCompressor interface {
+	Compress(prompt string) (Compacted, Handle)
+	Retrieve(handle Handle) string
+}
+
+type Compacted struct{ Text string }
+
+type Handle struct {
+	Text       string            // le compacted que ce handle ré-étend (auto-suffisant)
+	Dictionary map[string]string // "§N" -> span original
+}
+```
+</CodeGroup>
+
+- **`ReferenceCompressor`** est l'implémentation par défaut, **déterministe et byte-lossless** : la *reference-replacement* du spike HR01 **reconstruite proprement** dans `back/` (le spike ne gradue pas — `/harvest` propose, `/goal` fige, le code est réécrit). Elle collapse les **spans répétés** (longueur `maxPhrase`..1, plus longs d'abord) en handles `§N`, dans un **ordre stable** (savings décroissants, puis lexicographique), en gardant la première occurrence verbatim et en notant chaque span dans le dictionnaire — donc `Retrieve` est **exactement l'inverse**.
+- **Le miroir property** (`compressor_property_test.go`, **rapid**) — écrit **rouge d'abord** (le package ne compilait pas tant que `ContextCompressor`/`ReferenceCompressor` n'existaient pas ; ce fail de compilation **est** le rouge du goal). Il épingle :
+  1. `Retrieve(Compress(x)) == Normalize(x)` pour tout `x` — la loi porteuse ;
+  2. le handle est un **point fixe déterministe** : `Compress(Retrieve(h))` reproduit le même compacted + le même dictionnaire ;
+  3. un handle vide / zéro `Retrieve` sans paniquer (fonction totale) ;
+  4. **déterminisme** : même entrée → même compacted + même handle, rejoué **100×** (le miroir de reproductibilité, determinism-first) ;
+  5. les **faits porteurs** d'un vrai ContextPack survivent à `retrieve∘compress`.
+- **Le jumeau TS** (`front/web/lib/context-compressor.ts`) est la projection front du même algorithme, couvert par **fast-check** (`context-compressor.test.ts`) avec les mêmes invariants — l'écran calcule la compression **par cette fonction pure**, jamais un LLM, jamais une ré-implémentation divergente.
+- **La route `/context-compression`** est **actionnable** (CLAUDE.md §7, `ui-completeness`) : boutons **Compresser** / **Récupérer** liés à `compress` / `retrieve`, badge lossless, dictionnaire affiché. L'**e2e Playwright** (`tests/e2e/context-compression.spec.ts`) prouve que chaque bouton **exécute** et que le badge passe à `data-lossless="true"`.
+- **ADR 0035** acte le slot `replaceable`, le contrat à deux opérations, le lossless-d'abord, et le mur.
+
+## Méta — pourquoi ces choix
+
+<AccordionGroup>
+<Accordion title="Pourquoi un port, et pas l'outil headroom directement ?">
+Parce que `headroom` est un **adaptateur**, pas une vérité. En gravant l'**interface** maintenant, l'appelant (HR04, `agentloop.Drive`) dépend du **contrat**, jamais d'un outil concret. HR03 branchera `headroom` comme un second `ContextCompressor` sans réécrire une ligne d'appelant ; un futur ADR pourra le remplacer. C'est la discipline « `replaceable` derrière un port » (CLAUDE.md §3).
+</Accordion>
+<Accordion title="Pourquoi graver le lossless, et pas le mode lossy (plus de gain) ?">
+Le lossless est le **contrat le plus fort** : `Retrieve(Compress(x)) == x` exactement. Le grand gain (60–95 %, le mode lossy) **change** la nature du contrat — il faut un **miroir de fidélité** qui prouve que les faits porteurs survivent malgré la perte. On porte ce mode **derrière le même port** en HR03/HR04, encadré ; HR02 ne grave que l'invariant qui ne dépend d'aucun outil. *OpenQuestion OQ-HR02-lossy.*
+</Accordion>
+<Accordion title="Pourquoi le handle porte-t-il son propre texte ?">
+Pour que `Retrieve(handle)` soit **auto-suffisant** : un seul argument, et il ré-étend. Le handle est l'**état réversible complet** (texte compacté + dictionnaire), il ne dépend de rien d'autre. C'est aussi ce qui rend le **point fixe** propre à tester : `Compress(Retrieve(h))` redonne `h`.
+</Accordion>
+</AccordionGroup>
+
+## Méta-méta — la loi que ça sert
+
+**Determinism-first appliqué à une compression.** La compression de l'entrée LLM est précisément le genre d'opération qu'on pourrait être tenté de confier à un agent (« résume ce contexte »). HR02 refuse : la fonction `Compress`/`Retrieve` est **pure, déterministe, byte-lossless**, et c'est **elle** qui fait autorité. L'outil `headroom` (qui peut comporter de la summarization lossy) est l'**exception gatée** — branché derrière le port, jamais autoritaire, et son verdict de gate devra rester **invariant à la compression** (HR03). Le miroir de reproductibilité (100× même entrée → même sortie) **prouve** qu'aucun LLM ne s'est glissé dans le contrat.
+
+**Le mur tient sans rien dire.** Le port est **sous la ligne** : il lit le prompt, n'écrit aucune vérité (`kernel`/`mirrors`/`fitness`), n'a ni I/O ni LLM dans le contrat. Il **étend la marge sous** le cap budget ; il ne **relève jamais** le plafond. La compression n'est pas une porte dérobée vers le truth-store : c'est un adaptateur de lecture, certifié par sa property.
+
+<Note>OpenQuestion **OQ-HR02-linear** : le MCP `linear-server` n'était pas authentifié dans la session de build (OAuth requis) ; l'issue `HR02 · …` n'a pas pu être déplacée par l'agent (CLAUDE.md §11, best-effort) — à faire au prochain run authentifié.</Note>

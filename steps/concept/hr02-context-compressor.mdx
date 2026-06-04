@@ -1,0 +1,41 @@
+---
+title: "HR02 · Le port ContextCompressor — comprimer l'entrée du LLM, derrière une interface remplaçable"
+description: "HR02 grave le CONTRAT de la compression de contexte : le port Go ContextCompressor{Compress(pack)→(compacted,handle); Retrieve(handle)→original}, dans back/runtime/context. C'est un outil REPLACEABLE (ADR 0035) — l'outil concret (chopratejas/headroom, branché en HR03) vit derrière l'interface, jamais figé. Le contrat porteur, prouvé par un miroir property : Retrieve(Compress(x)) == l'original (réversibilité CCR) ; le handle est un point fixe déterministe ; les faits porteurs survivent. Déterministe et byte-lossless, pur, sous la ligne (le mur) : le port lit le prompt, n'écrit aucune vérité. Il étend la marge SOUS le cap budget, ne le relève jamais."
+keywords: ["aidos", "krd", "compression de contexte", "ContextCompressor", "port", "replaceable", "ADR 0035", "Compress", "Retrieve", "handle", "compacted", "byte-lossless", "réversible", "CCR", "faits porteurs", "déterminisme", "le mur", "ContextPack", "transcript", "plafond budget", "headroom", "HR01", "HR02", "HR03", "miroir property", "idempotence"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → HR02](/steps/internals/hr02-context-compressor).</Note>
+
+## En une phrase
+
+HR02 transforme le résultat du spike HR01 en **contrat** : un **port** Go `ContextCompressor` à deux opérations — `Compress(prompt) → (compacted, handle)` et `Retrieve(handle) → l'original` — avec une implémentation de référence **déterministe et byte-lossless**, et un **miroir property** qui épingle la loi `Retrieve(Compress(x)) == l'original`.
+
+## Le problème que ça résout
+
+HR01 a prouvé qu'on **peut** comprimer l'entrée du LLM sans perdre un fait porteur, de façon déterministe. Mais le spike est **jetable** : son code ne gradue pas. Il faut maintenant un **point d'ancrage stable** que la boucle agent pourra appeler (HR04) et derrière lequel on pourra brancher le vrai outil (`headroom`, HR03) — **sans réécrire l'appelant**. Ce point d'ancrage, c'est le **port** : une interface, pas un outil.
+
+## Les idées-clés
+
+<Field name="Un port, pas un outil" type="ADR 0035 — REPLACEABLE">
+  La compression de contexte est un slot **`replaceable`** (CLAUDE.md §3). L'outil concret (`headroom` ou un autre) se branche **derrière** l'interface `ContextCompressor` ; on le remplace par un ADR, jamais en touchant l'appelant. C'est un **adaptateur**, pas une vérité.
+</Field>
+
+<Field name="Deux opérations, un contrat porteur" type="Compress / Retrieve">
+  `Compress(prompt) → (compacted, handle)` compacte l'entrée et rend l'**état réversible** (le dictionnaire CCR). `Retrieve(handle) → l'original` ré-étend. L'identité du contrat : **`Retrieve(Compress(x)) == l'original`** (à la normalisation des espaces près).
+</Field>
+
+<Field name="Byte-lossless d'abord" type="le contrat le plus fort">
+  HR02 grave l'invariant **lossless** — le plus fort : aucune perte au niveau octet. Le mode lossy (gain plus fort) viendra **derrière le même port** en HR03/HR04, encadré d'un miroir de fidélité. Le contrat ne dépend pas de l'outil.
+</Field>
+
+<Field name="Sous la ligne — lecture seule" type="le mur">
+  Le port est **pur** : il lit le prompt qu'on lui passe et rend un compacted + un handle. Il n'écrit **aucune** vérité (`kernel` / `mirrors` / `fitness`), n'a ni DB, ni horloge, ni rng, ni LLM dans le contrat. Il **étend la marge sous** le cap budget ; il ne **relève jamais** le plafond.
+</Field>
+
+## Ce que vous voyez à l'écran
+
+La route Workbench **/context-compression** rend le port **actionnable** : vous gardez (ou collez) un prompt d'entrée LLM, vous cliquez **Compresser** — le texte compacté, le taux de réduction et le **dictionnaire réversible** (handle) apparaissent ; vous cliquez **Récupérer** — `Retrieve` ré-étend le handle, et un badge **« lossless »** prouve à l'écran que le round-trip rend l'original. Tout est calculé par un **jumeau pur** (déterministe, sans LLM), le même que le port Go.
+
+## Et après
+
+HR03 branche `headroom` (via son MCP) comme **second adaptateur** du même port et prouve le **miroir d'invariance** : le verdict du gate reste **invariant à la compression**. HR04 câble le compresseur dans `agentloop.Drive` avant `GenerateAction` et l'intègre au budget — le même verdict d'actions, moins de tokens, le cap jamais relevé.

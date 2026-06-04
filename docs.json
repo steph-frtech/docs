@@ -233,7 +233,9 @@
               "steps/concept/ba31-incident-to-idea",
               "steps/internals/ba31-incident-to-idea",
               "steps/concept/hr01-spike-headroom",
-              "steps/internals/hr01-spike-headroom"
+              "steps/internals/hr01-spike-headroom",
+              "steps/concept/hr02-context-compressor",
+              "steps/internals/hr02-context-compressor"
             ]
           }
         ]
