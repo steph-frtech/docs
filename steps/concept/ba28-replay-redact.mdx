@@ -1,0 +1,42 @@
+---
+title: "BA28 · Rejouer un run et caviarder son transcript — vue depuis l'écran"
+description: "BA28 rend un run d'agent REJOUABLE à l'identique (le replay re-dérive exactement le même run) et son transcript SÛR à conserver : avant d'être enregistré, le transcript est caviardé pour qu'aucun secret n'y figure en clair. Le journal des runs n'est pas un coffre à secrets. Vue concept, sans code."
+keywords: ["aidos", "krd", "build-agent", "BA28", "replay", "rejouer", "reproductibilité", "transcript", "rédaction", "caviardage", "secret", "redact", "ledger", "journal", "déterminisme", "le mur", "gap H1"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → BA28](/steps/internals/ba28-replay-redact).</Note>
+
+## L'idée en une phrase
+
+Un run d'agent peut être **rejoué à l'identique** depuis ce qu'AIDOS en a enregistré — et le journal qui le conserve **ne garde jamais un secret en clair**.
+
+## Pourquoi rejouer un run
+
+Quand un agent code votre app, AIDOS enregistre ce qu'il a fait : ses actions, le résultat (vert, rouge, abandonné), le budget consommé, le contexte qu'on lui a donné. **Rejouer** ce run, c'est le **re-dériver exactement** depuis ces ingrédients enregistrés — sans rappeler le modèle. Si le replay redonne **le même identifiant** que le run d'origine, vous avez la preuve que l'enregistrement est fidèle et reproductible. Si l'identifiant diffère, c'est qu'un champ a été altéré après coup : le replay devient un **signal d'intégrité**.
+
+C'est la même discipline que partout dans AIDOS : la reproductibilité « même entrée → même sortie », descendue jusqu'au grain d'un run d'agent.
+
+## Le journal n'est pas un coffre à secrets
+
+Le transcript d'un run — le prompt système plus le contexte que l'agent a reçu — peut contenir le **code, l'environnement et les secrets** de votre app : une clé d'API, une URL de base de données avec mot de passe, une clé privée. Conserver tout cela tel quel ferait du journal des runs un **coffre à secrets** durable, exactement ce qu'il ne faut pas.
+
+BA28 **caviarde** le transcript **avant** de l'enregistrer : chaque motif de secret connu est remplacé par `[REDACTED]`. Un secret présent dans l'entrée **n'apparaît jamais en clair** dans ce qui est conservé. Le replay, lui, **ré-injecte depuis la source confinée** (le contexte réel), pas depuis le journal — le journal ne porte que la forme caviardée.
+
+## Caviarder, c'est du code, pas un jugement
+
+Le caviardage **ne demande pas à un modèle** « trouve les secrets ». C'est une **substitution déterministe** sur un **jeu fermé et déclaré** de motifs : clés Anthropic, clés AWS, jetons GitHub, en-têtes de clé privée, chaînes de connexion avec mot de passe. Même entrée → même sortie, et re-caviarder un texte déjà caviardé n'y change rien. Un texte propre, sans aucun secret, ressort **inchangé** — on ne touche que les formes de secret déclarées.
+
+## Ce que vous voyez à l'écran
+
+Le panneau « Replay & rédaction » de l'écran des agents vous laisse, en un clic (« Rédiger & rejouer ») :
+
+- voir un **transcript brut** qui contenait un secret (une URL de base de données avec mot de passe) ;
+- voir le **transcript caviardé** où ce secret est devenu `[REDACTED]` ;
+- constater le badge **« aucun secret en clair »** (aucune fuite verbatim) ;
+- constater le badge **« replay identique »** — le run se re-dérive vers le même identifiant.
+
+Tout cela se fait **sous la ligne** : un run est de la télémétrie, jamais une vérité. La rédaction tourne **avant** tout affichage ou enregistrement.
+
+## Ce que ça vous garantit
+
+Vos runs sont **reproductibles** : on peut les rejouer à l'identique pour auditer ce qui s'est passé, sans rappeler le modèle ni dépendre d'un journal volumineux. Et vos **secrets ne fuient pas** : le journal des runs ne conserve aucune valeur sensible en clair, parce qu'elle est caviardée avant d'y entrer. Le tout est **déterministe** — la même rédaction, la même re-dérivation, à chaque fois.
