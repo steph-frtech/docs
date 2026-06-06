@@ -1,0 +1,51 @@
+---
+title: "EL19 · le wizard Compound du besoin (tout par écran)"
+description: "EL19 est la route Workbench /compound-besoin : le wizard tunnel niveau par niveau (escalier vertical) où l'utilisateur EXPLIQUE son app rung par rung, dans l'ordre de la verticale KRD §23. Une étape N+1 est VERROUILLÉE tant que CanDescend(N) n'est pas enough (la gate de forçage EL07 rendue visible) ; un niveau qui parse mais ne contraint rien (anti-vacuité) ne débloque pas. La vue /compound-besoin/doc génère le document d'exigences déterministe (EmitRequirementsDoc) — même BesoinGraph → doc byte-identique. « Projeter vers idea-intake » fait surgir les vraies Ideas (ordre topologique, NoEmit exclus) ; « Ouvrir comme goals » est refusé tant que le graphe n'est pas complet (gate EL09). Above le mur : l'écran PROPOSE, n'écrit jamais le Kernel."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "EL19", "wizard", "tunnel", "escalier vertical", "/compound-besoin", "/compound-besoin/doc", "CanDescend", "anti-vacuité", "anti-gaming", "ShrinkOptionSpace", "verticale KRD §23", "EmitRequirementsDoc", "document d'exigences", "requirements doc", "graph_hash", "Projeter", "idea-intake", "Ouvrir comme goals", "EL09", "NoEmit", "le mur", "HasMirror", "Workbench", "thémé", "bilingue", "déterminisme", "tout par écran"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL19](/steps/internals/el19-wizard).</Note>
+
+## En une phrase
+
+EL19 est l'**écran** où vous expliquez votre app : un **tunnel niveau par niveau** (product → journey → view → control → action → operation → entity) qui ne s'ouvre **rung par rung** que lorsque chaque niveau est **suffisamment déclaré**. Au bout, il **projette** votre besoin en un backlog d'Ideas ordonné et un **document d'exigences** que l'app-builder consomme.
+
+## Le problème que ça résout
+
+AIDOS interdit `prompt → code` : on ne jette pas une idée floue dans une boîte de texte vide. Mais une règle abstraite ne suffit pas — il faut un **écran** qui la rende vivante. EL19 est cet écran. Au lieu d'un champ libre, vous descendez un **escalier** : chaque marche est un niveau de la verticale KRD, et la marche suivante reste **verrouillée** tant que la précédente n'est pas *right-sized*.
+
+C'est le **forçage rendu visible**. Vous voyez, en direct :
+- ce qui **manque** pour franchir le niveau courant (`missing[]`) ;
+- les **OpenQuestions portées** (un manque vers un niveau plus profond ne bloque pas — il est noté) ;
+- les **ancres** déjà figées au-dessus (le compound en profondeur : un niveau résolu contraint celui d'en dessous, et vous ne pouvez pas le contredire en silence) ;
+- l'entier **ShrinkOptionSpace** : combien ce niveau **rétrécit** l'espace d'options du niveau inférieur (le compound *prouvé*, pas postulé).
+
+## Les idées-clés
+
+<Field name="L'escalier verrouillé (le forçage visible)" type="EL07">
+  Une étape N+1 est **verrouillée** tant que `CanDescend(N)` n'est pas `enough`. Le verrou lit le verdict **pur** EL07 — l'écran ne ré-implémente jamais la gate. Vous franchissez un niveau en le complétant, jamais en le déclarant « fini ».
+</Field>
+
+<Field name="L'anti-vacuité (anti-gaming)" type="ShrinkOptionSpace > 0">
+  Un scénario qui **parse mais reste vide** (un corps non-contraignant) ne débloque **pas** la suite. Le bouton « Rendre le scénario vide » le montre : product reste `not_enough` parce qu'il ne rétrécit rien. On ne triche pas la gate avec une coquille.
+</Field>
+
+<Field name="Projeter vers idea-intake (la porte légale)" type="EL16">
+  Le bouton « Projeter » fait surgir les **vraies Ideas** — une par rung **mappant** résolu, dans l'ordre **topologique**. Les rungs **NoEmit** (`journey`/`view`) seedent les ancres mais **n'émettent rien** : le compteur les exclut. Provenance humaine, `HasMirror` toujours false.
+</Field>
+
+<Field name="Le document d'exigences (byte-identique)" type="EmitRequirementsDoc">
+  La vue `/compound-besoin/doc` génère le **requirements doc** : les rungs ordonnés + les métadonnées + les OpenQuestions + le backlog topo-trié, adressés par le `graph_hash`. **Même besoin → mêmes octets** : c'est un rendu pur, jamais un LLM.
+</Field>
+
+<Field name="Ouvrir comme goals (la gate de complétude)" type="EL09">
+  « Ouvrir comme goals » est **refusé** tant que le BesoinGraph n'est pas complet : un niveau résolu sans son miroir-de-niveau est un **monstre** (loi de complétude EL09). On n'ouvre les goals que sur un besoin entièrement descendu.
+</Field>
+
+## Ce que ça change pour vous
+
+Vous n'écrivez plus un prompt — vous **descendez un escalier**. Quand vous arrivez en bas, votre besoin est **structuré, ordonné, content-adressé, déjà trié par dépendance architecturale**, chaque exigence typée et portant sa forme de miroir attendue. C'est exactement ce que l'app-builder reçoit en entrée.
+
+## Ce que ça ne change pas
+
+Le **mur tient**. L'écran **propose** des Ideas via la porte légale `idea-intake` (provenance humaine) ; il n'écrit **jamais** le Kernel, les mirrors ou la fitness. La promotion en vérité reste l'écriture du miroir via `/goal` — elle appartient à l'app-builder. *Tout se fait par écran*, mais rien ne franchit la ligne.

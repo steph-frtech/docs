@@ -319,7 +319,9 @@
               "steps/concept/el17-red-backlog",
               "steps/internals/el17-red-backlog",
               "steps/concept/el18-capitalisation",
-              "steps/internals/el18-capitalisation"
+              "steps/internals/el18-capitalisation",
+              "steps/concept/el19-wizard",
+              "steps/internals/el19-wizard"
             ]
           }
         ]

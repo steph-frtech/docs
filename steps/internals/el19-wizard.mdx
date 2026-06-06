@@ -1,0 +1,61 @@
+---
+title: "EL19 · wizard — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals d'EL19 : les routes Workbench /compound-besoin (le wizard tunnel niveau par niveau) + /compound-besoin/doc (le générateur du document d'exigences). Le wizard (CompoundBesoinWizard.tsx) pilote les twins TS déterministes (besoin-candescend EL07, besoin-cascade EL08, besoin-completeness EL09, emit-ideas EL16, red-backlog EL17) — byte-équivalents à back/runtime/besoin ; une étape N+1 est verrouillée tant que canDescend(N).enough est faux. EmitRequirementsDoc (lib/besoin-requirements-doc.ts) projette déterministiquement le BesoinGraph en doc + backlog topo-trié (même graphe → octets identiques) en COMPOSANT emitIdeas/redBacklog/levelMirrorForm/levelToProposes. Miroir : reproductibilité vitest+fast-check (besoin-requirements-doc.test.ts) + e2e Playwright (compound-besoin-wizard.spec.ts). Above le mur : PROPOSE, n'écrit jamais le Kernel (HasMirror false). Thémé (ADR 0010), bilingue FR-default (ADR 0011). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "EL19", "wizard", "/compound-besoin", "/compound-besoin/doc", "CompoundBesoinWizard", "RequirementsDocPanel", "lib/besoin-requirements-doc.ts", "EmitRequirementsDoc", "canDescend", "EL07", "anchorsAbove", "EL08", "shrinkOptionSpace", "besoinCompleteness", "EL09", "emitIdeas", "EL16", "redBacklog", "EL17", "levelMirrorForm", "EL10", "levelToProposes", "EL05", "NoEmit", "graph_hash", "le mur", "HasMirror", "idea-intake", "next-intl", "ADR 0010", "ADR 0011", "ui-completeness", "vitest", "fast-check", "Playwright", "déterminisme", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — les internals complets. La page concept est [ici](/steps/concept/el19-wizard).</Note>
+
+## Implémentation
+
+EL19 livre **deux routes Workbench** + **un projecteur déterministe**, tous au-dessus du mur :
+
+### `front/web/app/compound-besoin/page.tsx` + `CompoundBesoinWizard.tsx`
+
+Le **wizard tunnel** (escalier vertical) rend une étape par rung SOURCE (`product → … → entity`). L'état est un `RungState[]` (`completed`, `vacant`, `metaComplete`). Le cœur :
+
+- **Le verdict par rung est le twin PUR** `canDescend(nodeInputOf(rs), level, metaComplete)` (`lib/besoin-candescend.ts`, EL07). Le wizard **ne ré-implémente jamais la gate** — il appelle le twin byte-équivalent à `back/runtime/besoin/candescend.go`.
+- **Le verrou d'étape** : `unlocked(idx)` = `idx === 0 || verdicts[rungs[idx-1].level].enough`. Une étape N+1 ne s'ouvre que si N est `enough`.
+- **L'anti-gaming** : « Rendre le scénario vide » pose un `VACANT_BODY` (`scenarios: []`) — il parse comme un tableau mais reste vide → `checkBody` le rejette → `not_enough` → la suite reste verrouillée.
+- **Les ancres** : `anchorsAbove(cascadeNodes, level)` (`lib/besoin-cascade.ts`, EL08) en lecture seule ; le statut d'un nœud cascade est **dérivé du verdict** (`enough → resolved`), donc une ancre reflète la gate, pas un drapeau.
+- **Le compounding** : `shrinkFor(rs)` calcule l'entier `ShrinkOptionSpace` sur le set énumérable déclaré (EL06) — affiché par rung.
+- **Projeter** : `project()` appelle `emitRequirementsDoc(nodes, edges, graphHash)` → les Ideas surgissent (ordre topologique, NoEmit exclus). Le compteur `doc.ideaCount` exclut les rungs NoEmit.
+- **Ouvrir comme goals** : `openGoals()` appelle `besoinCompleteness` (`lib/besoin-completeness.ts`, EL09). Tant que chaque rung SOURCE n'est pas `enough`, le graphe est traité comme incomplet (aucun miroir-de-niveau) → un monstre `NEED_LEVEL_WITHOUT_MIRROR` → `data-ok="false"`.
+
+La route **réutilise** la coquille `/first-app` (l'idiome escalier + action-par-étape) et garde le panneau d'interview EL13 **en dessous** (additif, non destructif).
+
+### `front/web/app/compound-besoin/doc/page.tsx` + `RequirementsDocPanel.tsx`
+
+Le **générateur du doc** exécute `emitRequirementsDoc` sur un BesoinGraph démo (`product` + `journey` + `view` + `entity` — journey/view NoEmit) et rend le markdown déterministe + le backlog. Le `graph_hash` est stable (`el19demographstable`) → re-générer produit des **octets identiques**.
+
+### `lib/besoin-requirements-doc.ts` — `EmitRequirementsDoc`
+
+`emitRequirementsDoc(nodes, edges, graphHash) → RequirementsDoc` est une **fonction pure** qui **COMPOSE** les twins autoritatifs, sans en ré-implémenter aucun :
+- les rungs en ordre de descente via `allLevels()` (grammaire EL02) ;
+- la forme de miroir annexée via `levelMirrorForm` (EL10) ;
+- le backlog topo-trié via `redBacklog` (EL17) ;
+- le compteur d'Ideas via `emitCount` (EL16, NoEmit exclus) ;
+- le `proposes`/le flag d'émission via `levelToProposes` (EL05).
+
+`renderMarkdown` est un **template fixe sur des données triées** — pas de clock, pas de rng, pas de LLM → même graphe → mêmes octets.
+
+### Le miroir
+
+- **Reproductibilité** : `lib/besoin-requirements-doc.test.ts` (vitest + fast-check) — le doc est byte-identique pour le même graphe, le compteur d'Ideas exclut les NoEmit, une propriété borne le compteur par le nombre de rungs résolus.
+- **e2e** : `tests/e2e/compound-besoin-wizard.spec.ts` (Playwright) — l'étape journey verrouillée tant que product n'est pas enough ; un scénario vide ne débloque pas (anti-gaming) ; « Projeter » fait surgir les Ideas (NoEmit exclus) ; « Ouvrir comme goals » refusé sur un graphe incomplet ; le doc byte-identique re-généré.
+
+## Méta
+
+**Pourquoi un écran, et pourquoi un escalier ?** Le mandat §6.7 « tout se fait par écran » exige que toute capacité soit **atteignable ET exécutable** depuis une UI (`ui-completeness` : aucune capacité headless). EL19 est la **face visible** de tout le track : les twins déterministes (EL02→EL18) sont la machine, le wizard est le **cockpit**. L'escalier n'est pas décoratif — il **incarne** le forçage : on ne peut littéralement pas cliquer sur la marche suivante tant que la gate n'est pas verte. Le forçage cesse d'être une règle de prose pour devenir une **propriété de l'interface**.
+
+**Pourquoi le front ne ré-implémente jamais la gate.** Le verdict `enough` est calculé par `canDescend` (le twin TS), lui-même byte-équivalent au Go autoritatif. Si le front avait sa propre logique de gate, on aurait **deux vérités** — et tôt ou tard elles divergent (le classique « la validation client dit oui, le serveur dit non »). En appelant le **même** twin, l'écran est une **projection** de la gate, jamais une seconde implémentation.
+
+**Pourquoi le doc est une fonction pure.** Un requirements doc généré par un LLM serait non reproductible et non auditable. Ici `EmitRequirementsDoc` est déterministe : le `graph_hash` adresse le contenu, et le même graphe rend les mêmes octets. C'est `determinism-first` (§6/§8) appliqué à un artefact qu'on aurait *spontanément* confié à un LLM — et qu'on refuse de lui confier.
+
+## Méta-méta
+
+**Le mur tient même quand tout se fait par écran.** Le risque d'un cockpit complet, c'est qu'il devienne une **porte de derrière** : un bouton qui écrit la vérité « parce que c'est pratique ». EL19 est construit pour que ce soit **impossible**. Les deux seuls boutons qui sortent du graphe — « Projeter » et « Ouvrir comme goals » — sont des **propositions** : `emitRequirementsDoc` produit des Ideas `HasMirror=false`, et « Ouvrir comme goals » ne fait que **calculer** un verdict de complétude, il n'ouvre aucun goal en écrivant quoi que ce soit. La promotion reste l'écriture du miroir via `/goal`, sous la ligne, hors de portée de l'agent.
+
+**EL19 ferme le track EL.** Le BesoinGraph (EL03) est la verticale KRD §23 matérialisée ; la gate (EL07) la rend franchissable rung par rung ; l'émetteur (EL16) et le tri topo (EL17) la projettent en backlog ; la capitalisation (EL18) la fait compound dans le temps. EL19 **expose** tout cela à l'humain — et c'est le hand-off net vers l'app-builder S64 : au lieu d'une boîte de texte vide, S64 reçoit un besoin déjà descendu, ordonné, typé, avec sa forme de miroir attendue. La boucle anti-`prompt → code` est **bouclée**, et elle est **cliquable**.
+
+**La self-similarité.** Le wizard EL19 est, lui-même, une **vue** au sens de la grammaire (`view` : but + zones + données) dont les **controls** (`control` : les boutons « Compléter », « Projeter ») déclenchent des **actions** (`action` : `project`, `openGoals`) qui invoquent des **operations** (les twins purs). AIDOS construit ses propres écrans avec la même verticale qu'il force l'utilisateur à descendre. L'OS se code avec la méthode qu'il impose — le cliquet s'applique à lui-même.
