@@ -275,7 +275,9 @@
               "steps/concept/ce04-behavior-expansion",
               "steps/internals/ce04-behavior-expansion",
               "steps/concept/ce05-reuse-router",
-              "steps/internals/ce05-reuse-router"
+              "steps/internals/ce05-reuse-router",
+              "steps/concept/mk01-spike-markitdown",
+              "steps/internals/mk01-spike-markitdown"
             ]
           }
         ]

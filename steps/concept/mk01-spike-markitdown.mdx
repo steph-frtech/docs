@@ -1,0 +1,59 @@
+---
+title: "MK01 · Spike markitdown — un document réel devient du markdown, puis une idée draft"
+description: "MK01 est un SPIKE de nécessité (KRD §84 : cliquet OFF, rigueur T0, jetable) confiné à /spike/markitdown/. Il sonde la frontière d'ingestion : convertir un document réel (une spec fonctionnelle de checkout) en markdown préserve-t-il ses faits porteurs (fidélité) ET cette conversion est-elle idempotente (mêmes octets → même markdown, et stable en ré-ingestion) ? Un convertisseur HTML→markdown déterministe, en Go stdlib pur (hors-ligne), est mesuré sur un vrai document. Verdict calculé, jamais déclaré, sans LLM : GO — 13/13 faits porteurs préservés (fidélité 100 %), conversion byte-déterministe (hash dfac5f53…), stable en ré-ingestion (100 %), et mappée vers une idée DRAFT qui respecte le mur (provenance conservée, jamais d'écriture kernel). Si le spike avait perdu des faits ou n'avait pas été idempotent, le sujet MARKITDOWN se serait arrêté là."
+keywords: ["aidos", "krd", "spike", "markitdown", "ingestion", "frontière d'ingestion", "document", "markdown", "PDF", "DOCX", "conversion", "fidélité", "idempotence", "déterminisme", "faits porteurs", "carrier facts", "idée draft", "idea-intake", "idea_capture", "provenance", "le mur", "candidate-truth", "go/no-go", "spike-gate", "/spike", "cliquet OFF", "rigueur T0", "DocConverter", "MK01", "MK02", "MK03", "S27", "§84", "OpenQuestion"]
+---
+
+<Note>Côté concept — aucune ligne de code graduée (un spike est **jetable**). Pour le détail d'implémentation, voir [Pour moi → MK01](/steps/internals/mk01-spike-markitdown).</Note>
+
+## En une phrase
+
+MK01 est un **spike de nécessité** (KRD §84 : **cliquet OFF, rigueur T0, jetable**) confiné à `/spike/markitdown/`. Il répond à une seule question avant qu'on dépense le moindre miroir : **convertir un document réel en markdown préserve-t-il ses faits porteurs (fidélité) ET cette conversion est-elle idempotente — assez pour devenir un miroir d'idempotence à MK02 et nourrir l'idée draft à MK03 sans perte silencieuse ?** Verdict **calculé, jamais déclaré** : **GO**.
+
+## Le problème que ça résout
+
+Un humain dépose souvent une **spec existante** (un PDF, un DOCX, une page HTML) en disant « voilà ce que je veux ». AIDOS ne code jamais directement depuis ce document : il doit d'abord le faire entrer par la **frontière d'ingestion** — `microsoft/markitdown` convertit PDF/DOCX/PPTX/XLSX/HTML/image(OCR)/audio/YouTube → markdown — puis le proposer comme une **idée** (idea-intake), **jamais** comme une vérité. Mais deux risques guettent : une conversion qui **perd des faits porteurs** (le total panier, un événement émis, une référence croisée) est une **perte de données silencieuse**, le pire défaut d'une ingestion ; et une conversion **non idempotente** (le même fichier donne deux markdowns différents) rendrait impossible le **miroir d'idempotence** que MK02 doit poser. Le spike doit donc **mesurer** ces deux propriétés sur un cas réel, pas les espérer.
+
+## Les idées-clés
+
+<Field name="Un spike, pas une fonctionnalité" type="KRD §84 — cliquet OFF">
+  MK01 n'ajoute **aucune** vérité au noyau, **aucun** miroir, **aucun** code réel. Tout vit sous `/spike/markitdown/` et sera **jeté** ; `/harvest` proposera, `/goal` figera, le vrai port `DocConverter` sera **réécrit** à MK02+. Le mur reste intact : zéro écriture `kernel` / `mirrors` / `fitness`.
+</Field>
+
+<Field name="La frontière d'ingestion, jamais le code" type="roadmap MARKITDOWN">
+  markitdown sert **uniquement** à faire entrer un document → markdown → idée. Il n'est **PAS** un chemin vers le noyau et **PAS** le chemin des émetteurs/AST (ceux-là possèdent le code). C'est une frontière d'**entrée**, pas de génération.
+</Field>
+
+<Field name="Fidélité : tous les faits porteurs survivent" type="plancher 100 %">
+  Sur un vrai document, **13 faits porteurs déclarés** (le titre, 3 invariants de panier, le span de code `line.qty * line.unit_price`, 2 étapes du workflow, 2 événements émis `OrderPlaced` / `PaymentDeclined`, 2 données du tableau de prix, la référence croisée `PaymentGateway` **avec son lien**) doivent **tous** se retrouver dans le markdown. Mesuré **13/13 = 100 %**.
+</Field>
+
+<Field name="Idempotence, deux sens" type="determinism-first">
+  (a) **Déterminisme** : `ToMarkdown(octets)` redonne le **même** markdown byte-pour-byte (hash `dfac5f53…`). (b) **Stabilité en ré-ingestion** : repasser le markdown produit dans la frontière préserve **100 %** des faits porteurs — aucune érosion progressive. C'est exactement la propriété que le miroir de MK02 figera.
+</Field>
+
+<Field name="Le résultat est une idée DRAFT, pas une vérité" type="le mur">
+  La conversion produit une **idée draft** : `status="draft"`, provenance conservée (« document ingéré : checkout-spec.html »), source **et** markdown content-adressés. C'est une **candidate-truth** que l'humain pourra figer plus tard via idée → miroir → `/goal`. L'ingestion **propose**, elle ne fige rien.
+</Field>
+
+## Ce que le spike a mesuré (déterministe, sans LLM)
+
+| propriété | valeur | garde |
+|---|---|---|
+| **fidélité** | **13/13 (100,0 %)** | ≥ plancher 100 % ✓ |
+| **déterministe** | true (byte-pour-byte, hash `dfac5f53…`) | idempotence (a) ✓ |
+| **stable en ré-ingestion** | true (100,0 %) | idempotence (b) ✓ |
+| **mur respecté** | true (`status=draft`, provenance + hashes) | candidate-truth ✓ |
+| **reproductible** | true (100×, aucune dérive) | determinism-first ✓ |
+
+## Verdict : GO
+
+Sur un **document réel** (une spec fonctionnelle de checkout), la frontière convertit HTML → markdown en préservant **tous** les faits porteurs (titres, invariants, étapes, événements, données du tableau, spans de code, la référence croisée **et** son lien), est **idempotente** dans les deux sens, et produit une **idée draft propre** qui honore le mur. Un chemin d'ingestion déterministe et idempotent **existe** → on poursuit vers **MK02** (skill + port `DocConverter{ToMarkdown(bytes,mime)→md}` + le **miroir property d'idempotence** ; ADR « frontière d'ingestion replaceable »).
+
+## Les questions restées ouvertes (OpenQuestions)
+
+- **L'adaptateur réel.** Ce probe **modélise** la frontière avec un convertisseur HTML→markdown déterministe en Go stdlib pur ; il **n'appelle pas** `microsoft/markitdown` (une lib Python, et cet environnement est **hors-ligne** : `pip install markitdown` échoue/expire). markitdown n'est **pas garanti** byte-idempotent selon les versions/OCR/audio. **MK02** branche le vrai adaptateur derrière le port et **re-mesure** l'idempotence — c'est le gap porteur : le GO porte sur la **forme** de la capacité, prouvée idempotente ; l'idempotence de l'outil concret est re-prouvée à MK02 par le miroir property.
+- **Les autres formats.** Le spike prouve **HTML**, le seul format purement parsable hors-ligne en Go stdlib. PDF/DOCX/PPTX/XLSX/image(OCR)/audio sont le métier de markitdown et **ne sont pas** exercés ici ; leur fidélité (tableaux XLSX, confiance OCR sur scans) reste à prouver à MK02 sur de vrais fixtures de chaque type.
+- **La liste des faits porteurs est déclarée, pas apprise.** La fidélité se mesure contre 13 carriers **déclarés à la main** pour CE document (honnête, au-dessus de la ligne). Une ingestion générale ne peut pas énumérer les faits d'un doc inconnu ; le miroir de MK02 teste l'**idempotence** (même entrée → même sortie), qui ne demande aucune liste, tandis que la fidélité-à-la-substance reste une vérification d'acceptation par fixture, jamais un juge automatique.
+
+<Note>Si ce spike avait perdu des faits porteurs ou n'avait pas été idempotent, le sujet MARKITDOWN se serait **arrêté là** — c'est le rôle d'un spike-gate : refuser à bon escient (« si nécessaire »).</Note>

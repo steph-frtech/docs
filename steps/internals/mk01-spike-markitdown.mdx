@@ -1,0 +1,51 @@
+---
+title: "MK01 (interne) · Mesurer l'ingestion dans /spike/markitdown/ — Implémentation · Méta · Méta-méta"
+description: "Journal interne du spike MK01. Module Go isolé aidos.spike/markitdown (n'importe pas back/), confiné à /spike/markitdown/ (cliquet OFF, T0, jetable). Modélise la frontière d'ingestion avec un convertisseur HTML→markdown DÉTERMINISTE en Go stdlib pur (hors-ligne, sans dépendance) : ToMarkdown(bytes) parse → walk → render ; MeasureFidelity compte les faits porteurs préservés ; MeasureIdempotence asserte le déterminisme byte-pour-byte + la stabilité en ré-ingestion ; ToIdeaDraft produit la forme idée draft (status=draft, provenance, hashes) ; Decide() calcule le verdict go/no-go contre un plancher de fidélité (100 %) + idempotence + mur respecté + reproductibilité. Verdict GO : 13/13 faits porteurs (100 %), byte-déterministe (hash dfac5f53…), stable en ré-ingestion (100 %), idée draft conforme au mur, reproductible 100×. OpenQuestions MK01-1..4."
+keywords: ["aidos", "krd", "spike", "markitdown", "MK01", "ingestion", "ToMarkdown", "DocConverter", "MeasureFidelity", "MeasureIdempotence", "ToIdeaDraft", "Decide", "verdict", "go/no-go", "fidélité", "faits porteurs", "idempotence", "déterminisme", "reproductibilité", "fonction pure", "module isolé", "Go stdlib", "hors-ligne", "/spike/markitdown", "idea-intake", "idea_capture", "le mur", "candidate-truth", "provenance", "S27", "§84", "OpenQuestion", "spike-gate"]
+---
+
+<Info>Page **« Pour moi »** — le journal de bord interne, tout y est. Concept lisible : [Pour les futurs utilisateurs → MK01](/steps/concept/mk01-spike-markitdown).</Info>
+
+## Implémentation
+
+**Où.** Tout sous `/spike/markitdown/` — un **module Go isolé** (`module aidos.spike/markitdown`, `go.mod` propre) qui **n'importe pas** `back/`. C'est volontaire : un spike est **jetable** (KRD §84) ; rien ne doit pouvoir graduer par inadvertance, et le module réel n'est pas pollué. **stdlib uniquement, par décision** : le probe doit tourner **hors-ligne** et **déterministe** ; le vrai adaptateur `microsoft/markitdown` est une OpenQuestion câblée au port MK02, jamais ici.
+
+**Le document réel.** `testdata/checkout-spec.html` est une **vraie** spec fonctionnelle de checkout en HTML — avec du *chrome* à jeter (un `<script>` d'analytics, un `<style>`, une `<nav>` fil d'Ariane, un `<footer>` copyright) et de la **substance** à garder (titres, invariants en liste, étapes en liste ordonnée, un tableau de prix, des spans `<code>`, du `<strong>`/`<em>`, et une référence croisée `<a href>`).
+
+**Les fichiers.**
+
+- `convert.go` — `ToMarkdown(bytes)`, **fonction pure** : (1) supprime les éléments entiers `script`/`style`/`head` puis le chrome `nav`/`footer` ; (2) applique les conversions **inline d'abord** (`<code>`→`` `…` ``, `<strong>`→`**…**`, `<em>`→`*…*`, `<a href>`→`[texte](url)`) — **avant** tout walk de bloc, sinon un `<code>` dans un `<li>` serait aplati ; (3) convertit les blocs dans un **ordre fixe** (titres `#`, listes `-`/`1.`, tableaux `| … | --- |`) ; (4) déséchappe les entités. Tout en stdlib (`regexp`, `strings`). Déterministe par construction.
+- `measure.go` — `Carriers()` déclare les **13 faits porteurs** (au-dessus de la ligne, jamais appris) ; `MeasureFidelity(md)` compte combien survivent ; `MeasureIdempotence(raw)` asserte les **deux sens** — déterminisme (`ToMarkdown(b) == ToMarkdown(b)`, + hash sha256 du markdown) et **stabilité en ré-ingestion** (ré-emballe le markdown en HTML, reconvertit, et vérifie que la fidélité reste à 100 %) ; `ToIdeaDraft(raw, name)` produit la **forme idée draft** (`Title` dérivé du 1er titre, `Status="draft"`, `Provenance`, `SourceHash`, `MarkdownHash`).
+- `verdict.go` — `Decide()` (avec le document `//go:embed`) calcule le `Verdict` : `FidelityFloor = 1.0` (plancher 100 % : un fait perdu = perte silencieuse), idempotence (déterministe ∧ stable en ré-ingestion), **mur respecté** (`status=draft`, provenance + hashes), et une **reproductibilité** (recalcule et compare les hashes). GO ssi les quatre gardes passent.
+- `convert_test.go` — la **preuve exécutable** de falsifiabilité : `TestSpikeVerdict` (imprime le rapport), `TestConversionIsFaithful`, `TestConversionDropsChrome` (le chrome ne fuit pas), `TestMarkdownStructure` (vraie structure markdown, pas du texte aplati), `TestDeterministic`, `TestReingestionStable`, `TestIdeaDraftRespectsWall`, `TestReproducible` (rejoue 100×).
+- `cmd/verdict/main.go` — imprime mesures + verdict (`go run ./cmd/verdict`).
+
+**Résultat mesuré.** Fidélité **13/13 (100,0 %)** ; déterministe **true** (markdown hash `dfac5f53…`) ; stable en ré-ingestion **true (100,0 %)** ; idée draft `title="Checkout Service Specification"`, `status=draft`, source `a4c28af9…`, md `dfac5f53…` ; mur respecté **true** ; reproductible **true**. **`Decide().Go == true`** : un chemin d'ingestion déterministe et idempotent existe → poursuivre vers MK02.
+
+**Le red→green réel.** Le premier `go test` a échoué (`TestMarkdownStructure`) : le span de code `line.qty * line.unit_price` perdait ses backticks et `**checkout**` n'apparaissait pas, parce que le walk de liste appelait `stripRemainingTags` **avant** la conversion inline, aplatissant le `<code>` interne. Le fix : déplacer `convertInline` **en premier**. Puis vert. C'est la falsifiabilité qui a fait son travail, pas l'espoir.
+
+**Determinism-first.** Le convertisseur est une **fonction pure** : aucun LLM, aucune horloge, aucun rng. La conversion, le **markdown hash** et le verdict sont **reproductibles** (`TestReproducible`, 100×). C'est le **mirror de reproductibilité** imposé par le mandat §6 — *un convertisseur document→markdown est une transformation déterministe (parse → walk → render), pas un « agent de conversion ».*
+
+## Méta
+
+**Pourquoi un spike, et pourquoi maintenant.** « Ingérer un document via markitdown » est une idée **séduisante** mais **fuzzy** : on ne savait pas si la conversion préserverait la **substance** d'un vrai doc, ni surtout si elle serait **idempotente** — la propriété que MK02 doit transformer en miroir property. KRD §84 dit quoi faire d'une intention fuzzy : la **spiker** (cliquet OFF, T0, jetable) jusqu'à la rendre **falsifiable**, *avant* de payer un miroir. La roadmap en fait explicitement un **spike-gate** (« si nécessaire ») : s'il avait perdu des faits ou n'avait pas été idempotent, **le sujet entier s'arrêtait**.
+
+**La décision de conception qui compte : modéliser, pas mocker l'outil absent.** L'outil cible (markitdown) est en Python et indisponible hors-ligne. La tentation paresseuse : « stubber un appel markitdown et déclarer GO ». Refusé : un stub ne **prouve rien** de la propriété qui décide (l'idempotence). On a donc écrit un **vrai convertisseur déterministe** (HTML, le seul format purement parsable en Go stdlib) sur un **vrai document**, et mesuré pour de vrai la fidélité **et** les deux sens d'idempotence. Le GO porte honnêtement sur la **forme** de la capacité — prouvée idempotente sur un cas réel — et l'idempotence de l'outil **concret** est explicitement renvoyée à MK02 (OQ-MK01-1), jamais cachée.
+
+**Le verdict est calculé, jamais déclaré (§8).** `Decide()` ne lit aucune confiance d'agent : il tombe de quatre gardes déclarées (fidélité ∧ idempotence ∧ mur ∧ reproductibilité). Un GO incohérent fait **échouer** `TestSpikeVerdict`. On ne peut pas forcer le verdict.
+
+**Les OpenQuestions (jamais comblées en douce).**
+
+- **OQ-MK01-1** — l'**adaptateur réel** markitdown n'est pas appelé (lib Python, environnement hors-ligne) ; le GO porte sur la forme, MK02 branche le vrai adaptateur et re-mesure l'idempotence (gap porteur).
+- **OQ-MK01-2** — seuls les **HTML** sont prouvés ; PDF/DOCX/PPTX/XLSX/OCR/audio restent à exercer à MK02 sur de vrais fixtures.
+- **OQ-MK01-3** — la liste des **faits porteurs** est déclarée pour ce document ; le miroir MK02 teste l'idempotence (sans liste), la fidélité-substance reste une acceptation par fixture, jamais un juge auto.
+- **OQ-MK01-4** — le **mur** : ici la forme idée draft est **assertée** mais rien n'est persisté ; MK03 l'applique pour de vrai en routant par `idea_capture` d'idea-intake, sans GRANT kernel.
+- **OQ-MK01-5** — **Linear** non authentifié dans cet environnement (seuls `authenticate`/`complete_authentication` exposés) ; l'issue MK01 n'a pu être déplacée par MCP — à régulariser au prochain restart authentifié.
+
+## Méta-méta
+
+**Ce que MK01 dit du système qui se construit lui-même.** Un OS qui veut que l'humain **dépose un document** comme point de départ doit garantir que la **frontière d'entrée** ne perd rien en silence et qu'elle est **idempotente** — sinon la même spec donnerait deux idées différentes, et le déterminisme de toute la boucle aval s'effondrerait. MK01 prouve que cette frontière **peut** être une transformation pure, mesurable, byte-stable. L'ingestion devient un **citoyen de premier ordre** du déterminisme d'AIDOS, pas un trou noir LLM en amont.
+
+**L'ingestion n'enjambe jamais le mur.** Le spike inscrit, dès l'amont, la règle qui gouvernera MK02–MK03 : un document ingéré devient une **idée** (candidate-truth, `status=draft`, provenance conservée) — **jamais** une vérité, **jamais** une écriture kernel/mirrors. L'ingestion **propose** ; idée → miroir → `/goal` → humain **fige**. Et c'est une frontière d'**entrée**, pas le chemin du code (les émetteurs/AST possèdent le code) : markitdown ne génère jamais d'implémentation, il fait seulement entrer de la matière à grilling.
+
+**Le déterminisme d'abord, même pour l'ingestion.** Le réflexe paresseux serait « laisse un agent lire le doc et en extraire ce qu'il juge utile ». MK01 refuse : il **modélise** la conversion en **code déterministe** (`ToMarkdown`, fonction pure), mesure de façon **reproductible**, et n'admettrait un LLM que comme **exception gatée** (une génération irréductible, jamais le parsing/transform qu'une fonction fait). C'est le mandat determinism-first appliqué à la frontière d'ingestion : *un diff est un algorithme de diff, une conversion est un convertisseur — jamais un « agent ».*
