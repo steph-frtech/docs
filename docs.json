@@ -305,7 +305,9 @@
               "steps/concept/el10-level-mirror-form",
               "steps/internals/el10-level-mirror-form",
               "steps/concept/el11-besoin-gate",
-              "steps/internals/el11-besoin-gate"
+              "steps/internals/el11-besoin-gate",
+              "steps/concept/el12-branchtree-decision-tree",
+              "steps/internals/el12-branchtree-decision-tree"
             ]
           }
         ]

@@ -1,0 +1,65 @@
+---
+title: "EL12 · BranchTree — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals d'EL12 : l'arbre de décision déterministe par niveau + l'altitude par schema-mismatch (back/runtime/besoin/branchtree.go). BranchTree(level, body) → []OpenBranch (une branche par RequiredField sourcé d'EL06, la règle de parse par rung réutilisant les validateurs EL07/EL10, la branche anti-vacuité EL07.e via shrinkOptionSpaceForBody), triée par (kind, field) → ordre-indépendante. IsResolved(graph, level, meta) → ResolveVerdict (toutes branches fermées ∧ anti-vacuité satisfaite, annexe truth_kind+verifiability EL04, CALCULÉ jamais déclaré). ClassifyAltitude(body)/MatchesSchema/IsOffAltitude : schema-mismatch — un corps d'entité (attributes) soumis au niveau product échoue le schéma product, classé à entity (tie-break vers le rung le plus profond). Miroir fixture ROUGE→VERT (branchtree_fixture_test.go : incomplet laisse une branche, complet ferme tout, off-altitude échoue le schéma) + property rapid (branchtree_property_test.go : reproductibilité, ordre, off-altitude = ¬matchesSchema). Jumeau TS lib/besoin-branchtree.ts byte-équivalent + vitest/fast-check 12/12 ; route Workbench /compound-besoin-branchtree action-capable ; e2e Playwright besoin-branchtree.spec.ts 4/4. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "EL12", "back/runtime/besoin", "branchtree.go", "BranchTree", "OpenBranch", "IsResolved", "ResolveVerdict", "ClassifyAltitude", "MatchesSchema", "IsOffAltitude", "schema-mismatch", "altitude", "Example-Mapping", "anti-vacuité", "ShrinkOptionSpace", "anti-Goodhart", "BesoinThresholds", "RequiredFields", "EL04", "EL06", "EL07", "EL10", "EL13", "rapid", "property test", "fast-check", "vitest", "déterminisme", "reproductibilité", "le mur", "ui-completeness", "Playwright", "EL19", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — les internals complets. La page concept est [ici](/steps/concept/el12-branchtree-decision-tree).</Note>
+
+## Implémentation
+
+Une capacité dans **`back/runtime/besoin/branchtree.go`** (au-dessus de la grammaire EL02, des seuils EL06, des métadonnées EL04, des validateurs EL10), **pure/totale/déterministe**, n'écrivant **aucune** vérité. Trois fonctions, le LLM exclu.
+
+### `BranchTree(level, body map[string]any) → []OpenBranch`
+
+L'ensemble **clos** des branches du niveau (les cellules de l'Example-Map). Pour un niveau hors-grammaire → `nil` (fail-closed : pas d'arbre, jamais une devinette LLM). Les branches :
+
+- **une par `RequiredField`** — `DefaultThresholds().RequiredFieldsFor(level)` (→ `spec.go`, **la même source qu'EL06/EL07**, jamais une copie) ; fermée ssi `!isEmptyField(body[f])` ; un `how_to_fix:["declare_field:"+f]` sur l'ouverte.
+- **la branche `parse_rule`** (`parseRuleBranch`) — réutilise les **mêmes** règles que `CanDescend` : `product` 1..`th.MaxScenarios` scénarios ; `journey` `ValidateJourneySchema` (EL10) ; `view` `ValidateViewSchema` (EL10) ; `control` `visible_when`/`enabled_when` typés **booléens**. Les rungs sans règle de parse au-delà des champs requis (`action`/`operation`/`entity`/bandes) n'ont pas cette branche.
+- **la branche `anti_vacuity`** (EL07.e), seulement pour un **rung SOURCE** (`IsSourceRung`) — fermée ssi `shrinkOptionSpaceForBody(level, body) > 0`. Une bande transversale n'a pas de descente → pas de branche anti-vacuité (vacuement satisfaite, comme EL07).
+
+Le slice est **trié par `(kind, field)`** → l'arbre est **ordre-indépendant** (l'itération de map ne fuit jamais dans la sortie).
+
+### `shrinkOptionSpaceForBody(level, body) → int`
+
+Miroir de `ShrinkOptionSpace` (candescend.go) sur un corps brut (BranchTree n'a pas besoin de construire un graphe). **Même** OptionSpace déclaré (`OptionSpaceFor`, EL06) + **même** sentinel `forwardDepShrink (= 1)` : un leaf (entity) ou une paire **non-énumérable** (`operation→entity`) renvoie le sentinel positif (l'anti-vacuité est portée-par-OpenQuestion, jamais fabriquée) ; un `selects` vide ou que des choix invalides → `0`.
+
+### `IsResolved(graph, level, meta Metadata) → ResolveVerdict`
+
+`ResolveVerdict{Level, Resolved bool, OpenBranches []OpenBranch, AntiVacuitySatisfied bool, TruthKind, Verifiability}`. `Resolved` est **calculé** : `len(openOnly(tree)) == 0` (toutes branches fermées) — l'anti-vacuité est l'une de ces branches. Un niveau **sans nœud** n'est jamais `resolved` (l'arbre sur un corps vide laisse ses branches ouvertes, mais reste lisible). Le verdict **annexe** les métadonnées EL04 du nœud (`meta.TruthKind`, `meta.Verifiability`) — **réutilisées, jamais re-jugées**.
+
+### `ClassifyAltitude(body) → Altitude` + `MatchesSchema` / `IsOffAltitude`
+
+Le classement d'altitude par **schema-mismatch** :
+
+- `MatchesSchema(level, body)` — vrai ssi **chaque** `RequiredField` (spec.go) du niveau est présent et non-vide ; **fail-closed** (`false`) pour un niveau hors-grammaire.
+- `ClassifyAltitude(body)` — route vers le niveau dont le `body` satisfait **pleinement** le schéma ; en cas d'égalité (un corps satisfaisant plusieurs sets), tie-break vers le **rung le plus profond** (`levelRank`, le schéma le plus spécifique) — un corps portant `attributes` est un corps `entity` même s'il porte aussi un champ `product`. `Matched=false` quand aucun schéma n'est satisfait (jamais deviné). `Scores` expose, par niveau, le nombre de champs requis satisfaits (pour expliquer un off-altitude).
+- `IsOffAltitude(claimed, body)` = **exactement** `!MatchesSchema(claimed, body)` — pas de chemin de jugement séparé. L'exemple canonique : un corps `entity` (`attributes`) soumis à `product` → off-altitude.
+
+**Miroir fixture** (`branchtree_fixture_test.go`) — écrit ROUGE d'abord (`marshalBody` indéfini → échec de compilation prouvé, corrigé en `json.Marshal`), puis VERT :
+- `EmptyBody_LeavesBranchesOpen` (∀ niveau : ≥1 branche ouverte, chaque ouverte porte un `how_to_fix`) ;
+- `MissingRequiredField_LeavesThatBranchOpen` (la branche `scenarios` précise) ;
+- `CompleteBody_ClosesAllBranches` (∀ niveau : un corps complet ferme tout) ;
+- `IsResolved_CompleteProduct_Resolved` (resolved + anti-vacuité + annexe `truth_kind`) ;
+- `IsResolved_NoNode_NotResolved` ; `IsResolved_ParsableButNonConstraining_NotResolved` (anti-vacuité) ;
+- `IsResolved_OperationForwardDep_AntiVacuityCarried` (la paire non-énumérable portée) ;
+- `ClassifyAltitude_EntityBodyAtProduct_OffAltitude` (le cas canonique : off-altitude + classé `entity`) ;
+- `ClassifyAltitude_ProductBody_OnAltitude` ; `ClassifyAltitude_NoSchema_Unmatched` ; `MatchesSchema_NonGrammarLevel_FailClosed`.
+
+**Miroir property (reproductibilité)** (`branchtree_property_test.go`, rapid) — `BranchTree` déterministe (même entrée → arbre identique) ; trié par `(kind, field)` ; `ClassifyAltitude` déterministe ∧ cohérent avec `MatchesSchema` ; `IsOffAltitude` = négation de `MatchesSchema` (∀ niveau) ; un corps complet ne laisse aucune branche ouverte.
+
+## Méta
+
+**Pourquoi un arbre, et pourquoi pur ?** EL12 est l'**Example-Mapping** que le reste d'AIDOS n'avait pas : la matérialisation, par niveau, des questions à fermer. Le pattern Compound Engineering veut un brainstorm forcé qui *right-size* avant de descendre ; mais le brainstorm est mené par un LLM (EL13), **exception barricadée** (§8). Le piège serait que le LLM décide aussi **quelles** branches existent et **quand** elles sont fermées — il se noterait lui-même (Goodhart). EL12 retire cette autorité au LLM : l'arbre, le verdict `resolved` et le classement d'altitude sont du **code déterministe faisant autorité**. Le LLM **phrase** la question (`OpenBranch.Question`) ; il ne décide jamais si elle est close.
+
+**La règle unique, jamais re-forkée.** Le danger d'un second « gate » à côté de `CanDescend` est la **dérive** : deux endroits qui décident « assez » avec des règles légèrement différentes. EL12 lit la **même** source EL06 (`RequiredFieldsFor`), réutilise les **mêmes** validateurs EL10 (`ValidateJourneySchema`/`ViewSchema`) et le **même** comptage anti-vacuité (`OptionSpaceFor` + le sentinel `forwardDepShrink`). L'arbre est une **projection** des critères EL07, pas un jumeau divergent.
+
+**L'altitude par schéma, pas par opinion.** Le choix décisif : l'altitude d'une réponse est un **schema-mismatch déterministe**, pas un jugement d'altitude LLM. C'est l'application directe de la maxime « le juge est le code » (§8) à la question « à quel étage cette réponse appartient-elle ? ». Un set de champs déclaré tranche ; le tie-break vers le rung le plus profond rend le classement total et reproductible.
+
+## Méta-méta
+
+**Quelle garantie de niveau 3 EL12 sert-il ?** La garantie « **le juge est déterministe, jamais l'agent qui se note** ». EL12 est la pièce qui empêche le compound du besoin de devenir un théâtre : sans elle, un LLM pourrait déclarer un niveau « résolu » et router une réponse « au bon étage » par confiance — exactement le mode d'échec que KRD §8 interdit. En faisant de l'arbre, du verdict et de l'altitude des **fonctions pures avec leur miroir de reproductibilité**, EL12 ajoute une **garde** (méta-loop §5) : il rend le forçage **non-gameable** et **auditable**.
+
+**Le jumeau byte-équivalent comme contrat.** `lib/besoin-branchtree.ts` n'est pas une ré-implémentation libre côté front : c'est le **twin** byte-équivalent de l'autorité Go, couvert par son propre miroir vitest/fast-check (12/12). L'écran `/compound-besoin-branchtree` **lit** le verdict pur (il ne ré-implémente jamais l'arbre) ; l'e2e Playwright (`besoin-branchtree.spec.ts`, 4/4) prouve que chaque contrôle **exécute** la fonction depuis l'écran (`ui-completeness`, §7) — corps complet → resolved, corps incomplet → branche ouverte, product vacant → anti-vacuité ouverte, corps d'entité au niveau product → off-altitude classé `entity`. La même loi vit donc **trois fois** (Go, TS, écran) et reste cohérente — c'est le déterminisme prouvé sur les trois plans (§6).
+
+**Le mur, renforcé.** EL12 ne touche ni `kernel`, ni `mirrors`, ni `fitness` ; il vit **au-dessus** du mur et alimente `Idea.Intent` / le triage `/grill`. Il n'ajoute aucune porte vers la vérité — il ajoute une **garde** qui rend le forçage honnête, sans jamais en retirer une (méta-loop §5).

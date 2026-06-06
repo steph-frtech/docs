@@ -1,0 +1,59 @@
+---
+title: "EL12 · BranchTree (l'arbre de décision déterministe par niveau + l'altitude par schema-mismatch)"
+description: "EL12 est l'arbre de décision déterministe, code-faisant-autorité, par niveau du compound du besoin (l'Example-Mapping manquant, construit au-dessus du mur). BranchTree(level, body) → l'ensemble CLOS des branches à fermer pour resolved (une branche par champ requis EL06, plus la règle de parse du rung, plus la branche anti-vacuité EL07.e). IsResolved = toutes les branches fermées ET l'anti-vacuité satisfaite — CALCULÉ, jamais déclaré. La classification d'altitude est un SCHEMA-MISMATCH déterministe : une réponse est routée au niveau dont elle satisfait le schéma ; un attribut d'entité soumis au niveau product ÉCHOUE le schéma product (un set de champs déclaré), ce n'est PAS une opinion LLM d'altitude. L'arbre, le verdict resolved et le classement sont des fonctions pures ; le LLM n'y entre pas. BranchTree alimente Idea.Intent / le triage /grill, jamais une écriture kernel (le mur)."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "BranchTree", "arbre de décision", "Example-Mapping", "OpenBranch", "IsResolved", "resolved", "altitude", "schema-mismatch", "ClassifyAltitude", "off-altitude", "anti-vacuité", "anti-Goodhart", "BesoinThresholds", "EL04", "EL06", "EL07", "EL12", "EL13", "déterminisme", "fonction pure", "le mur", "runtime/besoin"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL12](/steps/internals/el12-branchtree-decision-tree).</Note>
+
+## En une phrase
+
+EL12 est **l'arbre de décision** du besoin : pour chaque niveau, la **liste close** des questions à fermer pour qu'il soit `resolved`, et le **classement d'altitude** qui range chaque réponse au bon niveau — par **comparaison de champs déclarés**, jamais par opinion.
+
+## Le problème que ça résout
+
+L'interview du besoin (EL13) pose des questions niveau par niveau. Mais **quelles** questions, exactement ? Et que faire d'une réponse qui « tombe au mauvais étage » ?
+
+1. **L'arbre de questions doit être fixe et calculé.** Si le LLM improvise la liste des branches à fermer, deux interviews du même besoin divergent — et personne ne peut prouver qu'un niveau est vraiment complet. EL12 dérive l'arbre des **mêmes seuils EL06** que la gate EL07 : aucune règle re-forkée, aucune liste inventée.
+2. **L'altitude doit être un fait, pas un jugement.** Quand l'utilisateur répond « mes données ont un titre et une date » alors qu'on l'interroge au niveau `product`, ce n'est pas une réponse `product` : c'est une réponse `entity`. EL12 le **détecte par schéma** (la réponse porte des `attributes`, pas un `intent` + des `scenarios`), pas par une intuition LLM d'« altitude ».
+
+## Les idées-clés
+
+<Field name="BranchTree(level, body) → les cellules de l'Example-Map" type="ensemble clos, sourcé d'EL06">
+  Pour un niveau, l'ensemble **clos** des branches : une par **champ requis** déclaré (la source unique EL06), plus la **règle de parse** du rung (≤ MaxScenarios scénarios pour `product`, Gherkin Given/When/Then pour `journey`, conditions typées booléennes pour `control`…), plus la branche **anti-vacuité** (EL07.e). Chaque branche est annotée : le corps la **ferme** ou non.
+</Field>
+
+<Field name="IsResolved est CALCULÉ" type="anti-Goodhart, §8">
+  `resolved` est **vrai** ssi **toutes** les branches sont fermées **ET** l'anti-vacuité est satisfaite. C'est une fonction pure du corps, jamais déclarée par l'utilisateur ni le LLM. Le verdict annexe aussi les métadonnées EL04 du nœud (`truth_kind`, `verifiability`).
+</Field>
+
+<Field name="La classification d'altitude est un SCHEMA-MISMATCH" type="un fait, pas une opinion">
+  Une réponse est routée au niveau dont elle satisfait le `besoin_level_schema` (l'ensemble de champs requis déclaré). Un corps d'entité (`attributes`) soumis au niveau `product` (qui exige `intent` + `scenarios`) **échoue** le schéma `product` → **off-altitude**, et est classé à `entity`. C'est une comparaison de **sets de champs déclarés**, jamais un jugement LLM.
+</Field>
+
+<Field name="Tout reste au-dessus du mur" type="le mur, §2">
+  `BranchTree` ne lit que le corps du niveau ; il alimente `Idea.Intent` et le triage `/grill`. Il **n'écrit aucune vérité** (ni kernel, ni mirror).
+</Field>
+
+## Un exemple
+
+Vous décrivez votre app. À l'étape `product`, l'interview vous montre l'arbre :
+
+- *Champ requis « intent » déclaré ?* — fermée (vous avez donné une intention).
+- *Champ requis « scenarios » déclaré ?* — **ouverte** (vous ne l'avez pas encore donné). `how_to_fix : declare_field:scenarios`.
+- *Entre 1 et 5 scénarios ?* — ouverte.
+- *Rétrécit-il l'espace d'options du parcours ?* — **ouverte** (vous n'avez encore choisi aucun archétype de journey).
+
+Tant qu'une branche reste ouverte, le niveau n'est **pas** `resolved`. Et si vous répondez « les tâches ont un titre et une échéance » — EL12 voit un corps `entity` (des `attributes`) au niveau `product` : **off-altitude**, on vous le dit, on ne l'avale pas en silence.
+
+## Ce que ça vous donne
+
+- Une interview du besoin **reproductible** : le même besoin produit le même arbre, les mêmes questions.
+- Un `resolved` que **personne ne peut forcer** — calculé, jamais déclaré.
+- Une protection contre les **réponses au mauvais étage**, détectées par schéma, expliquées, jamais devinées.
+
+## Pour aller plus loin
+
+- [EL06 · BesoinThresholds & OptionSpace](/steps/concept/el06-besoin-thresholds-optionspace) — la source unique des seuils que l'arbre lit.
+- [EL07 · CanDescend (la gate de forçage)](/steps/concept/el07-candescend-forcing-gate) — les mêmes critères, côté gate de descente.
+- [EL04 · les métadonnées par-vérité](/steps/concept/el04-metadonnees-besoin) — l'annexe `truth_kind` + `verifiability` du verdict.
