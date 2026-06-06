@@ -1,0 +1,45 @@
+---
+title: "EL00 · La cible de l'app ÉMISE — Hono + TypeScript fonctionnel (constructrice ≠ construite)"
+description: "EL00 grave, en tête du track compound-besoin, la CIBLE de l'app que AIDOS émet pour l'utilisateur (ADR 0040) : Hono front+back, TypeScript pur-fonctionnel, ses propres MCP + Skills, datastore dialecte Postgres via un client TS, et l'Operation-DSL exécuté par un callback vers un service-interpréteur Go gouvernable (jamais ré-émis en TS). EL00 tranche la frontière constructrice ≠ construite : AIDOS la constructrice reste Go gouvernable — jamais réécrit en TS, n'émet jamais de Go pour l'app utilisateur ; la construite (l'arbre gen/) est Hono/TS pur-fonctionnel. C'est un ADR-only (aucun package), au-dessus du mur : aucune écriture kernel/mirrors/fitness. Sa preuve est un property test de parité : la cible déclarée ≡ la config arch-fitness que FN04/S84 enforce sur gen/. Les trois invariants émis FN02 (EMITTED_FUNCTION_PURE / EMITTED_NO_GLOBAL_MUTABLE / EMITTED_CALL_GRAPH_ACYCLIC) sont neutres au langage et s'appliquent verbatim au TS. Élargir la frontière est un changement de VÉRITÉ (idée → miroir → /goal)."
+keywords: ["aidos", "krd", "EL00", "app émise", "Hono", "TypeScript fonctionnel", "constructrice", "construite", "ADR 0040", "frontière constructrice ≠ construite", "émission déterministe", "byte-identique", "FN02", "EMITTED_FUNCTION_PURE", "EMITTED_NO_GLOBAL_MUTABLE", "EMITTED_CALL_GRAPH_ACYCLIC", "arch-fitness", "FN04", "S84", "property test de parité", "service-interpréteur Go", "callback", "Operation-DSL", "datastore Postgres", "ADR 0006", "MCP", "Skills", "le mur", "ADR-only", "déterminisme", "ADR 0036"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → EL00](/steps/internals/el00-cible-app-emise).</Note>
+
+## En une phrase
+
+EL00 **grave la cible de l'app que AIDOS émet** pour vous (ADR 0040) : **Hono front+back, TypeScript pur-fonctionnel**, avec ses **propres MCP + Skills**, un datastore **dialecte Postgres**, et l'Operation-DSL exécuté par **callback vers un service-interpréteur Go**. Et il tranche **la** frontière : **AIDOS la constructrice reste Go gouvernable** — jamais réécrit en TS, n'émet jamais de Go pour votre app ; **la construite** (l'arbre `gen/`) est Hono/TS. EL00 n'écrit **aucun code** : c'est un **ADR-only**, comme le mandat fonctionnel FN02.
+
+## Le problème que ça résout
+
+Jusqu'ici, l'app que AIDOS émet héritait **par défaut** de la stack de l'OS lui-même : back Go, front Next, accès DB sqlc/pgx — parce que la stack figée (CLAUDE.md §3) confondait les deux plans. Pour **votre** app, ce n'est ni voulu ni optimal : on veut une app **ultra-fonctionnelle, edge-friendly, à partage de types front↔back de bout en bout**. **Hono** (router TS multi-runtime, client typé `hc`) + **TypeScript pur-fonctionnel** est la cible idéale — et elle **s'aligne déjà** sur le mandat de pureté FN02. EL00 sépare proprement **la constructrice** (AIDOS, qui ne change pas) de **la construite** (l'app, qui devient Hono/TS), et grave cette décision avant que le BesoinGraph élucide quoi que ce soit — car le besoin s'élucide **contre une cible**.
+
+## Les idées-clés
+
+<Field name="Constructrice ≠ construite — la frontière tranchée" type="ADR 0040 Décision 1/2">
+  Deux artefacts qu'on confondait. **La constructrice** — AIDOS lui-même : Go (Kernel/Runtime/Archive + l'interpréteur Operation-DSL) + le Workbench Next + le truth-store Postgres. Un OS **gouvernable**, sous le mur. Il n'est **jamais** réécrit en TS et n'émet **jamais** de Go pour votre app. **La construite** — l'app émise (l'arbre `gen/`) : **Hono front+back, TypeScript pur-fonctionnel**.
+</Field>
+
+<Field name="Hono + TypeScript fonctionnel — la cible de votre app" type="ADR 0040 Décision 1/3">
+  Votre app livrée est **Hono** (front et back), en **TypeScript pur-fonctionnel**. Elle reçoit **ses propres MCP** (un outil = une op de votre app) **+ ses Skills**. Le datastore reste le **dialecte Postgres** (ADR 0006 **inchangé** ; seul le driver d'accès passe de pgx à un client TS — postgres.js / Drizzle / Kysely).
+</Field>
+
+<Field name="Le mandat fonctionnel s'applique au TS émis" type="FN02 / ADR 0036, neutre au langage">
+  Les trois invariants du code émis — **fonction pure**, **aucune globale mutable**, **graphe d'appel acyclique** — sont **neutres au langage** : ils s'appliquent verbatim au Hono/TS. Pivoter Go→TS n'ajoute **aucun** invariant et n'en forke **aucun**. Leur enforcement bascule de `go-arch-lint`/`depguard` vers `dependency-cruiser` + un linter de pureté TS — toujours déterministe, jamais un LLM qui « juge si c'est fonctionnel ».
+</Field>
+
+<Field name="L'Operation-DSL : un callback vers un service Go" type="ADR 0040 Décision 7 (tranchée)">
+  L'interpréteur Operation-DSL reste **Go, gouvernable, non dupliqué** : il est exposé comme un **service interne** (un outil MCP) que les handlers Hono/TS appellent à l'exécution via un client typé. On **ne ré-émet pas** l'interpréteur en TS — une seule source d'interprétation autoritaire, pas de dérive de parité. Votre app déploie donc un **sidecar interpréteur Go** : la seule dépendance Go de votre app, partagée et gouvernée. Le code que **vous** possédez (handlers, UI, entités) reste **pur TS fonctionnel**.
+</Field>
+
+<Field name="ADR-only, au-dessus du mur — émission déterministe" type="le mur, déterminisme">
+  EL00 n'écrit **aucun package** : il enregistre une **décision** (un ADR + provenance), au-dessus de la ligne. Votre app reste gouvernée par `idée → miroir → /goal` ; le pivot Hono ne crée **aucune** porte d'écriture-vérité. Et le code émis reste une **émission déterministe** : même Kernel → bundle **byte-identique** (« compile » = `tsc`). La pureté FN02 **EST** le déterminisme appliqué à la sortie, désormais sur TS.
+</Field>
+
+## La preuve
+
+Comme EL00 n'écrit pas de code, sa preuve est un **property test de parité** : la **cible déclarée** (Hono/TS + les invariants FN02 + la frontière) **≡** la **config que FN04/S84 enforce** sur `gen/` (le bloc `emitted_target` d'`arch-fitness.json`). Si les deux divergent, la frontière pourrait pourrir silencieusement — le test l'interdit. Élargir ou assouplir la frontière (ré-émettre AIDOS en TS, changer la cible) est un **changement de VÉRITÉ** (idée → miroir → /goal), jamais une édition silencieuse.
+
+## Sur l'écran
+
+La route Workbench **`/emitted-target`** affiche la frontière (la constructrice Go, la construite Hono/TS) et un bouton **« Vérifier la parité »** qui rejoue le **même verdict pur** que le test Go : la cible déclarée ≡ la config enforce-cée. L'écran **lit une décision** et **calcule un verdict** ; il n'écrit **aucune vérité**.

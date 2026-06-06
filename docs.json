@@ -281,7 +281,9 @@
               "steps/concept/mk02-doc-converter",
               "steps/internals/mk02-doc-converter",
               "steps/concept/mk03-ingestion-door",
-              "steps/internals/mk03-ingestion-door"
+              "steps/internals/mk03-ingestion-door",
+              "steps/concept/el00-cible-app-emise",
+              "steps/internals/el00-cible-app-emise"
             ]
           }
         ]

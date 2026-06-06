@@ -1,0 +1,53 @@
+---
+title: "EL00 · La cible de l'app ÉMISE — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail d'implémentation de EL00 (ADR 0040, ADR-only) : la cible déclarée de l'app émise gravée en une vérité Go unique back/runtime/agentloop.EmittedTargetEL00() (le record EmittedTarget : Constructrice{language:go, rewritten_in_ts:false, emits_go_for_user_app:false} + Construite{backend/frontend:hono, language:typescript, datastore_dialect:postgres, own_mcp/own_skills:true, operation_interpreter:go-service-callback} + functional_invariants = EmittedInvariantCodes() verbatim + writes_truth:false), pinnée ≡ le bloc emitted_target d'arch-fitness.json par le property test de parité emittedtarget_parity_test.go (TestEmittedTarget_ParityWithConfig / _InvariantsAreLanguageNeutral / _FrontierIsTrenched) + le miroir de reproductibilité emittedtarget_property_test.go (rapid), le twin TS pur front/web/lib/emitted-target.ts (verifyParity) + son Vitest, la route Workbench /emitted-target action-capable (EmittedTargetPanel + bouton Vérifier la parité) + l'e2e Playwright tests/e2e/emitted-target.spec.ts. Réutilise FN04/ADR 0036 (EmittedInvariantCodes, arch-fitness.json, ScanEmittedTree), ADR 0006 (datastore Postgres inchangé). Aucun package neuf, aucune écriture kernel/mirrors/fitness. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "EL00", "ADR 0040", "EmittedTarget", "EmittedTargetEL00", "Constructrice", "Construite", "emitted_target", "arch-fitness.json", "EmittedInvariantCodes", "FN04", "S84", "ADR 0036", "FN02", "property test de parité", "TestEmittedTarget_ParityWithConfig", "go-service-callback", "operation_interpreter", "datastore_dialect", "writes_truth", "rewritten_in_ts", "lib/emitted-target", "verifyParity", "EmittedTargetPanel", "tests/e2e/emitted-target.spec.ts", "rapid", "Vitest", "Playwright", "ADR-only", "le mur", "déterminisme", "byte-identique", "ADR 0006", "back/runtime/agentloop"]
+---
+
+<Note>Côté implémentation — le détail interne. Pour le concept et l'usage, voir [Pour les futurs utilisateurs → EL00](/steps/concept/el00-cible-app-emise).</Note>
+
+## En une phrase
+
+EL00 grave la **cible de l'app émise** comme une **vérité Go unique** — `back/runtime/agentloop.EmittedTargetEL00()` (un record `EmittedTarget`) — **pinnée ≡** le bloc `emitted_target` d'`arch-fitness.json` (la config que FN04/S84 enforce) par un **property test de parité**. Aucun package neuf, aucune écriture vérité : un ADR (`docs/adr/0040`) + une déclaration + sa preuve.
+
+## Implémentation
+
+<Steps>
+  <Step title="ADR 0040 — la décision (accepted)">
+    `docs/adr/0040-emitted-app-hono-functional-ts.md` (status `accepted`) porte les sept décisions : la frontière constructrice ≠ construite (D1/D2), le re-pointage des cibles d'émission de **code** sans toucher le datastore (D2, ADR 0006 inchangé), l'extension du mandat FN02 au TS émis (D3), les MCP/Skills propres à l'app émise (D4), l'émission déterministe gouvernée par le mur (D5), l'amendement par renvoi de CLAUDE.md §3 / ADR 0003/0010 (D6), et l'Operation-DSL via **callback vers un service-interpréteur Go** (D7, OQ-0040-interpréteur tranchée).
+  </Step>
+  <Step title="EmittedTargetEL00() — la cible déclarée (une seule source Go)">
+    `back/runtime/agentloop/emittedtarget.go` : le record `EmittedTarget{ADR, Constructrice, Construite, FunctionalInvariants[], WritesTruth}`. `Constructrice{Language:"go", RewrittenInTS:false, EmitsGoForUserApp:false}` ; `Construite{Backend:"hono", Frontend:"hono", Language:"typescript", DatastoreDialect:"postgres", OwnMCP:true, OwnSkills:true, OperationInterpreter:"go-service-callback"}`. `FunctionalInvariants` est dérivé de `EmittedInvariantCodes()` (FN04) — **une seule liste, jamais une seconde**. `WritesTruth:false` (ADR-only). C'est une **fonction pure** : retournée par valeur, sans globale mutable (elle obéit à l'invariant qu'elle porte).
+  </Step>
+  <Step title="Le bloc emitted_target d'arch-fitness.json — la config enforce-cée">
+    `back/runtime/agentloop/arch-fitness.json` gagne un bloc `emitted_target` (`adr`, `constructrice`, `construite`, `functional_invariants`, `writes_truth`) **identique** au record Go, plus un `$comment` JSON-only (ignoré par l'unmarshal Go). C'est le côté « config » de la parité — le pendant déclaré qu'un linter d'arch-fitness (FN04/S84) lit.
+  </Step>
+  <Step title="Le property test de parité — la preuve (red → green)">
+    `back/runtime/agentloop/emittedtarget_parity_test.go` : `TestEmittedTarget_ParityWithConfig` (`reflect.DeepEqual` entre le bloc lu d'`arch-fitness.json` et `EmittedTargetEL00()`) ; `TestEmittedTarget_InvariantsAreLanguageNeutral` (les invariants de la cible ≡ `EmittedInvariantCodes()` exactement) ; `TestEmittedTarget_FrontierIsTrenched` (la constructrice est Go non-réécrite, la construite Hono/TS, le datastore Postgres, l'interpréteur `go-service-callback`, `WritesTruth:false`, ADR `0040`). + `emittedtarget_property_test.go` (rapid) : `EmittedTargetEL00()` est **reproductible** (même appel → même record, N fois) et suit FN04 sans fork.
+  </Step>
+  <Step title="Le twin TS pur + son Vitest (front)">
+    `front/web/lib/emitted-target.ts` : `emittedTargetEL00()` (le twin byte-identique du record Go) + `verifyParity(declared, enforced)` (le verdict pur par champ — le même que le `reflect.DeepEqual` Go). `front/web/lib/emitted-target.test.ts` (Vitest + fast-check) : le twin ≡ le bloc `emitted_target` lu directement d'`arch-fitness.json`, la reproductibilité, et la détection de dérive (un backend falsifié vire la parité au rouge).
+  </Step>
+  <Step title="La route Workbench action-capable + l'e2e">
+    `front/web/app/emitted-target/page.tsx` (Server Component : lit `arch-fitness.json` via `node:fs`, calcule le twin) + `front/web/components/EmittedTargetPanel.tsx` (`use client`) avec le bouton **« Vérifier la parité »** qui exécute `verifyParity` **depuis l'écran** et rend le verdict + la table par champ. Entrée nav (`emittedTarget`, groupe build) + i18n FR/EN. L'e2e `tests/e2e/emitted-target.spec.ts` prouve que le bouton EXÉCUTE le verdict (badge vert, frontière rendue, note du mur).
+  </Step>
+</Steps>
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Une seule source, jamais double-typée (CLAUDE.md §9).** La cible vit en **une** vérité Go (`EmittedTargetEL00()`) ; `arch-fitness.json` en est la projection config ; le twin TS en est le reflet front. Le **property test de parité** garde les trois en phase — exactement le pattern FN04 (`TestArchFitnessConfig_MatchesEmittedInvariants`) que EL00 réutilise et étend, sans le forker. C'est pourquoi EL00 ne crée **aucun** package neuf : il **compose** FN04 et ADR 0006.
+- **Déterminisme-first.** La cible est une **fonction pure** (sans horloge/rng/IO) et la parité est un `reflect.DeepEqual` / un `verifyParity` par champ — jamais un LLM qui « juge si l'app est assez Hono ». Le miroir de reproductibilité (rapid + fast-check) pin « même entrée → même sortie ». La pureté FN02 désormais sur TS **EST** le déterminisme d'émission (même Kernel → octets byte-identiques) appliqué à la sortie.
+- **ADR-only, comme FN02.** EL00 grave une **cible**, pas un mécanisme : exactement comme FN02/ADR 0036 a gravé le **mandat** fonctionnel avant que FN03/FN04 ne l'implémentent. Les émetteurs Hono/TS réels arrivent à FN03/S87+ ; EL00 ne fait que **trancher la cible** et la prouver pinnée.
+- **L'interpréteur n'est pas dupliqué.** D7 tranche l'OpenQuestion : un **callback vers un service Go**, pas une ré-émission TS. Dupliquer une logique gouvernée romprait la parité de comportement ; le trade-off accepté est un sidecar Go dans le déploiement émis — la seule dépendance Go de votre app, versionnée avec le Kernel.
+
+## Méta-méta — la garantie de niveau 3
+
+EL00 ne touche **ni la fitness ni le mur** : il les **réutilise**. Aucune écriture `kernel`/`mirrors`/`fitness` ; le record `EmittedTarget` est une donnée above-the-line, `WritesTruth:false` est **vérifié par le test** (pas seulement affirmé). La garantie inviolable : **graver une cible d'émission n'ouvre aucune porte d'écriture-vérité côté TS**, et la frontière ne peut dériver silencieusement — le property test de parité la fige (`arch-fitness.json` ≡ le record Go ≡ le twin TS). Élargir/assouplir la frontière est un **changement de VÉRITÉ** (idée → miroir → /goal). La méta-loop **ajoute** une garde (la parité de la cible émise), elle n'en retire aucune.
+
+## Limites connues
+
+- **Pas d'émetteurs Hono/TS encore.** EL00 grave la cible ; FN03/S87 émettent réellement le Hono/TS pur (handlers + workers + client). EL00 ne produit aucun arbre `gen/` Hono — il déclare et prouve la cible.
+- **L'enforcement TS de FN04 est à venir.** FN04 bascule l'enforcement des trois invariants vers `dependency-cruiser` + un linter de pureté TS sur `gen/` ; aujourd'hui `ScanEmittedTree` parse encore du Go (FN04/ADR 0036). EL00 ne change pas l'enforceur, il déclare que les invariants sont neutres au langage.
+- **Le sidecar interpréteur Go n'est pas déployé ici.** D7 est tranchée mais réalisée en S90/S77 (le handler Hono → service Go) ; EL00 ne câble aucun service.
+- **OQ-0040-front / OQ-0040-driver.** Le framework front exact (Hono JSX/SSR vs client `hc`) est tranché en S93 ; le client Postgres TS (postgres.js / Drizzle / Kysely) par le spike S88 — OpenQuestions déclarées, non bloquantes.
+- **Pas de nouveau hook / MCP / Skill / migration / codegen** — EL00 est ADR-only : il grave une cible et la prouve pinnée, rien de plus.
