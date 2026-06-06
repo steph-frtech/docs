@@ -317,7 +317,9 @@
               "steps/concept/el16-emit-ideas",
               "steps/internals/el16-emit-ideas",
               "steps/concept/el17-red-backlog",
-              "steps/internals/el17-red-backlog"
+              "steps/internals/el17-red-backlog",
+              "steps/concept/el18-capitalisation",
+              "steps/internals/el18-capitalisation"
             ]
           }
         ]

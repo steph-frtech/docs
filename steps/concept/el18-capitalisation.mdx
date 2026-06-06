@@ -1,0 +1,49 @@
+---
+title: "EL18 · capitaliser le besoin (le compound dans le temps)"
+description: "EL18 est la capitalisation du besoin — le /compound appliqué à l'élicitation : à la résolution complète d'un BesoinGraph, on capture le graphe résolu comme ANCRE RÉUTILISABLE (graph_hash + clés canonicalisées (level, normalized-intent-hash)) + le motif de résolution comme mémoire procédurale + une behavior-besoin candidate — STRICTEMENT via firewall.ViaIdea, JAMAIS ToKernel, JAMAIS la fitness. La provenance de l'idée capitalisée se reconstruit jusqu'au graph_hash. Réutilisation cross-app = name-match sur clés canonicalisées : un besoin similaire rejoue (ReplayCost), un besoin dissemblable ne réutilise rien (anti-faux-positif). Above le mur : wroteKernel toujours false."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "capitalisation", "EL18", "ancre réutilisable", "BesoinGraph", "graph_hash", "firewall.ViaIdea", "ToKernel", "fitness", "mémoire procédurale", "KindProcedural", "behavior-besoin", "name-match", "clés canonicalisées", "normalized-intent-hash", "ReplayCost", "DeriveCost", "réutilisation cross-app", "anti-faux-positif", "CE03", "CE05", "le mur", "wroteKernel", "déterminisme", "compound dans le temps"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL18](/steps/internals/el18-capitalisation).</Note>
+
+## En une phrase
+
+EL18 prend un besoin **entièrement résolu** et le transforme en **capital réutilisable** : la prochaine fois qu'un besoin ressemble à celui-ci, vous ne le ré-élicitez pas — vous le **rejouez**. Et tout passe par le mur : on propose une idée, on n'écrit jamais la vérité.
+
+## Le problème que ça résout
+
+Élicitater un besoin niveau par niveau (EL13→EL17) coûte de l'effort. Si chaque nouvelle app repartait de zéro, l'OS ne s'**améliorerait** jamais. EL18 fait que le besoin **se compound dans le temps** : un besoin résolu devient une **ancre** qu'un second besoin similaire réutilise. C'est le pendant temporel du compound en profondeur (chaque niveau contraint celui d'en dessous) — ici, chaque *app résolue* abaisse le coût de la *suivante*.
+
+Mais réutiliser de la connaissance est dangereux : c'est exactement par là qu'un système triche (il « apprend » un raccourci, il fabrique une réutilisation qui n'existe pas, il écrit une vérité par la porte de derrière). EL18 est construit pour que **rien de tout ça** ne soit possible.
+
+Trois garanties qu'il tient :
+
+1. **Strictement via le mur, jamais la fitness.** La capitalisation passe **uniquement** par `firewall.ViaIdea` (idée → miroir → `/goal` → approbation humaine). Elle n'appelle **jamais** `ToKernel`, ne touche **jamais** les poids/seuils (capitalisation ≠ apprentissage de critères). `wroteKernel` est **toujours false**.
+2. **La provenance se reconstruit jusqu'au graph_hash.** L'idée capitalisée trace honnêtement son origine : son `graph_hash` est porté dans la provenance de la mémoire (`besoin:<graph_hash>`), de sorte qu'on peut **remonter** de l'idée au graphe exact qui l'a engendrée.
+3. **Réutilisation honnête : pas de faux positif.** Un second besoin **similaire** (mêmes intentions, à la casse/aux espaces/à la ponctuation près) rejoue ses unités (coût réduit, `ReplayCost`). Un besoin **dissemblable** ne fabrique **aucune** réutilisation (coût plein, `DeriveCost`) — la frontière anti-faux-positif.
+
+## Les idées-clés
+
+<Field name="L'ancre réutilisable (le compound dans le temps)" type="EL18">
+  À la résolution complète, le graphe devient une **ancre** : son `graph_hash` + une **unité canonicalisée** par rung SOURCE mappant résolu (`(level, normalized-intent-hash)`). C'est le capital qu'un second besoin rejoue.
+</Field>
+
+<Field name="Clés canonicalisées : la réutilisation cross-app fiable" type="name-match">
+  Le routeur de réutilisation (CE05) est un **name-match**. Pour qu'il marche d'une app à l'autre, les intentions sont **normalisées** (casse, espaces, ponctuation) avant d'être hachées. Deux intentions qui se canonicalisent pareil partagent la **même clé** → elles se réutilisent.
+</Field>
+
+<Field name="Le motif de résolution = mémoire procédurale" type="KindProcedural">
+  Le **motif** (l'ordre des unités résolues) devient une mémoire `KindProcedural` — du fuel `/brain` **sous la ligne**, rejoué pour abaisser le coût du besoin suivant. La mémoire propose ; le noyau déclare le vrai.
+</Field>
+
+<Field name="Un besoin non résolu ne capitalise rien" type="la porte « green »">
+  Seul un besoin **entièrement résolu** capitalise (chaque rung SOURCE présent est `resolved`, ≥1 rung mappant). Un besoin en cours ne produit **rien** — pas de capital prématuré.
+</Field>
+
+## Ce que ça change pour vous
+
+La deuxième fois que vous décrivez une app proche d'une précédente, le wizard vous montre ce qui est **déjà connu** : les niveaux que vous pouvez **rejouer** au lieu de re-déclarer, et de combien votre coût d'élicitation baisse. Vous gardez la main — rien n'est figé, tout reste une **proposition** (une idée draft) que vous promouvez via `/goal`.
+
+## Ce que ça ne change PAS
+
+Le mur est intact. EL18 ne franchit **jamais** la ligne : tout sort comme **idée draft** (sans version ni miroir), `wroteKernel` toujours false. La promotion en vérité reste l'écriture du miroir via `/goal`. Les poids/seuils restent **déclarés**, jamais appris.
