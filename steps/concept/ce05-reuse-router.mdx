@@ -1,0 +1,38 @@
+---
+title: "CE05 · Le compounding — un goal suivant similaire réutilise ce qu'un goal antérieur a capitalisé"
+description: "Pour les futurs utilisateurs : la boucle de capitalisation se referme. Quand un goal se termine vert, AIDOS capture son motif (CE03) ; CE05 le RÉUTILISE sur le goal suivant similaire — ses gestes sont rappelés depuis la mémoire procédurale, ses behaviors sont expansées (§24.6), et seul son unité propre est re-dérivée. Résultat : l'effort et les tokens du goal suivant BAISSENT. Le router est un match par nom, jamais un LLM ; il ne touche aucune vérité (le mur)."
+keywords: ["aidos", "krd", "compounding", "compound-engineering", "capitalisation", "réutilisation", "reuse", "router", "MatchRole", "behavior-macro", "§24.6", "mémoire procédurale", "KindProcedural", "effort", "tokens", "le mur", "/goal", "déterminisme", "faux positif", "CE05"]
+---
+
+<Note>Côté produit — comment développer votre app avec AIDOS. Internes : [Pour moi → CE05](/steps/internals/ce05-reuse-router).</Note>
+
+## La promesse du compounding : chaque goal facilite le suivant
+
+Vous avez terminé un goal — disons « archiver les commandes » (owner-scoping, soft-delete, fixtures, le tout vert). La prochaine fois que vous attaquez un goal **similaire** — « archiver les factures » — vous ne devriez pas tout re-payer. C'est la promesse du **compound-engineering** : un goal terminé rend le suivant moins cher. CE05 referme cette boucle.
+
+## Trois étapes, une boucle
+
+- **CE03 — capturer.** À la clôture d'un goal **vert**, AIDOS capture son motif durable : la suite de **gestes** (charger le contexte, dériver le miroir, câbler le contrôle…) devient une mémoire procédurale, et la forme de **spec** devient une behavior-macro candidate.
+- **CE04 — expanser.** Une behavior capturée s'expanse (fonction pure) en attributs/relations/opérations/policies/fixtures — sans réécrire le boilerplate.
+- **CE05 — réutiliser.** Le **router** prend le goal suivant, regarde chaque unité de travail dont il a besoin, et la **rejoue** depuis le corpus capitalisé au lieu de la re-dériver.
+
+## Ce que le router fait, à l'écran
+
+Sur la route `/agents` du Workbench, la section **« Compounding »**. Cliquez **« Router le goal suivant (similaire) »** : l'**historique de capitalisation** s'affiche, unité par unité :
+
+| Unité du goal suivant | Origine | Coût |
+|---|---|---|
+| `load_context_pack` | **Recall procédural** (rappelé) | 20 |
+| `derive_mirror` | **Expansion behavior** · via le mur | 20 |
+| `invoice_specific_rule` | **Dérivé frais** (propre au goal) | 80 |
+
+Huit des neuf unités sont réutilisées ; seule l'unité **intrinsèque** au goal est re-dérivée. Le bandeau affiche **Effort ▼** : l'effort « avec réutilisation » est nettement inférieur à l'effort « sans réutilisation », et les **tokens économisés** sont calculés.
+
+## Deux garanties que vous pouvez vérifier
+
+- **Pas de faux positif.** Cliquez **« Goal dissimilaire (contrôle) »** : un goal qui ne partage aucun motif (« moteur de tarification ») ne réutilise **rien** — l'effort reste inchangé, le badge dit « Aucune réutilisation ». La capitalisation réutilise le **motif partagé**, elle n'en fabrique jamais.
+- **Le mur tient.** Le router **lit** le corpus capitalisé et **rappelle** des gestes (sous la ligne) ; il n'écrit **aucune vérité**. Réutiliser une behavior rappelle sa forme, mais la **figer** dans le noyau passe toujours par idée → miroir → `/goal` → approbation. La note « via le mur » sur chaque behavior réutilisée le rend visible.
+
+## Pourquoi ça compte
+
+Sans compounding, le 50ᵉ goal coûte autant que le 1ᵉʳ. Avec, votre système **apprend à se construire moins cher** — sans jamais apprendre vos critères (les poids et seuils restent déclarés, jamais appris). C'est la différence entre une équipe qui capitalise et une qui recommence à zéro à chaque fois.

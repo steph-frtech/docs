@@ -1,0 +1,40 @@
+---
+title: "CE05 (interne) · Le router de réutilisation (compounding) — Implémentation · Méta · Méta-méta"
+description: "Internes de CE05 : back/runtime/compound/reuse.go porte Reuse(Corpus, NextGoal) (ReusePlan, error) — un ROUTER pur, total, déterministe qui route les work-units d'un goal suivant contre le corpus capitalisé (CE03/CE04) : recall procédural (sous la ligne) / expansion behavior (via le mur) / dérivé frais. Mirror-first : un fixture ROUGE d'abord (reuse_fixture_test.go) + un property rapid (reuse_property_test.go : déterminisme ∧ conservation ∧ payoff ∧ frontière ∧ le mur). Jumeau TS lib/compound.ts (reuse) + section CompoundingSection sur /agents + e2e Playwright. Le mur tient : le router lit + recall, n'écrit aucune vérité."
+keywords: ["aidos", "krd", "compounding", "reuse", "router", "Reuse", "Corpus", "NextGoal", "ReusePlan", "Route", "Origin", "MatchRole", "S33", "KindProcedural", "behavior-macro", "§24.6", "déterminisme", "conservation", "payoff", "faux positif", "le mur", "/goal", "ViaWall", "rapid", "fast-check", "CompoundingSection", "Playwright", "CE05"]
+---
+
+<Note>Côté interne — le journal complet de CE05. Concept : [Pour les futurs utilisateurs → CE05](/steps/concept/ce05-reuse-router).</Note>
+
+## Implémentation
+
+**Le contrat.** Le package `back/runtime/compound/reuse.go` ajoute le ROUTER qui **referme** la boucle de capitalisation (CE03 capture → CE04 expanse → CE05 réutilise). Il déclare :
+
+- `Origin` — l'ensemble fermé d'où vient l'effort d'une unité routée : `OriginReusedProcedural` (recall procédural, sous la ligne), `OriginReusedBehavior` (expansion behavior, §24.6, via le mur), `OriginDerivedFresh` (dérivé plein).
+- `Corpus{ Procedural, Behavior []CapturedUnit, SourceGoal }` — le corpus qu'un goal vert antérieur a laissé (CE03) : ses recalls procéduraux et ses behavior-macro candidates, plus le goal source (provenance).
+- `NextGoal{ GoalID, Required []string }` — le goal suivant et la liste ordonnée des work-units dont il a besoin (l'entrée du routing).
+- `ReusePlan{ Routes, EffortBefore, EffortAfter, SavedTokens, ReductionFrac, ReusedProcedural, ReusedBehavior, DerivedFresh, WroteKernel }` — le plan : routing par unité, le delta d'effort calculé, et `WroteKernel` **toujours faux** (le mur).
+- `Reuse(corpus Corpus, next NextGoal) (ReusePlan, error)` — **pure, totale** : pour chaque unité requise, un **match par nom** contre le corpus (procédural d'abord, sinon behavior, sinon frais). `EffortBefore = DeriveCost × |units|` (tout dériver) ; `EffortAfter` somme les coûts routés (`ReplayCost` pour une unité réutilisée, `DeriveCost` pour une fraîche). Un goal vide → `ErrEmptyGoal` (jamais un plan deviné).
+
+Les coûts `DeriveCost = 80` / `ReplayCost = 20` sont **déclarés** (au-dessus de la ligne, jamais appris). *Quoi* réutiliser est le **corpus**, pas un jugement — déterminisme-first.
+
+**Mirror-first (rouge d'abord).** `reuse_fixture_test.go` (`state → command → events`) a été écrit AVANT le code et était **rouge** (`undefined: compound.Corpus / compound.Reuse`). Il pin les clauses exactes du critère CE05 :
+
+- un goal **similaire** (`goal-invoice-archive`, 8 unités partagées + 1 intrinsèque) réutilise 5 procéduraux + 3 behaviors, dérive 1 frais → `EffortAfter < EffortBefore`, `SavedTokens > 0` ;
+- un goal **dissimilaire** (`goal-pricing-engine`) ne partage aucune unité → réutilise 0/0, dérive tout → effort inchangé (la frontière anti-faux-positif) ;
+- une réutilisation behavior est `ViaWall=true` (figer passe par /goal), un recall procédural est sous la ligne (`ViaWall=false`) ;
+- corpus vide → tout frais ; goal vide → erreur typée.
+
+`reuse_property_test.go` (rapid) pin, sur tout l'espace d'entrée : **déterminisme** (`reflect.DeepEqual` entre deux runs), **conservation** (`reused + fresh == |required|`), **payoff** (`reused>0 ⇒ EffortAfter < EffortBefore`), **frontière** (`reused==0 ⇒ égalité`), **le mur** (`WroteKernel==false` partout). **Tous les tests Go verts** ; `go build ./...` propre.
+
+**L'écran (action-capable).** Le jumeau TS `lib/compound.ts` ajoute `reuse(Corpus, NextGoal): ReusePlan` — copie déterministe exacte du router Go, avec les constantes `DERIVE_COST`/`REUSE_REPLAY_COST` et les fixtures `COMPOUND_CORPUS` / `SIMILAR_NEXT_GOAL` / `DISSIMILAR_NEXT_GOAL`. `components/CompoundingSection.tsx` est le contrôle, monté sur `app/agents/page.tsx` : boutons **« Router le goal suivant (similaire) »** et **« Goal dissimilaire (contrôle) »** appelant `reuse`, rendant le bandeau payoff (`data-effort-before`/`data-effort-after`/`data-saved`/`data-reused`), l'**historique de capitalisation** (un `li` par unité, `data-origin`), le badge **« via le mur »** sur chaque behavior, et la note **`data-wrote-kernel="false"`**. Thémé (ADR 0010), bilingue (ADR 0011, clés `compoundingSection.*`). `lib/compound.test.ts` : **25 tests verts** (20 antérieurs + 5 CE05 dont un fast-check de reproductibilité + conservation). Playwright `tests/e2e/agents.spec.ts` : le bloc CE05 (**3 tests verts**) prouve que le contrôle exécute — effort qui baisse, badge via-le-mur, contrôle dissimilaire sans réutilisation.
+
+## Méta
+
+**Le router est MatchRole appliqué à la capitalisation.** CE05 réutilise la même discipline que S33 (`back/runtime/scheduler/matchrole.go`) : une lecture **pure** sur des données **déclarées**, un match (là un rôle de couche, ici un nom d'unité), un ordre total déterministe — jamais un prompt. Le router ne « ressemble » pas (pas de similarité floue LLM) : il **matche par nom**. C'est le choix porteur : une réutilisation par nom est exacte, reproductible et auditable ; une réutilisation par jugement serait un trou de déterminisme qui pourrait fabriquer un faux positif. La frontière anti-faux-positif de CE01 (le contrôle dissimilaire plafonné à 20%) devient ici un invariant **prouvé** : `reused==0 ⇒ effort inchangé`.
+
+**Pourquoi le payoff est un invariant, pas une mesure.** CE01 a *mesuré* le delta (75% sur la paire similaire). CE05 le **garantit** comme propriété : tant qu'au moins une unité est réutilisée, l'effort baisse strictement (`ReplayCost < DeriveCost`), et `SavedTokens` n'est jamais négatif (la réutilisation ne coûte jamais plus). Le compounding n'est plus une promesse de spike : c'est une propriété rapid sur tout l'espace.
+
+## Méta-méta
+
+**Le router referme la boucle de capitalisation au-dessus de la ligne — et le mur tient à chaque maillon.** La boucle CE03→CE04→CE05 est exactement le « compound-engineering » du KRD : chaque goal terminé facilite le suivant. Mais elle est **gouvernée bout en bout** : la capture (CE03) écrit une mémoire procédurale sous la ligne + propose une idée draft via `firewall.ViaIdea` ; l'expansion (CE04) est un dry-run ; la réutilisation (CE05) **lit** le corpus et **rappelle** sous la ligne, et marque `ViaWall=true` sur toute behavior dont le gel passerait par /goal. Nulle part la boucle n'écrit une vérité ni ne touche la fitness — `CAPITALISATION ≠ APPRENTISSAGE DE CRITÈRES` (CE02). C'est la distinction porteuse : le système apprend à se **construire moins cher** (un motif de gestes/spec réutilisé), il n'apprend **jamais** ce qui définit « réussi » (les poids restent déclarés, CLAUDE.md §8). Le router est ainsi un **cliquet** : il ajoute une garde (un goal suivant paie moins, prouvé par fonction pure), il n'en retire aucune. Le miroir de reproductibilité ferme la boucle — c'est lui, et non la confiance de l'agent, qui prouve que la réutilisation est une fonction.
