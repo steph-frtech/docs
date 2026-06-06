@@ -1,0 +1,46 @@
+---
+title: "EL06 · BesoinThresholds & OptionSpace (les seuils déclarés + la métrique énumérable du compound)"
+description: "EL06 déclare DEUX capacités au-dessus du mur, jamais apprises (§8). (1) BesoinThresholds : UN record content-adressé portant tous les seuils de gate (le ≤5 scénarios du product ; les champs requis par rung, sourcés de la grammaire — jamais une seconde copie), lu par EL07 (CanDescend) et EL11 (le hook Stop) de sorte qu'un seuil ne dérive jamais entre appelants. (2) OptionSpace(L, L+1) : la métrique énumérable déclarée par paire de rungs adjacents — l'ensemble CLOS comptable des choix que le rung inférieur admet. |OptionSpace| est un entier calculé par fonction pure, jamais un jugement LLM. Une paire non-énumérable (operation→entity, le domaine ouvert de l'utilisateur) est une OpenQuestion DÉCLARÉE (taille -1), jamais fabriquée à 0. Au-dessus du mur : config déclarée, aucune écriture vérité. ADR 0042."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "BesoinThresholds", "OptionSpace", "seuils déclarés", "thresholds", "magic-number", "max_scenarios", "champs requis", "RequiredFields", "source unique", "métrique énumérable", "enumerable", "OpenQuestion", "ShrinkOptionSpace", "anti-vacuité", "compound", "EL06", "EL07", "EL08", "EL11", "CanDescend", "content-adressé", "déterminisme", "fonction pure", "le mur", "ADR 0042", "runtime/besoin"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL06](/steps/internals/el06-besoin-thresholds-optionspace).</Note>
+
+## En une phrase
+
+EL06 déclare les **seuils** de la gate du besoin dans **UN seul** record (`BesoinThresholds`) que toute la gate lit — et la **métrique `OptionSpace`** qui mesure, par paire de rungs, combien de choix le niveau inférieur admet, pour **prouver** (et non postuler) que chaque niveau rétrécit réellement l'espace du suivant.
+
+## Le problème que ça résout
+
+La GATE par niveau (EL07 `CanDescend`) et le hook `Stop:besoin-gate` (EL11) ont besoin de **seuils** : « un `product` est right-sized à **≤5 scénarios** », « un `control` a les champs `visible_when`/`enabled_when`/`triggers` ». Deux pièges :
+
+1. **Le magic-number.** Si EL07 inline son `5` et EL11 son propre `5`, ils **dérivent** un jour. KRD §8 : *les seuils sont **déclarés** au-dessus du mur, jamais appris.* Il faut **une** source.
+2. **La métrique fabriquée.** Le cœur du compound (EL08 `ShrinkOptionSpace`) mesure si un niveau rétrécit l'espace de choix du niveau d'en dessous. Mais si l'ensemble des choix n'est **pas énumérable** et qu'on le compte quand même à `0`, on **fabrique** un chiffre — un jugement déguisé en métrique.
+
+## Les idées-clés
+
+<Field name="BesoinThresholds : un record, une source" type="content-adressé, above-the-line, jamais appris">
+  Tous les seuils vivent dans **UN** record déclaré. `MaxScenarios = 5` (le ≤5 du `product`). Les champs requis par rung **ne sont pas re-déclarés** : ils sont **sourcés de la grammaire** (`spec.go`) — donc **aucune seconde copie** qui pourrait dériver. EL07 et EL11 lisent le **même** record ; une property pin qu'il n'y a pas de double.
+</Field>
+
+<Field name="Hash content-adressé" type="même record → même hash, byte-identique Go/TS">
+  Le record porte un `Hash()` (SHA-256 de ses valeurs + les champs requis en ordre canonique). Le même record donne toujours le même hash ; le jumeau TS calcule **le même hash byte-pour-byte**. Une dérive de n'importe quel seuil change le hash.
+</Field>
+
+<Field name="OptionSpace(L, L+1) : un ensemble CLOS comptable" type="par paire de rungs adjacents">
+  Pour chaque paire de rungs consécutifs (`product→journey`, `journey→view`, …), un **ensemble clos déclaré** des choix que le rung inférieur admet (les archétypes de parcours qu'un produit admet, les archétypes d'écran qu'un parcours admet…). `|OptionSpace|` = la **taille** de cet ensemble, un entier calculé par **fonction pure**, jamais un jugement LLM.
+</Field>
+
+<Field name="La paire non-énumérable est une OpenQuestion, jamais 0" type="operation→entity">
+  `operation→entity` n'est **pas** énumérable v1 : les frontières d'agrégat d'une entité sont le **domaine ouvert de l'utilisateur** (son modèle de données), pas une liste close d'archétypes. EL06 le **déclare** comme OpenQuestion (`Enumerable=false`, taille **-1**), jamais comme `0` fabriqué. L'honnêteté plutôt qu'une fausse complétude.
+</Field>
+
+## À quoi ça sert ensuite
+
+- **EL07 `CanDescend`** lit `MaxScenarios` + `RequiredFieldsFor` (jamais un `5` inliné) et consomme `ShrinkOptionSpace > 0` comme condition **anti-vacuité** : un niveau parsable qui ne rétrécit **pas** l'espace inférieur est `not_enough`.
+- **EL08** compte `|OptionSpace|` **avant** vs **après** les ancres figées sur **ce** set déclaré — le compound **prouvé**, pas postulé.
+- **EL11** lit le **même** record pour bloquer la descente.
+
+## Le mur
+
+EL06 est de la **config déclarée** au-dessus du mur : elle décide des seuils et énumère des choix, mais **n'écrit aucune vérité** (`kernel`/`mirrors`/`fitness`). Déterministe : mêmes entrées → mêmes sorties. Chaque décision (le `5`, le `-1` d'`operation→entity`) est justifiée par l'**ADR 0042**.

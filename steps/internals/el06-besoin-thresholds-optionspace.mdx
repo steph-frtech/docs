@@ -1,0 +1,53 @@
+---
+title: "EL06 · BesoinThresholds & OptionSpace — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals d'EL06 : le config déclaré BesoinThresholds (back/runtime/besoin/thresholds.go) — UN record content-adressé (max_scenarios=5 ; champs requis par rung sourcés de spec.go, jamais une seconde copie) lu par EL07/EL11 ; et la métrique OptionSpace énumérable par paire de rungs adjacents (l'ensemble clos comptable des choix admis ; |OptionSpace| = comptage pur ; operation→entity = OpenQuestion déclarée, taille -1, jamais 0). Miroir property ROUGE→VERT (thresholds_property_test.go, rapid) : reproductible, ≤5 déclaré, pas de seconde copie, total, immuable/content-adressé, OptionSpace énumérable positif, non-énumérable=OpenQuestion≠0, paires=rungs adjacents, reproductible, paire inconnue introuvable. Jumeau TS lib/besoin-thresholds.ts hash byte-identique + vitest/fast-check 10/10 ; route Workbench /compound-besoin-thresholds action-capable ; e2e Playwright besoin-thresholds.spec.ts 4/4. ADR 0042. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "EL06", "back/runtime/besoin", "thresholds.go", "BesoinThresholds", "DefaultThresholds", "MaxScenarios", "RequiredFieldsFor", "Hash", "content-adressé", "OptionSpace", "OptionSpaceFor", "OptionSpacePairs", "Enumerable", "OpenQuestion", "Size", "sentinel -1", "ShrinkOptionSpace", "anti-vacuité", "magic-number", "source unique", "rapid", "property test", "fast-check", "vitest", "déterminisme", "reproductibilité", "le mur", "ui-completeness", "Playwright", "ADR 0042", "EL07", "EL08", "EL11", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — les internals complets. La page concept est [ici](/steps/concept/el06-besoin-thresholds-optionspace).</Note>
+
+## Implémentation
+
+Deux capacités dans **`back/runtime/besoin/thresholds.go`** (au-dessus de la grammaire EL02 + EL05), toutes deux pures/totales/déterministes, n'écrivant **aucune** vérité.
+
+### 1. `BesoinThresholds` — le record déclaré, source unique
+
+- `BesoinThresholds{MaxScenarios int}` ; `DefaultThresholds()` retourne le record canonique (`MaxScenarios = 5`, le ≤5 du ROADMAP). C'est la **seule** source que EL07 et EL11 lisent.
+- `RequiredFieldsFor(level) []string` **source les champs requis de `spec.go`** (`RequiredFields`) — **pas** une seconde copie : retourne `nil` pour un niveau hors-grammaire, sinon une copie fraîche (muter la slice retournée ne change pas le record).
+- `Hash() string` — content-address SHA-256 sur `max_scenarios` + les champs requis par niveau en ordre `AllLevels()`. Même record → même hash.
+
+### 2. `OptionSpace(L, L+1)` — la métrique énumérable
+
+- `OptionSpace{From, To, Enumerable, Choices, OpenQuestion}` ; `Size()` retourne `len(Choices)` (entier positif) si `Enumerable`, sinon le **sentinel `-1`** (jamais 0).
+- `optionSpaceTable` (clos, déclaré) mappe chaque **paire de rungs SOURCE adjacents** (`product→journey` … `operation→entity`) vers son `OptionSpace`. Les 5 premières paires sont énumérables (sets d'archétypes : parcours, écran, contrôle, action, opération) ; `operation→entity` est **non-énumérable** (`Enumerable=false`, `OpenQuestion` renseignée — le domaine ouvert de l'utilisateur) avec `Size()==-1`.
+- `OptionSpaceFor(from, to) (OptionSpace, bool)` — `ok=false` pour toute paire **non-adjacente / hors-grammaire / inversée** (aucune métrique fabriquée). `OptionSpacePairs()` retourne les paires en ordre de descente ; `EnumerableOptionSpacePairs()` / `OpenQuestionOptionSpacePairs()` partitionnent.
+
+**Miroir property** (`thresholds_property_test.go`, rapid) — écrit ROUGE d'abord (les symboles `DefaultThresholds`/`OptionSpaceFor`/… n'existaient pas → échec de compilation prouvé), puis VERT :
+- `TestThresholds_DefaultsAreReproducible` : même appel → record + hash identiques (50×) ;
+- `TestThresholds_ProductMaxScenariosDeclared` : `MaxScenarios == 5` (positif, le ≤5 déclaré) ;
+- `TestThresholds_RequiredFieldsHaveNoSecondCopy` : pour **chaque** niveau, `RequiredFieldsFor` ≡ `RequiredFields` (la source unique — la garantie qu'EL07/EL11 ne lisent pas de copies divergentes) ;
+- `TestThresholds_RequiredFieldsTotalOverGrammar` : défini pour tout niveau valide, `nil` hors-grammaire ;
+- `TestThresholds_ContentAddressedAndImmutable` : muter une slice retournée ne change pas le `Hash()` ;
+- `TestOptionSpace_EnumerablePairsCountPositiveDeterministic` : chaque paire énumérable a `Size() > 0 == len(Choices)` ;
+- `TestOptionSpace_NonEnumerablePairIsOpenQuestionNotZero` : une paire non-énumérable porte une `OpenQuestion`, `Size() != 0`, `Size() == -1` (l'anti-fabrication) ;
+- `TestOptionSpace_PairsAreAdjacentSourceRungs` : les paires sont **exactement** les rungs SOURCE consécutifs (`to == NextLevel(from)`) ;
+- `TestOptionSpace_Reproducible` : même paire → même `OptionSpace` (taille + ordre des choix) ;
+- `TestOptionSpace_UnknownPairNotFound` : `entity→product` et `saga→temporal` sont **introuvables**.
+
+`go test ./runtime/besoin/` vert ; `go vet` + `gofmt` propres.
+
+**Jumeau TS** (`front/web/lib/besoin-thresholds.ts`) — `defaultThresholds`, `requiredFieldsFor`, `thresholdsHash` (Web Crypto, **hash byte-identique au Go** : `37d267af…e00f037`, vérifié), `optionSpaceFor`/`optionSpacePairs`/`optionSpaceSize`/`enumerableOptionSpacePairs`/`openQuestionOptionSpacePairs`, byte-équivalent. Couvert par `lib/besoin-thresholds.test.ts` (vitest + fast-check, **10/10**). `tsc` + `biome` propres.
+
+**Route Workbench** `/compound-besoin-thresholds` (`BesoinThresholdsPanel.tsx`) — **action-capable** (ui-completeness, aucune capacité headless) : la table OptionSpace complète rendue (énumérable | OpenQuestion), « Charger les seuils » exécute `defaultThresholds`+`thresholdsHash` (max_scenarios + champs requis + hash), « Prouver la source unique » prouve l'absence de seconde copie, « Compter l'OptionSpace » exécute `optionSpaceFor` (entier positif | -1 OpenQuestion). Thémé (ADR 0010), bilingue FR-default (ADR 0011) ; parité i18n 2966/2966. **e2e Playwright** `tests/e2e/besoin-thresholds.spec.ts` **4/4** contre le serveur live :3000.
+
+## Méta
+
+Le geste d'EL06, c'est **rendre la gate du besoin non-gameable en amont** : avant même qu'EL07 calcule `enough`, EL06 fixe **où** sont les seuils (une source) et **comment** se mesure la contrainte (un comptage, pas un avis). Trois disciplines KRD :
+
+- **Seuils déclarés, jamais appris (§8)** : `MaxScenarios=5` et les champs requis vivent dans **un** endroit. La property « pas de seconde copie » est la garde anti magic-number — c'est l'équivalent, pour la config, de « weights declared, never learned ».
+- **Déterminisme-first (§6/§8)** : `|OptionSpace|` est un **comptage pur** sur un set déclaré, jamais un jugement LLM de « combien de choix il reste ». Le hash content-adressé byte-identique Go/TS prouve que les deux plans calculent **la même** valeur — un différenciateur déterministe à travers la stack.
+- **Honnêteté anti-fabrication (§8)** : `operation→entity` **n'est pas** énumérable v1. Plutôt que de fabriquer un `0` (qui ferait croire à une contrainte nulle ou à une complétude), EL06 **déclare** l'OpenQuestion et renvoie le sentinel `-1`. Une métrique fabriquée serait un monstre ; un trou nommé est un savoir.
+
+## Méta-méta
+
+EL06 incarne la maxime du compound : **on ne prouve pas qu'un niveau contraint le suivant — on le compte.** En posant l'`OptionSpace` comme un **ensemble clos déclaré** plutôt qu'un jugement, EL06 transforme l'affirmation « le `product` réduit l'espace du `view` » en un **delta entier** (EL08 `ShrinkOptionSpace` : `|OptionSpace|` avant vs après ancres). C'est l'anti-vacuité d'EL07 rendue **mesurable** : un niveau qui parse mais ne rétrécit rien est `not_enough`, **calculé**, jamais déclaré. La leçon récursive vaut pour AIDOS entière : **un seuil partagé empêche la dérive, un comptage remplace l'opinion, et ce qui ne se compte pas honnêtement se nomme OpenQuestion — jamais zéro.** Le `-1` d'`operation→entity` est, en miniature, tout le contrat KRD : la frontière entre ce que la grammaire close du besoin peut mesurer et le domaine ouvert que l'utilisateur, lui seul, possède.

@@ -293,7 +293,9 @@
               "steps/concept/el04-metadonnees-besoin",
               "steps/internals/el04-metadonnees-besoin",
               "steps/concept/el05-table-level-to-proposes",
-              "steps/internals/el05-table-level-to-proposes"
+              "steps/internals/el05-table-level-to-proposes",
+              "steps/concept/el06-besoin-thresholds-optionspace",
+              "steps/internals/el06-besoin-thresholds-optionspace"
             ]
           }
         ]
