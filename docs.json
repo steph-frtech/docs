@@ -315,7 +315,9 @@
               "steps/concept/el15-besoin-intake",
               "steps/internals/el15-besoin-intake",
               "steps/concept/el16-emit-ideas",
-              "steps/internals/el16-emit-ideas"
+              "steps/internals/el16-emit-ideas",
+              "steps/concept/el17-red-backlog",
+              "steps/internals/el17-red-backlog"
             ]
           }
         ]

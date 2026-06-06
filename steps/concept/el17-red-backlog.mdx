@@ -1,0 +1,49 @@
+---
+title: "EL17 · red-backlog (le tri topologique du backlog d'idées)"
+description: "EL17 est le RedBacklog ordonné pour l'app-builder (S53+) : RedBacklog(graph) topo-trie les Ideas émises (les rungs mappants, EL16) selon les arêtes constrains/seeds → l'ordre exact de promotion que l'app-builder ouvre ses /goal dans, exactement la verticale §23. Chaque Idea porte ses anchors_above (dont les nœuds NoEmit journey/view qui la contraignent sans émettre) et sa forme de miroir attendue (LevelMirrorForm, EL10) ANNEXÉE — jamais écrite. Un cycle d'arêtes est refusé (BESOIN_CYCLE). Le tri est un algorithme pur (Kahn, départage déterministe), jamais un LLM. Above le mur : aucune écriture kernel/mirror, HasMirror toujours false."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "red-backlog", "RedBacklog", "tri topologique", "topological sort", "BesoinGraph", "Idea", "backlog", "constrains", "seeds", "BESOIN_CYCLE", "LevelMirrorForm", "EL10", "anchors_above", "NoEmit", "le mur", "HasMirror", "verticale", "S64", "app-builder", "EL16", "EL17", "déterminisme", "forme de miroir"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL17](/steps/internals/el17-red-backlog).</Note>
+
+## En une phrase
+
+EL17 prend les idées qu'EL16 a émises depuis votre BesoinGraph et les **met dans l'ordre de l'architecture** : un tri topologique qui donne l'ordre exact dans lequel l'app-builder ouvrira vos `/goal` — product d'abord, puis la descente, jamais un ordre arbitraire.
+
+## Le problème que ça résout
+
+EL16 vous donne un **sac d'idées** : une par niveau résolu qui mappe. Mais un sac n'a pas d'ordre. Dans quel ordre faut-il les construire ? On ne peut pas coder le bouton « Payer » (control) avant de savoir ce que fait l'écran (view) ni quelle entité il touche (entity). L'ordre **n'est pas une préférence** : c'est l'**architecture elle-même**.
+
+EL17 est ce tri. `RedBacklog(graph)` lit les arêtes `constrains`/`seeds` du BesoinGraph — la topologie qui **est** la verticale §23 — et range les idées dans l'ordre où chaque niveau **dépend** de celui d'au-dessus. Le résultat : *le doc suit l'architecture*.
+
+Trois garanties qu'il tient :
+
+1. **L'ordre est l'architecture, pas un caprice.** Le tri suit les arêtes du graphe. Si product contraint entity, l'idée de product **précède** celle d'entity dans le backlog. L'app-builder (S64) ouvre ses `/goal` exactement dans cet ordre.
+2. **Les niveaux NoEmit contraignent sans apparaître.** Les rungs `journey`/`view` (NoEmit, EL05) n'émettent pas d'idée — mais ils **contraignent** les rungs plus bas. Ils apparaissent donc dans les **`anchors_above`** de chaque idée qu'ils contraignent (le compound rendu visible), jamais dans la liste elle-même.
+3. **Chaque idée connaît sa forme de miroir — sans qu'on l'écrive.** Chaque item porte sa **forme de miroir attendue** (`LevelMirrorForm`, EL10 : product/journey → Gherkin, invariant → property, operation → fixture). Elle est **annexée** pour guider le `/goal`, mais **jamais écrite** : écrire le miroir reste à vous, via `/goal`.
+
+## Les idées-clés
+
+<Field name="Tri topologique total et déterministe" type="EL17">
+  `RedBacklog` est un **tri topologique pur** (algorithme de Kahn), avec un départage déterministe par rang de descente → un ordre **total**. Même graphe → même backlog, byte-identique. Jamais un LLM qui ordonne.
+</Field>
+
+<Field name="Un cycle est refusé (BESOIN_CYCLE)" type="EL17">
+  Si les arêtes des rungs émetteurs forment un **cycle**, il n'existe aucun ordre total : le backlog est **refusé** avec `BESOIN_CYCLE` — jamais un ordre arbitraire (le déterminisme serait perdu). La verticale §23 est acyclique par construction ; un cycle = un graphe malformé.
+</Field>
+
+<Field name="Les refs résolvent @version (ou portent une OpenQuestion)" type="bootstrap §6">
+  Chaque idée résout ses **refs descendantes** : une ref dont le niveau cible existe résolu **résout @version** ; une ref pendante (le niveau cible n'existe pas encore) est portée comme **OpenQuestion non-bloquante** (forward-dep), jamais avalée.
+</Field>
+
+<Field name="La forme de miroir : annexée, jamais écrite" type="le mur">
+  Chaque item porte sa forme de miroir attendue (`LevelMirrorForm`, EL10) — **annexée** pour le `/goal`, **jamais écrite**. Chaque idée reste un candidat draft (`HasMirror` toujours false). Le tri n'écrit aucun noyau ni miroir.
+</Field>
+
+## Comment vous l'utilisez
+
+Depuis l'écran **`/red-backlog`** du Workbench : vous façonnez le graphe déjà-décidé (le statut de chaque rung), puis **« Trier le RedBacklog »** lance le tri. La liste apparaît dans l'ordre topologique, chaque item montrant sa forme de miroir, ses ancres au-dessus (dont les NoEmit), et la résolution @version de ses refs. **« Injecter un cycle »** prouve le refus `BESOIN_CYCLE`.
+
+## Le hand-off (S64)
+
+Le RedBacklog est l'**entrée exacte** de l'app-builder : `RedBacklog(graph)` → l'ordre topologique → **S64** (« capturez votre idée ») → **S65** (`/grill`) → **S66** (`/goal`, ouverts **dans l'ordre du backlog**) → **S67**. Au lieu d'un prompt plat, S64 reçoit un besoin **déjà descendu niveau par niveau, ordonné architecturalement**, où chaque idée porte sa forme de miroir attendue et ses ancres.

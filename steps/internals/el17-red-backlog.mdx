@@ -1,0 +1,60 @@
+---
+title: "EL17 · red-backlog — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals d'EL17 : le tri topologique RedBacklog(graph) → BacklogItem[] (back/runtime/besoin/red_backlog.go + l'outil MCP besoin_red_backlog). Topo-trie les Ideas émises (EL16) selon les arêtes constrains/seeds via Kahn (départage déterministe par rang de descente) → un ordre total. Chaque item porte son Idea (content-adressée, draft), sa forme de miroir attendue (LevelMirrorForm, EL10) ANNEXÉE, ses anchors_above (NoEmit journey/view inclus, jamais dans la liste), et la résolution @version de ses refs (pendante = OpenQuestion portée, bootstrap §6). Un cycle = *CycleError (BESOIN_CYCLE). Deux portes : RedBacklog (statut stocké) + RedBacklogUnion (verdict EL07, la porte du MCP). Miroir property rapid (déterministe, total, topo-correct, cycle refusé, NoEmit pas dans la liste, forme annexée) + fixtures Go + Testcontainers (besoin_red_backlog read-only, kernel refusé) + jumeau TS lib/red-backlog.ts (vitest+fast-check) + e2e Playwright. Above le mur : la forme est annexée jamais écrite, aucune écriture kernel/mirror/Idea. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "EL17", "back/runtime/besoin/red_backlog.go", "red-backlog", "RedBacklog", "RedBacklogUnion", "besoin_red_backlog", "MCP", "tri topologique", "Kahn", "BacklogItem", "constrains", "seeds", "BESOIN_CYCLE", "CycleError", "LevelMirrorForm", "EL10", "anchors_above", "NoEmit", "RefStatus", "@version", "OpenQuestion", "bootstrap", "EmitIdeasWithProvenance", "EL16", "CanDescend", "EL07", "le mur", "HasMirror", "rapid", "Testcontainers", "vitest", "fast-check", "Playwright", "S64", "app-builder", "déterminisme", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — les internals complets. La page concept est [ici](/steps/concept/el17-red-backlog).</Note>
+
+## Implémentation
+
+EL17 livre le **tri topologique** `RedBacklog(graph) → []BacklogItem` (`back/runtime/besoin/red_backlog.go`) + son outil MCP `besoin_red_backlog` (dans `back/mcp/besoin-intake/`). Il consomme l'émission d'EL16 (`EmitIdeasWithProvenance`) et range les idées dans l'**ordre architectural** où l'app-builder ouvrira ses `/goal`.
+
+### Le pipeline
+
+`RedBacklog(g)` :
+
+1. **Émet** les idées (EL16, `EmitIdeasWithProvenance`) — une par rung résolu qui mappe ; les NoEmit n'émettent rien.
+2. **Topo-trie** les rungs émetteurs (`topoSortEmitting`) le long des arêtes `constrains`/`seeds` qui relient **deux rungs émetteurs** (`From` avant `To`), via **Kahn**, départage par **rang de descente déclaré** → un ordre **total déterministe**.
+3. **Annexe** par item, dans un `BacklogItem` :
+   - l'`Idea` (content-adressée, draft, provenance human — la même qu'EL16) ;
+   - la **forme de miroir** via `LevelMirrorForm(level)` (EL10) — `MirrorForm`, **annexée jamais écrite** ;
+   - les **`AnchorsAbove`** via `AnchorsAbove(g, level)` (cascade EL08) — les rungs SOURCE résolus strictement au-dessus, **NoEmit `journey`/`view` inclus** ;
+   - la résolution **`@version`** des refs (`resolveItemRefs`) : `ResolvedRefs` (cible existe résolue) / `UnresolvedRefs` (pendante) + une **OpenQuestion portée** par ref pendante (bootstrap §6).
+4. **Refuse un cycle** — si l'ordre Kahn ne couvre pas tous les rungs émetteurs, c'est un cycle → un `*CycleError` (code `BESOIN_CYCLE`), jamais un ordre arbitraire. Un self-loop `From == To` est un cycle dégénéré immédiat.
+
+### Kahn + le départage déterministe
+
+`topoSortEmitting` ne considère que les arêtes **entre deux rungs émetteurs** (les NoEmit ne sont pas des nœuds du tri — ils vivent dans les ancres). Les arêtes sont dé-dupliquées `(From,To)` (une arête doublée ne gonfle pas le in-degree). Parmi les rungs de in-degree 0, on choisit le **plus petit par rang de descente** (`sortByRank`), puis on re-trie à chaque insertion → l'ordre est **total** (jamais deux ordres possibles), donc **déterministe**. C'est exactement ce que la property rapid épingle.
+
+### Les deux portes
+
+| Fonction | Critère « resolved » | Usage |
+|---|---|---|
+| `RedBacklog(graph)` | `node.Status == NodeResolved` stocké | la fonction pure, le miroir property + fixtures |
+| `RedBacklogUnion(graph, metaOf)` | **union** : statut stocké OU verdict EL07 `CanDescend(graph, level, meta).Enough` | l'outil MCP `besoin_red_backlog` |
+
+Les deux délèguent à `backlogFrom(g, emitted)` (le tri + l'annexion partagés), donc la sortie est cohérente quelle que soit la porte. `RedBacklogUnion` réutilise `projectNode` (via la même logique qu'`EmitIdeasUnion`), donc une idée triée est **byte-identique** à celle d'EL16.
+
+### L'outil MCP `besoin_red_backlog`
+
+`{project, meta}` → charge le graphe persisté, calcule `RedBacklogUnion(g, metaOf(meta))`, projette chaque `BacklogItem` en sortie (Idea + `from_level` + `mirror_form` + `anchors_above` + `resolved_refs`/`unresolved_refs` + `open_questions`). Sur un cycle, il surface `{cycle: true, cycle_code: "BESOIN_CYCLE"}` (un **refus déterministe**, pas une erreur serveur). **READ-ONLY** : il n'écrit **aucune** Idea, **aucun** `kernel`/`mirrors`/`fitness` — il n'y a aucun GRANT. Le test Testcontainers `TestBesoinIntake_RedBacklogEL17` prouve que rien n'est persisté et que `CanWriteKernel` reste false avant ET après.
+
+## Méta
+
+> *Pourquoi cette forme, et pas une autre.*
+
+- **Pourquoi un tri pur et pas un agent ?** (determinism-first, CLAUDE.md §6/§8) Un tri **est** un algorithme (Kahn) — c'est l'exemple canonique d'un *determinism gap* si on le confiait à un LLM (« un diff est un diff », « un tri est un tri »). Le départage par rang de descente le rend **total** : aucune ambiguïté, donc aucune place pour un « jugement ». Le miroir de reproductibilité (`red_backlog_property_test.go`, rapid) épingle « même graphe → même backlog ».
+- **Pourquoi un cycle est-il un refus dur (BESOIN_CYCLE) et pas un ordre best-effort ?** Un ordre arbitraire sur un cycle **perdrait le déterminisme** (deux runs pourraient diverger) et **mentirait sur l'architecture** (il prétendrait une dépendance qui n'existe pas). La verticale §23 est acyclique ; un cycle est un graphe malformé qu'on **refuse honnêtement**, pas qu'on rafistole.
+- **Pourquoi les NoEmit dans `anchors_above` et jamais dans la liste ?** Un rung `journey`/`view` **contraint** les rungs plus bas (le compound) mais n'**émet** rien (EL05). Le mettre dans la liste serait un cast `journey→idée` qui n'existe pas. Le mettre dans les ancres dit la vérité : *il te contraint, il ne devient pas une idée*. C'est le compound rendu visible sans mensonge d'altitude.
+- **Pourquoi annexer la forme de miroir au lieu de l'écrire ?** (le mur, §2) La forme (`LevelMirrorForm`, EL10) **guide** le `/goal` à venir, mais écrire le miroir EST la promotion en vérité — elle appartient à l'utilisateur via `/goal`, pas au tri. Annexer ≠ écrire : `HasMirror` reste false, le tri n'écrit aucune vérité.
+- **Pourquoi une ref pendante est-elle une OpenQuestion et pas un blocage ?** (bootstrap §6) Quand on déclare une operation avant l'entity, la ref descendante ne résout pas encore @version. Ce n'est pas une erreur : c'est une **forward-dep portée**, non-bloquante. La porter (jamais l'avaler) garde le besoin honnête sur ce qui reste à descendre.
+
+## Méta-méta
+
+> *Ce que cette étape garantit au niveau de la méthode (NIVEAU 3).*
+
+- **Le doc suit l'architecture, prouvé par le code.** La promesse du track — *« le requirements doc suit l'architecture »* — n'est pas une prose : c'est le **tri topologique** qui la rend vraie. L'ordre des idées **est** la topologie du graphe, qui **est** la verticale §23. Un test (`TestRedBacklog_TopoOrderRespectsEdges`) épingle que toute arête `L→D` place `L` avant `D`. La méthode garantit que l'ordre n'est jamais arbitraire.
+- **Le juge est le code, jamais le LLM (anti-Goodhart, §8).** Le tri, le refus de cycle, l'annexion de la forme et la résolution des refs sont des **fonctions pures faisant autorité**. Aucun LLM n'ordonne le backlog. Le « done » du track inclut « backlog topo-trié sans cycle » — **calculé**, jamais déclaré.
+- **Le mur tient jusqu'au hand-off.** EL17 est la dernière étape de projection (EL16→EL17) avant l'app-builder. Elle **propose** un ordre, elle n'écrit **jamais** une vérité : forme annexée jamais écrite, `HasMirror` toujours false, aucun GRANT noyau. Le hand-off vers S64 traverse le mur **par l'idée** (`idea_capture`), jamais par une écriture directe — la frontière humain-possède-la-vérité / agent-possède-l'implémentation reste intacte.
+- **Tout se fait par écran (ui-completeness, §6.7).** Le tri est exécutable depuis `/red-backlog` (pas display-only) : « Trier le RedBacklog » lance le tri, « Injecter un cycle » prouve le refus. Le jumeau TS (`lib/red-backlog.ts`) est byte-équivalent au tri Go ; l'e2e Playwright (`tests/e2e/red-backlog.spec.ts`) prouve que chaque control exécute son op. Aucune capacité headless.
