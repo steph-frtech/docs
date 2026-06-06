@@ -253,7 +253,9 @@
               "steps/concept/fn05-index-graphe-appel",
               "steps/internals/fn05-index-graphe-appel",
               "steps/concept/fn06-graphe-fonctionnel",
-              "steps/internals/fn06-graphe-fonctionnel"
+              "steps/internals/fn06-graphe-fonctionnel",
+              "steps/concept/gv01-cross-check-owasp",
+              "steps/internals/gv01-cross-check-owasp"
             ]
           }
         ]

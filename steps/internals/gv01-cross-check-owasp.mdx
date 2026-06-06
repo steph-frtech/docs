@@ -1,0 +1,38 @@
+---
+title: "GV01 · Cross-check OWASP Agentic + verdict d'adoption AGT — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de GV01 : la matrice de couverture OWASP Agentic Top-10 et la table d'adoption AGT comme TABLES DÉCLARÉES dans back/runtime/governance (pures, totales, reproductibles), le miroir property qui juge la complétude et l'invariant « le mur n'est jamais abandonné », le twin front lib/governance.ts + le panneau action-capable /governance, l'e2e Playwright. Trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "governance", "GV01", "OWASP", "Agentic", "AGT", "cross-check", "matrice", "couverture", "adoption", "déterminisme", "miroir property", "le mur", "fail-closed", "Merkle", "GateAction", "agentlayer", "ledger", "internals"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet (tout). Pour la vue sans code, voir [Pour les futurs utilisateurs → GV01](/steps/concept/gv01-cross-check-owasp).</Note>
+
+## En une phrase
+
+GV01 est un **audit déterministe** : une matrice de couverture (les 10 risques OWASP Agentic → les enforcers AIDOS existants) et une table d'adoption (les 5 piliers du *Microsoft agent-governance-toolkit* → adopter/déjà-couvert/rejeté), toutes deux **déclarées en code** dans `back/runtime/governance`, jugées par un miroir property et projetées dans un panneau Workbench action-capable.
+
+## Implémentation
+
+**Le paquet `back/runtime/governance`** (pur, total, sans I/O, sans clock, sans rng, sans LLM) :
+
+- `owasp.go` — le type `Risk` (les dix codes `AAI01..AAI10`, ensemble clos et déclaré), le type `Coverage` (`Risk`, `Status` ∈ {covered, partial, uncovered}, `CoveredBy[]`, `Residual`, `AugmentedBy`), et la **`matrix`** : la table autoritaire. Les noms d'enforcers sont les **identifiants réels** des paquets audités (`agentlayer.MayWrite`, les axes de `GateAction`, `ReplayMatches`, les codes `BlockReason`) — la couverture ne peut pas dériver vers une couverture inventée. `Coverages()`, `Count()` (le tally par statut), `Residuals()` en dérivent.
+- `adoption.go` — le type `AGTPillar` (les cinq piliers : policy-as-YAML, audit Merkle, evals OWASP, identité/trust, SRE), la table `adoptionTable` (décision + rationale + étape GV), et **`Verdict()`** : `Stop` est calculé (`ToAdopt == 0 ∧ ResidualRisks == 0`), jamais déclaré.
+
+**Le résultat de l'audit, factuel :** 8 risques `covered`, 2 `partial` (AAI09 — le ledger BA28/BA29 hache par-run mais n'a pas de chaîne Merkle cross-row ; AAI10 — BA11 a des plafonds durs mais pas d'error-budget/circuit-breaker). 3 piliers `adopt_augment` (GV03/GV04/GV05/GV06), 1 `already_covered` (BA18 prouve déjà l'identité), 0 `reject`. `Stop = false` → la roadmap GV est justifiée.
+
+**Le miroir (`owasp_property_test.go`, rouge d'abord — compile-red sans le paquet)** pin : exactement dix risques stables sans doublon ; chaque ligne bien-formée avec un `Residual`+`AugmentedBy` **exactement** quand le statut n'est pas `covered` (anti-Goodhart : pas de couverture clamée sans nommer le manque) ; le tally somme au total ; et l'**invariant load-bearing** — `Verdict` n'adopte aucun pilier en *remplacement* du mur, et `Stop` est computed. Le test rapid pin la reproductibilité (même table ⇒ rapport byte-stable).
+
+**Le twin front** `front/web/lib/governance.ts` réplique la table verbatim (couvert par `governance.test.ts`, fast-check) ; le panneau `components/GovernancePanel.tsx` est **action-capable** — le bouton « Lancer le cross-check » exécute les fonctions pures et rend la matrice, les piliers, les écarts et le verdict. La route `/governance` (thémée ADR 0010, bilingue ADR 0011) est enregistrée dans la nav (groupe meta). L'e2e `tests/e2e/governance.spec.ts` prouve que le contrôle s'exécute (rapport absent avant clic, puis tally 8/2/0, 2 risques résiduels nommés).
+
+## Méta
+
+**Pourquoi une table déclarée et non un agent.** Auditer la conformité est un **diff** entre deux ensembles connus (les risques, les enforcers) — une fonction pure. Un « LLM qui score la couverture OWASP » serait un **gap de déterminisme** (CLAUDE.md §6/§8) : non reproductible, non vérifiable, et lui-même une autorité non gouvernée. La matrice est donc la source autoritaire, le miroir est le juge, et le LLM n'intervient nulle part dans le verdict.
+
+**Pourquoi le mur reste autoritaire.** L'AGT (et la plupart des toolkits de gouvernance d'agents) repose sur un middleware default-allow. Adopter cela tel quel échangerait une garantie **structurelle** (`PeutModifierNoyau`/`PeutModifierFitness` toujours faux, par construction) contre une garantie **configurée** (donc oubliable, contournable). GV01 inscrit en code la règle : un pilier ne peut être adopté qu'en **augmentation prouvée**, jamais en remplacement. Même un verdict « arrêt » garderait le mur.
+
+**Honnêteté du rapport.** Le miroir interdit deux mensonges symétriques : une ligne `covered` qui inventerait un écart, et une ligne `partial`/`uncovered` qui cacherait le sien. C'est la version « anti-monstre » appliquée à un audit : pas de couverture orpheline de preuve, pas d'écart caché.
+
+## Méta-méta
+
+GV01 est le pas où AIDOS **s'audite lui-même contre un référentiel externe** sans se laisser coloniser par lui. Le geste générique : *avant d'adopter, prouver ce qu'on couvre déjà ; n'adopter que l'écart réel ; n'adopter qu'en augmentation, jamais en remplacement d'une garantie structurelle.* C'est le cliquet appliqué à la gouvernance — on n'ajoute un cran que s'il **resserre** (ou prouve) ; jamais s'il desserre.
+
+C'est aussi une instance du mandat determinism-first à l'échelle méta : même la décision « faut-il adopter cet outil ? » est rendue **reproductible** — une table + un miroir, pas un jugement. Le rapport de GV01 devient alors l'entrée déclarée que GV02 (l'ADR d'adoption) et GV03→GV06 (les augmentations prouvées) consomment : la suite de la roadmap n'est pas une opinion, c'est la projection d'un cross-check vérifié.

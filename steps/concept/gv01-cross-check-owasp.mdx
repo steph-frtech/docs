@@ -1,0 +1,37 @@
+---
+title: "GV01 · Le cross-check OWASP Agentic — vue depuis l'écran"
+description: "GV01 audite la gouvernance d'agents d'AIDOS contre les 10 risques OWASP Agentic et le Microsoft agent-governance-toolkit. Le résultat est un rapport : 8 risques sur 10 sont déjà couverts fail-closed par le mur structurel, 2 ont un écart réel (le ledger n'est pas encore Merkle, et il manque un error-budget/circuit-breaker). Le verdict d'adoption dit quoi ajouter — sans jamais abandonner le mur. Vue concept, sans code."
+keywords: ["aidos", "krd", "governance", "GV01", "OWASP", "Agentic", "Top-10", "AGT", "agent-governance-toolkit", "cross-check", "conformité", "adoption", "le mur", "fail-closed", "Merkle", "error-budget", "circuit-breaker", "déterminisme"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → GV01](/steps/internals/gv01-cross-check-owasp).</Note>
+
+## L'idée en une phrase
+
+Avant d'ajouter quoi que ce soit, AIDOS **vérifie d'abord ce qu'il couvre déjà** : il confronte sa gouvernance d'agents aux dix risques de référence du secteur (OWASP Agentic Top-10) et n'adopte une brique externe **que là où un écart réel existe**.
+
+## Pourquoi ce pas existe
+
+Quand un outil de gouvernance d'agents à la mode apparaît (ici le *Microsoft agent-governance-toolkit*), la tentation est de tout adopter. Mais beaucoup de ces outils reposent sur un middleware **default-allow** : tout est permis sauf ce qu'une policy interdit. AIDOS fait l'inverse — un **mur structurel fail-closed** : rien au-dessus de la ligne de flottaison n'est écrit par un agent, jamais, par construction.
+
+GV01 est le **garde-fou anti-mode** : il refuse d'échanger une garantie structurelle contre une garantie plus molle. Il produit un **rapport de conformité honnête** et un **verdict d'adoption**.
+
+## Ce que le cross-check trouve
+
+Sur l'écran `/governance`, vous lancez le cross-check d'un clic. Il affiche :
+
+- **La matrice OWASP Agentic Top-10** — pour chacun des dix risques, un statut : *couvert*, *partiel* ou *non couvert*, et **par quoi** il est couvert (le mur, les axes du `GateAction`, l'identité prouvée, les budgets…).
+- **8 risques sur 10 sont déjà couverts** fail-closed. Hijacking d'autorisation, interactions système critiques, manipulation d'instruction, hallucination prise pour vérité, rayon d'explosion, mémoire empoisonnée, usurpation entre agents, dépendances non gouvernées : tous butent déjà sur une garantie structurelle.
+- **2 risques restent partiels** — des écarts **réels**, nommés honnêtement :
+  - *Traçabilité & non-répudiation* : le journal détecte une ligne **altérée**, mais pas une ligne **supprimée**. Il manque une chaîne Merkle.
+  - *Épuisement économique* : il y a des plafonds durs par action, mais pas d'**error-budget / circuit-breaker** sur un taux d'échecs entre runs.
+
+## Le verdict : augmenter, jamais remplacer
+
+Le verdict d'adoption tranche pilier par pilier : ce qu'on **adopte comme augmentation** (le ledger Merkle, les miroirs OWASP exécutables, la policy-as-YAML, les contrôles SRE), ce qui est **déjà couvert** (l'identité/trust), et ce qu'on **rejette** s'il affaiblirait le mur.
+
+Le message tient en une phrase : **le mur reste le garant**. L'outil externe l'**augmente** et le **prouve** — il ne le remplace jamais. Et comme un écart réel subsiste, le verdict n'est pas « arrêt » : la suite (GV03→GV06) est justifiée.
+
+## Ce que vous gagnez
+
+Une preuve, pas une opinion : la couverture est une **table déclarée**, vérifiée par un test de reproductibilité (même entrée → même rapport). Personne — pas même un LLM — ne « juge » la conformité à la volée ; le rapport est du **code déterministe**.
