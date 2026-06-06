@@ -255,7 +255,9 @@
               "steps/concept/fn06-graphe-fonctionnel",
               "steps/internals/fn06-graphe-fonctionnel",
               "steps/concept/gv01-cross-check-owasp",
-              "steps/internals/gv01-cross-check-owasp"
+              "steps/internals/gv01-cross-check-owasp",
+              "steps/concept/gv02-adoption-agt",
+              "steps/internals/gv02-adoption-agt"
             ]
           }
         ]

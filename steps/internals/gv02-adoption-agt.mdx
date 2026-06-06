@@ -1,0 +1,43 @@
+---
+title: "GV02 · ADR d'adoption AGT — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de GV02 : l'ADR 0037 (accepté) comme PROJECTION de la table d'adoption autoritaire (adoption.go), épinglée au code par un miroir de parité ADR↔code dans back/runtime/governance ; l'invariant « le mur reste le garant sur chaque ligne non-rejetée » ; le twin front adrParity/adrSummary + le contrôle action-capable de /governance ; l'e2e Playwright. Trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "governance", "GV02", "ADR", "0037", "adoption", "AGT", "parité", "ADRParity", "miroir property", "le mur", "garant", "déterminisme", "Merkle", "OWASP", "policy-as-YAML", "SRE", "Linear", "internals"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet (tout). Pour la vue sans code, voir [Pour les futurs utilisateurs → GV02](/steps/concept/gv02-adoption-agt).</Note>
+
+## En une phrase
+
+GV02 ne livre pas d'enforcer : il **grave la décision d'adoption** en un **ADR accepté** (`docs/adr/0037-gv02-agt-adoption.md`) et **l'épingle au code** — l'ADR est une **projection** de la table autoritaire `adoptionTable` (GV01), vérifiée par un miroir de parité, de sorte que le document ne peut jamais diverger du runtime.
+
+## Implémentation
+
+**Le code (`back/runtime/governance/adoption_adr.go`, pur, total, sans I/O ni LLM) :**
+
+- `ADRParity()` — projette, pilier par pilier, la table autoritaire `adoptionTable` (de `adoption.go`) en lignes d'ADR : `Pillar`, `Title`, `Decision`, `Step`, et **`WallIsGarant = (Decision != reject)`** — vrai sur chaque ligne non-rejetée (l'invariant load-bearing de GV02).
+- `AdoptionADRSummary()` — dérive le titre de l'ADR du `Verdict()` : `Adopt`/`AlreadyCovered`/`Rejected` (donc **4 / 1 / 0**, jamais re-saisis) + `WallStaysGarant = true` inconditionnel.
+- `ADRNumber()` / `ADRAcceptanceStatus()` — l'identité de l'ADR (`"0037"`, `Accepted`), déclarée en code pour que le miroir vérifie le fichier publié.
+
+**Le miroir (`adoption_adr_test.go`, rouge d'abord — d'abord compile-red sans `ADRParity`, puis rouge sur le fichier ADR manquant) pin :**
+
+- **Parité** — chaque ligne d'`ADRParity()` égale exactement la `adoptionTable` (pilier, décision, titre, étape).
+- **Le mur garant** — `WallIsGarant == (Decision != reject)` sur chaque ligne ; `WallStaysGarant` du résumé est vrai.
+- **Accord avec le verdict** — les compteurs du résumé égalent `Verdict()`, et la forme réelle est **4 adopt / 1 covered / 0 reject**.
+- **Le fichier ADR publié** — `TestADRFile_AcceptedAndComplete` lit `docs/adr/0037-gv02-agt-adoption.md` et exige qu'il existe, soit **`Status: Accepted`**, déclare son numéro, et **nomme chaque pilier + sa décision** verbatim, et explique pourquoi le **mur** reste garant. Un ADR `Proposed`, manquant, ou qui oublie un pilier passe **rouge** — la complétude du document est non-gameable.
+- **Reproductibilité** (rapid) — même table ⇒ projection byte-stable.
+
+**Le twin front** `front/web/lib/governance.ts` réplique `adrParity()` / `adrSummary()` + `ADR_NUMBER` / `ADR_STATUS` (couvert par `governance.test.ts`, fast-check : parité au verdict, mur garant partout, reproductibilité). Le panneau `components/GovernancePanel.tsx` est **action-capable** : le bouton **« Voir l'ADR d'adoption »** exécute la projection pure et rend le statut **Accepté 0037**, les compteurs **4 / 1 / 0**, et un badge *mur-garant* par pilier — lecture seule au-dessus de la ligne (le panneau ne propose aucune écriture). L'e2e `tests/e2e/governance.spec.ts` prouve les trois : ADR absent avant clic puis Accepté 0037, compteurs 4/1/0, badge garant sur les cinq piliers.
+
+## Méta
+
+**Pourquoi un ADR projeté, et non un ADR écrit à la main.** Un ADR rédigé à part dériverait du code à la première évolution. GV02 applique le **determinism-first au document lui-même** : la décision est une **table déclarée** (`adoptionTable`), l'ADR en est la **projection**, et le miroir de parité est le **juge**. Le test qui lit le `.md` publié rend la cohérence document↔code **non-gameable** — exactement comme un émetteur projette du code depuis une source, l'ADR « projette » la décision depuis la table.
+
+**Pourquoi `Rejected = 0` n'est pas un blanc-seing.** Le compteur de rejet est à zéro parce qu'on **ré-implémente** chaque pilier dans la posture du mur (default-deny), au lieu d'importer la posture *default-allow* de l'AGT. On ne rejette pas l'*idée* d'un pilier ; on rejette sa *posture* quand elle est plus molle. La distinction est tracée comme une `OpenQuestion` de l'ADR (si une revue future veut une ligne « posture default-allow = REJETÉE » explicite, ce serait un raffinement de vérité : idée → miroir → /goal).
+
+**Le mur reste le garant — l'invariant gravé.** Sur chaque ligne non-rejetée, `WallIsGarant = true`. Tout pilier adopté est un **miroir** (GV03/GV04, qui certifie sous la ligne), une **projection** d'une policy vers les enforcers (GV05, qui ne peut qu'égaler/resserrer), ou un **resserrement** (GV06). Aucun n'est une autorité *au-dessus* du mur. Élargir l'adoption, importer le default-allow, ou rétrograder le mur sont des **changements de vérité** (idée → miroir → /goal → approbation humaine), jamais une édition silencieuse de l'ADR.
+
+## Méta-méta
+
+GV02 est le pas où AIDOS **rend une décision d'architecture aussi vérifiable qu'un comportement**. Le geste générique : *une décision n'engage que si elle est un artefact accepté ; et un artefact n'est fiable que s'il est épinglé à sa source par un miroir.* L'ADR cesse d'être de la prose qu'on espère à jour : il devient une **projection gardée**, dont la dérive est un test rouge.
+
+C'est le cliquet appliqué à la gouvernance de la gouvernance : GV01 mesure, GV02 décide-et-épingle, GV03→GV06 exécutent les augmentations — chaque cran ne fait qu'**ajouter une garde**, jamais en retirer, et le mur structurel reste, à chaque cran, le garant. Côté suivi : l'ADR `GV02 ·` est tracé dans le projet Linear AIDOS (label `adr`) — best-effort si le MCP `linear-server` est authentifié, sinon noté en `OpenQuestion` sans bloquer le step (CLAUDE.md §11).

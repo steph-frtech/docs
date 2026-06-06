@@ -1,0 +1,35 @@
+---
+title: "GV02 · L'ADR d'adoption AGT — ce qu'on adopte, ce qu'on n'adopte pas"
+description: "GV02 grave la décision : à partir du cross-check de GV01, AIDOS écrit un ADR ACCEPTÉ qui liste précisément ce qu'il adopte du Microsoft agent-governance-toolkit (4 piliers en augmentation), ce qu'il a déjà (l'identité), ce qu'il rejette (0), et pourquoi le mur structurel reste le garant. La décision est épinglée au code par un miroir : le document ne peut pas dériver. Vue concept, sans code."
+keywords: ["aidos", "krd", "governance", "GV02", "ADR", "adoption", "AGT", "agent-governance-toolkit", "Merkle", "OWASP", "policy-as-YAML", "SRE", "identité", "le mur", "garant", "fail-closed", "déterminisme"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → GV02](/steps/internals/gv02-adoption-agt).</Note>
+
+## L'idée en une phrase
+
+GV01 a **mesuré** ce qu'AIDOS couvre déjà ; GV02 **décide** quoi en faire — il écrit un **ADR accepté** qui dit, pilier par pilier, ce qu'on adopte et ce qu'on n'adopte pas du *Microsoft agent-governance-toolkit* (AGT), et **pourquoi le mur structurel reste le garant**.
+
+## Pourquoi ce pas existe
+
+Un cross-check qui finit dans une discussion orale ne décide rien. Pour qu'une décision d'adoption **engage** le projet, elle doit être un artefact : un **ADR** (Architecture Decision Record), daté, accepté, traçable. GV02 transforme le verdict de GV01 en cette décision écrite — et, surtout, il **l'épingle au code** pour que le document ne puisse jamais dire autre chose que ce que le runtime fait réellement.
+
+## Ce que l'ADR décide
+
+L'ADR 0037 liste les cinq piliers de l'AGT et tranche chacun :
+
+- **On ADOPTE — comme augmentations (4 piliers).** Chacun est adopté **uniquement avec sa preuve**, et **au-dessus du mur, jamais à sa place** :
+  - *Audit tamper-evident (Merkle)* → **GV03** : une chaîne Merkle rend toute suppression/réordonnancement du journal détectable.
+  - *Miroirs OWASP exécutables* → **GV04** : les dix risques deviennent des tests déterministes (injecter la violation → rouge).
+  - *Policy-as-YAML → enforcers* → **GV05** : une policy lisible qui **compile** vers les enforcers existants — elle ne peut qu'**égaler ou resserrer** le mur, jamais l'élargir.
+  - *Contrôles SRE (error-budget / circuit-breaker)* → **GV06** : un resserrement supplémentaire au-dessus des plafonds durs.
+- **On N'ADOPTE PAS — déjà couvert (1 pilier).** L'*identité/trust* : AIDOS prouve déjà l'identité d'un agent (BA18). Rien à ajouter ; on ne fait que la **surfacer**.
+- **On REJETTE — 0 pilier.** Aucun pilier n'est importé **tel quel** s'il apportait une posture *default-allow* (tout est permis sauf interdiction explicite). On garde notre posture *default-deny fail-closed* et on ne reprend de l'AGT que les pièces qui **resserrent ou prouvent** le mur.
+
+## Pourquoi le mur reste le garant
+
+C'est la décision portée par l'ADR. Le mur est **structurel** : il refuse **par construction**, pas par configuration. Tout pilier adopté est soit un **miroir** (qui certifie), soit une **projection** d'une policy déclarée vers les enforcers existants, soit un **resserrement** supplémentaire. **Aucun** n'est un point de décision *au-dessus* du mur ; **aucun** ne peut élargir ce que le mur autorise. La règle, en une ligne : sur chaque pilier non-rejeté, **le mur reste le garant** que le pilier augmente.
+
+## Ce que vous gagnez
+
+Sur l'écran `/governance`, un clic sur **« Voir l'ADR d'adoption »** affiche la décision : son statut **Accepté**, les compteurs précis **4 adoptés / 1 déjà couvert / 0 rejeté**, et pour chaque pilier le badge *« le mur reste garant »*. Ce n'est pas une opinion : ces chiffres sont **dérivés du cross-check** et vérifiés par un miroir — le document et le code ne peuvent pas se contredire.
