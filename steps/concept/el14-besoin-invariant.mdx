@@ -1,0 +1,47 @@
+---
+title: "EL14 · /besoin-invariant (la bande transversale des invariants ∀ et des policies — contraint latéralement)"
+description: "EL14 est la bande transversale /besoin-invariant : l'interview LATÉRALE des invariants ∀ qui croisent tout niveau (« vrai sur tous les chemins ») et des policies où l'autorisation est en jeu. L'humain énonce l'invariant ; le code ne fait que l'enregistrer et le classer (le ban de circularité, §8 — la skill ne peut pas auteurer un ∀ qu'elle satisferait ensuite). Un ∃ (un exemple unique) est refusé (INVARIANT_IS_EXAMPLE_NOT_FORALL) ; un invariant attaché à un rung contraint ce rung ET tout rung au-dessus ; une bande policy émet au plus une Idea{Proposes:policy} via la porte légale idea_capture ; un invariant path-independent n'émet rien (NoEmit). Above le mur : la bande n'écrit aucune vérité."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "invariant", "besoin-invariant", "bande transversale", "∀", "forall", "policy", "contrainte latérale", "CrossedLevels", "vrai sur tous les chemins", "INVARIANT_IS_EXAMPLE_NOT_FORALL", "ban de circularité", "anti-Goodhart", "idea_capture", "Idea policy", "NoEmit", "complétude", "le mur", "EL02", "EL04", "EL13", "EL14", "runtime/besoin"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL14](/steps/internals/el14-besoin-invariant).</Note>
+
+## En une phrase
+
+EL14 est **la bande latérale** : pendant qu'on descend les niveaux (produit → entité), on énonce **les règles vraies partout** — les invariants ∀ (« sur tous les chemins ») et les policies (« qui a le droit »). **L'humain énonce, le code juge.**
+
+## Le problème que ça résout
+
+Tous les besoins ne sont pas des étages de l'échelle. Certains **traversent** l'échelle : « le solde reste toujours positif », « seul un admin peut rembourser ». Ce ne sont pas des rungs — ce sont des **contraintes latérales** qui pèsent sur plusieurs niveaux à la fois.
+
+EL14 les capture **sans casser le mur** et **sans laisser le LLM tricher**. Trois pièges qu'on évite :
+
+1. **L'exemple déguisé en loi.** « Par exemple la commande #3 est payée » n'est **pas** un invariant : c'est un cas unique (un ∃), pas un universel (un ∀). EL14 le **refuse** (`INVARIANT_IS_EXAMPLE_NOT_FORALL`) — un invariant ne s'illustre jamais par un exemple.
+2. **La skill qui s'auto-note.** Si l'IA pouvait *écrire* l'invariant qu'elle va ensuite *satisfaire*, ce serait circulaire (vous écririez l'examen puis vous le passeriez). Le **ban de circularité** (§8) refuse tout invariant auto-auteuré : l'humain énonce, le code enregistre.
+3. **L'invariant qui ne contraint rien.** Un invariant attaché à `operation` ne contraint pas que l'opération : il contraint **tout niveau au-dessus** qu'il croise (action, contrôle, vue, parcours, produit). « Vrai sur tous les chemins » vaut sur chaque étage que le chemin traverse.
+
+## Les idées-clés
+
+<Field name="Un ∀, jamais un ∃" type="INVARIANT_IS_EXAMPLE_NOT_FORALL">
+  Un invariant est un **universel** (« pour tout », « toujours », « jamais »). Un énoncé qui n'est qu'un exemple unique est refusé. La distinction est faite par un **prédicat lexical déclaré** (bilingue FR/EN), jamais par un jugement de l'IA.
+</Field>
+
+<Field name="La contrainte est LATÉRALE et MONTANTE" type="CrossedLevels">
+  Un invariant attaché à un rung `L` contraint `L` **et tout rung au-dessus**. Un invariant sur `operation` contraint donc aussi `action / control / view / journey / product` — l'ensemble est calculé (`CrossedLevels`), jamais re-jugé.
+</Field>
+
+<Field name="Le ban de circularité (§8)" type="l'humain énonce, le code juge">
+  La skill **ne peut pas auteurer** un invariant qu'elle satisferait ensuite. Un invariant auto-auteuré est toujours refusé (`INVARIANT_CIRCULAR_SELF_AUTHORED`). L'humain possède la vérité ; le code la classe.
+</Field>
+
+<Field name="Au plus une Idea{policy}" type="la porte légale idea_capture">
+  Une bande **policy** (l'autorisation) émet **au plus une** `Idea{Proposes:policy}` via la porte légale `idea_capture` (provenance humaine, utterance verbatim). Un invariant **path-independent** n'émet **rien** (`NoEmit`) — son miroir est une property N1, pas une idée.
+</Field>
+
+## Ce que ça change pour vous
+
+Quand vous décrivez votre app, vous n'êtes plus obligé de tout faire rentrer dans l'échelle verticale. Vous pouvez dire « voici une règle vraie partout » et AIDOS l'**attache latéralement** aux bons niveaux, **vérifie** que c'est bien un universel (pas un exemple), et — si c'est une autorisation — la **propose** comme idée par la seule porte légale. La complétude **flagge** ensuite tout niveau qui devrait porter un invariant et n'en a pas.
+
+## Ce que ça ne change PAS
+
+Le mur tient : la bande n'écrit **aucune** vérité. La seule sortie est, au plus, **une** `Idea{Proposes:policy}` (jamais figée, sans miroir). Promouvoir un invariant en vérité reste l'écriture de son miroir via `/goal` — elle appartient à l'app-builder.

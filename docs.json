@@ -309,7 +309,9 @@
               "steps/concept/el12-branchtree-decision-tree",
               "steps/internals/el12-branchtree-decision-tree",
               "steps/concept/el13-compound-besoin-interview",
-              "steps/internals/el13-compound-besoin-interview"
+              "steps/internals/el13-compound-besoin-interview",
+              "steps/concept/el14-besoin-invariant",
+              "steps/internals/el14-besoin-invariant"
             ]
           }
         ]

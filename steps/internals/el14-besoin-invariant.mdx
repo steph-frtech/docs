@@ -1,0 +1,54 @@
+---
+title: "EL14 · /besoin-invariant — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals d'EL14 : la skill /besoin-invariant + son backing pur-Go (back/runtime/besoin/invariant.go). ParseInvariantBand(body) → type le ∀, refuse un ∃ (INVARIANT_IS_EXAMPLE_NOT_FORALL via IsForallStatement, un prédicat lexical déclaré bilingue), valide l'attachement (AttachableTo, EL02). CrossedLevels(band) → L + tout rung SOURCE au-dessus (le cross-product latéral montant). RecordInvariant(graph, body, utterance, selfAuthored, meta) → InvariantResult : le ban de circularité (§8, selfAuthored refusé INVARIANT_CIRCULAR_SELF_AUTHORED), le routage record/off_altitude/spike (floue → /spike via idea_capture → idea_grill → idea_spike), et pour une bande policy SEULEMENT au plus une Idea{Proposes:policy} (provenance human, verbatim, content-adressée) ; un invariant path-independent n'émet rien (NoEmit). BandCompleteness(graph) → flagge un rung resolved qui requiert un invariant croisé mais n'en a aucun (NEED_LEVEL_MISSING_INVARIANT). Miroir property rapid (invariant_property_test.go) + fixture (invariant_fixture_test.go) + acceptance Godog (besoin-invariant.feature) GREEN. Jumeau TS lib/besoin-invariant.ts byte-équivalent + vitest/fast-check 14/14 ; route Workbench /besoin-invariant action-capable ; e2e Playwright besoin-invariant.spec.ts 5/5. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "EL14", "back/runtime/besoin", "invariant.go", "besoin-invariant", "InvariantBand", "ParseInvariantBand", "IsForallStatement", "CrossedLevels", "ConstrainsLevel", "RecordInvariant", "InvariantResult", "BandCompleteness", "BandMonster", "INVARIANT_IS_EXAMPLE_NOT_FORALL", "INVARIANT_CIRCULAR_SELF_AUTHORED", "NEED_LEVEL_MISSING_INVARIANT", "ban de circularité", "anti-Goodhart", "contrainte latérale", "∀", "policy", "idea_capture", "Idea policy", "NoEmit", "CertifyMetadata", "AttachableTo", "déterminisme", "le LLM mène le code juge", "Godog", "rapid", "property test", "fast-check", "vitest", "le mur", "ui-completeness", "Playwright", "EL02", "EL04", "EL13", "EL15", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — les internals complets. La page concept est [ici](/steps/concept/el14-besoin-invariant).</Note>
+
+## Implémentation
+
+EL14 livre **deux artefacts** : la skill `.claude/skills/besoin-invariant/SKILL.md` (le geste rejouable) et son **backing pur-Go** `back/runtime/besoin/invariant.go` (l'autorité déterministe). Le backing est **pur/total/déterministe** et n'écrit **aucune** vérité (le mur) ; il compose l'existant (`AttachableTo` EL02, `CertifyMetadata` EL04, `ideas` la porte) sans forker. Quatre surfaces, le LLM exclu comme autorité de chacune.
+
+### `IsForallStatement(statement string) → bool` et `ParseInvariantBand(body) → (InvariantBand, error)`
+
+`IsForallStatement` est un **prédicat lexical déclaré bilingue** : un énoncé est un ∀ ssi il porte un marqueur universel (`forallMarkers` : `∀`, `pour tout`, `toujours`, `jamais`, `every`, `never`…) **et** aucun marqueur d'exemple (`exampleMarkers` : `par exemple`, `for example`, `une fois`…). Jamais un jugement LLM « est-ce universel » — c'est un comptage de sous-chaînes (determinism-first). `ParseInvariantBand` type le `statement`, **refuse un ∃** (`INVARIANT_IS_EXAMPLE_NOT_FORALL`), lit le `kind` (`path_independent` par défaut ; `policy` si un `rule`/`policy` est présent), et valide chaque `attached_levels` contre `AttachableTo(bandLevel, rung)` (EL02) — un mauvais attachement est une erreur dure (`INVARIANT_BAD_ATTACHMENT`), jamais une coercition silencieuse.
+
+### `CrossedLevels(band) → []Level`
+
+L'ensemble de la **contrainte latérale montante** : pour chaque rung attaché `L` (index `idx` dans `sourceOrder`), on ajoute `sourceOrder[0..idx]` — `L` et **tout rung au-dessus**. Un invariant sur `operation` contraint donc `operation → action → control → view → journey → product`. Trié par `levelRank`, dé-dupliqué. `ConstrainsLevel(band, level)` en dérive le booléen. Le property mirror pin que rien **en dessous** de l'attachement n'est contraint.
+
+### `RecordInvariant(graph, body, utterance, selfAuthored, meta) → InvariantResult`
+
+Le recorder déterministe (le pendant latéral de `RecordAnswer` EL13). Ordre des décisions :
+
+1. **Ban de circularité (§8)** : `selfAuthored=true` → refusé `INVARIANT_CIRCULAR_SELF_AUTHORED`, graphe inchangé. La skill ne peut **pas** auteurer un invariant qu'elle satisferait.
+2. **Parse** : `ParseInvariantBand` ; un ∃ / mauvais attachement → `off_altitude`, graphe inchangé.
+3. **Floue → /spike** : si `CertifyMetadata(probe, meta).RouteToSpike` (verifiability `unverifiable`, EL04, le **même** classifieur truthtyping que le kernel), routage `spike` via la porte légale à trois sauts `idea_capture → idea_grill → idea_spike` ; pas d'enregistrement.
+4. **Record** : sinon le nœud de bande est appendé (`upsertNode`, status `drafting`). **Pour une bande policy SEULEMENT**, `buildPolicyIdea` construit **au plus une** `Idea{Proposes:policy}` (provenance `human`, `intent` = la règle verbatim, content-adressée via `ideas.Hashed`, status `draft`). Un invariant path-independent → `PolicyIdea == nil` (NoEmit ; son miroir est une property N1).
+
+### `BandCompleteness(graph) → BandCompletenessReport`
+
+Le miroir need-side de `check-completeness` pour la bande. Pour chaque rung SOURCE `resolved` dont le corps déclare `requires_invariant: true` (opt-in déclaré, jamais un « should » inféré par LLM), si **aucune** bande ne le croise (`levelIsCrossed` via `CrossedLevels`), c'est un monstre `NEED_LEVEL_MISSING_INVARIANT`. Comptage + appariement purs.
+
+### Les miroirs (rouge → vert)
+
+- **Property (rapid)** `invariant_property_test.go` : `CrossedLevels` contraint tout rung au/au-dessus et aucun en dessous ; `IsForallStatement` accepte le ∀, refuse le ∃ ; `RecordInvariant` déterministe ; le ban de circularité refuse toujours sans enregistrer ; une bande policy émet exactement une `Idea{policy}`, un ∀ n'en émet aucune ; un mauvais attachement refusé.
+- **Fixture** `invariant_fixture_test.go` : `BandCompleteness` flagge le `NEED_LEVEL_MISSING_INVARIANT` puis le clear (y compris couverture depuis un attachement plus bas) ; une fault-injection re-rougit le détecteur ; un tour refusé laisse `graph_hash` inchangé.
+- **Acceptance (Godog, N0)** `back/tests/runtime/besoin-invariant.feature` + `invariant_bdd_test.go` : les 5 done-criteria (contrainte latérale, ∃ refusé, ban de circularité, au plus une Idea{policy}, complétude flagge le manquant).
+- **Jumeau TS** `front/web/lib/besoin-invariant.ts` byte-équivalent + `besoin-invariant.test.ts` (vitest + fast-check) **14/14**.
+- **Route Workbench** `/besoin-invariant` (action-capable, thémée ADR 0010, bilingue FR-default ADR 0011) : `record-cta`/`crossed-cta`/`completeness-cta` exécutent `recordInvariant`/`crossedLevels`/`bandCompleteness` depuis l'écran ; lien nav ajouté ; e2e Playwright `besoin-invariant.spec.ts` **5/5**.
+
+## Méta
+
+**Pourquoi une bande, pas un rung ?** Tranché en EL02 : `invariant` et `policy` sont des **bandes transversales**, pas des étages de la verticale (`NextLevel` ne les traverse jamais). Un invariant n'a pas de position dans la descente — il **croise** la descente. EL14 est donc le **pendant latéral** d'EL13 : même langage de routage (`AnswerRouting`), même classifieur de métadonnées (`CertifyMetadata`), même porte (`idea_capture`), mais l'objet est une contrainte qui pèse sur plusieurs niveaux à la fois.
+
+**Pourquoi le ban de circularité ?** C'est l'application directe d'anti-Goodhart (§8) : « tu n'écris jamais un test de vérité que tu satisferais ensuite ». Si la skill pouvait auteurer l'invariant, elle écrirait l'examen et le passerait — la garantie serait creuse. Le code **refuse** l'auto-auteurage ; l'humain possède la vérité, le code la classe.
+
+**Pourquoi un prédicat lexical, pas un LLM, pour ∀ vs ∃ ?** Parce qu'un test déterministe existe : un marqueur universel présent ∧ aucun marqueur d'exemple. Determinism-first impose alors que **le code fasse autorité**. Le LLM peut *suggérer* une reformulation en ∀, mais le verdict est le prédicat. C'est pourquoi le ∃ « toujours par exemple ce cas-ci » est refusé : un universel **phrasé** comme un exemple reste un exemple.
+
+**Pourquoi au plus une Idea{policy} ?** Une bande policy est la seule des deux à avoir une cible `Proposes` légale (EL05 : `LevelToProposes(policy) == policy`). Un invariant ∀ n'en a aucune (`NoEmit`) — son miroir est une **property N1**, pas une idée. L'émission est donc **bornée** : au plus une `Idea{Proposes:policy}` par bande, jamais une pour le ∀ lui-même.
+
+## Méta-méta
+
+EL14 **renforce** le mur sans jamais le franchir (méta-loop §5 : on n'AJOUTE qu'une garde). La bande écrit `besoin` (via l'MCP EL15), jamais `kernel`/`mirrors`/`fitness`. La seule sortie au-dessus de la ligne est une `Idea` — un candidat-truth, sans `version` ni `mirror` par construction (la double absence). Le détecteur de complétude de bande est lui-même un **miroir** (il a sa fault-injection) : casser le lien rung↔invariant le fait virer au rouge — ce qui interdit qu'un niveau prétende « complet » alors qu'il lui manque un invariant croisé qu'il a déclaré requérir. Et tout le verdict — ∀ vs ∃, la contrainte latérale, le routage, le ban de circularité, la complétude — est **calculé**, jamais déclaré : le juge est le code, jamais le LLM qui se noterait. C'est la garantie KRD appliquée à la bande latérale : *chaque comportement est prouvé en BDD avant d'exister ; toute la vérité vit dans Postgres, hors de portée de l'agent.*
