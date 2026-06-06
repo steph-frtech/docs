@@ -299,7 +299,9 @@
               "steps/concept/el07-candescend-forcing-gate",
               "steps/internals/el07-candescend-forcing-gate",
               "steps/concept/el08-anchor-cascade",
-              "steps/internals/el08-anchor-cascade"
+              "steps/internals/el08-anchor-cascade",
+              "steps/concept/el09-besoin-completeness",
+              "steps/internals/el09-besoin-completeness"
             ]
           }
         ]

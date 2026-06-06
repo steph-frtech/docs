@@ -1,0 +1,50 @@
+---
+title: "EL09 · La complétude du besoin — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals d'EL09 : back/runtime/besoin/completeness.go (BesoinCompleteness → CompletenessReport, les quatre MonsterCode) + mirrorform.go (LevelMirrorForm) + le twin TS lib/besoin-completeness.ts + les miroirs fixture/property (rapid, fast-check) + l'e2e Playwright + la route /compound-besoin-completeness. La loi de complétude appliquée au besoin : casser le lien nœud↔miroir-de-niveau dans les deux sens vire au rouge ; détection = fonction pure ; aucun miroir réel écrit ; above-the-wall."
+keywords: ["aidos", "krd", "besoin", "complétude", "BesoinCompleteness", "MonsterCode", "NEED_LEVEL_WITHOUT_MIRROR", "ORPHAN_NEED_MIRROR", "NEED_MIRROR_WRONG_FORM", "LevelMirrorForm", "MirrorForm", "completeness.go", "mirrorform.go", "besoin-completeness.ts", "rapid", "fast-check", "Playwright", "fault-injection", "fonction pure", "le mur", "EL09", "runtime/besoin"]
+---
+
+<Note>Côté internals (le journal de construction — tout). Pour la vue concept, voir [Pour les futurs utilisateurs → EL09](/steps/concept/el09-besoin-completeness).</Note>
+
+## Implémentation
+
+EL09 construit `back/runtime/besoin/completeness.go` + `back/runtime/besoin/mirrorform.go`, avec le twin TS `front/web/lib/besoin-completeness.ts` (byte-équivalent) et la route `/compound-besoin-completeness`.
+
+### `LevelMirrorForm(level) → MirrorForm` (`mirrorform.go`)
+
+La table neuve qui porte la forme de miroir attendue par rung. `MirrorForm` est l'ensemble fermé `{gherkin_n0, screen_fixture, fixture_n2, property_n1}`. Le map total : `product/journey → gherkin_n0`, `view → screen_fixture`, `control/action/operation/policy → fixture_n2`, `entity/invariant → property_n1`. `DerivedMirrorCovers(level)` nomme les 5 rungs que la skill `derive-mirror` couvre déjà (`entity/policy/operation/control/action`) — pour eux la table porte la **même** forme (la property `TestProp_LevelMirrorForm_AgreesWithDeriveMirrorCovered` épingle l'accord, zéro fork) ; `product/journey/view` portent la forme fraîchement déclarée. Un niveau hors-grammaire → `ok=false` (aucune forme fabriquée).
+
+### `BesoinCompleteness(graph, mirrors, metadata) → CompletenessReport` (`completeness.go`)
+
+Fonction PURE/TOTALE. `mirrors []BesoinLevelMirror` est le set **côté besoin** des miroirs-de-niveau déclarés (`Reflects Level`, `Form MirrorForm`) — **pas** des vrais miroirs Postgres. `metadata map[Level]Metadata` porte les quatre métadonnées EL04 avec lesquelles le rung a été certifié.
+
+Détection, en ordre déterministe :
+1. **Pour chaque nœud `resolved`** : (a) s'il n'a aucun miroir-de-niveau → `NEED_LEVEL_WITHOUT_MIRROR` ; (b) si le miroir existe mais `Form != LevelMirrorForm(level)` → `NEED_MIRROR_WRONG_FORM` ; (c) si `CertifyMetadata(node, metadata[level])` (EL04, **réutilisé**, jamais re-jugé) n'est pas `Complete` → `NEED_LEVEL_METADATA_DISAPPEARED`.
+2. **Pour chaque miroir-de-niveau déclaré** : s'il ne reflète aucun nœud `resolved` du graphe → `ORPHAN_NEED_MIRROR`.
+
+Les monstres sont triés par rang de descente du niveau puis par code puis par explication (rapport byte-stable). `MonsterCode` est l'ensemble fermé besoin-local (séparé de `blockreason.Code` et de `BesoinBlockCode` — un monstre est un défaut de complétude du besoin, pas un refus de gate). Chaque `Monster` porte un `how_to_fix` non vide (jamais une prison).
+
+### Les miroirs (red→green)
+
+- `completeness_fixture_test.go` — la **fault-injection** : lien intact → complet ; retirer le miroir → `NEED_LEVEL_WITHOUT_MIRROR` ; miroir orphelin → `ORPHAN_NEED_MIRROR` ; miroir reflétant un nœud `drafting` → orphelin ; mauvaise forme → `NEED_MIRROR_WRONG_FORM` ; métadonnées évaporées → `NEED_LEVEL_METADATA_DISAPPEARED` ; nœud `empty` → aucune obligation.
+- `completeness_property_test.go` (rapid) — `LevelMirrorForm` totale sur les 9 rungs et accord derive-mirror sur les 5 couverts ; `BesoinCompleteness` reproductible (identique sur 15 appels) ; la **loi** (`complete ⟺ resolved ∧ miroir-présent ∧ bonne-forme ∧ métadonnées-présentes`) ; tout monstre porte un code fermé + un fix non vide.
+- `lib/besoin-completeness.test.ts` (vitest + fast-check) — 13/13, le twin TS byte-équivalent (la complétude prend `metaComplete: Record<string,boolean>`, le screen fournit le verdict EL04 ; le twin ne ré-implémente pas le classifieur kernel).
+- `tests/e2e/besoin-completeness.spec.ts` (Playwright) — 4/4 contre le dev server `:3000` : lien intact → complet, aucun monstre ; retrait du miroir → `monster-NEED_LEVEL_WITHOUT_MIRROR` rouge ; miroir orphelin → `monster-ORPHAN_NEED_MIRROR` rouge ; reset → verdict effacé puis re-complet.
+
+### La route `/compound-besoin-completeness`
+
+`components/BesoinCompletenessPanel.tsx` (action-capable, ui-completeness) : « Vérifier la complétude » (`besoinCompleteness`), « Casser le lien (retirer le miroir) », « Casser le lien (miroir orphelin) », « Réinitialiser ». Chaque verdict est calculé par le twin déterministe, jamais re-jugé dans le composant. Thémé (ADR 0010) + bilingue FR-default (ADR 0011 ; namespace `besoinCompleteness` + `nav.besoinCompleteness`, parité 2864/2864).
+
+## Méta
+
+**Pourquoi une gate distincte ?** EL07 répond « ce niveau est-il assez déclaré » et EL08 « contraint-il vraiment celui d'en dessous, et de combien ». Aucune des deux ne répond « ce niveau résolu porte-t-il sa preuve attendue ». EL09 ferme cette troisième question avec la **même** loi qui régit la vérité sous le mur — par cohérence : le besoin n'est pas une vérité, mais sa discipline de complétude est identique, sinon le hand-off vers l'app-builder mentirait.
+
+**Pourquoi `LevelMirrorForm` et pas `derive-mirror` ?** `derive-mirror` ne connaît que les 5 rungs kernel (vérifié dans son SKILL.md) ; le besoin élicite aussi `product/journey/view`. On **délègue** pour les 5 couverts (la property épingle l'accord) et on **construit** la forme pour les 3 que `derive-mirror` ignore — zéro duplication, zéro fork.
+
+**Pourquoi pas un LLM ?** La détection de monstre est du **comptage + appariement** : un nœud résolu a-t-il son miroir ? la forme correspond-elle ? les métadonnées sont-elles présentes ? Toutes des questions à réponse pure. Mettre un LLM ici serait une *determinism gap* (§6/§8) qui bloquerait l'étape.
+
+## Méta-méta
+
+**Le détecteur se prouve par fault-injection.** Un détecteur de complétude qui ne vire jamais au rouge est lui-même un monstre (un *hook mort*, §5). EL09 porte sa preuve : casser le lien nœud↔miroir **dans les deux sens** rend le détecteur rouge, et la propriété de loi épingle qu'il n'est vert que lorsque tout est en place. C'est la loi de complétude appliquée à l'outil qui vérifie la loi de complétude.
+
+**Forward-dependency déclarée (bootstrap §6, non bloquante).** Les vrais miroirs (schéma Postgres `mirrors`) sont écrits **sous le mur** par l'app-builder (S68) via `/goal` ; EL09 ne manipule que des miroirs-de-niveau **côté besoin** (en mémoire, au-dessus du mur). La pleine formalisation des validateurs `view`/`journey` neufs et la persistance du set de miroirs sont l'objet d'EL10/EL15 — OpenQuestions déclarées, jamais des résiduels bloquants.

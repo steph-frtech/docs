@@ -1,0 +1,54 @@
+---
+title: "EL09 · La complétude du besoin (la loi de complétude appliquée au BESOIN)"
+description: "EL09 applique la loi de complétude au besoin. BesoinCompleteness(graph, mirrors) → { complete, monsters[] } : tout niveau résolu doit porter son miroir-de-niveau de la bonne forme et ses métadonnées vivantes ; aucun miroir-de-niveau ne peut être orphelin. Casser le lien nœud↔miroir-de-niveau dans un sens fait apparaître NEED_LEVEL_WITHOUT_MIRROR ; dans l'autre, ORPHAN_NEED_MIRROR. La détection est une fonction pure (comptage + appariement), jamais un LLM ; aucun miroir réel n'est écrit (le mur)."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "complétude", "loi de complétude", "BesoinCompleteness", "monstre", "monster", "NEED_LEVEL_WITHOUT_MIRROR", "ORPHAN_NEED_MIRROR", "miroir-de-niveau", "LevelMirrorForm", "MirrorForm", "fonction pure", "fault-injection", "le mur", "check-completeness", "EL07", "EL09", "runtime/besoin"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL09](/steps/internals/el09-besoin-completeness).</Note>
+
+## En une phrase
+
+EL09 applique au besoin la **loi de complétude** d'AIDOS : un niveau du besoin déjà figé sans son **miroir-de-niveau** est un **monstre**, et un miroir-de-niveau qui ne reflète aucun niveau est un **orphelin** — la même règle qui, sous le mur, interdit une vérité sans preuve.
+
+## Le problème que ça résout
+
+La promesse d'AIDOS (Mandat A) : **aucune vérité sans miroir vivant** ; un comportement sans preuve est un *monstre*, un miroir sans vérité est un *orphelin*. Le *compound du besoin* élicite des niveaux **au-dessus du mur** — ce ne sont pas encore des vérités, mais ils doivent respecter la **même discipline** pour que le hand-off vers l'app-builder soit honnête. Sans cette gate :
+
+1. **Le niveau figé creux.** Un rung passe `resolved` (EL07 dit *enough*) mais rien n'énonce *comment on le prouvera* — on hérite d'un besoin qui prétend être complet sans porter sa forme de preuve.
+2. **Le miroir fantôme.** Une forme de miroir traîne en prétendant refléter un rung qui n'existe pas (ou n'est pas résolu) — un orphelin qui fausse le compte de complétude.
+3. **La métadonnée évaporée.** Un rung résolu dont les quatre métadonnées par-vérité (EL04) ont disparu n'est plus certifiable — un monstre silencieux.
+
+## Les idées-clés
+
+<Field name="La loi de complétude, réénoncée pour le besoin" type="réutilise check-completeness">
+  On **réutilise** la loi (S06 / la skill `check-completeness`) — on ne la réinvente pas. EL09 la calcule sur le BesoinGraph **au-dessus du mur** : chaque nœud `resolved` doit avoir son miroir-de-niveau ; aucun miroir-de-niveau ne peut être orphelin.
+</Field>
+
+<Field name="Le miroir-de-niveau (ce que c'est, ce que ce n'est PAS)" type="le mur">
+  Un **miroir-de-niveau** décrit « ce rung résolu est prouvable par un miroir de TELLE forme ». Ce n'est **PAS** un vrai miroir dans le schéma Postgres `mirrors` : EL09 le **lit** pour vérifier le lien, il ne l'écrit jamais. Les vrais miroirs sont écrits **sous le mur** par l'app-builder (S68) via `/goal`.
+</Field>
+
+<Field name="La forme attendue par rung — LevelMirrorForm" type="table déclarée">
+  La forme du miroir attendue par niveau vient de la table neuve `LevelMirrorForm(level)` : `product/journey` → Gherkin N0, `view` → fixture-écran, `control/action/operation/policy` → fixture N2, `entity/invariant` → property N1. Pour les 5 rungs que la skill `derive-mirror` couvre déjà, la table porte la **même** forme (zéro fork) ; pour `product/journey/view` (que `derive-mirror` ne connaît pas), elle porte la forme fraîchement déclarée.
+</Field>
+
+<Field name="Les monstres détectés" type="comptage + appariement">
+  Quatre codes, fermés : `NEED_LEVEL_WITHOUT_MIRROR` (un rung résolu sans miroir), `ORPHAN_NEED_MIRROR` (un miroir reflétant aucun rung résolu), `NEED_MIRROR_WRONG_FORM` (le lien existe mais la forme est fausse), `NEED_LEVEL_METADATA_DISAPPEARED` (un rung résolu dont les métadonnées EL04 ont disparu). Chaque monstre nomme **la porte de sortie** (`how_to_fix`) — jamais une prison.
+</Field>
+
+## La fault-injection (le rouge prouvé)
+
+La preuve d'un détecteur de complétude, c'est qu'il **vire au rouge** quand on casse ce qu'il surveille. EL09 casse le lien nœud↔miroir-de-niveau **dans les deux sens** :
+
+- **Retirer le miroir** d'un nœud résolu → `NEED_LEVEL_WITHOUT_MIRROR` (rouge) ;
+- **Ajouter un miroir orphelin** qui ne reflète aucun nœud résolu → `ORPHAN_NEED_MIRROR` (rouge).
+
+Si le détecteur restait vert dans l'un de ces cas, il serait un *hook mort*. Le panneau Workbench rend ces deux sens **exécutables depuis l'écran**.
+
+## Le mur
+
+EL09 se calcule sur le BesoinGraph **au-dessus de la ligne** ; **aucun miroir réel n'est écrit**. La détection de monstre est une **fonction pure** (on compte les liens, on apparie les formes, on re-certifie les métadonnées) — jamais un jugement LLM. C'est le déterminisme appliqué à la complétude.
+
+## Ce que ça débloque
+
+EL09 garantit qu'un BesoinGraph présenté comme « complet » porte vraiment, pour chaque rung mappant, sa **forme de miroir attendue** — l'information exacte que `RedBacklog` (EL17) annexe à chaque Idea et que l'app-builder consomme pour ouvrir le bon `/goal`.
