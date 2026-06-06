@@ -1,0 +1,40 @@
+---
+title: "CE03 (interne) · La gesture /compound — capture procédurale + behavior candidate via le mur — Implémentation · Méta · Méta-méta"
+description: "Internals de CE03 : la gesture /compound est une fonction PURE (back/runtime/compound/compound.go) qui, sur un GoalClose vert, émet une Capture = ≤1 memory.WriteInput de KindProcedural (le motif de gestes) + ≤1 firewall.IdeaCandidate (le motif de spec, via firewall.ViaIdea → idée draft, WroteKernel=false). Mirror-first : un miroir fixture ROUGE d'abord (compound_fixture_test.go) + un miroir de reproductibilité rapid (compound_property_test.go). Le jumeau TS (lib/compound.ts) + le panneau GesturePanel rendent la gesture exécutable à l'écran ; un e2e Playwright prouve que le contrôle exécute. Le mur tient : la gesture renvoie des valeurs, n'écrit aucune vérité."
+keywords: ["aidos", "krd", "compound", "/compound", "gesture", "CE03", "Compound", "GoalClose", "Capture", "memory.WriteInput", "KindProcedural", "firewall.ViaIdea", "IdeaCandidate", "WroteKernel", "le mur", "idée draft", "behavior-macro", "miroir fixture", "miroir de reproductibilité", "rapid", "fast-check", "fonction pure", "déterminisme", "GesturePanel", "Playwright", "S31", "S27", "records.Hash"]
+---
+
+<Note>Côté interne — le journal complet de CE03. Concept : [Pour les futurs utilisateurs → CE03](/steps/concept/ce03-compound-gesture).</Note>
+
+## Implémentation
+
+**Le contrat.** `back/runtime/compound/compound.go` ajoute la gesture `/compound` au package CE02 existant (qui portait déjà la table de décision `capitalisation.go`). Trois types + une fonction :
+
+- `GoalClose{ GoalID, Branch, Green, GesturePattern []string, SpecPattern []string }` — l'entrée : un goal qui vient d'atteindre sa condition d'arrêt, son motif découpé en deux canaux CE02.
+- `Capture{ ProceduralWrites []memory.WriteInput, BehaviorCandidates []firewall.IdeaCandidate }` — la sortie : des **valeurs**, jamais des écritures. `Capture.WroteKernel()` parcourt les candidates et renvoie **toujours faux** (la garantie du mur, rendue explicite et testable).
+- `Compound(g GoalClose) (Capture, error)` — **pure, totale** :
+  - `!g.Green` → `Capture` vide, pas d'erreur (la capitalisation est un événement de **fermeture**).
+  - `len(g.GesturePattern) > 0` → une `memory.WriteInput{ Kind: memory.KindProcedural, Content: <motif rendu>, Provenance: "compound:<goalID>", Confidence: 1.0, Taint: [unverified], Branch }`.
+  - `len(g.SpecPattern) > 0` → on construit un `firewall.MemoryItem`, on calcule son id content-addressé (`records.Hash` sur `CanonicalBody()` — réutilise S01/S02, jamais forké), puis `firewall.ViaIdea(mem)` produit l'`IdeaCandidate` (idée `StatusDraft`, `WroteKernel=false`).
+
+*Ce qui passe par quel canal* est la **table déclarée** de CE02 (`CapitalisationDecisions`), pas un jugement LLM — déterminisme-first.
+
+**Mirror-first (rouge d'abord).** `compound_fixture_test.go` (le miroir fixture `state → command → events`) a été écrit AVANT le code et confirmé **rouge** (`undefined: compound.GoalClose / compound.Compound`). Il pin les deux assertions porteuses du critère : un goal vert produit **1** entrée procédurale (`Kind=procedural`) **+ 1** idée `draft`, et **`out.WroteKernel() == false`**. Plus : un goal non-vert ne capture rien ; un motif de gestes vide ne produit pas d'entrée procédurale mais propose quand même la behavior ; la provenance remonte au goal. Après le code : **vert**.
+
+**Miroir de reproductibilité.** `compound_property_test.go` (rapid) pin le déterminisme sur tout l'espace d'entrée : même `GoalClose` → mêmes événements (mêmes contenus procéduraux, mêmes ids d'idée) ; **aucun** goal généré n'écrit de vérité (le mur, propriété) ; un goal non-vert est toujours un no-op. 7 tests Go verts au total.
+
+**L'écran (action-capable).** Le jumeau TS `lib/compound.ts` ajoute `compound(GoalClose): Capture` — copie déterministe exacte du code Go. `components/GesturePanel.tsx` est le contrôle : le bouton **« Lancer /compound »** appelle `compound(GOAL_CLOSE)` et rend l'événement 1 (l'entrée `KindProcedural`), l'événement 2 (l'idée `draft`) et le badge **« AUCUNE écriture kernel »** (`data-wrote-kernel="false"`). Câblé dans `app/compound/page.tsx`, thémé (ADR 0010), bilingue (ADR 0011, clés `compound.gesture.*`). `lib/compound.test.ts` : 17 tests verts (11 antérieurs + 6 CE03 dont un fast-check de reproductibilité). Playwright `tests/e2e/compound.spec.ts` : 3 tests verts (CE01 + CE02 + le bloc CE03 prouvant que le contrôle exécute).
+
+## Méta
+
+**Pourquoi une gesture pure, pas un effet de bord.** En suivant le déterminisme-first (§6/§8), `/compound` ne *fait* rien d'irréversible : elle **calcule** les deux événements de capitalisation et les **renvoie**. La persistance (INSERT dans `brain.memory_item`, enregistrement de l'idée) est portée par les adapters S31/S27 au branchement runtime — séparer le **calcul** (pur, testable, reproductible) de l'**effet** (plumbing) rend la gesture entièrement prouvable par un miroir fixture, sans DB, sans horloge.
+
+**Le mur, rendu structurel.** La garantie « aucune écriture kernel » n'est pas un commentaire : c'est `Capture.WroteKernel()`, dérivé des `IdeaCandidate.WroteKernel` (toujours faux par construction de `firewall.ViaIdea`). Le type rend la violation **représentable mais fausse** — un test la lit, l'écran l'affiche. La seule porte vers une vérité reste `firewall.ViaIdea` → idée → miroir → `/goal`.
+
+**« proposed » = `draft`.** Le critère demande une idée `Status=proposed`. L'enum S27 (`ideas.Status`) n'a pas de « proposed » ; l'état d'entrée d'une idée fraîchement proposée est `StatusDraft`. CE03 produit donc une idée `draft` — la candidate « proposée » au sens du critère — via `firewall.ViaIdea`, sans inventer un sixième statut. C'est un OpenQuestion documenté, pas un écart.
+
+## Méta-méta
+
+**La boucle se construit elle-même selon ses propres règles.** CE03 est *la gesture qui capitalise les gestes*. Elle aurait pu être un agent qui « décide quoi retenir » ; le contrat l'interdit (déterminisme-first) : *quoi* capitaliser est une **table déclarée** (CE02), *comment* est une **fonction pure**. La boucle de capitalisation est donc elle-même **non-apprenante** — elle propose la réutilisation d'un geste prouvé, elle n'apprend aucun critère. C'est la frontière porteuse de CE02 appliquée à CE03 : on capitalise le **motif**, jamais la **fitness**.
+
+**Le mur s'auto-applique à l'outil qui le fait grandir.** La gesture qui rend les futurs goals moins chers n'a, elle non plus, aucun raccourci vers le kernel. L'OS qui se construit ne s'accorde aucune exception : même l'outil de capitalisation passe par idée → miroir → `/goal`. Un nouvel artefact **ajoute** une garde (la gesture + son miroir fixture), il n'en **retire** jamais une (le mur reste intact, `WroteKernel` toujours faux).

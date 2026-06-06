@@ -269,7 +269,9 @@
               "steps/concept/ce01-spike-compound",
               "steps/internals/ce01-spike-compound",
               "steps/concept/ce02-capitalisation-loop",
-              "steps/internals/ce02-capitalisation-loop"
+              "steps/internals/ce02-capitalisation-loop",
+              "steps/concept/ce03-compound-gesture",
+              "steps/internals/ce03-compound-gesture"
             ]
           }
         ]

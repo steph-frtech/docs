@@ -1,0 +1,52 @@
+---
+title: "CE03 · La gesture /compound — capturer le motif à la fermeture d'un goal"
+description: "CE02 a gravé la décision ; CE03 l'EXÉCUTE. À la fermeture d'un goal VERT, la gesture /compound CAPITALISE le motif durable via le mur : le motif de GESTES devient une entrée mémoire procédurale (KindProcedural, S31) et le motif de SPEC devient une behavior-macro candidate proposée par firewall.ViaIdea (idée draft → miroir → /goal). Un goal vert produit exactement 1 entrée procédurale + 1 idée draft, et AUCUNE écriture kernel (le mur). Un goal non-vert ne capitalise rien (la capitalisation est un événement de FERMETURE). La gesture est une fonction PURE et déterministe : même goal → mêmes événements, sans LLM, sans horloge."
+keywords: ["aidos", "krd", "compound", "compound-engineering", "capitalisation", "/compound", "gesture", "fin de goal", "goal vert", "motif durable", "mémoire procédurale", "KindProcedural", "recall procédural", "behavior-macro", "§24.6", "behavior candidate", "idée draft", "firewall.ViaIdea", "le mur", "idée → miroir → /goal", "aucune écriture kernel", "déterminisme", "fonction pure", "miroir fixture", "CE01", "CE02", "CE03", "CE04", "CE05", "S31", "OpenQuestion"]
+---
+
+<Note>Côté concept — CE03 est la **gesture** qui exécute la décision gravée en CE02. Détail d'implémentation : [Pour moi → CE03](/steps/internals/ce03-compound-gesture).</Note>
+
+## En une phrase
+
+À la **fermeture d'un goal vert**, vous lancez `/compound` : la gesture **capture** le motif de gestes en **mémoire procédurale** et **propose** le motif de spec comme **behavior candidate** via le mur — **un événement de capitalisation, jamais une écriture de vérité**.
+
+## Le problème que ça résout
+
+CE02 a décidé *ce qu'on capitalise* et *par où*. Mais une décision n'est pas une action : il faut une **gesture** qui, au bon moment (la fermeture d'un goal **vert**), produise concrètement les deux événements de capitalisation — sans jamais déraper en écriture kernel. CE03 est cette gesture. Elle est **étroite** : un goal en cours ou échoué ne capitalise **rien** ; seul un goal **vert** (red set → vert ∧ vert antérieur intact ∧ mutation ≥ seuil ∧ pas de monstre) déclenche la capture.
+
+## Les idées-clés
+
+<Field name="Déclenchée à la FERMETURE d'un goal VERT" type="événement de close">
+  La capitalisation est un événement de **clôture**, pas une action en cours de route. `/compound` ne capture que si le goal est **vert**. Un goal non-vert produit une capture **vide** — aucune entrée procédurale, aucune behavior candidate.
+</Field>
+
+<Field name="Événement 1 — le motif de gestes → mémoire procédurale" type="KindProcedural, S31">
+  Les gestes réutilisables du goal (charger le ContextPack, scaffolder le package, projeter Go/TS, câbler le contrôle, lancer les sensors) deviennent **une** entrée `memory.WriteInput` de **`KindProcedural`** — fuel `/brain` sous la ligne, branch-aware, traçant sa provenance au goal (`compound:<goalID>`). Le router (CE05) la rejouera pour abaisser l'effort du goal suivant similaire.
+</Field>
+
+<Field name="Événement 2 — le motif de spec → behavior candidate via le mur" type="firewall.ViaIdea">
+  Le motif de spec (forme miroir/fixture/contrat) devient **une** behavior-macro candidate (§24.6) proposée par `firewall.ViaIdea` → une **idée draft**. L'idée ne porte **ni version ni miroir** ; elle doit **encore** acquérir son miroir via `/goal` pour atteindre le kernel. C'est la seule porte.
+</Field>
+
+<Field name="AUCUNE écriture kernel — le mur" type="WroteKernel == false">
+  La gesture ne **renvoie** que des valeurs : un `memory.WriteInput` (que le store `/brain` appendra plus tard, sous la ligne) et une `IdeaCandidate` dont `WroteKernel` est **toujours faux**. Il n'existe aucun chemin de cette gesture vers le kernel/mirrors/fitness. « La mémoire propose ; le noyau déclare le vrai. »
+</Field>
+
+<Field name="Une fonction PURE et déterministe" type="déterminisme-first">
+  `Compound(goalClose)` est **pure et totale** : même goal → mêmes événements (même contenu procédural, mêmes ids content-addressés). *Ce qu'on capitalise* est la **table déclarée** de CE02, pas un jugement LLM. Un miroir de reproductibilité (rapid + fast-check) l'épingle.
+</Field>
+
+## Lancer la gesture à l'écran
+
+Le panneau `/compound` du Workbench rend la gesture **exécutable** : le bouton **« Lancer /compound »** rejoue la gesture (le jumeau pur du code Go), affiche **l'événement 1** (l'entrée `KindProcedural` avec son contenu, sa branche, sa provenance), **l'événement 2** (l'idée `draft` avec son intent et sa provenance) et le badge **« AUCUNE écriture kernel (le mur) »**. Vous *voyez* la capitalisation se produire sans qu'aucune vérité ne soit écrite.
+
+## Ce qui suit
+
+- **CE04** — l'**expansion** d'une behavior-macro (§24.6) : fonction pure, idempotente, qui ne crée aucune vérité hors `/goal`.
+- **CE05** — le router (`MatchRole`, S33) **réutilise** les behaviors + procédures capturées aux goals suivants similaires + panneau « Compounding ».
+
+## Les questions restées ouvertes (OpenQuestions)
+
+- **« Status=proposed » = `draft`.** Le critère parle d'une idée `Status=proposed` ; l'enum S27 n'a pas de statut « proposed » — l'état d'entrée d'une idée fraîchement proposée est `draft`. CE03 produit donc une idée **`draft`** (la candidate « proposée »), conformément à `firewall.ViaIdea`.
+- **La persistance.** `/compound` renvoie des *write-inputs* ; l'INSERT réel dans `brain.memory_item` (sous la ligne) et l'enregistrement de l'idée dans le schéma `ideas` sont portés par les adapters S31/S27 — branchés au runtime, hors de cette gesture pure.
+- **Le motif réel.** Le goal-fixture (`goal-order-archive`) est le motif mesuré par CE01 ; CE05 calculera *quand* réutiliser via la similarité (un algorithme, pas un prompt).
