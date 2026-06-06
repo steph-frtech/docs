@@ -1,0 +1,42 @@
+---
+title: "EL05 · La table LevelToProposes — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals d'EL05 : la table déclarée LevelToProposes(level) → ProposesKind | NoEmit (back/runtime/besoin/proposes.go), la jointure honnête entre les 9 niveaux de la grammaire et le closed set existant ideas.ProposesKinds() (6 kinds). Self-map pour control/action/operation/entity/product + policy ; NoEmit pour journey/view/invariant. Aucun alias silencieux (journey→product interdit) ; un mapping hors closed set est une erreur dure (LevelToProposesChecked). Miroir property ROUGE→VERT (proposes_property_test.go, rapid) : total, clos (chaque Emit ∈ ideas.ProposesKinds()), alias-free, NoEmit-exact, domaine = AllLevels(), out-of-grammar = hard error, reproductible. Jumeau TS lib/besoin-proposes.ts + vitest/fast-check 12/12 ; route Workbench /compound-besoin-proposes action-capable ; e2e Playwright besoin-proposes.spec.ts 4/4. ADR 0041. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "EL05", "back/runtime/besoin", "proposes.go", "LevelToProposes", "LevelToProposesChecked", "Mapping", "MappingEmit", "MappingNoEmit", "ProposesKind", "NoEmit", "ideas.ProposesKinds", "closed set", "jointure honnête", "self-map", "alias silencieux", "journey", "view", "invariant", "rapid", "property test", "fast-check", "vitest", "déterminisme", "reproductibilité", "le mur", "ui-completeness", "Playwright", "ADR 0041", "EL16", "EL17", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — les internals complets. La page concept est [ici](/steps/concept/el05-table-level-to-proposes).</Note>
+
+## Implémentation
+
+La table dans **`back/runtime/besoin/proposes.go`** (au-dessus de la grammaire EL02) :
+
+- **Types** — `MappingKind` ∈ {`MappingEmit`, `MappingNoEmit`}. `Mapping{Kind, Proposes(ideas.Proposes)}` est une struct **comparable** (l'égalité, donc la reproductibilité, se teste directement) : `Proposes` n'est rempli que pour `MappingEmit`, vide pour `MappingNoEmit`.
+- **La table déclarée** — `levelProposesTable map[Level]Mapping` est **first-class, close, totale**, son domaine est **exactement `AllLevels()`** (9 entrées). Les 5 rungs SOURCE dont le nom est un `ProposesKind` (`control/action/operation/entity/product`) + la bande `policy` se mappent vers eux-mêmes (`emit(ideas.ProposesX)`) ; `journey`, `view`, `invariant` sont `noEmit`. Chaque ligne porte un commentaire renvoyant à l'ADR 0041.
+- **Les fonctions autoritaires** — `LevelToProposes(l) → Mapping` (pure, totale ; pour un niveau hors-grammaire renvoie `noEmit` afin que l'itération sur les niveaux valides ne panique jamais) ; `LevelToProposesChecked(l) → (Mapping, error)` (erreur **dure** sur hors-grammaire — un mapping vers un kind inconnu est impossible) ; helpers `NoEmitLevels()`, `EmitLevels()`, `IsNoEmit(l)`.
+
+**Miroir property** (`proposes_property_test.go`, rapid) — écrit ROUGE d'abord (les symboles `LevelToProposes`/`MappingEmit`/… n'existaient pas), puis VERT :
+- `TestLevelToProposes_TotalOverAllLevels` : chaque niveau valide mappe vers exactement un `Mapping` ; un Emit a un `Proposes` non vide, un NoEmit a un `Proposes` vide ;
+- `TestLevelToProposes_EmitTargetIsInClosedSet` : **chaque** cible Emit est membre de `ideas.ProposesKinds()` (la jointure honnête, jamais un kind inventé) ;
+- `TestLevelToProposes_NoSilentAlias` : les 6 niveaux self-kind mappent vers **leur propre** kind ; `journey`/`view`/`invariant` sont **forcément** NoEmit (jamais aliasés) ;
+- `TestLevelToProposes_NoEmitSetIsExact` : le set NoEmit est **exactement** `{journey, view, invariant}` ;
+- `TestLevelToProposes_OutOfGrammarIsHardError` : sur des chaînes aléatoires hors-grammaire, `LevelToProposesChecked` renvoie **toujours** une erreur ;
+- `TestLevelToProposes_Reproducible` : même niveau → même `Mapping` sur 50 appels (déterminisme) ;
+- `TestLevelToProposes_DomainIsExactlyAllLevels` : le domaine de la table ≡ `AllLevels()`, aucune entrée en trop ni manquante.
+
+`go test ./runtime/besoin/` vert ; `go vet` + `gofmt` propres.
+
+**Jumeau TS** (`front/web/lib/besoin-proposes.ts`) — `LEVEL_PROPOSES_TABLE`, `levelToProposes`, `levelToProposesChecked`, `emitLevels`/`noEmitLevels`/`proposesKinds`, byte-équivalent au Go. Couvert par `lib/besoin-proposes.test.ts` (vitest + fast-check, **12/12**) qui re-prouve total / clos / alias-free / NoEmit-exact / hard-error / reproductible / domaine. `tsc` + `biome` propres.
+
+**Route Workbench** `/compound-besoin-proposes` (`BesoinProposesPanel.tsx`) — **action-capable** (ui-completeness) : la table complète rendue, « Mapper le niveau » exécute `levelToProposes`, « Prouver la jointure honnête » prouve Emit∈closed-set sans alias, « Tester un niveau hors-grammaire » prouve l'erreur dure. Thémé (ADR 0010), bilingue FR-default (ADR 0011). **e2e Playwright** `tests/e2e/besoin-proposes.spec.ts` **4/4** contre le serveur live :3000.
+
+## Méta
+
+Le geste d'EL05, c'est **joindre honnêtement deux grammaires fermées de cardinalités différentes** (9 niveaux ↔ 6 kinds) sans en distordre aucune. Trois disciplines KRD s'y croisent :
+
+- **Déterminisme-first (§6/§8)** : le mapping est une **fonction pure totale sur un set déclaré**, jamais un « choix de convenance » LLM. La property de reproductibilité (`même niveau → même mapping`) est l'application littérale du mandat « tout ce qui peut être une fonction pure DOIT être du code ».
+- **Anti-Goodhart (§8)** : le danger n'est pas qu'un niveau ne mappe pas — c'est qu'il mappe **faussement** (un cast silencieux `journey→product` qui gonflerait le compteur d'Ideas). La table refuse l'alias **par construction** (self-map seul) et le prouve par property, pas par convention.
+- **Le mur (§2)** : EL05 décide une **cible**, jamais une **émission**. Elle joint vers `ideas.ProposesKinds()` (un closed set du Kernel) sans **l'élargir** — élargir ce set serait un changement de vérité (idée → miroir → /goal), pas une décision de track above-the-wall.
+
+## Méta-méta
+
+EL05 est la **charnière de typage** entre le track « compound du besoin » (above-the-wall) et l'app-builder (below-the-wall) : elle dit, pour chaque rung de l'architecture, **quel genre de candidate** il deviendra — ou s'il ne devient **rien** (NoEmit, il seede). C'est ce qui permet à EL16/EL17 de produire un backlog d'Ideas **topo-trié** où chaque Idea porte déjà son `Proposes` correct et où les nœuds qui ne portent qu'une contrainte (journey/view) restent des **ancres**, jamais de faux items. La leçon récursive : **on n'étend pas un closed set pour faire rentrer une grammaire voisine ; on déclare la jointure, on la prouve close et alias-free, et on nomme `NoEmit` ce qui n'a pas de cible** — l'honnêteté de la topologie est plus précieuse qu'une complétude apparente. C'est le même principe qui, plus tard, empêchera l'app-builder de croire qu'un écran (`view`) « est » un produit.

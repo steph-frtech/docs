@@ -1,0 +1,39 @@
+---
+title: "EL05 · La table LevelToProposes (la jointure honnête avec le closed set des Ideas)"
+description: "EL05 déclare la table LevelToProposes(level) → ProposesKind | NoEmit — la jointure honnête entre la grammaire du BesoinGraph (9 niveaux) et le closed set existant ideas.ProposesKinds() (control|policy|operation|action|entity|product). control/action/operation/entity/product et la bande policy se mappent vers eux-mêmes (self-map, la seule émission légale) ; journey, view et invariant sont NoEmit (aucune cible Proposes légale ; ils seedent les ancres au lieu d'émettre). Aucun alias silencieux : journey→product est interdit, view→view* impossible. Un mapping hors closed set est une erreur dure. Table close = fonction pure déterministe, jamais un choix LLM (§6/§8). Au-dessus du mur : la table décide seulement la cible Proposes ; elle n'écrit aucune Idea (EL16 le fait via la porte idea-intake) et aucune vérité. Chaque non-mapping est justifié par l'ADR 0041."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "BesoinGraph", "LevelToProposes", "ProposesKind", "NoEmit", "ideas.ProposesKinds", "closed set", "jointure honnête", "honest join", "self-map", "alias silencieux", "journey", "view", "invariant", "seede les ancres", "anchors_above", "déterminisme", "fonction pure", "le mur", "idea-intake", "idea_capture", "EL02", "EL03", "EL05", "EL16", "EL17", "ADR 0041", "runtime/besoin"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL05](/steps/internals/el05-table-level-to-proposes).</Note>
+
+## En une phrase
+
+EL05 déclare la table **`LevelToProposes(level) → ProposesKind | NoEmit`** : la **jointure honnête** entre les 9 niveaux de la grammaire du `BesoinGraph` et le **closed set existant** `ideas.ProposesKinds()`, sans jamais inventer un kind ni aliaser silencieusement un niveau.
+
+## Le problème que ça résout
+
+EL02 a fixé la grammaire (9 `Level` : 7 rungs SOURCE + les bandes `invariant`/`policy`). À la projection (EL16), chaque nœud `resolved` **dont le rung mappe** sort comme **Idea** via la porte `idea-intake`. Or une `Idea` porte un champ `Proposes` dont le closed set est **exactement** `control | policy | operation | action | entity | product` — **PAS** `journey`, **PAS** `view`, **PAS** `invariant`.
+
+Il faut donc une **jointure** entre 9 niveaux et 6 kinds. Le piège anti-Goodhart : un **cast silencieux** (`journey → product`, `view → control`) qui ferait croire que tout rung émet une Idea — alors que `journey`/`view`/`invariant` n'ont **aucune** cible `Proposes` légale.
+
+## Les idées-clés
+
+<Field name="Self-map : la seule émission légale" type="control/action/operation/entity/product · policy">
+  Les 5 rungs dont le **nom EST** un `ProposesKind` se mappent vers **eux-mêmes** (`entity → entity`, jamais `entity → control`). La bande `policy` se mappe vers `policy` (qui existe dans le closed set). C'est la **seule** émission permise : un niveau ne peut jamais aliaser le kind d'un **autre** niveau.
+</Field>
+
+<Field name="NoEmit : journey, view, invariant" type="ils seedent les ancres, n'émettent rien">
+  `journey` et `view` n'ont **aucun** kind homonyme dans `ideas.ProposesKinds()` → ils sont **NoEmit** : ils **seedent** les `anchors_above[]` des rungs qui, eux, mappent — jamais un cast `journey → product`. La bande `invariant` est aussi NoEmit : son miroir est une **property (N1)**, pas un kind d'Idea ; elle contraint **latéralement**.
+</Field>
+
+<Field name="Aucun alias silencieux" type="journey→product interdit, view→view* impossible">
+  Une property prouve qu'un niveau sans kind homonyme **doit** être NoEmit (jamais aliasé). `journey → product` est interdit ; `view → view*` est impossible (il n'existe aucun kind `view`). Un mapping vers un kind **hors** `ideas.ProposesKinds()` est une **erreur dure** — jamais une devinette LLM.
+</Field>
+
+<Field name="Table close = fonction pure" type="déterminisme §6/§8">
+  La table est un **map déclaré, clos, total** dont le domaine est exactement `AllLevels()`. Même niveau → même mapping (property de reproductibilité). Ce n'est jamais un « choix de convenance » d'un LLM : c'est du code qui fait autorité.
+</Field>
+
+## Ce que ça change (et ne change pas)
+
+EL05 ne franchit **jamais** le mur : la table décide **seulement** la cible `Proposes` — elle **n'émet aucune Idea** (c'est EL16 qui le fait, via la porte légale `idea-intake`) et n'écrit **aucune** vérité. Les nœuds `NoEmit` apparaîtront dans les `anchors_above[]` (EL08/EL17) : ils **contraignent sans émettre**, et le compteur d'Ideas (EL19) les **exclut**. Chaque non-mapping est tranché par l'**ADR 0041**, jamais un footnote.
