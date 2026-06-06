@@ -1,0 +1,39 @@
+---
+title: "CE04 · Les behaviors-macro — attachez un comportement, l'expansion écrit le boilerplate à votre place"
+description: "Pour les futurs utilisateurs : une behavior-macro (§24.6) est un comportement réutilisable (ownable, soft-deletable, auditable…) que vous ATTACHEZ à une entité. AIDOS l'EXPANSE — fonction pure, dry-run, idempotente — en attributs, relations, opérations, policies et fixtures. « Ne réécris pas le boilerplate owner-scoping pour la 50ᵉ fois. » L'expansion n'écrit aucune vérité : vous la figez ensuite via /goal (le mur)."
+keywords: ["aidos", "krd", "behavior", "behavior-macro", "§24.6", "ownable", "soft-deletable", "auditable", "expansion", "dry-run", "idempotent", "owner-scoping", "boilerplate", "attributs", "relations", "opérations", "policies", "fixtures", "/goal", "le mur", "CE04"]
+---
+
+<Note>Côté produit — comment développer votre app avec AIDOS. Internes : [Pour moi → CE04](/steps/internals/ce04-behavior-expansion).</Note>
+
+## Le problème : réécrire le même boilerplate
+
+À chaque entité « possédée par quelqu'un », vous réécrivez la même chose : un champ `owner_id`, une relation vers `User`, une policy « seul le propriétaire peut modifier », et les fixtures qui le prouvent. Pour la 50ᵉ fois. C'est exactement ce que les **behaviors-macro** (KRD §24.6) suppriment.
+
+## Une behavior, c'est un comportement réutilisable
+
+Le catalogue déclaré : `ownable` (scopé à un propriétaire), `soft-deletable` (archivé, jamais détruit), `auditable` (chaque changement tracé). Vous en **attachez** une à une entité — par exemple `ownable` sur `Order` — et AIDOS fait le reste.
+
+## L'expansion : ce que la behavior écrit pour vous
+
+Attacher `ownable` à `Order` **expanse** en cinq sortes de pièces :
+
+| Sorte | Pièces (pour `ownable`) |
+|---|---|
+| **Attributs** | `owner_id` (string, requis) |
+| **Relations** | `owner → User` (many-to-one) |
+| **Opérations** | `transferOwnership` |
+| **Policies** | `owner-scoping` (OPERATION:mutate, DENY) |
+| **Fixtures** | `owner-only-mutation-allowed`, `non-owner-mutation-denied` |
+
+C'est le boilerplate owner-scoping, écrit pour vous.
+
+## Trois garanties
+
+- **Dry-run** — l'expansion vous **montre** ce qu'elle écrirait ; elle n'écrit **rien** tout de suite. Vous la figez ensuite via `/goal` (le mur : idée → miroir → /goal → approbation).
+- **Déterministe** — même behavior + même entité → exactement la même expansion. Pas d'aléatoire, pas de LLM qui « invente » des champs.
+- **Idempotente** — ré-attacher la même behavior à une entité qui porte déjà ces pièces n'ajoute **rien** : aucune colonne dupliquée, aucune policy en double.
+
+## Voir l'expansion à l'écran
+
+Sur la route `/compound` du Workbench, le panneau **« Expansion de behavior-macro »** : choisissez une behavior, une entité, cliquez **« Expanser »**. Les pièces apparaissent, avec le badge **« AUCUNE écriture kernel — figer via /goal »**. Cliquez **« Expanser à nouveau (idempotent) »** : le compteur de pièces tombe à **0** — la preuve, à l'écran, que ré-expanser n'ajoute rien.

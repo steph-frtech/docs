@@ -271,7 +271,9 @@
               "steps/concept/ce02-capitalisation-loop",
               "steps/internals/ce02-capitalisation-loop",
               "steps/concept/ce03-compound-gesture",
-              "steps/internals/ce03-compound-gesture"
+              "steps/internals/ce03-compound-gesture",
+              "steps/concept/ce04-behavior-expansion",
+              "steps/internals/ce04-behavior-expansion"
             ]
           }
         ]

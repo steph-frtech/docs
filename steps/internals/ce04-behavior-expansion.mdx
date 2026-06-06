@@ -1,0 +1,38 @@
+---
+title: "CE04 (interne) · L'expansion des behaviors-macro (§24.6) — Implémentation · Méta · Méta-méta"
+description: "Internes de CE04 : back/kernel/behavior/behavior.go porte le catalogue déclaré (ownable, soft-deletable, auditable) et Expand(Attachment) (Expansion, error) — une fonction PURE, DRY-RUN, IDEMPOTENTE qui expanse une behavior attachée à une entité en attributs/relations/opérations/policies/fixtures. Mirror-first : un miroir property rapid ROUGE d'abord (behavior_property_test.go : déterminisme ∧ idempotence ∧ WroteKernel=false) + un miroir fixture (behavior_fixture_test.go). Jumeau TS lib/compound.ts (expand) + panneau ExpansionPanel + e2e Playwright. Le mur tient : l'expansion renvoie des valeurs, n'écrit aucune vérité ; on fige via /goal."
+keywords: ["aidos", "krd", "behavior", "behavior-macro", "§24.6", "Expand", "Attachment", "Expansion", "ownable", "soft-deletable", "auditable", "dry-run", "idempotent", "ExpansionID", "records.Hash", "records.Canonicalize", "WroteKernel", "le mur", "/goal", "miroir property", "rapid", "fast-check", "déterminisme", "ExpansionPanel", "Playwright", "CE04"]
+---
+
+<Note>Côté interne — le journal complet de CE04. Concept : [Pour les futurs utilisateurs → CE04](/steps/concept/ce04-behavior-expansion).</Note>
+
+## Implémentation
+
+**Le contrat.** Le nouveau package `back/kernel/behavior/behavior.go` porte la couche BEHAVIOR-MACRO du Kernel (KRD §24.6). Il déclare :
+
+- `Kind` — le catalogue **fermé** : `Ownable`, `SoftDeletable`, `Auditable` (`Catalogue()` les rend dans l'ordre canonique). Un kind hors catalogue est `ErrUnknownBehavior` — jamais une expansion devinée (la règle d'honnêteté).
+- `Attachment{ Behavior, Entity, Existing Shape }` — l'entrée pure : quelle behavior, sur quelle entité, et la `Shape` (les **noms** de pièces déjà présentes) qui rend `Expand` idempotente.
+- `Expansion{ Behavior, Entity, Attributes, Relations, Operations, Policies, Fixtures, ExpansionID, WroteKernel }` — la sortie : les cinq sortes de pièces §24.6, un `ExpansionID` content-addressé, et `WroteKernel` **toujours faux** (la garantie du mur, explicite et testable).
+- `Expand(a Attachment) (Expansion, error)` — **pure, totale, dry-run, idempotente** : elle lit le `catalogueExpansion` déclaré (la pleine expansion sur une entité vierge) et **filtre** chaque pièce dont le nom est déjà présent dans `a.Existing` (idempotence). Entité vide → `ErrNoEntity`. `ExpansionID = records.Hash(records.Canonicalize(body))` sur le corps sémantique (les 5 sortes + behavior + entité), excluant `ExpansionID`/`WroteKernel` eux-mêmes.
+
+*Ce qu'une behavior expanse* est la **table déclarée** (`catalogueExpansion`), pas un jugement LLM — déterminisme-first.
+
+**Mirror-first (rouge d'abord).** `behavior_property_test.go` (rapid) a été écrit AVANT le code et était **rouge** (`undefined: behavior.Expand / behavior.Attachment`). Il pin les **trois clauses exactes** du critère CE04, sur tout l'espace d'entrée (catalogue × shapes arbitraires) :
+
+- **Déterminisme** — `Expand(a)` deux fois → `reflect.DeepEqual` (mêmes pièces, même `ExpansionID` non vide) ;
+- **Idempotence** — expanser, fusionner les noms émis dans `Existing`, ré-expanser → `PieceCount == 0` (aucune pièce nouvelle) ;
+- **Le mur** — `WroteKernel == false` sur chaque expansion, `ExpansionID` toujours content-addressé.
+
+`behavior_fixture_test.go` (`state → command → events`) pin l'exemple canonique §24.6 (`ownable` sur `Order` → owner-scoping), le rejet de l'unknown/no-entity, le skip idempotent quand `owner_id` est déjà présent, et la surface d'archive de `soft-deletable`. **8 tests Go verts**.
+
+**L'écran (action-capable).** Le jumeau TS `lib/compound.ts` ajoute `expand(Attachment): Expansion` — copie déterministe exacte du `CATALOGUE` Go. `components/ExpansionPanel.tsx` est le contrôle : sélecteurs behavior/entité + bouton **« Expanser »** appelant `expand`, rendant les 5 sections (`exp-attributes`, `exp-relations`, …), le badge **« AUCUNE écriture kernel — figer via /goal »** (`data-wrote-kernel="false"`), le compteur `piece-count` et un bouton **« Expanser à nouveau (idempotent) »** qui ré-attache la shape déjà expansée et fait tomber le compteur à 0. Câblé dans `app/compound/page.tsx`, thémé (ADR 0010), bilingue (ADR 0011, clés `compound.expansion.*`). `lib/compound.test.ts` : **20 tests verts** (17 antérieurs + 3 CE04 dont un fast-check de reproductibilité + idempotence). Playwright `tests/e2e/compound.spec.ts` : **4 tests verts** (le bloc CE04 prouve que le contrôle exécute, expanse, est idempotent, n'écrit pas le kernel).
+
+## Méta
+
+**Pourquoi l'idempotence est un invariant porteur, pas un confort.** Une behavior-macro sera ré-attachée — par re-projection, par fusion de branches, par un agent qui rejoue un goal capitalisé (CE03/CE05). Si `Expand` n'était pas idempotente, chaque rejeu dupliquerait `owner_id`, empilerait des policies `owner-scoping`, et l'expansion deviendrait une bombe à boilerplate. En faisant de l'idempotence une **propriété rapid** (et non un test d'exemple), on la prouve sur tout l'espace : la `Shape` `Existing` est l'entrée qui rend la fonction **convergente** — ré-expanser une entité déjà complète est un no-op exact.
+
+**Pourquoi un dry-run, pas une écriture.** §24.6 dit « s'expanse » ; CE04 fait de cette expansion une **valeur**, pas un effet. `Expand` ne touche aucun schéma `kernel`/`mirrors`/`fitness` — elle n'en importe même pas le chemin d'écriture. Le `WroteKernel=false` n'est pas décoratif : c'est la frontière. Figer l'expansion (insérer les attributs comme source d'entité, les policies comme AST policy) passe **plus tard** par le mur — idée → miroir → /goal → approbation humaine. Le calcul est pur et prouvable ; le gel est gouverné.
+
+## Méta-méta
+
+**L'expansion est un emitter déterministe, jamais un agent.** C'est l'application directe du mandat déterminisme-first (CLAUDE.md §6/§8) au boilerplate : « ce qui peut être une fonction pure DOIT être du code ». Expanser une behavior est un *transform* — behavior+entité → pièces — exactement le genre d'opération (parse/validate/transform/render) que le mandat range du côté du code. Un « agent qui expanse une behavior » serait un trou de déterminisme : il pourrait inventer un champ, omettre une policy, varier d'un run à l'autre. Le `catalogueExpansion` est la table déclarée, content-addressée par `records.Hash` (réutilisé verbatim depuis S02, jamais forké) : même corps → même `ExpansionID`, partout dans le truth-store. Le miroir de reproductibilité (`behavior_property_test.go`) ferme la boucle : c'est lui, et non la confiance de l'agent, qui prouve que l'expansion est une fonction. La behavior-macro est ainsi un **cliquet** de capitalisation au-dessus de la ligne — elle ajoute une garde (le boilerplate est écrit par une fonction prouvée), elle n'en retire aucune.
