@@ -1,0 +1,66 @@
+---
+title: "MK03 · Internals — l'outil MCP convert_to_markdown, la dérivation pure, les miroirs"
+description: "Internals MK03 (le journal de build). Implémentation : l'outil MCP convert_to_markdown dans back/mcp/idea-intake/convert.go qui branche le port DocConverter de MK02 sur ideas.Capture — convert → deriveDraft (pur) → Capture → Insert (ON CONFLICT DO NOTHING, idempotent) ; la provenance conservée (source human, détail = le nom du document) ; le miroir reproductibilité rapid (convert_property_test.go) écrit rouge d'abord ; le miroir intégration Testcontainers (convert_to_markdown → idée draft persistée → idea_status/idea_list) ; la route /ingestion actionnable + l'e2e Playwright. Méta : pourquoi la porte vit dans idea-intake, pourquoi l'on-ramp humain, pourquoi ON CONFLICT DO NOTHING. Méta-méta : determinism-first — la dérivation document→idée est une fonction pure, jamais un LLM ; le mur tient par GRANT."
+keywords: ["aidos", "krd", "MK03", "convert_to_markdown", "MCP", "idea-intake", "convert.go", "deriveDraft", "ideas.Capture", "provenance", "ON CONFLICT DO NOTHING", "idempotence", "rapid", "miroir property", "miroir intégration", "Testcontainers", "le mur", "aucune écriture kernel", "ProvenanceHuman", "ideas schema", "idea_status", "idea_list", "déterminisme", "determinism-first", "DocConverter", "MK02", "ADR 0039", "Playwright", "/ingestion", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — tout le détail. La page concept est [ici](/steps/concept/mk03-ingestion-door).</Note>
+
+## Implémentation
+
+La porte est l'outil MCP **`convert_to_markdown`**, ajouté au serveur `idea-intake` (`back/mcp/idea-intake/convert.go`). Le serveur porte désormais, en plus de son `store`, le **port `DocConverter`** de MK02 (injecté ; l'`HTMLConverter` par défaut, le vrai `microsoft/markitdown` swappable par ADR derrière la même interface).
+
+<CodeGroup>
+```go convert.go (back/mcp/idea-intake)
+func (s *server) convertToMarkdown(ctx context.Context, _ *mcp.CallToolRequest, in convertInput) (*mcp.CallToolResult, convertOutput, error) {
+	md := s.converter.ToMarkdown([]byte(in.Content), markitdown.Mime(in.Mime))
+
+	proposes, intent, prov := deriveDraft(md, in.Source, in.Proposes)
+	idea, err := ideas.Capture(proposes, intent, prov)
+	if err != nil {
+		return nil, convertOutput{}, err
+	}
+	if err := s.store.Insert(ctx, idea); err != nil {
+		return nil, convertOutput{}, err
+	}
+	return nil, convertOutput{Markdown: md, Idea: toOutput(idea)}, nil
+}
+
+// la dérivation PURE — une fonction, jamais un LLM
+func deriveDraft(markdown, sourceName, proposes string) (ideas.Proposes, string, ideas.Provenance) {
+	p := ideas.Proposes(proposes)
+	if proposes == "" {
+		p = ideas.ProposesProduct
+	}
+	detail := "ingested document: " + sourceName + " (via markitdown frontier)"
+	return p, markdown, ideas.Provenance{Source: ideas.ProvenanceHuman, Detail: detail}
+}
+```
+</CodeGroup>
+
+- **Le pipeline est trois fonctions pures** : `converter.ToMarkdown` (le port MK02, déterministe) → `deriveDraft` (titre = premier `# `, intent = le markdown, provenance = le document) → `ideas.Capture` (qui hashe la sketch — la **même** identité que l'on-ramp humain : aucune voie de hashing parallèle). Le seul effet de bord est `store.Insert` dans le schéma `ideas`.
+- **`Insert` est devenu idempotent** : `ON CONFLICT (id) DO NOTHING`. Comme l'id est le hash du contenu, ré-ingérer le **même** document est un **no-op** (append-only : ne réécrit jamais, ne supprime jamais une idée déjà staged), au lieu d'une erreur de clé dupliquée.
+- **Le miroir reproductibilité** (`convert_property_test.go`, **rapid**) — écrit **rouge d'abord** (il nomme `convertToMarkdown`/`deriveDraft` avant qu'ils existent). Il exerce le **cœur pur** (`convert → derive → Capture`) **sans DB**, donc rapide et total :
+  1. `TestConvertDeriveIsDeterministic` — même `(content, mime, source)` → même id d'idée + même provenance + même markdown, **100×** sans dérive ;
+  2. `TestProvenanceIsPreserved` (rapid, 100 cas) — le nom du document est **conservé verbatim** dans le détail de provenance, sur l'on-ramp **`human`** (l'ensemble fermé `{human, incident}`) ;
+  3. `TestStatusIsAlwaysDraft` — l'idée capturée est **toujours** `status=draft` et **sans miroir** (le mur) ;
+  4. `TestUnsupportedMimeStillCapturesAnIdea` — un mime non supporté rend `""` (le port est total) **mais** produit quand même une idée draft bien formée — la porte ne panique jamais.
+- **Le miroir intégration** (`main_test.go`, **Testcontainers** Postgres réel) — `TestConvertToMarkdownCapturesIdeaWithProvenance` : un fixture HTML → markdown (titre survécu, chrome strippé) → idée **persistée** en `status="draft"`, provenance conservée, intent == le markdown ; relue par `idea_status`, présente dans la **draft lane** d'`idea_list` ; ré-ingestion → **même id**. **Le mur** : le seul schéma touché est `ideas` (INSERT) — ce serveur n'a **aucun** GRANT kernel.
+- **La route `/ingestion`** reste actionnable (CLAUDE.md §7, `ui-completeness`) : **Convertir** / **Proposer une idée** liés à la conversion + à la dérivation d'idée draft ; l'**e2e Playwright** (`tests/e2e/ingestion.spec.ts`, 2/2) prouve que la conversion sort idempotente et que l'idée draft sort en `status="draft"` avec la provenance « ingested document ».
+
+## Méta — pourquoi ces choix
+
+- **Pourquoi la porte vit dans `idea-intake`, et pas dans un nouveau serveur ?** Parce que la sortie de la porte **EST** une idée : la mettre dans le serveur qui possède le schéma `ideas` réutilise `ideas.Capture`, `toOutput`, `Store.Insert` et le mur déjà gravés — aucune voie parallèle, aucun second GRANT. La porte n'est qu'**un on-ramp de plus** vers la même file de candidate-vérités.
+- **Pourquoi l'on-ramp `human` et pas un nouveau `document` ?** L'ensemble des sources de provenance est **fermé** `{human, incident}` (KRD §117). Déposer un document **est** une intention humaine ; on ne **forge pas** une vérité nouvelle (un troisième on-ramp) — on conserve le **détail** verbatim (« quel document, ingéré comment »). Inventer un `source: document` aurait été une vérité non gravée — interdit (honnêteté).
+- **Pourquoi `ON CONFLICT DO NOTHING` et pas un upsert ?** Parce que ré-ingérer le même document doit être **inoffensif** (idempotent) sans jamais **réécrire** une idée déjà staged (qui a pu avancer dans la file). Le no-op respecte l'append-only : on ne détruit ni ne mute la première capture.
+
+## Méta-méta — determinism-first appliqué à une porte
+
+La dérivation **document → idée** est un **transform déterministe** : `convert (pur) → derive (pur) → hash (pur)`. Le mandat determinism-first (CLAUDE.md §6/§8) impose donc qu'elle soit **du code**, jamais un agent — et c'est le cas : `convertToMarkdown` n'a ni horloge, ni rng, ni LLM sur le chemin de décision ; le seul effet est l'INSERT. Le **miroir de reproductibilité** (100×) le certifie. Là où un agent « LLM qui rédige l'idée à partir du doc » serait commode, il serait un **gap de déterminisme** qui bloquerait le step. Et le mur ne tient **pas** par convention mais par **GRANT** : ce serveur n'a aucune écriture kernel/mirrors/fitness — il ne pourrait pas figer une vérité même s'il le voulait.
+
+## Reproduire
+
+```bash
+cd back && go test -count=1 ./mcp/idea-intake/   # rapid (sans DB) + intégration (Testcontainers)
+npx playwright test tests/e2e/ingestion.spec.ts   # l'écran exécute : convert + propose
+```

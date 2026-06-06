@@ -1,0 +1,39 @@
+---
+title: "MK03 · Concept — la porte d'ingestion : un document devient une idée"
+description: "Concept MK03 (pour moi). MK03 ouvre la PORTE : l'outil MCP convert_to_markdown (dans back/mcp/idea-intake) prend un document, le convertit en markdown par le port DocConverter de MK02 (ADR 0039), puis le capture comme une IDÉE DRAFT — une candidate-vérité — avec sa provenance conservée (quel document, ingéré comment). Aucune écriture kernel : la porte reste au-dessus du produit mais sous le gel ; la seule porte vers la vérité reste idée → miroir → /goal → approbation humaine. Déterministe, idempotente (ré-ingérer le même document retombe sur la même idée)."
+keywords: ["aidos", "krd", "MK03", "ingestion", "porte", "convert_to_markdown", "MCP", "idea-intake", "idée draft", "candidate-truth", "provenance", "le mur", "DocConverter", "MK02", "ADR 0039", "idempotence", "déterminisme", "idea_capture", "ideas schema", "aucune écriture kernel", "Pour moi"]
+---
+
+<Note>Côté « Pour moi » — le concept. Le détail interne est [ici](/steps/internals/mk03-ingestion-door).</Note>
+
+## L'idée en une phrase
+
+**MK02** a forgé le port qui convertit un document en markdown. **MK03 ouvre la porte** : il branche ce port sur l'**idea-intake** pour qu'un document ingéré devienne une **idée draft** — une candidate-vérité que vous pourrez plus tard faire mûrir vers le kernel.
+
+## Le geste
+
+Vous avez un document — une spec, un PDF d'exigences, une page HTML. Vous le déposez à la frontière. La porte fait trois choses, **dans cet ordre, toujours les mêmes** :
+
+1. **convertit** le document en markdown (le port `DocConverter` de MK02, déterministe) ;
+2. **dérive** une idée — le titre vient du premier `# ` du markdown, le corps EST le markdown ;
+3. **capture** cette idée comme `status="draft"`, en **conservant la provenance** : quel fichier, ingéré par quelle frontière.
+
+Le résultat n'est **pas** une vérité. C'est une **idée** : une candidate-vérité, sans gel et sans miroir (KRD §118). Elle entre dans la file de triage (`draft → grilled → …`), exactement comme une intention humaine captée à la voix.
+
+## Le mur (l'essentiel)
+
+Ingérer un document **n'écrit jamais le kernel**. La porte ne touche que le schéma `ideas` (un `INSERT`, au-dessus du mur). Il n'existe **aucun** chemin de promotion ici : le markdown ingéré **propose**, il ne **fige** rien. La seule porte vers la vérité reste **idée → miroir → `/goal` → approbation humaine**.
+
+C'est ce qui rend MK03 sûr : on peut ingérer n'importe quel document sans risque pour la vérité du système — au pire on crée une idée de plus dans la file, jamais une vérité fausse.
+
+## Idempotente
+
+La porte est **idempotente** : ré-ingérer le **même** document retombe sur la **même** idée (même identité, car l'idée est adressée par le hash de son contenu). Pas de doublons, pas de dérive. « Même fichier → même idée ».
+
+## La provenance, conservée
+
+Chaque vérité un jour figée à partir d'une idée **pointe vers** sa provenance. MK03 la conserve verbatim : le nom du document est gardé dans le détail de provenance (« ingested document: spec.html (via markitdown frontier) »), sur l'on-ramp **humain** (déposer un document est une intention humaine). On sait toujours « quel document, ingéré comment ».
+
+## Le voir
+
+La route **`/ingestion`** du Workbench est actionnable : collez un document, cliquez **Convertir** (le markdown + le badge d'idempotence apparaissent), puis **Proposer une idée** (l'idée draft sort avec sa provenance). Tout se fait par écran.
