@@ -267,7 +267,9 @@
               "steps/concept/gv06-sre-trust-audit",
               "steps/internals/gv06-sre-trust-audit",
               "steps/concept/ce01-spike-compound",
-              "steps/internals/ce01-spike-compound"
+              "steps/internals/ce01-spike-compound",
+              "steps/concept/ce02-capitalisation-loop",
+              "steps/internals/ce02-capitalisation-loop"
             ]
           }
         ]

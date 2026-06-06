@@ -1,0 +1,52 @@
+---
+title: "CE02 (interne) · La boucle de capitalisation gravée en ADR épinglé au code — Implémentation · Méta · Méta-méta"
+description: "Journal interne de CE02. La décision « boucle de capitalisation » devient un ADR accepté (docs/adr/0038-ce02-capitalisation-loop.md) ÉPINGLÉ au code par un miroir de parité. Source autoritaire unique : capitalisationTable (back/runtime/compound/capitalisation.go) — 5 sujets, 2 capitalise (recall procédural KindProcedural + behavior-macro §24.6, tous deux via firewall.ViaIdea, aucun ne touche la fitness) / 3 forbidden (substance intrinsèque, fitness/poids/critères, écriture kernel directe). ADRParity() projette la table ; capitalisation_adr_test.go est le juge déterministe (rouge d'abord sur l'ADR manquant) : l'ADR égale la table, chaque capitalise franchit le mur ∧ ne touche pas la fitness, le fichier est Accepted et énonce la frontière verbatim, + un mirror de reproductibilité rapid. Twin TS lib/compound.ts (boundary()) + panneau BoundaryPanel /compound + e2e Playwright + mirror vitest/fast-check. Frontière : capitalisation ≠ apprentissage de critères ; tout via /goal."
+keywords: ["aidos", "krd", "compound", "CE02", "capitalisation", "ADR 0038", "miroir de parité", "ADRParity", "capitalisationTable", "Compute", "Disposition", "Channel", "behavior-macro", "KindProcedural", "recall procédural", "firewall.ViaIdea", "le mur", "fitness", "apprentissage de critères", "poids déclarés", "déterminisme", "rapid", "fonction pure", "reproductibilité", "twin TypeScript", "boundary", "BoundaryPanel", "/compound", "Playwright", "fast-check", "S31", "S33", "§24.6", "§8", "OpenQuestion", "Linear"]
+---
+
+<Info>Page **« Pour moi »** — le journal de bord interne, tout y est. Concept lisible : [Pour les futurs utilisateurs → CE02](/steps/concept/ce02-capitalisation-loop).</Info>
+
+## Implémentation
+
+**Où.** `back/runtime/compound/` (paquet `compound`, côté Runtime) + l'ADR `docs/adr/0038-ce02-capitalisation-loop.md` + le twin/panneau Workbench. CE02 ne livre **aucun** enforcer de runtime et **aucune** écriture de vérité : il **grave une décision** et l'**épingle au code**.
+
+**La source autoritaire unique.** `capitalisation.go` déclare `capitalisationTable` — **5 sujets** dans un ordre canonique stable. Chaque `Decision` porte : `Subject`, `Disposition` (`capitalise` | `forbidden`), `Channel` (`procedural_memory` | `behavior_macro` | `""`), `ViaWall`, `TouchesFitness`, `Rationale` (FR). Deux lignes **capitalisent** (motif de gestes → recall procédural S31 ; motif de spec → behavior-macro §24.6), toutes deux `ViaWall=true` et `TouchesFitness=false` ; trois lignes sont des **frontières** (`intrinsic_substance`, `fitness_weights_criteria`, `direct_kernel_write`), sans canal, ne franchissant pas le mur.
+
+**Les dérivations pures.** `CapitalisationDecisions()` rend la table en ordre canonique. `Compute()` en dérive le `Verdict` : `Capitalise`, `Forbidden`, et les deux invariants porteurs **`AllCapitaliseViaWall`** (aucun raccourci kernel) + **`NoCapitaliseTouchesFitness`** (la frontière « capitalisation ≠ apprentissage de critères »). Toutes pures, totales — même table ⇒ même verdict.
+
+**L'ADR projeté.** `capitalisation_adr.go` est la **projection** de la table vers l'ADR : `ADRParity()` rend, sujet par sujet, exactement les lignes publiées ; `ADRSummary()` calcule l'en-tête (`2 capitalise / 3 forbidden`, `EverythingViaGoal`, `FitnessUntouched`, `NotLearningCriteria`) — **jamais tapé deux fois**, donc la prose et le code ne peuvent pas se contredire. `adrNumber = "0038"`, `adrStatus = ADRAccepted`.
+
+**Le miroir de parité (rouge d'abord).** `capitalisation_adr_test.go` est le **juge déterministe**, écrit **avant** la projection et l'ADR :
+- `TestADRParity_TotalAndFaithful` — l'ADR est une projection totale, ordre-stable, fidèle à la table.
+- `TestFrontier_EveryCapitaliseViaWall_NoneTouchesFitness` — l'invariant porteur : chaque ligne `capitalise` franchit le mur **et** ne touche pas la fitness (et a un canal).
+- `TestForbiddenRows_HaveNoSink` — chaque frontière n'a aucun canal et ne franchit pas le mur.
+- `TestSummary_AgreesWithVerdict` — les compteurs de l'en-tête égalent `Compute()` (forme épinglée **2/3**), et l'en-tête affirme everything-via-/goal ∧ fitness-untouched ∧ not-learning-criteria.
+- `TestADRFile_AcceptedAndComplete` — **le fichier ADR sur disque** : il existe, est `Accepted`, déclare son numéro, **nomme chaque sujet + disposition**, et **énonce la frontière verbatim** (`/goal`, `fitness`, `firewall.ViaIdea`, `mur`, « apprentissage de critères »). Un ADR `Proposed`/manquant/incomplet passe **rouge**.
+- `TestADRParity_Reproducible` — le **mirror de reproductibilité** (rapid) : même table → mêmes lignes + même en-tête, rejoué.
+
+La **vague de rouge** observée : compile OK, toute la logique verte, **seul** `TestADRFile_AcceptedAndComplete` échoue sur l'ADR manquant — exactement le done-criterion (« ADR accepté »). Écrire l'ADR fait passer **tout** au vert.
+
+**Le twin Workbench.** `front/web/lib/compound.ts` gagne `boundary()` — le **jumeau TypeScript** de `Compute()` (même table, mêmes 2/3, mêmes deux invariants), couvert par `lib/compound.test.ts` (vitest + **fast-check** : reproductible, mêmes chiffres que le Go). `BoundaryPanel.tsx` est **action-capable** : « Afficher la frontière » exécute `boundary()` à l'écran et rend les compteurs `2 capitalise / 3 forbidden`, les deux badges d'invariant, et la table (sujet · canal · raison) avec `data-disposition`. Le panneau est rattaché à `/compound` (`app/compound/page.tsx`), i18n FR/EN (`compound.boundary.*`). Un **e2e Playwright** (`tests/e2e/compound.spec.ts`, bloc CE02) prouve que le contrôle s'exécute.
+
+**Determinism-first.** La frontière est **déclarée** (code), jamais un jugement LLM ; les projections sont **pures**, donc aussi des **mirrors de reproductibilité** (rapid en Go, fast-check en TS). Un « LLM qui vérifierait que l'ADR colle au code » serait une **lacune de déterminisme** — le juge est du code.
+
+## Méta
+
+**Pourquoi un ADR épinglé, et pas juste un document.** Le done-criterion est « ADR accepté + frontière claire ». Un ADR-document seul **dérive** : le code évolue, la prose ment. CE02 réutilise le **patron GV02** (ADR comme **projection** d'une table autoritaire, gardée par un miroir de parité) pour rendre la décision **non-falsifiable** : la frontière vit dans `capitalisationTable`, l'ADR la **projette**, le miroir **interdit** la divergence. La décision et le code sont la **même** chose.
+
+**La décision de conception qui compte : encoder la frontière comme deux invariants testables.** « Capitalisation ≠ apprentissage de critères » est une phrase ; elle pourrait rester un vœu. CE02 la **traduit en deux prédicats** vérifiés sur chaque ligne — `ViaWall` (tout via le mur) et `TouchesFitness=false` (la fitness intacte) — et `Compute()` les agrège en `AllCapitaliseViaWall` ∧ `NoCapitaliseTouchesFitness`. La frontière n'est plus une intention : c'est un **test rouge** si on la franchit.
+
+**Pourquoi 3 lignes interdites et pas zéro.** On aurait pu ne lister que ce qu'on capitalise. Mais nommer **explicitement** les trois choses qu'on ne touche **jamais** (la substance propre, la fitness, l'écriture kernel directe) rend la frontière **lisible et gardée** : chaque interdit a `Channel=""` ∧ `ViaWall=false`, vérifié par `TestForbiddenRows_HaveNoSink`. La frontière est aussi forte par ce qu'elle **exclut** que par ce qu'elle autorise.
+
+**Les OpenQuestions (jamais comblées en douce).**
+- **OQ-CE02-similarity** — *quand* réutiliser n'est pas opérationnalisé ici ; CE05 (`MatchRole`, embeddings S31) doit le **calculer**, pas le deviner par prompt.
+- **OQ-CE02-tokens** — les chiffres de CE01 sont des estimations (tokenizer hors-ligne) ; CE03+ re-mesure sur de vrais `/goal`.
+- **OQ-CE02-linear** — le MCP `linear-server` n'est pas authentifié dans cette session isolée (OAuth requis) ; l'issue `CE02 ·` (label `adr`, projet AIDOS) n'a pu être créée/déplacée en `Done` par l'agent — à régulariser au prochain run authentifié (best-effort, ne bloque pas le step).
+
+## Méta-méta
+
+**Ce que CE02 dit d'un OS qui se construit lui-même.** Un système qui « apprend de ses goals » est à un pas de **s'auto-récompenser** : ajuster les critères qui définissent sa réussite parce qu'un motif « a bien marché ». Ce serait Goodhart institutionnalisé. CE02 pose la **digue** : la boucle peut **réutiliser un geste prouvé** (rendre le suivant moins cher), mais **jamais toucher la mesure** de ce qui est bon. La capitalisation déplace l'**effort**, pas la **vérité**.
+
+**Le mur n'est jamais enjambé, même par ce qui « aide ».** La capitalisation est, par nature, ce qui *aide* l'agent — donc le candidat parfait pour un raccourci (« c'est utile, laisse-le passer »). CE02 grave le refus : même utile, même fortement confiant, un motif passe par `firewall.ViaIdea` → idée → miroir → `/goal`. Aucune utilité n'achète une vérité. La porte est **unique** et **toujours la même**.
+
+**Le déterminisme jusque dans la gouvernance de la boucle.** La frontière elle-même est du **code** (une table), pas une politique laissée au jugement. La tentation paresseuse — « qu'un agent décide au cas par cas ce qu'on capitalise » — est refusée : `capitalisationTable` est déclarée, `ADRParity`/`Compute` sont pures, le miroir est le juge. *Ce qui peut être une fonction pure doit l'être — y compris la règle qui dit ce qu'on a le droit de capitaliser.*

@@ -1,0 +1,69 @@
+---
+title: "CE02 · La boucle de capitalisation — ce qu'on capitalise, par où, et la frontière"
+description: "Après CE01 (verdict GO : capturer le motif d'un goal terminé rend le 2ᵉ goal similaire 75,1 % moins cher), CE02 grave la DÉCISION en un ADR accepté (0038) : à la fermeture d'un goal, son motif durable devient RÉUTILISABLE — un recall procédural (KindProcedural, S31) pour les gestes, une behavior-macro candidate (§24.6) pour la spec — mais UNIQUEMENT via le mur : firewall.ViaIdea → idée → miroir → /goal → approbation humaine. La frontière porteuse : CAPITALISATION ≠ APPRENTISSAGE DE CRITÈRES. La boucle rend le goal suivant moins cher ; elle ne touche JAMAIS la fitness (poids, seuils, waterline — déclarés, jamais appris). 2 motifs capitalisés (tous deux via le mur, sans toucher la fitness) ; 3 frontières interdites (la substance propre du goal, la fitness, l'écriture kernel directe). La décision est épinglée au code par un miroir de parité : l'ADR ne peut pas diverger de la table déclarée."
+keywords: ["aidos", "krd", "compound", "compound-engineering", "capitalisation", "boucle qui capitalise", "ADR", "frontière", "motif durable", "behavior-macro", "KindProcedural", "mémoire procédurale", "recall procédural", "firewall.ViaIdea", "le mur", "idée → miroir → /goal", "fitness", "apprentissage de critères", "poids déclarés", "déterminisme", "table déclarée", "miroir de parité", "CE01", "CE02", "CE03", "CE04", "CE05", "S31", "S33", "§24.6", "§8", "§84", "OpenQuestion"]
+---
+
+<Note>Côté concept — CE02 est une **décision** (un ADR), pas une fonctionnalité de runtime : la capture (CE03), l'expansion (CE04) et la réutilisation (CE05) suivent. Détail d'implémentation : [Pour moi → CE02](/steps/internals/ce02-capitalisation-loop).</Note>
+
+## En une phrase
+
+CE01 a **mesuré** que capitaliser paie. CE02 **décide** ce qu'on capitalise, **par où**, et — surtout — **où s'arrête** la boucle : à la fermeture d'un goal, son **motif durable** devient réutilisable **via le mur**, et la boucle **ne touche jamais** la fitness. **Capitalisation ≠ apprentissage de critères.**
+
+## Le problème que ça résout
+
+Une boucle qui « capitalise » est tentée de **trop** capitaliser. Deux dérives la guettent :
+
+1. **Réutiliser la substance propre d'un goal** (pas seulement le motif partagé) — fabriquer une réutilisation là où rien n'est partagé. CE01 a déjà plafonné ce faux positif (16,6 % ≤ 20 % sur un goal dissimilaire).
+2. **Apprendre les critères** — laisser la boucle ajuster un poids, un seuil, la définition de « réussi » parce que « ça a bien marché ». Ce serait **l'OS qui édite sa propre fitness** : exactement ce que le mur interdit (§8 : les poids sont **déclarés**, jamais appris).
+
+CE02 trace la **frontière claire** qui écarte les deux, et la **grave** : un ADR accepté + une table déclarée en code que l'ADR ne peut pas trahir.
+
+## Les idées-clés
+
+<Field name="Ce qu'on CAPITALISE — le motif durable, jamais la substance (2 lignes)" type="le mur">
+  Le motif de **gestes** d'un goal terminé (charger le ContextPack, dériver le miroir, lancer les sensors, câbler le contrôle) devient un **recall procédural** (`KindProcedural`, S31) — fuel `/brain` sous la ligne. Le motif de **spec** (forme miroir/fixture/contrat) devient une **behavior-macro candidate** (§24.6) proposée via `firewall.ViaIdea`. **Les deux passent par le mur** ; aucun ne s'installe en vérité tout seul.
+</Field>
+
+<Field name="Ce qu'on NE TOUCHE JAMAIS — 3 frontières interdites" type="§8">
+  La **substance intrinsèque** d'un goal n'est jamais réutilisée (on capitalise le motif partagé, pas le contenu propre). La **fitness** (poids, seuils, waterline, grammaire NIVEAU 3) n'est **jamais** touchée. L'**écriture kernel directe** depuis la capture est interdite : **tout passe par /goal**.
+</Field>
+
+<Field name="La frontière porteuse : capitalisation ≠ apprentissage de critères" type="§8 — anti-Goodhart">
+  La boucle **réutilise** un motif pour rendre le goal suivant moins cher ; elle ne **modifie** jamais ce qui définit « réussi ». Capitaliser, c'est **proposer** la réutilisation d'un geste prouvé — pas **apprendre** un critère. Un motif est un *stepping stone* que `/goal` doit toujours re-figer.
+</Field>
+
+<Field name="Tout via /goal — la seule porte" type="firewall.ViaIdea">
+  La seule porte de capitalisation vers une vérité est `firewall.ViaIdea` → **idée → miroir → /goal → approbation humaine**. Le raccourci mémoire → kernel est toujours refusé (`MEMORY_CANNOT_DECLARE_TRUTH`), quelle que soit la confiance. « La mémoire propose ; le noyau déclare le vrai. »
+</Field>
+
+<Field name="La décision est épinglée au code (déterminisme-first)" type="miroir de parité">
+  La frontière est une **table déclarée** (`back/runtime/compound/capitalisation.go`) — du code, jamais un jugement LLM. L'ADR 0038 en est une **projection** ; un **miroir de parité** vérifie, sans LLM, que l'ADR égale la table, que chaque ligne capitalisée franchit le mur et ne touche pas la fitness, et que le document est **accepté**. L'ADR ne peut pas diverger du code.
+</Field>
+
+## La frontière en une table
+
+| Sujet | Disposition | Canal | Via le mur | Touche la fitness |
+|---|---|---|---|---|
+| Motif de gestes | **capitalise** | recall procédural (S31) | oui | non |
+| Motif de spec | **capitalise** | behavior-macro (§24.6) | oui | non |
+| Substance intrinsèque | **interdit** | — | — | non |
+| Fitness / poids / critères | **interdit** | — | — | (jamais touchée) |
+| Écriture kernel directe | **interdit** | — | — | non |
+
+**2 capitalise · 3 interdits.** Deux invariants porteurs, vérifiés par le miroir : **chaque** ligne capitalisée passe par le mur **et** aucune ne touche la fitness.
+
+## Voir la frontière à l'écran
+
+Le panneau `/compound` du Workbench rend cette décision **exécutable** : le bouton **« Afficher la frontière »** rejoue la table déclarée (le jumeau pur du code Go), affiche les 2 lignes capitalisées et les 3 frontières, et fait apparaître les deux badges d'invariant (chaque capitalisation via le mur ∧ aucune ne touche la fitness). Lecture seule : le panneau **rejoue** la décision, il n'écrit aucune vérité.
+
+## Ce qui suit
+
+- **CE03** — la gesture `/compound` (fin de goal) : capture le motif en mémoire procédurale **+** propose une behavior candidate via `firewall.ViaIdea` (idée `Status=proposed`, **aucune** écriture kernel).
+- **CE04** — l'expansion d'une behavior-macro (§24.6) : **fonction pure, idempotente**, qui ne crée aucune vérité hors `/goal`.
+- **CE05** — le router (`MatchRole`, S33) **réutilise** behaviors + procédures aux goals suivants similaires + panneau « Compounding ».
+
+## Les questions restées ouvertes (OpenQuestions)
+
+- **La « similarité ».** CE02 fixe *ce qui* est capitalisable et *par où*, pas *quand* réutiliser. C'est CE05 (`MatchRole`, embeddings S31) qui devra **calculer** algorithmiquement la proximité d'un goal suivant — **un algorithme, pas un prompt**.
+- **Les chiffres absolus.** Les 75,1 % / 16,6 % de CE01 sont des **estimations** (tokenizer hors-ligne) ; CE03+ re-mesurera sur de vrais runs `/goal`. L'ADR épingle le **mécanisme et son sens**, pas le chiffre.
