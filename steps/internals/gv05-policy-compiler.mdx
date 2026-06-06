@@ -1,0 +1,53 @@
+---
+title: "GV05 · Le compilateur policy.yaml → GateAction + miroir d'équivalence (internals)"
+description: "Internals de GV05 : back/runtime/governance/policy.go compile une policy YAML déclarée vers la même AgentImplementation que GateAction lit déjà. Le miroir property prouve l'équivalence (même verdict/BlockReason pour toute action) et le resserrement (la YAML ne peut qu'égaler ou tighten, jamais élargir — toute déclaration qui widen est rejetée). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "GV05", "policy", "policy.yaml", "GateAction", "CompilePolicy", "GateUnderPolicy", "équivalence", "tighten", "widen", "determinism-first", "le mur", "rapid", "fast-check", "yaml.v3", "KnownFields"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet (le journal de construction). Pour la vue concept, voir [Pour les futurs utilisateurs → GV05](/steps/concept/gv05-policy-compiler).</Note>
+
+GV05 répond au critère de done : *« miroir property ROUGE d'abord — pour toute action, la YAML produit exactement le même BlockReason/verdict que les enforcers Go (équivalence prouvée) ; la YAML ne peut qu'égaler ou resserrer, jamais élargir (determinism-first) »*. Là où BA13 produisait l'enforcer composé (`GateAction`), GV05 ajoute une **source YAML lisible** qui **projette** sur ce même enforcer.
+
+## Implémentation
+
+### Le package : `back/runtime/governance/policy.go`
+
+Le compilateur traite la policy comme une **source** déclarée et le code Go comme la **projection** (determinism-first : jamais l'inverse).
+
+- `policyYAML` — la forme on-the-wire (paths, hosts, exec, tools, skills, `max_tokens_per_goal`). C'est exactement la **surface de confinement** que `GateAction` lit, rien de plus : une policy déclare *quoi* l'agent peut toucher, jamais un verdict.
+- `CompilePolicy([]byte) (Policy, error)` — parse (yaml.v3, `dec.KnownFields(true)` → une clé inconnue est une **erreur**, pas un silence qui élargirait), **valide** chaque item contre la surface de référence, puis projette sur une `agentimpl.AgentImplementation`.
+- `Policy` — porte l'`AgentImplementation` projetée (champ **privé**) + le cap de budget. Le seul moyen d'utiliser une `Policy` est `GateUnderPolicy` : un appelant ne peut pas forker un verdict différent.
+- `GateUnderPolicy(Policy, Action) Decision` — appelle le **même** `agentimpl.GateAction` sur l'impl projetée. C'est pourquoi l'équivalence tient **par construction** : la policy ne ré-implémente aucun verdict, elle ne fournit que la projection que `GateAction` lit.
+
+### La référence comme plafond structurel
+
+`referenceSurface()` déclare le **maximum structurel** qu'une policy peut déclarer (deux chemins sous la ligne, deux hôtes, un exec, deux outils liés, deux skills, un cap de tokens). `ReferenceImpl()` est l'`AgentImplementation` projetée depuis cette surface complète — la **baseline d'équivalence** que le miroir lit directement.
+
+`mustSubset` / `mustToolSubset` rejettent toute valeur déclarée **hors** de la référence (un élargissement) ; un cap de budget **au-dessus** de la référence est rejeté. La référence est **une seule source**, déclarée ici, jamais dérivée d'une YAML. Le mur (`WallForbiddenPaths()`) est **toujours** porté dans `buildImpl` : une cible noyau trippe l'axe zone sous **toute** policy — le mur n'est pas dans la surface élargissable.
+
+### Le miroir property — ROUGE d'abord
+
+`policy_property_test.go` (rapid) a été écrit **avant** `policy.go` : la première exécution ne compilait pas (pas de `CompilePolicy`/`GateUnderPolicy`/`SamplePolicyYAML`…) — ce rouge-de-compilation **est** le goal. Il épingle les quatre critères :
+
+- `TestEquivalence_PolicyMatchesEnforcers` — **load-bearing** : pour toute action générée (`drawAction` couvre zone/path/egress/exec/capacity/skill), `GateUnderPolicy(pol, act)` et `GateAction(ReferenceImpl(), act, …)` donnent le **même** `Allowed`, `DeniedAxis` et `BlockReason.Code`. La YAML et l'enforcer ne peuvent pas diverger.
+- `TestTighten_NeverWidens` — une policy resserrée (sous-ensemble strict, cap plus bas) ne **jamais** autorise ce que la référence refusait (deny ⊇ reference-deny).
+- `TestWiden_IsRejected` — chaque policy de `WidenPolicyYAMLs()` (un élargissement par axe + un champ inconnu) est **rejetée** par `CompilePolicy` (erreur).
+- `TestPolicy_RoundTripDeterministic` — même YAML ⇒ même `Policy` + même porte (byte-stable).
+
+Le verdict est single-sourcé : `brCode` lit le `BlockReason.Code` du **vrai** verdict, jamais une chaîne tapée à la main.
+
+### Le twin front + le panneau action-capable
+
+`front/web/lib/governance.ts` porte le twin GV05 (`compilePolicy`, `gateUnderPolicy`, `policyAudit`, `REFERENCE_SURFACE`, `SAMPLE_POLICY_YAML`/`TIGHTEN_POLICY_YAML`/`WIDEN_POLICY_YAMLS`). Le parseur YAML du twin est volontairement **minimal** (le sous-ensemble exact des fixtures) et **flagge toute clé inconnue** — même sémantique que `KnownFields(true)`. La porte twin réplique la précédence de `GateAction` (zone → path → egress → exec → capacity → skill). Pinné par `governance.test.ts` (Vitest + fast-check, mêmes propriétés équivalence/tighten/widen que le Go).
+
+`GovernancePanel.tsx` expose le contrôle **« Compiler la policy YAML »** (`data-testid=compile-policy`) qui **exécute** `policyAudit()` et rend : les lignes d'équivalence par action (référence vs resserrée, marqueur ✓ never-widens) et la liste des élargissements **rejetés**, thémé (ADR 0010) et bilingue (ADR 0011). `governance.spec.ts` (Playwright) prouve que le contrôle s'exécute : les sondes ne s'élargissent jamais, les sept élargissements sont rejetés.
+
+## Méta
+
+GV05 est du **determinism-first** au sens le plus strict (CLAUDE.md §6/§8). Un compilateur de policy est un **parse + valide + projette** — pur, total, reproductible. Un « LLM qui traduit la policy en code » serait un trou de déterminisme évident ; ici la traduction est une fonction. Mieux : l'équivalence ne **compare** pas deux implémentations indépendantes (qui pourraient dériver) — `GateUnderPolicy` appelle **littéralement** `GateAction`. Le single-sourcing fait de l'équivalence une **identité par construction**, le miroir ne fait que la confirmer sur l'espace d'actions.
+
+Le **resserrement-jamais-élargissement** est l'asymétrie qui rend la façade sûre. Une source déclarée au-dessus d'un mur fail-closed est dangereuse si elle peut **relâcher** le mur (un fichier de config qui ouvre un port). GV05 interdit structurellement le relâchement : la validation par sous-ensemble fait de « élargir » une **erreur de compilation**, pas un avertissement. C'est la même logique que le mur lui-même — *default-deny*, l'élargissement doit être impossible, pas découragé.
+
+## Méta-méta
+
+GV05 ferme le pilier *policy-as-YAML* de l'ADR 0037 (adoption AGT) **sans jamais abandonner le mur structurel**. La discipline est invariante par niveau : le mur (BA/S52) est l'autorité ; `GateAction` (BA13) la replie en un verdict ; GV05 ajoute une **projection lisible** par-dessus et **prouve** par miroir qu'elle ne peut qu'égaler ou resserrer. Le méta-loop n'**ajoute** qu'un garde-fou (la façade YAML validée), jamais n'en retire : la policy augmente l'auditabilité, le mur reste le garant. C'est la généralisation du principe directeur de la roadmap gouvernance — *le mur reste plus fort que le middleware default-allow* : on n'adopte la policy-as-YAML que parce qu'on peut prouver qu'elle est **default-deny par construction**, incapable d'élargir le périmètre qu'elle déclare.

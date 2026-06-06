@@ -1,0 +1,43 @@
+---
+title: "GV05 · Une policy YAML lisible qui compile vers le mur — et ne peut que le resserrer"
+description: "GV05 ajoute une policy.yaml lisible comme source déclarée : elle compile vers les mêmes garde-fous fail-closed qu'AIDOS applique déjà. Un miroir d'équivalence prouve que, pour toute action, la YAML produit exactement le même verdict que les enforcers ; et la YAML ne peut qu'ÉGALER ou RESSERRER le mur, jamais l'élargir. Vue concept, sans code."
+keywords: ["aidos", "krd", "governance", "GV05", "policy", "policy-as-yaml", "policy.yaml", "GateAction", "équivalence", "resserrer", "élargir", "determinism-first", "le mur", "enforcer", "confinement", "fail-closed"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → GV05](/steps/internals/gv05-policy-compiler).</Note>
+
+## L'idée en une phrase
+
+GV05 vous donne une **policy YAML lisible** pour déclarer ce qu'un agent a le droit de toucher — et garantit qu'elle **compile vers exactement les mêmes garde-fous** qu'AIDOS applique déjà, sans jamais pouvoir les **affaiblir**.
+
+## Pourquoi ce pas existe
+
+La gouvernance d'AIDOS est déjà **structurelle et fail-closed** : une seule porte (`GateAction`) replie neuf enforcers — la ligne d'eau (le mur), le confinement des chemins, l'egress réseau, les outils liés, les compétences, le budget… Mais cette porte est du **code Go**. Or l'outillage de gouvernance des agents (le Microsoft *agent-governance-toolkit*) propose une **policy-as-YAML** : une surface de policy **lisible** qu'un opérateur peut relire et auditer sans lire le code.
+
+GV05 adopte cette idée — mais avec une règle non négociable : la YAML est une **source déclarée**, le code Go reste la **projection**. On ne remplace pas le mur par un fichier de configuration ; on ajoute une façade lisible **par-dessus** le mur, et on **prouve** qu'elle ne fait que le refléter.
+
+## Les deux garanties qui portent ce pas
+
+### 1. Équivalence — la YAML dit exactement la même chose que le code
+
+Le compilateur transforme la policy YAML en la **même** configuration de confinement que la porte lit déjà. Du coup, pour **n'importe quelle** action — écrire un fichier, joindre un hôte, lancer un outil — la policy produit **exactement le même verdict** (autorisé / refusé, et la **même** raison de blocage) que les enforcers Go.
+
+Ce n'est pas une promesse : c'est prouvé par un **miroir d'équivalence** qui compare, sur un large espace d'actions générées, le verdict « via la policy » et le verdict « via l'enforcer de référence ». S'ils divergeaient une seule fois, le miroir virerait au rouge.
+
+### 2. Ne peut que resserrer, jamais élargir
+
+Une policy YAML peut **restreindre** ce que l'agent peut faire (moins de chemins, moins d'hôtes, un budget plus bas) : c'est légal, et le résultat **refuse plus**, jamais moins. Mais elle ne peut **pas élargir** le mur : si une policy tente d'autoriser un hôte interdit, un chemin hors confinement, un outil non lié, ou de **relever** le plafond de budget au-delà de la référence, le compilateur la **rejette** — elle ne compile tout simplement pas.
+
+C'est le principe **determinism-first** appliqué à la gouvernance : la source déclarée peut **égaler ou resserrer** le garde-fou, jamais l'élargir. Le mur reste le plafond ; la policy ne peut que descendre en dessous.
+
+## Une image
+
+Pensez au mur comme à une **enceinte** déjà construite. La policy YAML ne peut pas **percer un trou** dans l'enceinte (élargir = rejeté). Elle peut seulement **poser des cloisons internes** supplémentaires (resserrer = autorisé). Quoi qu'écrive l'opérateur, l'enceinte d'origine tient.
+
+## Le mur reste le garant
+
+Le compilateur **n'écrit aucune vérité** et ne gouverne rien : il projette une source lisible vers les enforcers existants. Le mur (le refus d'écrire au-dessus de la ligne d'eau) est **toujours** porté dans la projection — une cible noyau est refusée quelle que soit la policy. La policy est sous la ligne d'eau : un confinement déclaré, pas une vérité.
+
+## Ce que vous voyez à l'écran
+
+Sur le panneau **Gouvernance** du Workbench, un bouton **« Compiler la policy YAML »** exécute le compilateur d'un clic. Vous voyez : pour chaque action d'un jeu de sondes, le verdict de la policy de **référence** et celui d'une policy **resserrée** côte à côte (la resserrée n'élargit jamais — ✓) ; et, pour chaque axe, qu'une policy qui tente d'**élargir** est bien **rejetée à la compilation**.

@@ -261,7 +261,9 @@
               "steps/concept/gv03-ledger-merkle",
               "steps/internals/gv03-ledger-merkle",
               "steps/concept/gv04-owasp-mirrors",
-              "steps/internals/gv04-owasp-mirrors"
+              "steps/internals/gv04-owasp-mirrors",
+              "steps/concept/gv05-policy-compiler",
+              "steps/internals/gv05-policy-compiler"
             ]
           }
         ]
