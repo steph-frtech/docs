@@ -1,0 +1,57 @@
+---
+title: "EL15 · besoin-intake (la porte capacité au-dessus du BesoinGraph)"
+description: "EL15 est l'MCP besoin-intake (Go MCP SDK, ADR 0009) : la porte capacité au-dessus du BesoinGraph. Un humain explique son app niveau par niveau, au-dessus du mur ; chaque niveau résolu sort comme Idea via la seule porte légale idea_capture (EL05). Outils read/state (besoin_graph_state, besoin_level_schema, besoin_list), capture par rung (besoin_capture_product/_journey/_view/_control/_action/_operation/_entity/_invariant), validate (besoin_validate_level, besoin_classify) — déterministes, jamais un LLM. Une capture sur un rung qui mappe émet une Idea ; un rung NoEmit (journey/view/invariant) n'émet rien (pas de cast silencieux). Above le mur : aucun GRANT kernel/mirrors/fitness, l'écriture kernel toujours refusée ; projets isolés par RLS."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "besoin-intake", "MCP", "porte capacité", "BesoinGraph", "idea_capture", "EL05", "NoEmit", "Idea", "le mur", "RLS", "isolation projet", "append-only", "JSONB", "content-addressed", "graph_hash", "fail-closed", "BlockReason", "déterminisme", "EL07", "EL13", "EL14", "EL15"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL15](/steps/internals/el15-besoin-intake).</Note>
+
+## En une phrase
+
+EL15 est **la porte** par laquelle vous expliquez votre app à AIDOS, **niveau par niveau** : vous énoncez le besoin, AIDOS l'enregistre dans le BesoinGraph, et chaque niveau résolu **sort comme une idée** — jamais directement comme du code, jamais dans le noyau.
+
+## Le problème que ça résout
+
+Tout ce que vous avez élicité jusqu'ici (la descente EL13, la bande latérale EL14) doit être **persisté quelque part** et **manipulable par une seule porte propre**. Sans cette porte, chaque écran, chaque skill devrait parler à la base directement — et le mur fuirait.
+
+EL15 est cette porte unique : un **serveur MCP** (un outil = une opération backend, ADR 0009). Vous lui demandez l'état du graphe, le schéma d'un niveau, vous capturez une réponse par rung, vous validez avant de capturer. **Une seule porte, au-dessus du mur, déterministe.**
+
+Trois garanties qu'elle tient :
+
+1. **Pas de `prompt → code`.** Un niveau résolu ne devient jamais du code en passant. Il sort comme **Idea** par la seule porte légale `idea_capture` (provenance humaine, votre phrase verbatim). La promotion vers le noyau, c'est le `/goal` — pas cette porte.
+2. **Pas de cast silencieux.** Certains niveaux *mappent* vers une idée (product, control, action, operation, entity) ; d'autres ne mappent vers rien (journey, view, invariant). Un rung **NoEmit** ajoute le nœud et seede les ancres **sans émettre d'idée** — jamais un faux « journey → product » glissé sous le tapis.
+3. **Le mur tient, fail-closed.** Le serveur n'a **aucun droit d'écriture** sur le noyau (`kernel`/`mirrors`/`fitness`). Une écriture noyau est **toujours** refusée. Une capture hors-altitude (un corps d'entité posé au niveau produit) est **refusée** avec un `BlockReason` qui nomme la porte ; le graphe ne bouge pas.
+
+## Les idées-clés
+
+<Field name="Une porte capacité, un outil = une op" type="ADR 0009">
+  Chaque opération backend est un outil MCP. Read/state (`besoin_graph_state`, `besoin_level_schema`, `besoin_list`), capture par rung (`besoin_capture_*`), validate (`besoin_validate_level`, `besoin_classify`). Aucune capacité headless : tout est joignable depuis un écran.
+</Field>
+
+<Field name="Le niveau entrable est CALCULÉ" type="EL07">
+  Vous ne choisissez pas où commencer. La porte calcule le **premier rung pas-encore-suffisant** (`besoin_graph_state` → `enterable_level`). Le forçage niveau-par-niveau est rendu visible.
+</Field>
+
+<Field name="Une capture émet une Idea, ou rien (NoEmit)" type="EL05">
+  Un rung qui mappe émet exactement une `Idea` de son propre kind via `idea_capture`. Un rung NoEmit (journey/view/invariant) n'émet **rien** — il seede les ancres. Pas de cast silencieux.
+</Field>
+
+<Field name="Le mur, fail-closed" type="aucun GRANT noyau">
+  Le serveur écrit `besoin` (le besoin) et réutilise `ideas` (la porte d'émission). **Aucun** droit sur `kernel`/`mirrors`/`fitness` : l'écriture noyau est toujours refusée. Une capture hors-altitude est refusée avec un `BlockReason`.
+</Field>
+
+<Field name="Projets isolés" type="RLS">
+  Chaque session est cadrée sur un projet ; le graphe du projet A est **invisible** d'une session cadrée sur B (Row-Level Security). Le besoin de chacun reste le sien.
+</Field>
+
+## Ce que ça vous donne
+
+Au bout de la descente (quand `besoin_graph_state` répond `done`), vous avez un **BesoinGraph complet** — l'architecture de votre app suivie niveau par niveau — et un **paquet d'idées** (une par rung qui mappe), prêtes pour le `/goal`. C'est l'**architecture-following requirements doc** que l'app-builder consomme ensuite.
+
+## Où ça vit
+
+- La porte : le serveur MCP `besoin-intake` (`back/mcp/besoin-intake/`).
+- L'écran : la route Workbench [`/besoin-intake`](/steps/internals/el15-besoin-intake) — exécutable, thémée, bilingue.
+- La skill : `/besoin-intake` (le geste rejouable qui pilote la porte).
+
+Pour le détail (les fonctions pures, le schéma Postgres, les miroirs), voir [Pour moi → EL15](/steps/internals/el15-besoin-intake).

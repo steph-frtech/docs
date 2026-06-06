@@ -1,0 +1,66 @@
+---
+title: "EL15 · besoin-intake — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals d'EL15 : l'MCP besoin-intake (back/mcp/besoin-intake/, Go MCP SDK, ADR 0009), la porte capacité au-dessus du BesoinGraph. Treize outils : read/state (besoin_graph_state, besoin_level_schema, besoin_list), capture par rung (besoin_capture_product/_journey/_view/_control/_action/_operation/_entity/_invariant), validate (besoin_validate_level, besoin_classify). Le serveur ne fait QUE persister une décision déjà prise par les fonctions pures back/runtime/besoin (RecordAnswer EL07/EL12, RecordInvariant EL14, LevelToProposes EL05) — aucun LLM. Store : besoin.node append-only, content-adressé par graph_hash (records.Hash(Canonicalize)), isolé par RLS (GUC aidos.project, S55). GRANT : INSERT/SELECT/UPDATE sur besoin + reuse ideas ; AUCUN GRANT kernel/mirrors/fitness (écriture kernel toujours refusée). Une capture sur un rung qui mappe émet une Idea via idea_capture ; un rung NoEmit (journey/view/invariant) n'émet rien. Miroir Testcontainers (round-trip JSONB, append-only, RLS, kernel refusé, NoEmit, fail-closed BlockReason) + property déterminisme + jumeau TS lib/besoin-intake.ts + e2e Playwright. Migration besoin_graph_baseline.sql. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "EL15", "back/mcp/besoin-intake", "besoin-intake", "MCP", "Go MCP SDK", "ADR 0009", "porte capacité", "BesoinGraph", "besoin_graph_state", "besoin_level_schema", "besoin_capture_product", "besoin_capture_journey", "besoin_capture_invariant", "besoin_validate_level", "besoin_classify", "RecordAnswer", "RecordInvariant", "LevelToProposes", "EL05", "EL07", "EL12", "EL14", "NoEmit", "idea_capture", "Idea", "le mur", "GRANT", "RLS", "aidos.project", "S55", "besoin.node", "graph_hash", "records.Hash", "Canonicalize", "append-only", "JSONB", "content-addressed", "Testcontainers", "fail-closed", "BlockReason", "WroteKernel", "déterminisme", "ui-completeness", "Playwright", "vitest", "fast-check", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — les internals complets. La page concept est [ici](/steps/concept/el15-besoin-intake).</Note>
+
+## Implémentation
+
+EL15 livre la **porte capacité** au-dessus du BesoinGraph : le serveur MCP `back/mcp/besoin-intake/` (Go MCP SDK, ADR 0009). Le serveur **n'a aucune logique métier** — il **persiste une décision déjà prise** par les fonctions pures `back/runtime/besoin` (EL03–EL14). Aucun LLM n'entre dans le serveur (determinism-first, CLAUDE.md §6/§8) : le code fait autorité, la porte défère.
+
+### Les treize outils (un outil = une op backend, ADR 0009)
+
+| Outil | Nature | Backing pur |
+|---|---|---|
+| `besoin_graph_state` | read | `LoadGraph` + `EnterableLevel` (EL07) + `CanDescend` par rung |
+| `besoin_level_schema` | read | `SpecOf` + `OutgoingRef` + `LevelToProposes` (EL05) |
+| `besoin_list` | read | `CountNodes` (la profondeur d'historique append-only) |
+| `besoin_capture_<rung>` (×7) | capture | `RecordAnswer(graph, level, body, utterance, meta)` (EL07/EL12) |
+| `besoin_capture_invariant` | capture | `RecordInvariant(graph, body, utterance, selfAuthored, meta)` (EL14) |
+| `besoin_validate_level` | validate | `CanDescend` sur un scratch in-memory (aucune écriture) |
+| `besoin_classify` | validate | `CertifyMetadata` (EL04) |
+
+### Le store : `besoin.node`, append-only, content-adressé, isolé par RLS
+
+`store.go` persiste le BesoinGraph **après** une capture. La colonne `id` est le **content-address** du graphe : `records.Hash(g.Canonicalize())` — la **même** adresse que la fonction pure calcule, jamais un espace forké. Re-capturer le graphe identique est un **NO-OP** (`ON CONFLICT (id) DO NOTHING`) : append-only, jamais d'écrasement, jamais de doublon. `LoadGraph` lit la ligne la plus récente du projet ; `Unmarshal` reconstruit le graphe (round-trip JSONB sans perte).
+
+**L'isolation projet** (S55, déclarée en dépendance avant, modélisée ici) : chaque requête tourne dans une transaction dont le GUC `aidos.project` est posé en LOCAL (`set_config('aidos.project', project, true)`). La policy RLS sur `besoin.node` (`USING (project = current_setting('aidos.project', true))`) rend le graphe du projet A **invisible** d'une session cadrée sur B. Le GUC est local à la transaction — il ne fuit pas au prochain checkout du pool.
+
+### L'émission d'Idea (EL05) : `ideastore.go`
+
+Une capture sur un rung **qui mappe** (product/control/action/operation/entity, et la bande policy) émet **une** `Idea` via la porte légale `idea_capture` (`ideas.Capture`, provenance `human`, votre utterance verbatim, content-adressée, status `draft`), persistée dans `ideas.idea` (la même table que l'MCP idea-intake S27). Un rung **NoEmit** (journey/view/invariant) **n'émet rien** — `LevelToProposes(level).Kind == MappingNoEmit` → `Emitted=false`, aucune Idea. Pas de cast silencieux.
+
+### Le mur, fail-closed
+
+`main.go` est fail-closed : si `RecordAnswer`/`RecordInvariant` route `off_altitude` (mismatch de schéma EL12) ou `spike` (floue, EL04), le serveur **ne persiste rien** (le graphe est inchangé) et renvoie le `BlockReason` (`code/severity/explanation/how_to_fix`). Le GRANT (migration `besoin_graph_baseline.sql`) : `INSERT/SELECT/UPDATE` sur `besoin.node` + reuse `ideas.idea` ; **aucun** droit sur `kernel`/`mirrors`/`fitness`. `Store.CanWriteKernel` tente une écriture noyau et prouve qu'elle **échoue toujours** (`WroteKernel` reste `false`).
+
+### Les miroirs (rouge → vert)
+
+- **Testcontainers** (vrai Postgres) `main_test.go` : applique les migrations kernel-records + ideas + besoin, connecte un **second pool en rôle `aidos_agent`** (sujet au GRANT + RLS — le rôle de prod), et prouve **chaque** done-criterion : écriture kernel refusée côté GRANT (`CanWriteKernel == false`), round-trip JSONB sans perte (le graphe rechargé porte le même `graph_hash`), append-only (le compteur croît), `journey = NoEmit` (aucune Idea émise), `besoin_capture_invariant` ∀ n'émet rien + ban de circularité refuse l'auto-auteurage, fail-closed BlockReason (une capture hors-altitude refusée, graphe inchangé), et `TestBesoinIntake_ProjectIsolationRLS` : le graphe de A invisible d'une session B (Pact par outil = chaque handler exercé).
+- **Property (déterminisme)** `determinism_property_test.go` : `metaInput.toMeta` et la projection `besoin_level_schema` sont des fonctions pures (même entrée → même sortie), un niveau hors-grammaire refusé (le mur : pas de niveau inventé).
+- **Jumeau TS** `front/web/lib/besoin-intake.ts` byte-équivalent (la projection schéma + la décision emit/NoEmit) + `besoin-intake.test.ts` (vitest + fast-check) **8/8**.
+- **Route Workbench** `/besoin-intake` (action-capable, thémée ADR 0010, bilingue FR-default ADR 0011) : `schema-cta`/`project-cta` exécutent `besoinLevelSchema`/`captureProjection` depuis l'écran ; l'inventaire énumère **tous** les outils (ui-completeness) ; lien nav ajouté ; e2e Playwright `besoin-intake.spec.ts` **5/5**.
+
+## Méta
+
+**Pourquoi un MCP, pas une lib appelée directement ?** Parce que la verticale doit pouvoir atteindre le BesoinGraph **depuis n'importe quel client** — la skill, l'écran, un autre agent — par **une seule porte propre** où le mur est appliqué en un point. ADR 0009 généralise : chaque op backend est un outil MCP. Un client (l'écran first-app, EL16+) lit `besoin_level_schema` et **rend le bon formulaire sans inventer un champ** ; il capture via `besoin_capture_*` ; il ne touche jamais la base directement. Le mur ne fuit pas.
+
+**Pourquoi le serveur ne décide rien ?** C'est determinism-first poussé à la couche capacité : tout ce qui *peut* être une fonction pure (le niveau entrable, le routage, la cartographie EL05, l'adressage) **est** une fonction pure dans `back/runtime/besoin`. Le serveur **persiste une décision déjà prise et déjà hashée**. Si le serveur jugeait quoi que ce soit, il y aurait deux autorités (la lib et le serveur) — et un risque de dérive. Une seule autorité : le code pur. Le serveur est plomberie.
+
+**Pourquoi content-adresser par `graph_hash` ?** Pour que l'idempotence soit gratuite (re-capturer le même graphe = NO-OP) et pour réutiliser le **schéma d'adresse S01/S02** (`records.Hash`) — jamais un espace forké. Le `graph_hash` est aussi la preuve de round-trip : recharger puis re-hasher doit redonner le même hash (le miroir le pin).
+
+**Pourquoi RLS maintenant alors que S55 est plus tard ?** Parce que le done-criterion d'EL15 exige « projets isolés ». La dépendance avant (S55 `ProjectScope` typé) est **déclarée** (bootstrap §6, non bloquante) ; l'isolation **fonctionnelle** est livrée ici par la policy RLS sur le GUC `aidos.project`. S55 back-fillera le scope typé ; le comportement (A invisible de B) est déjà prouvé.
+
+## Méta-méta
+
+**Quelle garantie de niveau 3 EL15 renforce ?** *Le mur tient même à la couche capacité.* Une porte capacité est exactement l'endroit où le mur pourrait fuir : un outil de trop (`idea_promote_to_kernel`), un GRANT de trop (une écriture noyau), un cast silencieux (journey → product). EL15 **n'ajoute** que des garde-fous (§5 : un nouvel artefact AJOUTE un garde-fou, n'en RETIRE jamais) :
+- pas d'outil de promotion (la promotion reste le `/goal`) ;
+- pas de GRANT noyau (le miroir Testcontainers le prouve par tentative-et-échec) ;
+- pas d'émission silencieuse (le NoEmit est explicite, le miroir compte les Idea émises) ;
+- fail-closed (une capture hors-altitude refusée avec un `BlockReason`, jamais avalée).
+
+**Le test qui empêche la régression.** Le miroir Testcontainers tourne en rôle `aidos_agent` (pas owner) : il **est** l'agent de prod, sujet au même GRANT et à la même RLS. Si un futur changement ajoutait par erreur un GRANT noyau ou affaiblissait la policy RLS, `CanWriteKernel == true` ou `B voit les lignes de A` re-rougirait le miroir. C'est la preuve déterministe (le juge, §8) — pas un second agent qui « valide ».
+
+**La discipline du forçage.** Le niveau entrable est **calculé** (`EnterableLevel`), pas choisi. Le verdict `enough`/`resolved` est **calculé** (`CanDescend`), jamais déclaré par le LLM. EL15 expose ces calculs sans jamais laisser le client les contourner : la porte rend le forçage niveau-par-niveau **opérationnel**, pas seulement conceptuel.
