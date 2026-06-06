@@ -1,0 +1,59 @@
+---
+title: "EL07 · CanDescend — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals d'EL07 : la fonction de forçage pure CanDescend(graph, level, metadata) → Verdict{enough, missing, openQuestions, blockReasons} (back/runtime/besoin/candescend.go). enough CALCULÉ depuis cinq gates : (a) corps non-vacant (champs requis sourcés d'EL06 + règles de parse : ≤MaxScenarios scénarios, Gherkin Given/When/Then, conditions bool-typées), (b) quatre métadonnées certifiables (EL04 CertifyMetadata réutilisé), (c) référence sortante résolue (sinon, paire non-énumérable → OpenQuestion portée + enough=true, bootstrap §6), (e) ANTI-VACUITÉ ShrinkOptionSpace(graph, level) > 0. Codes BesoinBlockCode locaux réutilisant la SHAPE blockreason.BlockReason (KRD §44.5). Miroir fixture ROUGE→VERT (candescend_fixture_test.go) + property rapid (candescend_property_test.go : reproductibilité + loi anti-vacuité). Jumeau TS lib/besoin-candescend.ts byte-équivalent + vitest/fast-check 13/13 ; route Workbench /compound-besoin-candescend action-capable ; e2e Playwright besoin-candescend.spec.ts 4/4. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "EL07", "back/runtime/besoin", "candescend.go", "CanDescend", "ShrinkOptionSpace", "Verdict", "enough", "anti-Goodhart", "anti-vacuité", "BesoinBlockCode", "BlockReason", "blockreason", "OptionSpace", "OpenQuestion", "forward dependency", "bootstrap", "CertifyMetadata", "EL04", "EL06", "EL08", "EL11", "BesoinThresholds", "MaxScenarios", "Gherkin", "rapid", "property test", "fast-check", "vitest", "déterminisme", "reproductibilité", "le mur", "ui-completeness", "Playwright", "EL19", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — les internals complets. La page concept est [ici](/steps/concept/el07-candescend-forcing-gate).</Note>
+
+## Implémentation
+
+Une capacité dans **`back/runtime/besoin/candescend.go`** (au-dessus de la grammaire EL02, des seuils EL06, des métadonnées EL04), pure/totale/déterministe, n'écrivant **aucune** vérité.
+
+### `CanDescend(graph, level, metadata) → Verdict`
+
+`Verdict{Enough bool, Missing []string, OpenQuestions []string, BlockReasons []blockreason.BlockReason}`. `Enough` est **calculé** : `len(v.BlockReasons) == 0` après l'évaluation des cinq gates (jamais déclaré — anti-Goodhart §8). Les cinq gates :
+
+- **(a) corps non-vacant** — `checkBody` : chaque champ requis (sourcé via `DefaultThresholds().RequiredFieldsFor(level)` → `spec.go`, **la même source qu'EL06**, jamais une copie) doit être présent et non-vide ; puis la règle de parse par rung : `product` 1..`th.MaxScenarios` scénarios (jamais un `5` inliné) ; `journey` Gherkin contenant `given`/`when`/`then` (parse structurel, pas un jugement LLM) ; `control` `visible_when`/`enabled_when` typés **booléens**.
+- **(b) quatre métadonnées** — `CertifyMetadata(node, meta)` (EL04) **réutilisé**, jamais re-jugé ; `¬Complete` → `CodeMetadataIncomplete` avec les `how_to_fix` des gaps.
+- **(c) référence sortante** — `checkOutgoingRef` lit `OutgoingRef(level)` (spec EL02). Un `Ref` dont `To == spec.RefTo` est résolu. Une ref **absente** vers une paire **non-énumérable** déclarée (`operation→entity`, via `OptionSpaceFor`) est une **dépendance avant** → `OpenQuestion` portée, **pas** un block (bootstrap §6) ; sinon `CodeRefUnresolved`.
+- **(e) anti-vacuité** — `ShrinkOptionSpace(graph, level) == 0` → `CodeOptionSpaceNotNarrowed`.
+
+### `ShrinkOptionSpace(graph, level) → int`
+
+Comptage **pur** : `shrink = |OptionSpace| − kept`, où `kept` = le nombre d'archétypes du set clos (EL06) que le champ `selects` du corps retient. Un `selects` vide (ou que des choix invalides) → `0` (vacant). Une paire non-énumérable (`operation→entity`) ou un leaf (entity) → le **sentinel positif** `forwardDepShrink (= 1)` : l'anti-vacuité est satisfaite-par-OpenQuestion, **jamais** une contrainte fabriquée. EL08 étendra ce comptage à AVANT/APRÈS la cascade des ancres figées ; EL07 possède le rétrécissement minimal par-nœud qu'il gate.
+
+### `BesoinBlockCode` — un enum local réutilisant la SHAPE blockreason
+
+Les cinq codes (`BESOIN_NODE_ABSENT`, `BESOIN_BODY_VACANT_OR_MALFORMED`, `BESOIN_METADATA_INCOMPLETE`, `BESOIN_REF_UNRESOLVED`, `BESOIN_OPTION_SPACE_NOT_NARROWED`) sont **besoin-locaux** : ils réutilisent la **forme** `blockreason.BlockReason` (code/severity/explanation/how_to_fix, KRD §44.5) **sans** polluer le registre clos `blockreason.Code` (côté vérité). Chaque `BlockReason` porte un `how_to_fix` non-vide — le mur bloque sans devenir une prison.
+
+**Miroir fixture** (`candescend_fixture_test.go`) — écrit ROUGE d'abord (`CanDescend`/`ShrinkOptionSpace`/`Verdict` n'existaient pas → échec de compilation prouvé), puis VERT, une ligne par niveau / par disjonct :
+- `ProductRightSized_Enough` : ≤5 scénarios + intent + 4 métadonnées + ref résolue + rétrécit → enough ;
+- `ProductParsableButNonConstraining_NotEnough` : parse mais `selects` vide → not_enough + `BESOIN_OPTION_SPACE_NOT_NARROWED` (anti-gaming) ;
+- `ProductTooManyScenarios_NotEnough` : `> th.MaxScenarios` → not_enough (le seuil déclaré, pas un 5 inliné) ;
+- `JourneyUnparsableGherkin_NotEnough` / `JourneyParsableGherkin_Enough` : règle de parse Gherkin ;
+- `ControlTriggersUnresolved_NotEnough` : `triggers` ne résout pas → `BESOIN_REF_UNRESOLVED` ;
+- `ControlResolved_Enough` / `ControlConditionNotBool_NotEnough` : conditions bool-typées ;
+- `MissingMetadata_NotEnough` : métadonnée manquante (EL04) → not_enough ;
+- `OperationForwardDepEntity_CarriedOpenQuestion` : la dépendance avant → enough=true + OpenQuestion, **zéro** résiduel bloquant ;
+- `ShrinkOptionSpace_Reproducible` (sélectionner 2 de 7 élague 5) ; `CanDescend_Reproducible` ; `AbsentNode_NotEnough`.
+
+**Miroir property** (`candescend_property_test.go`, rapid) — la reproductibilité (même entrée → même verdict/comptage, 20×) et la **loi anti-vacuité** : sélectionner `k` de `N` archétypes élague exactement `N − k` ; `shrink == 0 ⇔ ¬enough ∧ porte le code anti-vacuité` ; `shrink > 0 ⇒ jamais le code anti-vacuité`.
+
+`go test ./runtime/besoin/` vert ; `go vet` + `gofmt` propres.
+
+**Jumeau TS** (`front/web/lib/besoin-candescend.ts`) — `canDescend(node, level, metaComplete)` + `shrinkOptionSpace(node, level)`, byte-équivalents : mêmes cinq gates, mêmes codes, même comptage, réutilisant les jumeaux `besoin-grammar`/`besoin-thresholds` (la source unique). Couvert par `lib/besoin-candescend.test.ts` (vitest + fast-check, **13/13**). `tsc` + `biome` propres.
+
+**Route Workbench** `/compound-besoin-candescend` (`BesoinCanDescendPanel.tsx`) — **action-capable** (ui-completeness, aucune capacité headless) : un sélecteur de fixture de corps (right-sized | vacant | trop de scénarios | métadonnées incomplètes | dépendance avant) ; « Calculer le verdict » exécute `canDescend` (affiche `enough` calculé, `missing`, `OpenQuestions` portées, `BlockReasons` actionnables) ; « Compter le rétrécissement » exécute `shrinkOptionSpace` (l'entier élagué + sa signification). L'écran **lit** le verdict pur, il ne ré-implémente jamais la gate. Thémé (ADR 0010), bilingue FR-default (ADR 0011) ; parité i18n 2807/2807. **e2e Playwright** `tests/e2e/besoin-candescend.spec.ts` **4/4** contre le serveur live :3000.
+
+## Méta
+
+Le geste d'EL07, c'est **calculer le `enough` au lieu de le déclarer** — le pivot anti-Goodhart du compound. Trois disciplines KRD :
+
+- **« Done » calculé (§8)** : `enough` est une fonction pure de l'état du graphe, jamais lue depuis la confiance de l'agent ou de l'utilisateur. C'est l'équivalent, pour le besoin, du `Stop:goal-check` non-gameable du noyau : le juge est le code.
+- **Anti-vacuité = anti-gaming** : la gate (e) attrape la coquille vide qui parse. Un corps qui passe (a) mais ne rétrécit rien (`ShrinkOptionSpace == 0`) est rejeté — exactement comme un miroir orphelin ou une capacité headless est un monstre. La contrainte se **compte**, elle ne se postule pas.
+- **Déterminisme-first + réutilisation (§6)** : `CanDescend` est pure, totale, sans clock/rng/IO/LLM. La règle Gherkin est un **parse structurel** (`given`/`when`/`then`), pas un « agent qui juge si c'est du Gherkin » ; les métadonnées **réutilisent** `CertifyMetadata` (EL04) au lieu de re-juger ; les codes réutilisent la **forme** `blockreason.BlockReason` au lieu de re-déclarer une shape. Le jumeau TS calcule **le même** verdict.
+
+## Méta-méta
+
+EL07 transforme le forçage du besoin d'une **promesse** en une **mesure**. Là où EL06 a posé l'`OptionSpace` comme un ensemble clos comptable, EL07 en fait le **prédicat de descente** : un niveau ne franchit pas tant que `ShrinkOptionSpace > 0` n'est pas vrai — c'est-à-dire tant qu'il n'a pas **réellement** élagué des branches du niveau inférieur. La récursivité est totale : la même logique qui interdit `prompt → code` (l'humain possède le « quoi », le code possède le « comment ») interdit ici `niveau-vide → niveau-suivant`. Et le `enough=true` **avec** OpenQuestion portée (la dépendance avant `operation→entity`) encode la frontière fondatrice du système — entre ce que la grammaire close du besoin peut décider maintenant et le domaine ouvert que l'utilisateur, seul, déclarera plus tard. **La gate ne triche pas, ne fabrique pas, ne déclare pas : elle compte, elle nomme ses trous, et elle laisse le verdict émerger.**

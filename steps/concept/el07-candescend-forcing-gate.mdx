@@ -1,0 +1,48 @@
+---
+title: "EL07 · CanDescend (la fonction de forçage par niveau du compound du besoin)"
+description: "EL07 est la fonction de forçage PURE CanDescend(graph, level) → Verdict{enough, missing, openQuestions, blockReasons}. Un niveau est franchissable ssi (a) son corps est énonçable ET non-vacant, (b) ses quatre métadonnées sont certifiables (EL04), (c) sa référence sortante résout @version, et (e) ANTI-VACUITÉ : ShrinkOptionSpace(graph, level) > 0 — un niveau parsable qui ne rétrécit RIEN est not_enough (anti-gaming). Un manque vers un niveau plus profond pas encore existant est une OpenQuestion portée + enough=true (bootstrap §6), jamais un résiduel bloquant. enough est CALCULÉ par le code, jamais déclaré (anti-Goodhart §8). La gate ne lit que le BesoinGraph, n'écrit aucune vérité (le mur)."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "CanDescend", "forçage", "forcing gate", "enough", "anti-Goodhart", "anti-vacuité", "ShrinkOptionSpace", "OptionSpace", "not_enough", "right-sizing", "Verdict", "BlockReason", "OpenQuestion", "forward dependency", "bootstrap", "métadonnées", "BesoinThresholds", "EL06", "EL07", "EL08", "EL11", "déterminisme", "fonction pure", "le mur", "runtime/besoin"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL07](/steps/internals/el07-candescend-forcing-gate).</Note>
+
+## En une phrase
+
+EL07 est **la gate de forçage** : la fonction pure qui **calcule** — jamais ne déclare — si un niveau du besoin est assez **right-sized** pour descendre au niveau suivant, et qui **refuse** un niveau qui parse mais ne contraint rien (l'anti-vacuité).
+
+## Le problème que ça résout
+
+Le cœur du *compound du besoin*, c'est le **forçage** : un niveau n'est pas franchissable tant qu'il n'est pas **suffisamment déclaré** ET tant qu'il **ne contraint pas réellement** le niveau d'en dessous. Deux pièges classiques :
+
+1. **Le « enough » déclaré.** Si c'est l'utilisateur (ou un LLM) qui dit « c'est bon, on descend », il suffit de **prétendre** que c'est assez pour passer — c'est du Goodhart (KRD §8). Le verdict `enough` doit être **calculé** par du code déterministe, pas annoncé.
+2. **La coquille vide qui parse.** Un `Scenario` vide mais syntaxiquement correct, un `product` qui liste des scénarios mais ne **choisit** aucun archétype de parcours : ça **parse**, mais ça **ne contraint rien**. Sans garde, ce niveau « passe » et le compounding est un mensonge.
+
+## Les idées-clés
+
+<Field name="enough est CALCULÉ, jamais déclaré" type="anti-Goodhart, §8">
+  `CanDescend(graph, level)` renvoie un `Verdict{enough, missing, openQuestions, blockReasons}`. `enough` est **vrai** ssi **toutes** les gates passent — c'est une fonction pure de l'état du graphe, pas une opinion. Personne ne peut « se noter » franchissable.
+</Field>
+
+<Field name="Cinq gates" type="(a) corps non-vacant · (b) 4 métadonnées · (c) refs résolues · (d) pas de contradiction d'ancre · (e) anti-vacuité">
+  (a) le corps porte ses champs requis et passe sa règle de parse (≤5 scénarios pour le `product`, Gherkin Given/When/Then pour le `journey`, `visible_when`/`enabled_when` typés booléens pour le `control`…) ; (b) ses quatre métadonnées sont certifiables (EL04) ; (c) sa référence sortante résout vers le rung inférieur ; (d) il ne contredit aucune ancre figée au-dessus (la cascade EL08) ; (e) l'**anti-vacuité**.
+</Field>
+
+<Field name="(e) Anti-vacuité : ShrinkOptionSpace > 0" type="le compounding prouvé, pas postulé">
+  Un niveau doit **rétrécir** l'`OptionSpace` (EL06) du niveau d'en dessous. `ShrinkOptionSpace` compte les archétypes que le corps **élague** en en sélectionnant un sous-ensemble propre non-vide. Un corps qui ne sélectionne rien (ou tout) rétrécit de **0** → `not_enough`. Un scénario vide qui parse est **rejeté**.
+</Field>
+
+<Field name="La dépendance avant est portée, jamais bloquante" type="bootstrap §6">
+  Déclarer une `operation` avant que son `entity` existe (le domaine ouvert de l'utilisateur) est une **dépendance avant** : `CanDescend` renvoie `enough=true` **avec** une `OpenQuestion` portée — jamais un résiduel bloquant. La paire `operation→entity` est la paire non-énumérable déclarée (EL06), donc l'anti-vacuité est satisfaite-par-OpenQuestion.
+</Field>
+
+## Comment on s'en sert
+
+Sur l'écran **`/compound-besoin-candescend`** du Workbench : choisissez une **fixture de corps**, cliquez « Calculer le verdict » — l'écran affiche `enough` (calculé), les gates `missing`, les `OpenQuestions` portées et les `BlockReasons` actionnables. « Compter le rétrécissement » montre le `ShrinkOptionSpace` (l'entier élagué). Tout est calculé par le jumeau déterministe ; l'écran ne ré-implémente jamais la gate.
+
+## Le mur
+
+EL07 **ne lit que le BesoinGraph** (above-the-line) et **n'écrit aucune vérité** : la gate **propose** un verdict, elle ne fige rien dans le `kernel`/`mirrors`/`fitness`. Le `BlockReason` (code, severity, explanation, how_to_fix) nomme toujours la porte de sortie (KRD §44.5) — le mur bloque sans devenir une prison.
+
+## Ce que ça débloque
+
+EL07 est la brique que consomment EL08 (la cascade d'ancres + `ShrinkOptionSpace` complet), EL11 (le hook `Stop:besoin-gate`, qui bloque l'avancée d'un niveau si `¬enough`), et EL19 (le wizard tunnel : l'étape N+1 reste **verrouillée** tant que `CanDescend(N)` n'est pas `enough` — le forçage rendu visible).
