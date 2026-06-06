@@ -1,0 +1,64 @@
+---
+title: "MK02 · Internals — le port DocConverter, la référence HTMLConverter, le miroir d'idempotence"
+description: "Internals MK02 (le journal de build). Implémentation : l'interface Go DocConverter{ToMarkdown(bytes,mime)→md} + le type Mime dans back/runtime/markitdown/markitdown.go, l'implémentation de référence déterministe HTMLConverter (le convertisseur HTML→markdown du spike MK01 reconstruit proprement), le miroir property rapid (markitdown_property_test.go) écrit rouge d'abord qui épingle « même fichier → même markdown », la reproductibilité 100× et le point-fixe de ré-ingestion ; le jumeau TS (lib/markitdown.ts) + fast-check ; la skill maison markitdown ; la route /ingestion actionnable + l'e2e Playwright ; ADR 0039. Méta : pourquoi un port plutôt qu'un outil, pourquoi l'idempotence comme contrat, pourquoi le mur tient. Méta-méta : determinism-first appliqué à une frontière d'ingestion — un convertisseur est du code, jamais un LLM."
+keywords: ["aidos", "krd", "DocConverter", "port", "markitdown.go", "HTMLConverter", "Mime", "ToMarkdown", "rapid", "miroir property", "idempotence", "même fichier même markdown", "déterminisme", "reproductibilité", "ré-ingestion", "point fixe", "determinism-first", "le mur", "idée draft", "candidate-truth", "ADR 0039", "fast-check", "jumeau", "lib/markitdown.ts", "skill markitdown", "Playwright", "/ingestion", "MK01", "MK02", "MK03", "replaceable", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — tout le détail. La page concept est [ici](/steps/concept/mk02-doc-converter).</Note>
+
+## Implémentation
+
+Le port vit dans **`back/runtime/markitdown/markitdown.go`** — la frontière d'ingestion du Runtime.
+
+<CodeGroup>
+```go interface (back/runtime/markitdown/markitdown.go)
+type Mime string
+
+const MimeHTML Mime = "text/html"
+
+type DocConverter interface {
+	ToMarkdown(raw []byte, mime Mime) string
+}
+
+type HTMLConverter struct{}
+
+func (HTMLConverter) ToMarkdown(raw []byte, mime Mime) string {
+	switch mime {
+	case MimeHTML:
+		return htmlToMarkdown(raw)
+	default:
+		return "" // total : un mime non supporté rend "" (jamais un panic)
+	}
+}
+```
+</CodeGroup>
+
+- **`HTMLConverter`** est l'implémentation par défaut, **déterministe et pure** : le convertisseur HTML→markdown du spike MK01 **reconstruit proprement** dans `back/` (le spike ne gradue pas — `/harvest` propose, `/goal` fige, le code est réécrit). L'**ordre fixe du pipeline EST le déterminisme** : drop chrome (`script`/`style`/`head`/`nav`/`footer`) → **spans inline d'abord** (`<code>`/`<strong>`/`<em>`/`<a>`, pour qu'un `<code>` dans un `<li>`/`<td>` survive au walk) → titres → listes → tableaux → strip tags restants → unescape entités → collapse des lignes vides.
+- **Le miroir property** (`markitdown_property_test.go`, **rapid**) — écrit **rouge d'abord** : il nomme `DocConverter`/`HTMLConverter`/`MimeHTML` **avant** que le package ne compile ; ce fail de compilation **est** le rouge du goal (vérifié : `undefined: DocConverter`). Il épingle :
+  1. `ToMarkdown(b, mime) == ToMarkdown(b, mime)` pour tout document — **« même fichier → même markdown »**, byte-pour-byte ;
+  2. **reproductibilité** : rejoué **100×** sur le vrai fixture, aucune dérive (le miroir de reproductibilité, determinism-first) ;
+  3. **ré-ingestion** : re-passer le markdown produit dans la frontière est un transform **stable** (point fixe) ;
+  4. **totalité** : un mime non supporté rend `""`, jamais un panic ;
+  5. le vrai document (`testdata/checkout-spec.html`) se convertit en markdown non-vide portant son titre.
+- **Le jumeau TS** (`front/web/lib/markitdown.ts`) est la projection front du **même** algorithme (même ordre de pipeline), couvert par **fast-check** (`markitdown.test.ts`) avec les mêmes invariants — l'écran calcule la conversion **par cette fonction pure**, jamais un LLM, jamais une ré-implémentation divergente.
+- **La skill `markitdown`** (`.claude/skills/markitdown/SKILL.md`) suit le format maison (frontmatter `name`/`description`/`allowed-tools` + sections) : la gestuelle « convertir un document → idée draft, jamais le kernel ».
+- **La route `/ingestion`** est **actionnable** (CLAUDE.md §7, `ui-completeness`) : boutons **Convertir** / **Proposer une idée** liés à `toMarkdown` / `toIdeaDraft`, badge d'idempotence, idée draft affichée (`status=draft`). L'**e2e Playwright** (`tests/e2e/ingestion.spec.ts`) prouve que chaque bouton **exécute** et que l'idée draft sort en `status="draft"`.
+- **ADR 0039** acte le slot `replaceable`, le contrat à une opération totale/pure, l'idempotence comme identité, et le mur.
+
+## Méta — pourquoi ces choix
+
+- **Pourquoi un port et pas l'outil directement ?** Parce que `microsoft/markitdown` est un **adaptateur**, pas une vérité. En gravant l'**interface** (`DocConverter`) et un **invariant** (l'idempotence) plutôt que l'outil, l'appelant (MK03) dépend du contrat, jamais d'un binaire concret — substitution par ADR, sans réécriture. C'est le même schéma que le `ContextCompressor` de HR02 (ADR 0035).
+- **Pourquoi l'idempotence comme contrat, et pas la fidélité ?** La **fidélité** (les faits porteurs survivent) est une vérification d'acceptation **par fixture** — elle a besoin d'une liste de carriers déclarée à la main (OpenQuestion MK01-3), donc elle ne peut pas être l'invariant général. L'**idempotence** (même entrée → même sortie) ne demande **aucune** liste : c'est la propriété qu'un adaptateur quelconque, sur un format quelconque, peut être tenu d'honorer. On fige donc le contrat le plus fort qui reste universel.
+- **Pourquoi le mur tient.** Le port lit des octets, rend du markdown. Il n'écrit **aucune** vérité. Le markdown devient une **idée draft** (`status="draft"`) — une candidate-vérité. La seule porte vers la vérité reste idée → miroir → `/goal` → approbation humaine.
+
+## Méta-méta — determinism-first appliqué à une frontière d'ingestion
+
+Un convertisseur document→markdown est un **transform déterministe** : `parse → walk → render`. Le mandat determinism-first (CLAUDE.md §6/§8) impose donc qu'il soit **du code**, jamais un LLM — et c'est le cas : `HTMLConverter` n'a ni horloge, ni rng, ni I/O, ni LLM. Le **miroir de reproductibilité** (`TestReproducible`, 100×) le certifie : même `(octets, mime)` → même markdown, byte-pour-byte. Là où un agent « LLM-convertisseur » serait commode, il serait un **gap de déterminisme** qui bloquerait le step. La seule exception gatée (irréductible) viendra plus tard pour l'**OCR/audio** de markitdown — et même là, le port pin une normalisation déterministe ou gate le format : la frontière ne dérive jamais.
+
+## Reproduire
+
+```bash
+cd back && go test -count=1 ./runtime/markitdown/   # rapid : idempotence + reproductibilité 100×
+cd front/web && npx vitest run lib/markitdown.test.ts   # fast-check : le jumeau TS
+npx playwright test tests/e2e/ingestion.spec.ts          # l'écran exécute (convert + propose)
+```

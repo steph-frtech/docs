@@ -1,0 +1,57 @@
+---
+title: "MK02 · Le port DocConverter — un document devient du markdown, déterministiquement"
+description: "MK02 grave le contrat de la frontière d'ingestion d'AIDOS : le port DocConverter{ToMarkdown(bytes,mime)→md}, un slot REPLACEABLE (ADR 0039) dont l'identité est l'IDEMPOTENCE — « même fichier → même markdown », byte-pour-byte. Le miroir property (écrit rouge d'abord) épingle le déterminisme, la reproductibilité (100×) et la stabilité en ré-ingestion. L'implémentation de référence par défaut (HTMLConverter) reconstruit proprement le convertisseur du spike MK01 ; l'outil réel (microsoft/markitdown, les formats PDF/DOCX/OCR/audio) se branche derrière le MÊME port à MK03. Le markdown devient une candidate-vérité (une idée draft, status=draft), jamais une écriture kernel : le mur tient. Une skill maison + une route /ingestion actionnable + un e2e Playwright accompagnent le port."
+keywords: ["aidos", "krd", "DocConverter", "port", "ToMarkdown", "ingestion", "frontière d'ingestion", "markitdown", "document", "markdown", "idempotence", "déterminisme", "même fichier même markdown", "replaceable", "ADR 0039", "miroir property", "rapid", "fast-check", "HTMLConverter", "idée draft", "candidate-truth", "le mur", "idea-intake", "provenance", "skill", "/ingestion", "Playwright", "MK01", "MK02", "MK03", "determinism-first"]
+---
+
+<Note>Côté concept — pour le détail d'implémentation (le port Go, le miroir property, le jumeau TS, la route, l'ADR), voir [Pour moi → MK02](/steps/internals/mk02-doc-converter).</Note>
+
+## En une phrase
+
+MK02 grave le **contrat** de la frontière d'ingestion : le **port `DocConverter{ToMarkdown(bytes,mime)→md}`**, dont l'identité est l'**idempotence** — **« même fichier → même markdown »**, byte-pour-byte. Le spike MK01 avait prouvé que la conversion **existe** ; MK02 la transforme en un **port replaceable** (ADR 0039) tenu par un **miroir property** écrit **rouge d'abord**.
+
+## Le problème que ça résout
+
+MK01 (un spike jetable) avait répondu « oui, convertir un document réel → markdown est fidèle et idempotent ». Mais un spike ne gradue pas : son code est **jeté**. Il fallait donc **reconstruire proprement** la frontière dans le vrai moteur — et surtout **figer le bon contrat**. Le risque : laisser l'outil concret (`microsoft/markitdown`, une lib externe) dicter le comportement, et se retrouver coincé le jour où on veut le remplacer ou ajouter un format. La solution KRD : un **port** (une interface), un **adaptateur** derrière, et un **invariant** que tout adaptateur futur devra honorer.
+
+## Les idées-clés
+
+<Field name="Un port, pas un outil" type="CLAUDE.md §3 — replaceable">
+  La frontière d'ingestion est un slot **`replaceable`** (jamais gelé). L'outil concret se branche **derrière** l'interface `DocConverter` ; on le remplace par un ADR sans toucher l'appelant. C'est un **adaptateur**, pas une vérité.
+</Field>
+
+<Field name="L'identité du contrat : l'idempotence" type="« même fichier → même markdown »">
+  Pour les mêmes `(octets, mime)`, `ToMarkdown` rend **toujours** le même markdown, byte-pour-byte, et c'est **reproductible** (rejoué 100×, aucune dérive). C'est ce que le miroir property fige — et tout adaptateur futur y est tenu : si un format (OCR, audio) dérive, l'adaptateur épingle une normalisation déterministe **ou** ce format est gaté hors du port.
+</Field>
+
+<Field name="Une opération totale et pure" type="determinism-first">
+  `ToMarkdown(raw, mime) → string`. **Totale** : un `mime` non supporté rend un markdown **vide**, jamais un panic. **Pure** : ni horloge, ni rng, ni I/O, ni LLM dans le contrat. Un convertisseur est un **transform déterministe** (parse → walk → render) — donc du **code**, jamais un LLM.
+</Field>
+
+<Field name="L'implémentation de référence par défaut" type="HTMLConverter">
+  MK02 livre `HTMLConverter` — le convertisseur HTML→markdown du spike **reconstruit proprement** dans `back/runtime/markitdown/`. Il rend le contrat **testable avant** que l'outil réel n'existe (bootstrap). L'adaptateur réel (`microsoft/markitdown`, PDF/DOCX/OCR/audio) se branche derrière le **même** port à MK03 et y est **re-prouvé** contre ce même miroir.
+</Field>
+
+<Field name="Le résultat est une idée DRAFT, jamais une vérité" type="le mur">
+  Le markdown peut être emballé en **idée draft** (`status="draft"`, provenance conservée) — une **candidate-truth** que l'humain figera plus tard via idée → miroir → `/goal`. L'ingestion **propose**, elle ne grave jamais le `kernel`/`mirrors`/`fitness`.
+</Field>
+
+## Ce que MK02 ajoute concrètement
+
+| artefact | rôle |
+|---|---|
+| **port `DocConverter`** (`back/runtime/markitdown`) | l'interface `ToMarkdown(bytes,mime)→md`, replaceable |
+| **`HTMLConverter`** | l'implémentation de référence déterministe par défaut |
+| **miroir property** (rapid) | « même fichier → même markdown », reproductible 100×, ré-ingestion stable |
+| **skill `markitdown`** | la gestuelle maison : convertir un document → idée draft, jamais le kernel |
+| **ADR 0039** | « frontière d'ingestion replaceable » |
+| **route `/ingestion`** + e2e Playwright | l'écran actionnable : coller un document, convertir, proposer une idée |
+
+## Essayez-le
+
+Ouvrez la route **`/ingestion`** du Workbench. Collez un document HTML, cliquez **Convertir** : le markdown apparaît avec son **badge d'idempotence** (cliquez à nouveau — les octets sont identiques). Cliquez **Proposer une idée** : le markdown est emballé en candidate-vérité (`status=draft`) — un aperçu de ce que l'idea-intake capturera à MK03. **Rien n'est gravé** : le mur tient.
+
+## Les questions restées ouvertes (OpenQuestions)
+
+- **L'adaptateur réel.** `microsoft/markitdown` (lib Python, environnement hors-ligne) n'est **pas** appelée à MK02 ; le port grave le **contrat** d'idempotence et la **référence** déterministe. L'adaptateur réel est branché et re-prouvé à **MK03**.
+- **Les autres formats.** Seul HTML est prouvé par la référence (le format purement parsable hors-ligne en Go stdlib). PDF/DOCX/PPTX/XLSX/image(OCR)/audio/YouTube sont le métier de markitdown, branchés à MK03 derrière le même port, re-mesurés sur de vrais fixtures.

@@ -277,7 +277,9 @@
               "steps/concept/ce05-reuse-router",
               "steps/internals/ce05-reuse-router",
               "steps/concept/mk01-spike-markitdown",
-              "steps/internals/mk01-spike-markitdown"
+              "steps/internals/mk01-spike-markitdown",
+              "steps/concept/mk02-doc-converter",
+              "steps/internals/mk02-doc-converter"
             ]
           }
         ]
