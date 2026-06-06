@@ -303,7 +303,9 @@
               "steps/concept/el09-besoin-completeness",
               "steps/internals/el09-besoin-completeness",
               "steps/concept/el10-level-mirror-form",
-              "steps/internals/el10-level-mirror-form"
+              "steps/internals/el10-level-mirror-form",
+              "steps/concept/el11-besoin-gate",
+              "steps/internals/el11-besoin-gate"
             ]
           }
         ]

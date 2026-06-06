@@ -1,0 +1,45 @@
+---
+title: "EL11 · La porte de descente Stop:besoin-gate (le forçage rendu non-bypassable)"
+description: "EL11 livre le hook Stop:besoin-gate : un binaire Go distinct, scopé aux sessions avec un BesoinGraph ouvert, qui refuse la descente d'un niveau ssi le rung courant n'est PAS right-sized (¬CanDescend.enough, EL07) OU porte un monstre de complétude-du-besoin (EL09) — un OU, pas un ET. Sans BesoinGraph : no-op (pas de sur-tirage). Le verdict est calculé, jamais LLM ; le hook renforce le mur (il ajoute une garde, n'en retire jamais)."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "Stop", "hook", "besoin-gate", "CanDescend", "BesoinCompleteness", "forçage", "right-sizing", "monstre", "le mur", "no-op", "EL07", "EL09", "EL11", "runtime/besoin"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL11](/steps/internals/el11-besoin-gate).</Note>
+
+## En une phrase
+
+EL11 transforme le *forçage* du compound du besoin — « on ne descend pas avant d'avoir assez déclaré » — d'une politesse en une **garde non-bypassable** : au moment du `Stop`, un hook refuse la descente tant que le niveau courant n'est pas suffisant **OU** porte un monstre.
+
+## Le problème que ça résout
+
+Les étapes précédentes ont construit le *verdict* de forçage (`CanDescend`, EL07) et le *verdict* de complétude (`BesoinCompleteness`, EL09) comme des **fonctions pures**. Mais une fonction qu'on peut oublier d'appeler ne force rien. Sans EL11 :
+
+1. **Le forçage facultatif.** Rien n'empêche un agent (ou l'écran) de descendre vers `journey` alors que `product` n'est pas right-sized — le verdict existe mais personne ne le consulte.
+2. **Le monstre silencieux.** Un niveau `resolved` dont le miroir-de-niveau a disparu (EL09) resterait un trou non détecté à la fermeture de la session.
+3. **Le hook sur-tirant.** Un hook `Stop` qui se déclencherait sur **chaque** session — y compris les sessions purement kernel — serait le « hook mort/sur-tirant » que CLAUDE.md §5 interdit.
+
+## Les idées-clés
+
+<Field name="Le OU, pas le ET" type="deux disjoncts indépendants">
+  La porte bloque ssi, pour le niveau courant, **¬CanDescend.enough (EL07) OU un monstre (EL09)**. Les deux modes d'échec sont **indépendants** : un niveau peut être `not_enough` **sans** monstre et être quand même refusé ; un monstre bloque même si le rung est par ailleurs `enough`. C'est un OU, jamais un ET.
+</Field>
+
+<Field name="Scopé aux sessions BesoinGraph" type="anti-sur-tirage">
+  Le hook ne tire **que** sur les sessions qui portent un BesoinGraph ouvert (l'événement `Stop` nomme un bloc `besoin`). Une session **sans** BesoinGraph est un **no-op** : la porte laisse passer et n'écrit rien. Un hook qui tire sur tout est un hook mort.
+</Field>
+
+<Field name="Le verdict est calculé, jamais déclaré" type="determinism-first">
+  La décision du hook est **computée** par les fonctions pures `CanDescend` + `BesoinCompleteness`, jamais par un jugement LLM. Même événement → même décision (la property l'épingle des deux côtés, Go et TypeScript).
+</Field>
+
+<Field name="Le hook RENFORCE le mur" type="méta-loop §5">
+  La porte **lit** le BesoinGraph au-dessus de la ligne (un besoin, pas une vérité) et **n'écrit rien** : aucun kernel, aucun miroir, aucune ligne `besoin`. Sa seule sortie est un `BlockReason` actionnable. Un nouvel artefact n'ajoute qu'une garde — il n'en retire jamais.
+</Field>
+
+## La preuve (le rouge prouvé)
+
+La fault-injection prouve **un rouge par disjonct du OU** : (1) supprimer le `truth_kind` d'un niveau franchi fait bloquer (`¬enough`) ; (2) un niveau `not_enough` **sans** monstre bloque quand même (le OU, pas le ET) ; (2bis) un monstre **sans** `not_enough` bloque aussi (l'autre moitié du OU) ; (3) une session **sans** BesoinGraph est un no-op (pas de sur-tirage). En plus : un événement malformé échoue **fermé** (KRD §82 — une porte non vérifiable ne passe jamais en silence). Sur l'écran [`/compound-besoin-gate`](/steps/internals/el11-besoin-gate), vous pouvez **casser le right-sizing**, **casser le miroir-de-niveau**, ou **détacher le BesoinGraph** et voir le verdict virer en direct.
+
+## Ce que ça donne à l'étape suivante
+
+EL11 est la garde qui rend le forçage réel pour tout le reste du track : l'MCP `besoin-intake` (EL15) et le wizard Workbench (EL19) s'appuient sur ce même verdict pour verrouiller l'étape N+1 tant que l'étape N n'est pas franchissable. La porte spécifie aussi son **ordre avec le `Stop` complétude-kernel existant** : deux binaires distincts sur la même phase `Stop`, chacun fail-closed sur sa propre zone, aucun ne relâche l'autre.

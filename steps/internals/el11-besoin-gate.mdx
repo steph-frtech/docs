@@ -1,0 +1,54 @@
+---
+title: "EL11 · La porte Stop:besoin-gate — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals d'EL11 : back/hooks/stop/besoin-gate/ (un binaire Go distinct de back/hooks/stop), la fonction pure Decide (¬CanDescend.enough EL07 OU monstre EL09 au niveau courant — le OU), le scoping aux sessions BesoinGraph (no-op sinon), le fail-closed, le twin TS lib/besoin-gate.ts composant les twins EL07/EL09, les miroirs (rapid, fast-check, Playwright) et la route /compound-besoin-gate. Verdict calculé ; aucune écriture vérité ; le hook renforce le mur."
+keywords: ["aidos", "krd", "besoin", "Stop", "hook", "besoin-gate", "Decide", "CanDescend", "BesoinCompleteness", "gate.go", "besoin-gate.ts", "fail-closed", "rapid", "fast-check", "Playwright", "le mur", "no-op", "EL07", "EL09", "EL11"]
+---
+
+<Note>Côté internals (le journal de construction — tout). Pour la vue concept, voir [Pour les futurs utilisateurs → EL11](/steps/concept/el11-besoin-gate).</Note>
+
+## Implémentation
+
+EL11 construit `back/hooks/stop/besoin-gate/` (un binaire Go **distinct** de `back/hooks/stop`, le gate complétude-kernel), avec le twin TS `front/web/lib/besoin-gate.ts` (byte-équivalent, composant les twins EL07/EL09), la route `/compound-besoin-gate` et son e2e Playwright.
+
+### `Decide(ev StopEvent) → Decision` (`gate.go`)
+
+Le cœur d'EL11 — une fonction **pure, totale, déterministe** de l'événement :
+
+- `StopEvent{Ref, Besoin *BesoinSession}` — le bloc `Besoin` est **optionnel** ; sa **présence** est ce qui scope le hook. `BesoinSession{Project, Level, Graph, Metadata, MetadataByLevel, Mirrors}` porte le BesoinGraph ouvert, le niveau courant gaté, les 4 métadonnées du nœud courant (EL04), la map par-niveau pour le balayage de complétude (EL09) et l'ensemble déclaré de miroirs-de-niveau.
+- **No session** → `VerdictNoOp` (le hook ne tire pas, §5).
+- **Disjonct 1 (EL07)** : `CanDescend(graph, level, meta)` ; si `¬Enough` → `NotEnough=true`, on agrège ses `BlockReasons`.
+- **Disjonct 2 (EL09)** : `BesoinCompleteness(graph, mirrors, metadataByLevel())` ; pour chaque monstre **au niveau courant** → `HasMonster=true`, on agrège le `BlockReason` correspondant.
+- Si `NotEnough || HasMonster` → `VerdictBlock` + un `BlockReason` ombrelle (`BESOIN_GATE_BLOCKED`) portant le `how_to_fix` déclaré EL11 (`declare_missing_metadata, resolve_ref, state_invariant_as_forall, assign_authority, narrow_option_space`). Sinon → `VerdictAllow`.
+
+Les deux disjoncts sont **indépendants** : chacun pose son drapeau et contribue ses raisons ; le bloc tire si **l'un** est posé (le OU, pas le ET).
+
+### `Run` + `main.go`
+
+`Run(stdin, stdout) → exitCode` décode l'événement, calcule `Decide`, écrit les `BlockReason` sur stdout en cas de bloc, et renvoie `0` (allow) ou `2` (block). Un événement **malformé** échoue **fermé** (`BESOIN_GATE_EVENT_UNDECODABLE`, exit 2) — KRD §82 `.passthrough()` : une porte non vérifiable ne passe jamais en silence. Un no-op (pas de bloc `besoin`) écrit **rien** et autorise.
+
+### Distinct du `Stop` kernel + dispatch
+
+Ce binaire est le gate **besoin** ; `back/hooks/stop` est le gate **complétude-kernel** (qui lit le CUT du schéma `mirrors`). Deux processus distincts câblés sur la même phase `Stop` : le harness lance le gate kernel sur le CUT `mirrors` et ce gate sur l'événement besoin. L'ordre est **indépendant** — chacun fail-closed sur sa propre zone ; aucun ne relâche l'autre (le mur n'ajoute que).
+
+### Les miroirs (red→green)
+
+- `gate_bdd_test.go` (Godog-style table en Go) — la fault-injection **par disjonct** : (1) supprimer le `truth_kind` → bloque (`¬enough`) ; (2) `not_enough` sans monstre (nœud `drafting`, pas d'obligation de complétude) → bloque quand même (le OU) ; (2bis) un monstre sans `not_enough` (miroir-de-niveau manquant sur un nœud `resolved`) → bloque ; (3) pas de bloc `besoin` → no-op ; happy path → allow ; événement malformé → fail-closed ; le bloc porte le `how_to_fix` ombrelle EL11.
+- `gate_property_test.go` (rapid) — la **reproductibilité** : même événement → même `Decision` (verdict, drapeaux, nombre de raisons) ; l'invariant du OU (bloc ssi un disjonct a tiré).
+- `front/web/lib/besoin-gate.test.ts` (vitest + fast-check) — le twin TS : les mêmes scénarios + le déterminisme.
+- `tests/e2e/besoin-gate.spec.ts` (Playwright) — l'écran autorise un rung right-sized ; casser le right-sizing bloque sur `¬enough` seul (le OU, sans monstre) ; casser le miroir bloque sur un monstre seul ; détacher le BesoinGraph → no-op.
+
+### Le twin TS `lib/besoin-gate.ts` + la route `/compound-besoin-gate`
+
+`decide(session | null) → GateDecision` **compose** les twins existants `canDescend` (EL07, `besoin-candescend.ts`) + `besoinCompleteness` (EL09, `besoin-completeness.ts`) — il ne **réimplémente** aucune règle. `BesoinGatePanel.tsx` est **action-capable** (`ui-completeness`) : l'état de la session, « Évaluer la porte », « Casser le right-sizing » (disjonct 1 : corps qui ne narrow rien + statut `drafting`, donc pas de monstre), « Casser le miroir-de-niveau » (disjonct 2), « Détacher le BesoinGraph » (le no-op §5), « Réinitialiser ». Thémé (ADR 0010), bilingue FR d'abord (ADR 0011).
+
+## Méta
+
+**Pourquoi un binaire DISTINCT de `back/hooks/stop` ?** Le `Stop` kernel lit la complétude *de la vérité* (le CUT `mirrors ⋈ kernel`, sous la ligne). Le `besoin-gate` lit la complétude *du besoin* (le BesoinGraph, **au-dessus** de la ligne). Deux zones, deux gardes, deux fail-closed indépendants. Les fusionner mélangerait deux murs : le gate besoin n'a aucun GRANT, ne touche jamais `mirrors`, et ne doit pas dépendre de la DB kernel pour décider d'un besoin above-the-wall.
+
+**Pourquoi le OU et pas le ET ?** Parce que les deux échecs sont de **natures différentes** : `not_enough` dit « tu n'as pas assez déclaré pour descendre » ; un monstre dit « un niveau déjà résolu a perdu son miroir/ses métadonnées ». Exiger les deux pour bloquer (un ET) laisserait passer un monstre dès qu'un rung est enough — un trou. Le OU est la seule composition honnête : chaque défaut bloque sur son propre mérite.
+
+**Pourquoi un no-op et pas un bloc par défaut ?** Un hook `Stop` se déclenche à **chaque** fermeture de tour, kernel ou besoin. S'il bloquait (ou même calculait) sur les sessions sans BesoinGraph, il sur-tirerait — la définition même du hook mort (§5). Le scoping par la **présence** d'un bloc `besoin` dans l'événement garantit qu'il ne fire que là où il a un besoin à juger.
+
+## Méta-méta
+
+EL11 est l'instance besoin de l'invariant **« un verdict pur ne force rien tant qu'un garde non-bypassable ne l'appelle pas »**. EL07/EL09 ont fabriqué le *jugement* ; EL11 fabrique l'*exécution* de ce jugement à un point que le flux ne peut contourner (le `Stop`). Le garde-fou ajouté (méta-loop §5) est doublement honnête : (a) il **renforce** le mur — il lit le besoin et n'écrit aucune vérité, donc il ne peut pas devenir une porte d'écriture détournée ; (b) il **délègue** entièrement son verdict aux fonctions pures EL07+EL09 — le hook ne contient **aucune** règle de jugement propre, ce qui interdit qu'il dérive de la vérité qu'il est censé garder. Le juge reste le code (CLAUDE.md §8) ; le hook n'est que le point où le code est forcé d'être consulté. Aucun artefact d'EL11 ne retire une garde existante : il ajoute un binaire, un twin, une route — et spécifie son ordre avec le `Stop` kernel sans le modifier.
