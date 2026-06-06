@@ -1,0 +1,39 @@
+---
+title: "EL02 · Grammaire BesoinLevel — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals d'EL02 : le paquet Go back/runtime/besoin (grammar.go + spec.go) qui fige la grammaire CLOSE BesoinLevel — 7 rungs SOURCE en ordre total + 2 bandes transversales (invariant, policy), les champs requis et la référence sortante par rung, le refus dur du hors-grammaire et les 3 couches hors-scope-v1 déclarées. Miroir property rapid (grammar_property_test.go) ROUGE→VERT : ordre total clos, NextLevel ne traverse pas les bandes, ParseLevel refuse dur, round-trip déterministe, mapping ⊂ ideas.ProposesKinds(). Jumeau TS lib/besoin-grammar.ts + miroir vitest/fast-check ; route Workbench /compound-besoin-grammar action-capable ; e2e Playwright besoin-grammar.spec.ts. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "EL02", "back/runtime/besoin", "grammar.go", "spec.go", "BesoinLevel", "Level", "Levels", "NextLevel", "PrevLevel", "TransversalBands", "OutOfScopeLevels", "ParseLevel", "SpecOf", "OutgoingRef", "AttachableTo", "rapid", "property test", "fast-check", "vitest", "déterminisme", "fonction pure", "refus dur", "ordre total", "bande transversale", "ideas.ProposesKinds", "le mur", "ui-completeness", "Playwright", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — les internals complets. La page concept est [ici](/steps/concept/el02-grammaire-besoinlevel).</Note>
+
+## Implémentation
+
+Le paquet Go **`back/runtime/besoin`** (deux fichiers source à EL02) :
+
+- **`grammar.go`** — l'énumération `Level` (closed string), `sourceOrder` (les 7 rungs SOURCE en ordre total), `transversalBands` (`invariant`, `policy`), `outOfScopeLevels` (`saga`, `temporal`, `globalinvariant`). Fonctions pures totales : `Levels()`, `TransversalBands()`, `OutOfScopeLevels()`, `AllLevels()`, `IsSourceRung`, `IsTransversalBand`, `IsOutOfScope`, `IsLevel`, `ParseLevel` (refus dur — `ErrUnknownLevel` vs `ErrOutOfScopeLevel`), `NextLevel`/`PrevLevel` (les bandes ne sont jamais traversées), `Less` (l'ordre total sur les rungs SOURCE).
+- **`spec.go`** — `levelSpecs`, la map close et totale de chaque `Level` vers son `LevelSpec` : les **champs requis** par rung et la **référence sortante** (`RefTo` + `RefField` : `control.triggers→action`, `action.invoke→operation`, `operation.mutate→entity`). `SpecOf`, `RequiredFields`, `OutgoingRef`, `AttachableTo` (les bandes : `invariant`→tout rung, `policy`→`operation`/`entity`).
+
+**Miroir property** (`grammar_property_test.go`, rapid) — écrit ROUGE d'abord, puis VERT : l'ordre SOURCE est total et clos et stable sur 50 re-list ; `NextLevel` marche l'ordre et s'arrête à la feuille `entity` ; les bandes ne sont jamais traversées et jamais retournées comme `next` d'un rung ; toute chaîne hors-grammaire est refusée (`rapid.String()`) ; `saga`/`temporal`/`globalinvariant` refusées avec `ErrOutOfScopeLevel`, non aliasées ; `ParseLevel` round-trip tout `Level` et est déterministe ; chaque rung sauf la feuille résout vers le rung d'en dessous ; les rungs **mappants** (`product/control/action/operation/entity`) sont un **sous-ensemble** de `ideas.ProposesKinds()` (la jointure honnête, pas de fork) ; `journey`/`view` sont `NoEmit` (absents du set), `policy` y est.
+
+**Jumeau TypeScript** `front/web/lib/besoin-grammar.ts` (miroir byte-pour-byte de la grammaire Go) + son **miroir de reproductibilité** `besoin-grammar.test.ts` (vitest + fast-check, 9 propriétés). **Route Workbench** `/compound-besoin-grammar` **action-capable** (`BesoinGrammarPanel.tsx`) : deux contrôles qui EXÉCUTENT le jumeau pur depuis l'écran — « Lister la grammaire » (ordre total + bandes + hors-scope) et « Analyser le niveau » (résout un niveau valide, refuse dur le hors-grammaire). Thémé (ADR 0010), bilingue FR-default (ADR 0011). **e2e Playwright** `tests/e2e/besoin-grammar.spec.ts` (2/2 vert).
+
+## Méta
+
+**Pourquoi une grammaire close, et pourquoi maintenant ?** Le compound du besoin exige des niveaux **ordonnés, append-only, à références résolvant par code** : chaque niveau résolu devient une **ancre figée** que le niveau inférieur lit comme grounding. Sans un vocabulaire fermé et un ordre total **avant** tout graphe, l'agent inventerait des niveaux ad hoc — le `prompt → code` que le mur interdit (CLAUDE.md règle fondatrice). EL02 est donc le **premier maillon** du substrat EL-E1 : EL03 (le record `BesoinGraph`), EL05 (`LevelToProposes`), EL07 (`CanDescend`) s'appuient tous sur cette grammaire.
+
+**La décision tranchée : `policy` est une bande, pas un rung.** Le ROADMAP l'exigeait explicitement « tranchée en EL02, pas en prose implicite ». Une `policy` (autorisation) ne se descend pas après `entity` ; elle **croise** `operation`/`entity` latéralement, comme un `invariant` croise tout rung. Les coder comme bandes (jamais retournées par `NextLevel`) empêche le wizard EL19 de les présenter comme une étape verticale erronée.
+
+**Déterminisme-first (CLAUDE.md §6/§8).** L'ordre, le `NextLevel`, le `ParseLevel`, la table des specs : tout est **fonction pure totale**, sans clock/rng/IO/LLM. C'est la définition même d'une grammaire faisant **autorité** — le code décide, jamais un LLM d'altitude. Le miroir de reproductibilité (property : même entrée → même sortie) le pin sur les deux plans (Go + TS).
+
+## Méta-méta
+
+**Honnêteté de portée.** Les couches `saga`/`temporal`/`globalinvariant` ne sont pas omises en douce : elles sont **nommées** dans `OutOfScopeLevels()` et refusées avec une erreur **dédiée** (`ErrOutOfScopeLevel`, distincte de l'inconnu) pour que le refus s'explique « délibérément hors grammaire v1, OpenQuestion déclarée » plutôt que « jamais entendu parler ». C'est l'**exception bootstrap** appliquée au besoin (CLAUDE.md §6) : une forward-dependency déclarée n'est pas un residual bloquant.
+
+**Le mur, structurellement.** EL02 n'a **aucun** chemin d'écriture vérité : pas d'import des schémas `kernel`/`mirrors`/`fitness`, pas de DSN, pas de capacité. La grammaire est au-dessus de la ligne ; les Ideas qu'elle gouvernera (EL16) sortiront par la **seule porte légale** `idea-intake` (`idea_capture`, provenance humaine, `HasMirror` toujours false). La promotion en vérité reste l'écriture du miroir via `/goal`, propriété de l'app-builder.
+
+**Réutilisation, zéro réinvention.** Les noms des rungs mappants réutilisent `ideas.ProposesKinds()` (le closed set existant `control|policy|operation|action|entity|product`) ; un test pin ce sous-ensemble. Aucun espace d'adresses forké, aucun enum dupliqué — la grammaire **compose** le noyau existant au lieu de le doubler.
+
+## OpenQuestions portées (non bloquantes)
+
+- `saga`/`temporal`/`globalinvariant` : pas de rung d'élicitation v1 (déclaré, refusé dur). Un EL ultérieur pourra étendre la grammaire — ce sera un **changement de grammaire** (idée → miroir → /goal), jamais une édition silencieuse.
+- Le record `BesoinGraph`, la table `LevelToProposes`, la porte `CanDescend` et le wizard sont à EL03+ : EL02 ne fournit que la grammaire (la forme), pas encore le graphe ni la gate.

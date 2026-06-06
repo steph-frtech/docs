@@ -1,0 +1,41 @@
+---
+title: "EL02 · La grammaire close BesoinLevel — les 7 rungs + les bandes"
+description: "EL02 grave la GRAMMAIRE CLOSE du besoin (paquet Go back/runtime/besoin) : les 7 rungs SOURCE de la verticale KRD §23 (product→journey→view→control→action→operation→entity) en ordre TOTAL, plus les 2 bandes transversales (invariant ∀, policy attachée à operation/entity). Chaque rung nomme ses champs requis et sa référence sortante (control.triggers→action, action.invoke→operation, operation.mutate→entity). Tout est fonction pure totale (déterminisme §6/§8) : l'ordre, le NextLevel, le parse — sans clock, sans rng, sans LLM. Un niveau hors-grammaire est un REFUS DUR, jamais deviné, jamais aliasé. Décision tranchée : policy est une bande transversale (pas un rung vertical) ; saga/temporal/globalinvariant sont DÉLIBÉRÉMENT hors-grammaire-v1 (OpenQuestion déclarée). Au-dessus du mur : aucune écriture vérité."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "BesoinLevel", "grammaire close", "verticale", "§23", "rung", "product", "journey", "view", "control", "action", "operation", "entity", "invariant", "policy", "bande transversale", "NextLevel", "ordre total", "référence sortante", "triggers", "invoke", "mutate", "champs requis", "déterminisme", "fonction pure", "refus dur", "hors-grammaire", "saga", "temporal", "globalinvariant", "hors-scope", "OpenQuestion", "le mur", "EL01", "EL02", "EL03", "runtime/besoin"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL02](/steps/internals/el02-grammaire-besoinlevel).</Note>
+
+## En une phrase
+
+EL02 grave la **grammaire CLOSE `BesoinLevel`** : la liste figée, **ordonnée et totale**, des niveaux qu'un besoin peut prendre — les **7 rungs SOURCE** de la verticale KRD §23, plus **2 bandes transversales** (`invariant`, `policy`). Tout y est **fonction pure** ; un niveau hors-grammaire est un **refus dur**.
+
+## Le problème que ça résout
+
+Le track « compound du besoin » force l'utilisateur à expliquer son app **niveau par niveau, dans l'ordre de l'architecture**. Pour cela il faut d'abord un **vocabulaire fermé** : quels sont les niveaux légaux, dans quel ordre on descend, et qu'est-ce qui n'EST PAS un niveau. Sans grammaire close, un LLM pourrait inventer un « niveau » au fil de l'eau — exactement le `prompt → code` que le mur interdit. EL02 fige donc la grammaire **avant** tout graphe, toute porte de forçage, tout wizard : c'est le substrat sur lequel EL03+ s'appuie.
+
+## Les idées-clés
+
+<Field name="Sept rungs SOURCE, en ordre total" type="la verticale KRD §23">
+  `product → journey → view → control → action → operation → entity`. L'ordre du bloc EST l'ordre de descente : on ne descend jamais vers `journey` avant d'avoir `product`. `NextLevel(control)` rend `action`, et ainsi de suite jusqu'à la **feuille** `entity` (pas de suivant). Cet ordre est une **fonction pure totale** — même appel, même résultat, sans horloge ni hasard.
+</Field>
+
+<Field name="Deux bandes transversales — pas des rungs" type="invariant · policy">
+  Un **invariant** (∀ P→Q, « vrai sur tous les chemins ») et une **policy** (autorisation) ne sont pas sur le chemin de descente : ils **croisent** les niveaux latéralement. `NextLevel` ne les traverse JAMAIS. Décision tranchée en EL02 : `policy` est une **bande** attachée à `operation`/`entity` (là où l'autorisation est en jeu), **pas** un rung vertical séparé ; `invariant` s'attache à tout rung SOURCE croisé.
+</Field>
+
+<Field name="Chaque rung nomme sa référence sortante" type="les arêtes constrains">
+  `control.triggers → action`, `action.invoke → operation`, `operation.mutate → entity` : chaque rung (sauf la feuille) déclare le **champ** qui porte sa référence et le **rung plus profond** qu'elle résout. C'est l'ossature des arêtes `constrains` de la verticale — le « doc qui suit l'architecture » prend racine ici.
+</Field>
+
+<Field name="Le hors-grammaire est un refus DUR" type="jamais deviné, jamais aliasé">
+  Une chaîne qui n'est ni un rung SOURCE ni une bande n'est **pas** un `Level` : `ParseLevel` la refuse avec une erreur, jamais un alias silencieux d'un vrai rung. Le juge est le **code**, pas un LLM d'altitude.
+</Field>
+
+<Field name="La portée v1 est DÉCLARÉE, pas omise" type="OpenQuestion honnête">
+  Les couches noyau `saga`, `temporal`, `globalinvariant` existent dans `back/kernel/` mais sont **délibérément hors-grammaire-v1** : un besoin multi-étapes (saga) ou un invariant temporel n'a pas encore de rung d'élicitation dédié. Elles sont **nommées** (`OutOfScopeLevels()`) et refusées avec une erreur dédiée — une **OpenQuestion déclarée** pour un EL ultérieur, jamais une complétude prétendue.
+</Field>
+
+## Ce que ça change (et ne change pas)
+
+EL02 ne franchit **jamais** le mur : c'est une grammaire pure, sans aucune écriture `kernel`/`mirrors`/`fitness`. Elle fixe la **forme** ; EL03 construit le graphe `BesoinGraph` au-dessus, EL07 la porte de forçage, EL16 l'émission en Ideas via la porte légale `idea-intake`. Les noms des rungs qui émettent réutilisent le **closed set existant** `ideas.ProposesKinds()` — jamais un espace d'adresses forké.

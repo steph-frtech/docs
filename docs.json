@@ -285,7 +285,9 @@
               "steps/concept/el00-cible-app-emise",
               "steps/internals/el00-cible-app-emise",
               "steps/concept/el01-spike-necessite-besoin",
-              "steps/internals/el01-spike-necessite-besoin"
+              "steps/internals/el01-spike-necessite-besoin",
+              "steps/concept/el02-grammaire-besoinlevel",
+              "steps/internals/el02-grammaire-besoinlevel"
             ]
           }
         ]
