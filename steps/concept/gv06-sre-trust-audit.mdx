@@ -1,0 +1,48 @@
+---
+title: "GV06 · Un panneau d'audit qui montre le budget d'erreur, l'identité et le journal inviolable"
+description: "GV06 aligne les contrôles SRE (budget d'erreur, circuit-breaker) et l'identité/trust sur le flux de runs d'AIDOS, et les rend dans le panneau Workbench « Governance / Audit » — racine Merkle du journal, conformité OWASP, verdicts de policy — thémé et bilingue. Vue concept, sans code."
+keywords: ["aidos", "krd", "governance", "GV06", "SRE", "budget d'erreur", "error budget", "circuit-breaker", "SLO", "identité", "trust", "Merkle", "audit", "fail-closed", "le mur", "Workbench"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → GV06](/steps/internals/gv06-sre-trust-audit).</Note>
+
+## L'idée en une phrase
+
+GV06 vous donne un **panneau d'audit** unique qui répond à trois questions de gouvernance — *« le système tient-il son budget d'erreur ? »*, *« qui a décidé, sous quelle identité ? »*, *« le journal est-il inviolable ? »* — en lisant les **mêmes** garde-fous déterministes qu'AIDOS applique déjà.
+
+## Pourquoi ce pas existe
+
+Les pas précédents ont construit la matière : le journal d'audit inviolable (racine Merkle, GV03), les dix miroirs de conformité OWASP (GV04), le compilateur de policy lisible (GV05). Mais l'outillage de gouvernance des agents (le Microsoft *agent-governance-toolkit*) propose deux piliers de plus : des **contrôles SRE** (un objectif de service — un SLO — avec un **budget d'erreur** et un **circuit-breaker** qui coupe quand le budget est épuisé) et un pilier **identité / trust** (lier *qui* a décidé à un enregistrement infalsifiable).
+
+GV06 adopte ces deux idées — comme **augmentations**, jamais comme remplacement du mur — et les **rassemble dans un seul écran**.
+
+## Les contrôles SRE — un budget d'erreur, pas un agent
+
+Un **budget d'erreur** est simplement un **compte** : sur une fenêtre de runs récents, combien ont échoué par rapport à ce que votre objectif (le SLO) tolère. Un **circuit-breaker** est un **seuil** : si le taux d'échec observé dépasse la cible, le breaker **s'ouvre** et le système **coupe** le travail — il échoue en se fermant (*fail-closed*), comme le mur.
+
+Le point qui compte : ces deux contrôles sont des **fonctions pures**, pas des « agents SRE ». Un budget *est* un compte ; un breaker *est* un seuil. Deux propriétés tiennent toujours :
+
+- **une défaillance n'améliore jamais le budget** (ajouter un échec ne peut que le diminuer) ;
+- **une défaillance ne referme jamais un breaker ouvert** (une fois coupé, le système ne se rallume pas tout seul en empilant des erreurs).
+
+## L'identité / trust — qui a décidé, lié à l'inviolable
+
+Chaque run d'agent porte déjà *qui* a décidé : l'agent (et sa version) et l'empreinte de son implémentation. GV06 construit une **chaîne de confiance** qui **lie** cette identité à la **racine Merkle** du journal d'audit (GV03). Conséquence : une affirmation d'identité ne peut pas **flotter** librement à côté de l'audit — chaque ligne « cet agent a décidé ceci » est ancrée dans la racine infalsifiable. Si on altérait le journal, la racine changerait, et la chaîne de confiance ne correspondrait plus.
+
+## Le panneau « Governance / Audit »
+
+Tout cela se voit **à l'écran**, dans le Workbench. Un bouton **exécute** l'alignement SRE et l'audit d'identité ; le panneau rend alors, à côté du journal Merkle, de la conformité OWASP et des verdicts de policy :
+
+- l'état du **circuit-breaker** (fermé/sain ou ouvert/fail-closed) ;
+- le **budget d'erreur restant** et le **taux d'erreur observé** face à la **cible SLO** ;
+- la **chaîne de confiance** : une ligne par run, liant agent + implémentation à la racine d'entrée Merkle.
+
+Le tout est **thémé** (le thème Workbench) et **bilingue** (français par défaut, anglais en second).
+
+## Ce que ce pas ne fait pas
+
+Le panneau **n'écrit aucune vérité**. C'est un écran d'audit en lecture : il rend des dérivations pures de l'état courant, sous la ligne d'eau. Le **mur structurel reste le garant** — les contrôles SRE et la chaîne de confiance l'**augmentent** et le **prouvent**, ils ne le remplacent jamais par un middleware qui autoriserait par défaut.
+
+## En une phrase
+
+> GV06 réunit, dans un seul écran d'audit thémé et bilingue, le budget d'erreur fail-closed, l'identité liée à la racine inviolable, et les verdicts déjà prouvés — sans jamais affaiblir le mur.

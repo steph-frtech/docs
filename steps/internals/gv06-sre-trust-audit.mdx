@@ -1,0 +1,52 @@
+---
+title: "GV06 · SRE (budget d'erreur / circuit-breaker) + identité/trust + panneau d'audit (internals)"
+description: "Internals de GV06 : back/runtime/governance/sre.go aligne le budget d'erreur / circuit-breaker et la chaîne de confiance (identité liée à la racine Merkle GV03) comme fonctions pures sur le flux agentrun ; le twin front (governance.ts) et le panneau Workbench « Governance / Audit » les rendent thémé+bilingue avec un e2e Playwright. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "GV06", "SRE", "error budget", "circuit-breaker", "SLO", "trust chain", "identity", "Merkle", "EvaluateSRE", "BuildTrustChain", "determinism-first", "fail-closed", "le mur", "rapid", "fast-check", "Playwright"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet (le journal de construction). Pour la vue concept, voir [Pour les futurs utilisateurs → GV06](/steps/concept/gv06-sre-trust-audit).</Note>
+
+GV06 répond au critère de done : *« la route rend l'audit (ledger Merkle, conformité OWASP, verdicts policy) thémée+bilingue ∧ e2e vert ∧ pages « Pour moi » live ∧ /self-test reste vert »*. Il aligne deux piliers de l'AGT — les **contrôles SRE** (budget d'erreur / circuit-breaker) et l'**identité/trust** — sur le flux de runs existant (`agentrun`, BA), puis les **rassemble** dans le panneau Workbench « Governance / Audit » à côté du journal Merkle (GV03), de la conformité OWASP (GV04) et des verdicts de policy (GV05).
+
+## Implémentation
+
+### Le package : `back/runtime/governance/sre.go`
+
+Trois fonctions **pures, totales, déterministes**, sans horloge ni rng ni I/O.
+
+- `EvaluateSRE(results []agentrun.Result, slo float64) SREState` — replie une fenêtre ordonnée de résultats de run en un verdict de budget d'erreur + breaker. `isFailure` plie l'enum `Result` en binaire : seul `green` est un succès ; `still_red` / `blocked` / `abandoned` brûlent du budget. La cible SLO est **clampée** à `[0,1]`. `TotalBudget = floor(target * window)` (le nombre absolu d'échecs tolérés), `RemainingBudget = max(0, total − failures)` (clampé). Le breaker **s'ouvre** ssi `errorRate > target` (**fail-closed**). `SREState` est comparable par valeur (pas de slice/map) pour que le miroir de reproductibilité asserte l'égalité.
+- `BuildTrustChain(runs []agentrun.AgentRun) (TrustChain, error)` — projette chaque run sur une `TrustRow` (index, run, agent, impl) **liée** à la racine Merkle d'entrée. Le point load-bearing : elle **réutilise** `agentrun.Append` / `agentrun.Root` (le journal GV03) — donc l'identité est ancrée à la **même** racine inviolable que l'audit vérifie, **jamais** un hash parallèle.
+- `SREDefaultSLO = 0.25` — la cible déclarée (jamais apprise, §8) que le panneau rend : un budget d'erreur de 25 %.
+
+### Le twin front : `front/web/lib/governance.ts`
+
+Twin déclaratif du package Go (le Go reste l'**autorité**) : `evaluateSRE`, `buildTrustChain`, `BreakerState`, `SREState`, `TrustChain`, `SRE_DEFAULT_SLO`, et `sreAudit()` qui rend la tranche d'audit GV06 sur `DEMO_RUNS`. `buildTrustChain` réutilise `buildLedger`/`ledgerRoot` (le twin GV03) — single-sourcé avec la racine Merkle, comme côté Go.
+
+### Le panneau : `front/web/components/GovernancePanel.tsx`
+
+Un contrôle **action-capable** (`data-testid=align-sre`) qui **exécute** `sreAudit()` et rend, à côté des sections existantes (journal Merkle, conformité OWASP, verdicts policy, ADR) : l'état du breaker (`sre-breaker`), le budget restant (`sre-budget`), le taux d'erreur, la cible SLO, et la chaîne de confiance (`sre-trust-root` + une ligne `sre-trust-row-N` par run). Thémé (ADR 0010, tokens de design) et bilingue (ADR 0011, clés `governance.sre*` dans `messages/{fr,en}.json`).
+
+## Méta
+
+### Pourquoi du code, jamais un agent (determinism-first)
+
+Un **budget d'erreur EST un compte** ; un **circuit-breaker EST un seuil** sur un taux observé ; une **chaîne de confiance EST le repli Merkle** des runs. Les trois sont des fonctions pures de leurs entrées — la tentation d'un « agent SRE » ou d'un « LLM qui décide de couper » serait un **écart de déterminisme** qui bloquerait le pas (CLAUDE.md §6/§8). Le miroir de reproductibilité (`sre_property_test.go`, rapid) pin : même `(results, slo)` ⇒ même `SREState`, byte-pour-byte.
+
+### Le miroir RED-first et ses invariants
+
+`sre_property_test.go` a été écrit **avant** `sre.go` (le package ne compilait pas — `EvaluateSRE`/`BreakerOpen`/`BuildTrustChain` indéfinis : c'est le rouge). Il pin quatre propriétés :
+
+- **`TestSRE_Reproducible`** — même entrée ⇒ même état.
+- **`TestSRE_Failures_NeverHelp`** — ajouter un run échouant ne **monte jamais** le budget restant et ne **referme jamais** un breaker ouvert (fail-closed monotone).
+- **`TestSRE_BreakerMatchesSLO`** — `RemainingBudget ∈ [0, TotalBudget]` et le breaker est ouvert **ssi** `errorRate > target`.
+- **`TestSRE_TrustChainCoversLedger`** — chaque run est couvert par **exactement une** ligne ; la racine est reproductible ; l'identité (agent + impl) de chaque ligne correspond au run.
+
+Côté front, `governance.test.ts` (Vitest + fast-check) ajoute les twins de ces propriétés (5 tests GV06), et `tests/e2e/governance.spec.ts` (Playwright, 3 tests GV06) prouve que le contrôle **s'exécute** : le panneau apparaît, la chaîne de confiance lie l'identité à la racine, et le breaker reflète la **brèche** du SLO sur le flux démo (66 % d'échecs > 25 % ⇒ breaker **ouvert**, fail-closed).
+
+### Le mur reste le garant
+
+Le panneau est en **lecture** : il rend des dérivations pures sous la ligne d'eau, **n'écrit aucune vérité**. Les contrôles SRE et la chaîne de confiance **augmentent** le mur structurel (ADR 0037, GV02) — ils ne le remplacent jamais par un middleware default-allow. La chaîne de confiance, en liant l'identité à la racine GV03, **renforce** même l'inviolabilité : une identité ne peut pas flotter à côté d'un audit altéré.
+
+## Méta-méta
+
+GV06 ferme la boucle « cross-check → adoption → preuve → écran » du sujet gouvernance : ce que GV01 a identifié comme **résiduel** (les piliers SRE et identité/trust de l'AGT, non encore explicites dans AIDOS), GV02 l'a tranché en ADR, et GV03–GV06 l'ont **construit et prouvé**. La discipline est constante sur les trois plans (CLAUDE.md §6) : la **policy est la source déclarée**, les **enforcers/fonctions Go sont la projection**, et **jamais l'inverse**. Un budget, un seuil, un repli Merkle : autant de fonctions que le build-agent **écrit au moment du build**, pas un agent qui **siège dans la boucle d'exécution** à faire ce qu'une fonction ferait. C'est la même règle qui, généralisée, dit qu'un *diff est un algorithme de diff*, qu'une *recherche est `rg`*, qu'un *juge est déterministe* — l'agent code les garde-fous, il ne **devient** pas le garde-fou.

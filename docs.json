@@ -263,7 +263,9 @@
               "steps/concept/gv04-owasp-mirrors",
               "steps/internals/gv04-owasp-mirrors",
               "steps/concept/gv05-policy-compiler",
-              "steps/internals/gv05-policy-compiler"
+              "steps/internals/gv05-policy-compiler",
+              "steps/concept/gv06-sre-trust-audit",
+              "steps/internals/gv06-sre-trust-audit"
             ]
           }
         ]
