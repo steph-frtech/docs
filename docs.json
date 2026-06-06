@@ -313,7 +313,9 @@
               "steps/concept/el14-besoin-invariant",
               "steps/internals/el14-besoin-invariant",
               "steps/concept/el15-besoin-intake",
-              "steps/internals/el15-besoin-intake"
+              "steps/internals/el15-besoin-intake",
+              "steps/concept/el16-emit-ideas",
+              "steps/internals/el16-emit-ideas"
             ]
           }
         ]

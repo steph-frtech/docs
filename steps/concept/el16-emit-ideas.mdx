@@ -1,0 +1,49 @@
+---
+title: "EL16 · emit-ideas (l'émetteur déterministe vers le backlog d'idées)"
+description: "EL16 est l'émetteur déterministe EmitIdeas(graph) → []Idea, via la porte idea-intake, gouverné par la table close LevelToProposes (EL05). Pour chaque nœud résolu dont le rung mappe, une Idea draft est émise (proposes = LevelToProposes(level), intent = l'utterance verbatim, provenance humaine) ; les rungs NoEmit (journey/view/invariant) n'émettent rien — pas de cast silencieux. L'id réutilise records.Hash → l'Idea est content-adressée + idempotente (ré-émission byte-identique). Above le mur : aucune écriture kernel/mirror, HasMirror toujours false ; la promotion = écrire le miroir via /goal (hand-off S64)."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "emit-ideas", "EmitIdeas", "émetteur déterministe", "BesoinGraph", "Idea", "backlog", "LevelToProposes", "EL05", "NoEmit", "idea_capture", "idea-intake", "le mur", "HasMirror", "content-addressed", "idempotence", "graph_hash", "déterminisme", "S64", "app-builder", "EL15", "EL16"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL16](/steps/internals/el16-emit-ideas).</Note>
+
+## En une phrase
+
+EL16 prend votre **BesoinGraph** — l'app que vous avez expliquée niveau par niveau — et le **projette en un backlog d'idées** : une idée par niveau résolu qui mappe, **jamais du code en passant**, jamais dans le noyau.
+
+## Le problème que ça résout
+
+À la fin de la descente (EL13) et de la bande latérale (EL14), votre besoin est **persisté** dans le BesoinGraph (EL15). Mais un graphe de besoin n'est pas encore un **plan de travail**. Il faut le transformer en une **liste d'idées candidates** que l'app-builder (S64) ouvrira une par une — chacune en `/grill`, puis en `/goal`.
+
+EL16 est cette transformation. C'est un **émetteur déterministe** : `EmitIdeas(graph) → []Idea`. Il ne décide rien « intelligemment ». Pour chaque niveau, il lit la **table close `LevelToProposes` (EL05)** — une fonction pure — et émet (ou pas) exactement une idée.
+
+Trois garanties qu'il tient :
+
+1. **Pas de `prompt → code`.** Un niveau résolu ne devient jamais du code. Il sort comme **Idea draft** par la seule porte légale `idea_capture` (provenance humaine, votre phrase verbatim). La promotion vers le noyau, c'est **écrire le miroir = `/goal`** — pas l'émetteur.
+2. **Pas de cast silencieux.** Les niveaux qui *mappent* (product, control, action, operation, entity, et la bande policy) émettent une idée de leur propre kind. Les niveaux **NoEmit** (journey, view, invariant) n'émettent **rien** — leur contrainte vit dans les ancres au-dessus. Jamais un faux « journey → product ».
+3. **Idempotent et content-adressé.** L'id de chaque idée est le **hash de son contenu** (le même schéma que tout le reste d'AIDOS). Ré-émettre le même graphe redonne **exactement les mêmes idées, dans le même ordre** — byte-identique. Pas de doublon.
+
+## Les idées-clés
+
+<Field name="Gouverné par la table LevelToProposes" type="EL05">
+  Le mapping niveau → kind d'idée est une **table close, pure et totale** (EL05), jamais un choix LLM. `control/action/operation/entity/product` → eux-mêmes ; `policy` → policy ; `journey/view/invariant` → NoEmit.
+</Field>
+
+<Field name="Une idée par niveau RÉSOLU qui mappe" type="EL07">
+  Seul un niveau **right-sizé** (résolu, EL07) projette. Un niveau en cours (drafting) ou vide n'émet rien — ce n'est pas encore un besoin à transmettre.
+</Field>
+
+<Field name="NoEmit = rien (pas de cast)" type="EL05">
+  Un rung NoEmit (journey/view/invariant) **n'émet aucune idée**. Sa contrainte est portée par les ancres des rungs SOURCE qu'il contraint. Le compteur d'idées EXCLUT les NoEmit.
+</Field>
+
+<Field name="Le mur : HasMirror toujours false" type="le mur">
+  Chaque idée émise est un **candidat draft** — elle ne porte **ni version ni miroir** (par construction). L'émetteur n'écrit **aucun** noyau ni miroir. La promotion est `/goal`.
+</Field>
+
+## Comment vous l'utilisez
+
+Depuis l'écran **`/emit-ideas`** du Workbench : vous façonnez le graphe déjà-décidé (le statut de chaque rung), puis **« Émettre les Ideas »** lance l'émetteur. Le backlog apparaît dans l'ordre topologique (product d'abord, puis la descente), prêt pour le hand-off vers l'app-builder.
+
+## Le hand-off (S64)
+
+`EmitIdeas` → `idea-intake` (provenance humaine) → **S64** (« capturez votre idée ») → **S65** (`/grill`) → **S66** (`/goal`, ouverts dans l'ordre topologique du backlog) → **S67**. La promotion est **toujours** écrire le miroir via `/goal`, jamais une écriture noyau directe.
