@@ -1,0 +1,47 @@
+---
+title: "EL03 · Le record BesoinGraph — graphe ordonné, append-only, content-adressé"
+description: "EL03 grave le RECORD du besoin (paquet Go back/runtime/besoin/graph.go) : un ensemble ORDONNÉ et append-only de nœuds LevelNode (un par rung) plus les arêtes constrains(L→L+1) et seeds(L nomme un besoin plus profond). Le graphe est content-adressé via records.Hash(Canonicalize(graphe)) — le MÊME schéma S01/S02 que le kernel, jamais un hash forké. Par construction AUCUN champ Version, AUCUN champ Mirror : cette double absence EST ce qui distingue un BESOIN (au-dessus du mur) d'une VÉRITÉ. Tout est fonction pure (déterminisme §6/§8) : mêmes réponses → même graph_hash quel que soit l'ordre d'insertion ou de clés ; round-trip sans perte ; deux projets distincts sont disjoints. Au-dessus du mur : aucune écriture vérité."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "BesoinGraph", "LevelNode", "record", "content-adressage", "records.Hash", "Canonicalize", "graph_hash", "append-only", "ordonné", "constrains", "seeds", "arête", "double absence", "Version", "Mirror", "le mur", "déterminisme", "fonction pure", "round-trip", "projet disjoint", "ProjectScope", "S53", "EL02", "EL03", "EL15", "runtime/besoin"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL03](/steps/internals/el03-graphe-besoin).</Note>
+
+## En une phrase
+
+EL03 grave le **record `BesoinGraph`** : la **structure de données** du besoin — un ensemble **ordonné, append-only** de nœuds (un par rung de la grammaire EL02), **content-adressé** par son contenu, et qui par construction **n'est jamais une vérité**.
+
+## Le problème que ça résout
+
+EL02 a fixé le **vocabulaire** (les niveaux légaux et leur ordre). Mais un vocabulaire ne suffit pas : il faut une **forme de données** dans laquelle déposer les réponses de l'utilisateur, niveau par niveau. Cette forme doit obéir à trois contraintes non négociables d'AIDOS :
+
+- **Déterministe** (`determinism-first`, §6/§8) : le besoin ne doit pas être assemblé par un LLM. Mêmes réponses → **même graphe**, à l'octet près.
+- **Content-adressé** : le besoin est identifié par son **contenu** (un `graph_hash`), pas par un compteur ou une date — pour que le compounding (chaque niveau est une ancre figée) ait une identité stable et reconstructible.
+- **Au-dessus du mur** : un besoin n'est **pas** une vérité. La structure elle-même doit rendre cette distinction **impossible à confondre**.
+
+EL03 livre exactement cette forme, prouvée déterministe **avant** que tout épic suivant n'écrive dedans.
+
+## Les idées-clés
+
+<Field name="Un graphe de nœuds ordonnés" type="LevelNode + arêtes">
+  Chaque rung résolu devient un `LevelNode{Level, Body, Refs[], Provenance, Status}`. Les arêtes **`constrains`** (L→L+1, le rung d'au-dessus contraint celui d'en dessous) et **`seeds`** (un nœud nomme un besoin plus profond) tissent la topologie — qui **EST** la verticale §23. Les nœuds sont stockés **triés** dans l'ordre de descente, donc l'ordre d'insertion n'a aucune importance.
+</Field>
+
+<Field name="Content-adressé, jamais forké" type="records.Hash(Canonicalize(graphe))">
+  Le `graph_hash` est le **SHA-256 du corps canonique** du graphe, calculé par le **même** `records.Hash`/`Canonicalize` que le kernel (S01/S02). Pas un nouveau schéma d'adresses : la même porte de hachage que tout le reste d'AIDOS. Mêmes réponses → même hash ; clés réordonnées → même hash ; round-trip (canonicaliser → relire → recanonicaliser) **sans perte**.
+</Field>
+
+<Field name="La double absence — le mur incarné" type="ni Version, ni Mirror">
+  Le `BesoinGraph` (comme `ideas.Idea`) ne porte **aucun champ `Version`** et **aucun champ `Mirror`**. Ce n'est pas une omission : c'est **constitutif**. Un besoin ne se gèle pas (pas de version) et ne porte pas sa preuve (pas de miroir) — ces deux choses sont ce qui ferait de lui une **vérité**. Le type rend la confusion **impossible** : il n'y a tout simplement pas de champ pour ça. Une propriété vérifie qu'aucune clé `version`/`mirror` n'apparaît jamais dans le corps canonique.
+</Field>
+
+<Field name="Projets disjoints" type="le besoin est scopé">
+  Deux graphes de projets différents sont **disjoints** : un même contenu sous une clé de projet différente produit un `graph_hash` **différent**. Le multi-projet typé (`ProjectScope`, S53) et l'isolation au niveau ligne (RLS, S55) sont des dépendances en aval déclarées ; en attendant, la clé `Project` dans le corps canonique assure la disjonction de façon **déterministe**.
+</Field>
+
+<Field name="Append-only, non destructif" type="§9 anti-overwrite">
+  Ajouter un nœud rend un **nouveau** graphe ; le graphe d'origine n'est jamais muté. Un nœud déjà présent pour un rung est **refusé** : réécrire une ancre figée n'est pas une édition, c'est une **décision enregistrée** (un ChangeSet, EL08) — exactement la discipline anti-overwrite §9.
+</Field>
+
+## Ce que ça change (et ne change pas)
+
+EL03 ne franchit **jamais** le mur : c'est un record pur, sans aucune écriture `kernel`/`mirrors`/`fitness`. Il fournit la **forme** dans laquelle EL04 attache les 4 métadonnées, EL07 calcule la porte de forçage, EL16 émet les Ideas via `idea-intake`, et EL15 persiste le graphe en JSONB dans le schéma `besoin`. Le `graph_hash` content-adressé devient l'**identité reconstructible** que la capitalisation du besoin (EL18) porte jusqu'à la mémoire procédurale.
