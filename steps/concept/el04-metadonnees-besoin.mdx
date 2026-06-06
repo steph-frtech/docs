@@ -1,0 +1,43 @@
+---
+title: "EL04 · Les 4 métadonnées par-vérité attachées à chaque nœud"
+description: "EL04 attache à CHAQUE nœud du BesoinGraph les quatre métadonnées par-vérité, en réutilisant les TROIS packages distincts qui les portent : truth_kind + verifiability (back/kernel/truthtyping), scope (back/kernel/scope), authority (back/kernel/authority). Le truth_kind canonique du nœud est celui de truthtyping — une seule source d'enum, dont authority hérite la connaissance (authority.IsKnownTruthKind délègue à truthtyping.IsKnownKind). Un nœud sans truth_kind est incomplet ; verifiability=unverifiable route vers /spike (via idea_capture → idea_grill → idea_spike) ; un nœud actif sans scope (ni global « * ») est incomplet ; un nœud réglementaire sans autorité juridique est incomplet (le done-case authority). Tout est fonction pure (déterminisme §6/§8). Au-dessus du mur : ces métadonnées qualifient un besoin, elles ne le figent jamais en vérité."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "BesoinGraph", "LevelNode", "métadonnées", "truth_kind", "verifiability", "scope", "authority", "TruthScope", "AuthorityGraph", "truthtyping", "VerifiabilityLevel", "AllowedMode", "une seule source d'enum", "single enum source", "/spike", "idea_capture", "idea_grill", "idea_spike", "réglementaire", "regulatory", "done-case", "le mur", "déterminisme", "fonction pure", "classify-truth", "EL03", "EL04", "EL07", "runtime/besoin"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL04](/steps/internals/el04-metadonnees-besoin).</Note>
+
+## En une phrase
+
+EL04 attache à **chaque nœud** du `BesoinGraph` les **quatre métadonnées par-vérité** — `truth_kind`, `verifiability`, `scope`, `authority` — en **réutilisant** les trois packages du kernel qui les portent déjà, sans jamais forker leur enum.
+
+## Le problème que ça résout
+
+EL03 a fixé la **forme** du besoin (un graphe de nœuds ordonnés). Mais un nœud nu ne dit pas **quel genre de vérité** il deviendra, ni **où** elle tiendra, ni **qui** l'approuve. Or AIDOS exige (KRD §13.4–13.8) que toute affirmation candidate déclare ces quatre **qualificateurs** avant de s'approcher du noyau. Sans eux, on ne peut pas savoir :
+
+- si la candidate est **vérifiable** (et donc si elle peut un jour figer une vérité, ou doit partir en `/spike`) ;
+- **où / quand / pour qui** elle s'applique (une vérité sans scope est une « hallucination structurelle » §13.7) ;
+- **qui** détient l'autorité de l'admettre (une vérité réglementaire sans autorité juridique est bloquée §13.8).
+
+EL04 colle ces quatre métadonnées sur le nœud du besoin — **typées**, jamais du texte libre — pour que la porte de forçage (EL07) puisse calculer si un niveau est « assez déclaré ».
+
+## Les idées-clés
+
+<Field name="Trois packages, pas un seul" type="truthtyping · scope · authority">
+  Les quatre métadonnées vivent dans **trois** packages distincts du kernel, et EL04 les réutilise tels quels : `truth_kind` + `verifiability` viennent de `truthtyping`, le `scope` de `scope`, l'`authority` de `authority`. EL04 n'invente aucune logique de classification — il **compose** celle qui existe (la skill `classify-truth` orchestre les trois).
+</Field>
+
+<Field name="Une seule source d'enum pour le truth_kind" type="truthtyping est canonique">
+  Le `truth_kind` du nœud est **celui de `truthtyping`** (les sept types §13.4). Le package `authority` n'a pas son propre registre : `authority.IsKnownTruthKind` **délègue** à `truthtyping.IsKnownKind`. Les deux ne peuvent donc jamais diverger — il y a **une seule source d'enum**, vérifiée par une propriété.
+</Field>
+
+<Field name="Quatre fixtures rouges, une par métadonnée manquante" type="incomplet → complet">
+  Un nœud **sans `truth_kind`** est incomplet ; une **`verifiability=unverifiable`** route le nœud vers `/spike` (il ne pourra pas figer une vérité) ; un nœud **actif sans scope** (et non explicitement global « * ») est incomplet ; un nœud **réglementaire sans autorité juridique** est incomplet — exactement le « done-case » que `authority.Decide` calcule (regulatory sans legal → `MISSING_AUTHORITY_APPROVAL`). Chaque manque **nomme la porte** (un `how_to_fix`).
+</Field>
+
+<Field name="Le routage /spike passe par la porte légale" type="idea_capture → idea_grill → idea_spike">
+  Quand une candidate n'est pas vérifiable, EL04 ne la « capture » pas directement en `spiking` : elle voyage par la **seule porte de capture** (`idea_capture`, statut `draft`), puis **avance** via `idea_grill` puis `idea_spike`. Le routage qu'EL04 calcule est **consultatif** — il écrit zéro vérité.
+</Field>
+
+## Ce que ça change (et ne change pas)
+
+EL04 ne franchit **jamais** le mur : il **qualifie** un besoin (le nœud reste sans `Version` ni `Mirror`, la double absence d'EL03), il ne le **fige** pas. Les quatre métadonnées typées deviennent l'entrée que la porte de forçage EL07 lit (condition « les 4 métadonnées sont présentes/certifiables »), que la complétude EL09 surveille, et que l'émetteur EL16 transporte sur l'Idea émise. Le classement reste **déterministe** : les trois packages décident, l'agent **défère** au code.

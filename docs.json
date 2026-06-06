@@ -289,7 +289,9 @@
               "steps/concept/el02-grammaire-besoinlevel",
               "steps/internals/el02-grammaire-besoinlevel",
               "steps/concept/el03-graphe-besoin",
-              "steps/internals/el03-graphe-besoin"
+              "steps/internals/el03-graphe-besoin",
+              "steps/concept/el04-metadonnees-besoin",
+              "steps/internals/el04-metadonnees-besoin"
             ]
           }
         ]
