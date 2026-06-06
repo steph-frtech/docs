@@ -1,0 +1,65 @@
+---
+title: "GV04 · Les 10 miroirs de conformité OWASP Agentic + fault-injection (internals)"
+description: "Internals de GV04 : le package back/runtime/governance/compliance.go transforme les dix risques OWASP Agentic Top-10 en miroirs déterministes ancrés sur les vrais enforcers (GateAction, MayWrite, Arbitrate, Verify). Chaque miroir est vert sur l'état gouverné et rouge sous sa fault-injection. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "GV04", "OWASP", "compliance", "fault-injection", "GateAction", "MayWrite", "Arbitrate", "Verify", "déterminisme", "miroir", "monstre", "le mur", "rapid", "fast-check"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet (le journal de construction). Pour la vue concept, voir [Pour les futurs utilisateurs → GV04](/steps/concept/gv04-owasp-mirrors).</Note>
+
+GV04 répond au critère de done : *« chaque risque a un miroir ; injecter la violation correspondante → le miroir passe rouge ; tous verts sur l'état courant »*. Là où GV01 produisait un **rapport** (un tableau de couverture déclaré, `owasp.go`), GV04 produit des **miroirs exécutables** branchés sur les vrais enforcers.
+
+## Implémentation
+
+### Le package : `back/runtime/governance/compliance.go`
+
+Le cœur est le type `ComplianceMirror` : pour **un** risque OWASP, il porte une paire de checks sur le **même** enforcer réel.
+
+- `CheckGoverned()` — présente l'action interdite à l'enforcer **vivant** ; il la refuse ⇒ `Compliant: true` (vert). C'est la moitié « tous verts sur l'état courant ».
+- `CheckInjected()` — **dégrade** l'enforcer exactement comme le risque se matérialise ⇒ l'action échappe ⇒ `Compliant: false` (rouge). C'est la moitié « injecter la violation → rouge », et c'est la preuve que l'enforcer est **porteur**.
+
+Les dix miroirs sont déclarés en ordre canonique `AAI01..AAI10` (`mirrorFns`), exposés par `Mirrors()` / `MirrorFor(risk)`. Deux roll-ups purs :
+
+- `CheckCompliance()` — exécute tous les `CheckGoverned` : `AllCompliant` doit être vrai (le portail « tous verts »).
+- `CheckInjected()` — exécute tous les `CheckInjected` : `Compliant` doit valoir **0** (aucun miroir ne reste vert sous injection).
+
+### L'ancrage sur les vrais enforcers (jamais une copie)
+
+Chaque miroir lit le **verdict réel**, jamais une ré-implémentation — la conformité ne peut donc pas dériver du mur qu'elle audite :
+
+| Risque | Enforcer ancré | Gouverné (vert) | Injection (rouge) |
+| --- | --- | --- | --- |
+| AAI01 | `agentlayer.MayWrite` | refuse `kernel.truth` | mur contourné (write autorisé) |
+| AAI02 | `agentimpl.GateAction` axe egress | hôte non déclaré refusé | allow-list élargie à l'hôte |
+| AAI03 | `agentimpl.ArbitrateGated` | gap déterminisme bloqué (lit `bash rg …`, pas le label) | arbitre aveuglé au label |
+| AAI04 | `agentlayer.Propose` | statut `proposed`, jamais `admitted` | auto-admit dégradé |
+| AAI05 | `GateAction` axe path | write hors confinement refusé | `AllowedPaths` élargi |
+| AAI06 | `agentlayer.Propose` (pare-feu) | mémoire propose, ne fige pas | pare-feu contourné |
+| AAI07 | `GateAction` axe capacity | outil non lié refusé | allow-list outil élargie |
+| AAI08 | `GateAction` axe skill | skill non déclaré refusé | allow-list skill élargie |
+| AAI09 | `agentrun.Verify` (ledger Merkle GV03) | suppression non-tail → chaîne cassée | rebuild sans ancre → suppression cachée |
+| AAI10 | `GateAction` axe budget | dépense > cap refusée | caps retirés (illimité) |
+
+Deux fixtures portent les axes de confinement : `governedImpl()` (un seul chemin sous la ligne, egress/exec vides = confinement max) et `degradedImpl()` (les allow-lists **élargies à exactement** la valeur interdite — le matching est exact, knobs.go). La dégradation AAI01/03/04/06/09 est modélisée par de petits helpers locaux (`degradedMayWrite`, `arbiterTrustsLabel`, `proposalAutoAdmitted`, `merkleCatchesDeletion`) : l'enforcer réel reste **intact**, c'est l'injection qui simule sa panne.
+
+### Le miroir property — ROUGE d'abord
+
+`compliance_property_test.go` (rapid) a été écrit **avant** `compliance.go` : la première exécution ne compilait pas (pas de `Mirrors`/`CheckCompliance`) — ce rouge-de-compilation **est** le goal. Il épingle les quatre critères de done :
+
+- `TestMirrors_OnePerRisk` — exactement un miroir par risque, ancré (la loi de complétude : un risque sans miroir = monstre).
+- `TestCompliance_AllGreenOnCurrentState` — les dix `CheckGoverned` verts, avec evidence.
+- `TestInjection_EachTurnsRed` — **load-bearing** : chaque `CheckInjected` rouge ; un miroir qui resterait vert sous son injection est un monstre.
+- `TestCompliance_Reproducible` — même enforcers ⇒ même suite (déterminisme).
+
+### Le twin front + le panneau action-capable
+
+`front/web/lib/governance.ts` porte le twin (`mirrors`, `checkCompliance`, `checkInjected`, `complianceAudit`), behaviour-faithful au Go (vert gouverné / rouge injecté), pinné par `governance.test.ts` (Vitest + fast-check). `GovernancePanel.tsx` expose le contrôle **« Vérifier la conformité OWASP »** (`data-testid=verify-compliance`) qui **exécute** `complianceAudit()` et rend les dix lignes (gouverné vert / injecté rouge / ancre), thémé (ADR 0010) et bilingue (ADR 0011). `governance.spec.ts` (Playwright) prouve que le contrôle s'exécute : les dix miroirs, vert+rouge par risque, l'en-tête 10/10.
+
+## Méta
+
+GV04 illustre la différence **rapport vs miroir** du KRD. GV01 disait « ce risque est couvert » ; c'est une affirmation au-dessus du mur. GV04 la **réifie** en un test qui échouerait si le garde-fou nommé disparaissait. La `fault-injection` est le mécanisme qui distingue un test **porteur** d'un test décoratif : on casse délibérément ce que le miroir surveille et on **exige** qu'il vire au rouge (la même discipline que la honnêteté des hooks, CLAUDE.md §5).
+
+C'est aussi du **determinism-first** au sens strict : le juge de conformité n'est pas un « agent qui évalue la couverture OWASP » — ce serait un trou de déterminisme. Le juge est **l'enforcer lui-même**, pur et total ; le miroir ne ré-implémente jamais un verdict, il appelle `GateAction`/`MayWrite`/`Arbitrate`/`Verify`. Single-sourcing : la conformité ne peut pas mentir sur le mur, puisqu'elle interroge le mur.
+
+## Méta-méta
+
+GV04 ferme la boucle d'auto-audit du référentiel externe (OWASP Agentic Top-10) contre la gouvernance structurelle d'AIDOS. La discipline est invariante par niveau : le **rapport** (GV01) propose une cartographie, le **miroir** (GV04) la prouve exécutable, et la **fault-injection** garantit qu'aucun miroir n'est un monstre. Le méta-loop ne fait qu'**ajouter** un garde-fou (les dix miroirs), jamais en retirer un : le mur reste autoritaire, l'AGT l'augmente et le **prouve**. AAI09 et AAI10 — les deux trous « partiels » que GV01 avait identifiés — sont désormais des miroirs porteurs (AAI09 ancré sur le ledger Merkle de GV03 ; AAI10 sur l'axe budget), ce qui justifie la suite de la roadmap (GV05 policy→enforcers, GV06 SRE) sans jamais relâcher le mur.

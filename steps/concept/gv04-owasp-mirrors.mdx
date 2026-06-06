@@ -1,0 +1,49 @@
+---
+title: "GV04 · Les 10 risques OWASP Agentic comme miroirs vivants — chaque garde-fou est prouvé porteur"
+description: "GV04 transforme les dix risques de l'OWASP Agentic Top-10 en miroirs de conformité déterministes. Chaque risque a son miroir : sur l'état courant, l'action interdite est refusée (vert) ; on injecte la violation correspondante et le miroir passe rouge — la preuve que l'enforcer fait vraiment le travail. Vue concept, sans code."
+keywords: ["aidos", "krd", "governance", "GV04", "OWASP", "OWASP Agentic Top-10", "miroir", "conformité", "fault-injection", "injection de faute", "déterminisme", "AAI01", "AAI10", "le mur", "enforcer", "garde-fou", "porteur"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → GV04](/steps/internals/gv04-owasp-mirrors).</Note>
+
+## L'idée en une phrase
+
+GV04 prend les **dix risques** de l'**OWASP Agentic Top-10** — la liste de référence des dangers propres aux agents IA — et en fait **dix miroirs vivants** : pour chaque risque, un test déterministe prouve que le garde-fou correspondant **fonctionne vraiment**.
+
+## Pourquoi ce pas existe
+
+Le cross-check de GV01 avait produit un **rapport** : un tableau qui dit, risque par risque, « ce garde-fou couvre ça ». Mais un tableau est une **affirmation** — au mieux une promesse. Tant que personne ne l'exécute, rien ne prouve que le garde-fou nommé fait bel et bien son travail.
+
+GV04 transforme chaque ligne de ce tableau en un **miroir exécutable**, branché sur le **vrai** garde-fou (le même code qui protège AIDOS en production, jamais une copie). Une affirmation dans un tableau est un vœu ; un miroir vert avec une injection de faute rouge est une **preuve**.
+
+## Comment chaque miroir fonctionne
+
+Chaque risque porte un miroir avec **deux scénarios**, tous deux passés au même garde-fou réel :
+
+- **L'état gouverné** — on présente l'action interdite (écrire dans le noyau, joindre un serveur non déclaré, dépasser le budget…) au garde-fou tel qu'il tourne aujourd'hui. Il la **refuse**. Le miroir est **vert** : le risque est gouverné sur l'état courant.
+- **La violation injectée** — on **dégrade** le garde-fou exactement de la façon dont ce risque se matérialise (la liste d'autorisation vidée, le mur contourné, l'arbitre aveuglé, la chaîne de Merkle retirée). L'action interdite **échappe** alors au contrôle. Le miroir passe **rouge**.
+
+Ce passage au rouge sous injection est le cœur de la méthode : il **prouve que le garde-fou est porteur**. Un miroir qui resterait vert même quand on casse le garde-fou ne prouverait rien — ce serait un *monstre* (un test décoratif). Chaque miroir GV04 **doit** virer au rouge quand on injecte sa faute.
+
+## Les dix risques, en un coup d'œil
+
+| Risque OWASP | L'action interdite | Le garde-fou qui la refuse |
+| --- | --- | --- |
+| **AAI01** Détournement d'autorisation | écrire au-dessus de la ligne d'eau (le noyau) | le **mur** structurel |
+| **AAI02** Interaction système critique | joindre un hôte réseau non déclaré | l'axe **egress** de la porte |
+| **AAI03** Manipulation d'objectif | ré-étiqueter une action pour passer par le LLM | l'**arbitre** (lit la structure, pas le label) |
+| **AAI04** Hallucination prise pour vérité | faire admettre une sortie générée comme vérité | **Propose** (toujours « proposé », jamais « admis ») |
+| **AAI05** Rayon de souffle | écrire hors de son confinement | l'axe **path** de la porte |
+| **AAI06** Manipulation de mémoire | faire passer une mémoire empoisonnée pour vérité | le **pare-feu mémoire** |
+| **AAI07** Exploitation multi-agents | invoquer un outil jamais accordé | l'axe **capacity** de la porte |
+| **AAI08** Chaîne d'approvisionnement | charger une compétence tierce non déclarée | l'axe **skill** de la porte |
+| **AAI09** Non-traçabilité / répudiation | supprimer une exécution du journal | le **ledger Merkle** (GV03) |
+| **AAI10** Épuisement économique | dépenser au-delà du budget déclaré | l'axe **budget** de la porte |
+
+## Le mur reste le garant
+
+GV04 ne remplace aucun garde-fou : il les **lit** et **prouve** qu'ils tiennent. Les miroirs sont sous la ligne d'eau — un verdict de conformité, jamais une vérité. Le mur structurel d'AIDOS reste l'autorité ; l'OWASP Agentic Top-10 ne fait que **vérifier** qu'aucun de ses dix angles n'est resté ouvert.
+
+## Ce que vous voyez à l'écran
+
+Sur le panneau **Gouvernance** du Workbench, un bouton **« Vérifier la conformité OWASP »** exécute les dix miroirs d'un clic. Vous obtenez, pour chacun : l'état gouverné (vert), la violation injectée (rouge), et le garde-fou réel sur lequel il est ancré. L'en-tête confirme **10/10** verts sur l'état courant.
