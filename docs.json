@@ -297,7 +297,9 @@
               "steps/concept/el06-besoin-thresholds-optionspace",
               "steps/internals/el06-besoin-thresholds-optionspace",
               "steps/concept/el07-candescend-forcing-gate",
-              "steps/internals/el07-candescend-forcing-gate"
+              "steps/internals/el07-candescend-forcing-gate",
+              "steps/concept/el08-anchor-cascade",
+              "steps/internals/el08-anchor-cascade"
             ]
           }
         ]

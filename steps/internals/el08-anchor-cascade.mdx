@@ -1,0 +1,46 @@
+---
+title: "EL08 · La cascade des ancres — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals d'EL08 : back/runtime/besoin/cascade.go (AnchorsAbove, Descend gated par CanDescend, ShrinkOptionSpaceCascade Before/After, ReopenAnchor avec ChangeSet) + le twin TS lib/besoin-cascade.ts + les miroirs fixture/property (rapid, fast-check) + l'e2e Playwright + la route /compound-besoin-cascade. Le compound prouvé : descente prématurée refusée, |OptionSpace| strictement plus petit sous ancre figée, réouverture exige un ChangeSet."
+keywords: ["aidos", "krd", "besoin", "cascade", "AnchorsAbove", "Descend", "ShrinkOptionSpaceCascade", "ReopenAnchor", "ChangeSet", "anti-overwrite", "cascade.go", "besoin-cascade.ts", "rapid", "fast-check", "Playwright", "déterminisme", "fonction pure", "le mur", "EL07", "EL08", "runtime/besoin"]
+---
+
+<Note>Côté internals (le journal de construction — tout). Pour la vue concept, voir [Pour les futurs utilisateurs → EL08](/steps/concept/el08-anchor-cascade).</Note>
+
+## Implémentation
+
+EL08 construit `back/runtime/besoin/cascade.go` au-dessus d'EL07 (`candescend.go`), avec son twin TS `front/web/lib/besoin-cascade.ts` (byte-équivalent) et la route `/compound-besoin-cascade`.
+
+### `AnchorsAbove(graph, level) → []Anchor`
+
+Parcourt l'ordre déclaré des SOURCE rungs (`Levels()`) ; ne retient que les rungs dont `sourceIndex < sourceIndex(level)` (strictement au-dessus) **et** `Status == NodeResolved` (figés). Un rung `empty`/`drafting` est exclu ; une bande transversale ou un niveau hors-grammaire (`sourceIndex < 0`) n'a aucune position de cascade → `nil`. Résultat en ordre de descente, indépendant de l'ordre d'insertion. `IsAnchored(graph, level)` est le raccourci « le rung juste au-dessus est-il figé ».
+
+### `Descend(graph, fromLevel, meta) → DescendResult`
+
+Appelle `CanDescend(graph, fromLevel, meta)`. Si `¬enough`, renvoie le graphe **inchangé** + un `Verdict` portant les `BlockReasons` de la gate **plus** le code `CANNOT_DESCEND_LEVEL_NOT_RIGHTSIZED` (le caller voit POURQUOI le corps a échoué ET que la descente est donc refusée). Sinon, émet l'arête `constrains(fromLevel→next)` et, si le rung inférieur n'existe pas, l'ouvre en `drafting`. Au feuille (`entity`), `OK` avec `Opened == ""`. Non-destructif (valeur, §9).
+
+### `ShrinkOptionSpaceCascade(graph, level) → CascadeShrink`
+
+`Before = len(OptionSpace(level→next).Choices)` (le set déclaré complet, EL06). `After` = `|selects ∩ choices|` **quand le nœud à `level` est figé** (`resolved`) ; sinon `After = Before` et `Shrink = 0` (pas d'ancre figée → le compounding n'a pas eu lieu). `Shrink = Before − After`. Pour la paire non énumérable `operation→entity` (et la feuille `entity`), `Enumerable=false`, `Before/After = -1`, `Shrink = cascadeSentinel (1)` + l'`OpenQuestion` déclarée — jamais un compte fabriqué.
+
+### `ReopenAnchor(graph, level, changeSet) → ReopenResult`
+
+Si le nœud est figé (`resolved`) **et** `changeSet == ""` → refus `BESOIN_ANCHOR_OVERWRITE` (réécriture silencieuse interdite, §9). Avec un ChangeSet : reconstruit le graphe sans ce nœud, le ré-ajoute en `drafting` avec le corps figé **préservé** (append-only), une provenance `reopen via changeset:<id> (prior: …)` et une OpenQuestion qui trace la réouverture. Un nœud non figé (`empty`/`drafting`) n'a besoin d'aucun ChangeSet (rien n'est écrasé).
+
+### Les miroirs (red→green)
+
+- `cascade_fixture_test.go` — table : ancres uniquement figées-au-dessus ; descente prématurée refusée (`CANNOT_DESCEND`) ; `After=2 < Before=7` sous un `product` figé sélectionnant 2 archétypes ; `Shrink=0` sous un `product` `drafting` ; sentinelle positive pour `operation→entity` et la feuille `entity` ; réouverture refusée sans ChangeSet, décision tracée avec.
+- `cascade_property_test.go` (rapid) — reproductibilité (`ShrinkOptionSpaceCascade` identique sur 20 appels) ; loi du compound (`After = k`, `Shrink = N − k`, strict si `k < N`) ; `AnchorsAbove` strictement-au-dessus et ordonné ; `ReopenAnchor` fail-closed sans ChangeSet.
+- `lib/besoin-cascade.test.ts` (vitest + fast-check) — 13/13, le twin TS byte-équivalent.
+- `tests/e2e/besoin-cascade.spec.ts` (Playwright) — 4/4 contre le dev server : descente OK ; descente refusée + bloc `CANNOT_DESCEND` ; `Before=7/After=2/Shrink=5` puis `Shrink=0` ; réouverture refusée sans ChangeSet (`BESOIN_ANCHOR_OVERWRITE`) puis OK avec `cs-42`.
+
+## Méta
+
+**Pourquoi cette forme ?** Le *forçage* d'EL07 répond « ce niveau est-il assez déclaré ». EL08 répond aux deux questions du *compound* : « ce niveau contraint-il vraiment celui d'en dessous » (la cascade gated `Descend`) et « de combien » (`ShrinkOptionSpaceCascade`, un entier compté). Le « de combien » est ce qui transforme un slogan (« le besoin se compound ») en une **mesure falsifiable** : sous l'ancre figée, l'espace inférieur est strictement plus petit, ou le compounding a échoué (go/no-go façon CE01).
+
+**Le mur, encore.** La cascade ne lit que le BesoinGraph. La réouverture d'une ancre est l'unique opération qui *modifie* un nœud figé — et précisément parce qu'elle touche du figé, elle est **gated par un ChangeSet** : c'est l'application au besoin de l'anti-overwrite (§9). Le besoin n'est pas une vérité, mais sa discipline de non-écrasement est la **même** que celle de la vérité, par cohérence.
+
+**Déterminisme barricadé.** Les quatre fonctions sont pures/totales — aucun clock/rng/IO/LLM. Le twin TS rejoue exactement la même logique (le front ne ré-implémente jamais la gate ; il lit le verdict). Les miroirs de reproductibilité (rapid + fast-check) pinnent same-input→same-output sur les deux plans.
+
+## Méta-méta
+
+EL08 illustre la **boucle KRD appliquée au besoin** : on ne fige pas une garde sans son miroir-de-fault-injection. `BESOIN_ANCHOR_OVERWRITE` et `CANNOT_DESCEND_LEVEL_NOT_RIGHTSIZED` sont des **codes besoin-locaux** réutilisant la *forme* `blockreason.BlockReason` (KRD §44.5) sans polluer le registre clos `blockreason.Code` du noyau — la même discipline qu'EL07 (`BesoinBlockCode`). C'est le principe « ADD une garde, jamais REMOVE » (§5) : EL08 ajoute la cascade au-dessus d'EL07, sans modifier la gate ; un futur EL11 (le hook `Stop:besoin-gate`) consommera `CanDescend` ET la complétude, en OU. La cascade est ainsi un **cran de cliquet** : elle laisse une phase stable que la projection en Ideas (EL16) et le wizard (EL19) consommeront, où chaque Idea porte ses `anchors_above[]` figées — la topologie qui EST l'architecture.

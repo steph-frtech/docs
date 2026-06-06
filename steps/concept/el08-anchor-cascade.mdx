@@ -1,0 +1,46 @@
+---
+title: "EL08 · La cascade des ancres (l'héritage de contrainte mesuré — le compound prouvé)"
+description: "EL08 ajoute les trois pièces qui font du verdict EL07 le COMPOUND. AnchorsAbove(graph, level) = la liste FIGÉE des rungs résolus strictement au-dessus (le seul grounding lisible). Descend(graph, fromLevel) n'ouvre L+1 que si CanDescend.enough — une descente prématurée est refusée (CANNOT_DESCEND_LEVEL_NOT_RIGHTSIZED). ShrinkOptionSpaceCascade mesure |OptionSpace| AVANT vs APRÈS les ancres figées : STRICTEMENT plus petit sous une ancre figée (le compounding), 0 sans. Rouvrir une ancre figée exige un ChangeSet (BESOIN_ANCHOR_OVERWRITE, anti-overwrite §9). La cascade ne lit que le BesoinGraph, n'écrit aucune vérité (le mur)."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "cascade", "AnchorsAbove", "Descend", "ShrinkOptionSpace", "ShrinkOptionSpaceCascade", "ancre figée", "frozen anchor", "héritage de contrainte", "compounding", "OptionSpace", "anti-vacuité", "anti-overwrite", "ChangeSet", "BESOIN_ANCHOR_OVERWRITE", "CANNOT_DESCEND_LEVEL_NOT_RIGHTSIZED", "right-sizing", "EL06", "EL07", "EL08", "déterminisme", "fonction pure", "le mur", "runtime/besoin"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL08](/steps/internals/el08-anchor-cascade).</Note>
+
+## En une phrase
+
+EL08 **prouve le compound** : chaque niveau du besoin déjà résolu devient une **ancre figée** que le niveau d'en dessous lit comme *grounding*, et l'espace d'options de ce niveau inférieur **rétrécit mesurablement** — un entier compté, pas un jugement.
+
+## Le problème que ça résout
+
+EL07 donne le verdict par niveau (`CanDescend.enough`). Mais le *compound du besoin* promet plus : que chaque niveau résolu **contraigne réellement** le niveau d'en dessous, et que cette contrainte soit **mesurable** (sinon « ça compound » n'est qu'un slogan). Trois pièges :
+
+1. **La descente prématurée.** Si on peut ouvrir le niveau `journey` avant que `product` soit *right-sized*, le besoin part en vrille — chaque niveau inférieur s'appuie sur un grounding flou. La descente doit être **gated** par le verdict calculé d'EL07.
+2. **Le compounding postulé, pas prouvé.** Dire « le persona figé au `product` élague les parcours possibles » ne vaut rien si on ne **compte** pas le rétrécissement. Sous une ancre figée, `|OptionSpace|` doit être **strictement plus petit** que sans — un go/no-go chiffré.
+3. **La réouverture silencieuse.** Rouvrir une ancre déjà figée pour la réécrire en douce casse tout ce qui s'appuyait dessus. Ce n'est **pas une édition** : c'est une **décision enregistrée** (un ChangeSet), jamais un *overwrite* silencieux (anti-overwrite §9).
+
+## Les idées-clés
+
+<Field name="AnchorsAbove — le grounding figé" type="le compound P1">
+  `AnchorsAbove(graph, level)` renvoie les rungs **résolus** (figés) strictement **au-dessus** de `level`, en ordre de descente. Un rung en cours (`drafting`) n'est PAS une ancre : un niveau non figé ne peut pas contraindre celui d'en dessous. C'est l'unique grounding lisible que le niveau en cours d'élicitation lit.
+</Field>
+
+<Field name="Descend — on ne descend pas avant d'avoir assez déclaré" type="gated par EL07">
+  `Descend(graph, fromLevel)` n'ouvre le rung inférieur **que si** `CanDescend(fromLevel).enough`. Une descente prématurée est **refusée** avec `CANNOT_DESCEND_LEVEL_NOT_RIGHTSIZED` — jamais une opinion, le verdict **calculé** d'EL07 décide. Sur succès, elle émet l'arête `constrains(fromLevel→next)`.
+</Field>
+
+<Field name="ShrinkOptionSpaceCascade — le compound mesuré" type="entier compté, jamais jugé">
+  `|OptionSpace(level→next)|` **AVANT** les ancres (le set déclaré complet, EL06) vs **APRÈS** que l'ancre figée l'élague via ses `selects`. Sous une ancre figée, `After < Before` **strictement** (le compounding a eu lieu) ; sans ancre figée, `After == Before` et `Shrink == 0` (le compounding n'a pas eu lieu). Pour la paire non énumérable `operation→entity`, une sentinelle positive (satisfaite-par-OpenQuestion), jamais un compte fabriqué.
+</Field>
+
+<Field name="Rouvrir une ancre = un ChangeSet" type="anti-overwrite, §9">
+  `ReopenAnchor(graph, level, changeSet)` : rouvrir une ancre **figée** sans jeton ChangeSet est **refusé** (`BESOIN_ANCHOR_OVERWRITE`). Avec un ChangeSet, la réouverture est une **décision tracée** : le nœud repasse en `drafting`, le corps figé est **préservé** (append-only), la provenance cite le ChangeSet. Un nœud non figé n'a besoin d'aucun ChangeSet (rien n'est écrasé).
+</Field>
+
+## Ce que ça n'est pas
+
+- **Ce n'est pas un jugement LLM.** Les ancres, la descente, le rétrécissement et le refus d'overwrite sont des **fonctions pures** du graphe — `determinism-first` (§6/§8). Le LLM n'y entre jamais.
+- **Ce n'est pas une écriture de vérité.** La cascade ne lit que le **BesoinGraph** au-dessus du mur ; elle n'écrit ni `kernel`, ni `mirrors`, ni `fitness`.
+
+## L'écran
+
+La route Workbench **`/compound-besoin-cascade`** rend la cascade **exécutable** : on choisit un jeu de nœuds, puis on **liste les ancres**, on **descend** (refusé si pas right-sized), on **mesure le rétrécissement** (Before / After / Shrink), et on **rouvre une ancre** avec un jeton ChangeSet (refusé sans). Chaque verdict est calculé par le twin déterministe, jamais un LLM.
