@@ -1,0 +1,58 @@
+---
+title: "CE01 · Spike compound — capturer le 1er goal pour rendre le 2ᵉ moins cher"
+description: "CE01 est un SPIKE de nécessité (KRD §84 : cliquet OFF, rigueur T0, jetable) confiné à /spike/compound/. Il sonde la promesse du compound-engineering : capturer le MOTIF d'un goal terminé réduit-il vraiment l'effort/tokens d'un 2ᵉ goal SIMILAIRE ? Deux goals AIDOS (ajouter une opération archive à Order, puis à Invoice) sont décomposés en work-units ; les unités partagées (le motif) sont REJOUÉES — recall procédural depuis une entrée mémoire KindProcedural (S31) + expansion de behavior-macro (§24.6) — au lieu d'être re-dérivées. Verdict calculé, jamais déclaré, sans LLM : GO — goal-2 passe de 7800 à 1940 tokens (75,1 % de réduction), au-dessus du plancher déclaré de 25 %, SANS fabriquer d'économie sur un goal dissimilaire (16,6 % ≤ plafond 20 %), de façon reproductible. Si le spike avait conclu « gain non rentable » ou « réutilisation fabriquée », le sujet COMPOUND se serait arrêté là."
+keywords: ["aidos", "krd", "spike", "compound", "compound-engineering", "capitalisation", "boucle qui capitalise", "motif", "réutilisation", "tokens", "effort", "work-units", "behavior-macro", "mémoire procédurale", "KindProcedural", "recall", "déterminisme", "go/no-go", "spike-gate", "/spike", "cliquet OFF", "rigueur T0", "le mur", "firewall.ViaIdea", "CE01", "CE02", "CE03", "CE04", "S26", "S31", "§24.6", "§84", "OpenQuestion"]
+---
+
+<Note>Côté concept — aucune ligne de code graduée (un spike est **jetable**). Pour le détail d'implémentation, voir [Pour moi → CE01](/steps/internals/ce01-spike-compound).</Note>
+
+## En une phrase
+
+CE01 est un **spike de nécessité** (KRD §84 : **cliquet OFF, rigueur T0, jetable**) confiné à `/spike/compound/`. Il répond à une seule question avant qu'on dépense le moindre miroir : **capturer le motif d'un 1er goal terminé réduit-il vraiment l'effort/tokens d'un 2ᵉ goal SIMILAIRE — sans fabriquer de réutilisation là où aucun motif n'est partagé ?** Verdict **calculé, jamais déclaré** : **GO**.
+
+## Le problème que ça résout
+
+La promesse du **compound-engineering** (`everyinc/compound-engineering`) : **chaque goal terminé facilite le suivant**. Concrètement, deux goals AIDOS proches — ajouter une opération `archive` à `Order`, puis la même à `Invoice` — partagent presque tout : charger le `ContextPack`, choisir la forme du miroir (une fixture), scaffolder le paquet, projeter Go + TS, câbler le contrôle UI, passer les sensors. Seule l'**opération intrinsèque** diffère. Sans capitalisation, l'agent **re-dérive tout** au 2ᵉ goal. L'idée COMPOUND : **capturer le motif** du 1er goal et le **rejouer** au 2ᵉ. Mais une capitalisation qui « aide » même un goal **sans rapport** serait un **faux positif** ; et une capitalisation qui **apprendrait** les critères violerait le mur. Le spike doit donc **mesurer**, pas espérer.
+
+## Les idées-clés
+
+<Field name="Un spike, pas une fonctionnalité" type="KRD §84 — cliquet OFF">
+  CE01 n'ajoute **aucune** vérité au noyau, **aucun** miroir, **aucun** code réel. Tout vit sous `/spike/compound/` et sera **jeté** ; `/harvest` proposera, `/goal` figera, la vraie boucle de capitalisation sera **réécrite** à CE02+. Le mur reste intact : zéro écriture `kernel` / `mirrors` / `fitness`.
+</Field>
+
+<Field name="On réutilise le MOTIF, jamais la substance propre du goal" type="honnêteté du modèle">
+  L'unité **intrinsèque** (l'opération `archive` propre à `Invoice`) est **toujours** payée plein (1800 tokens) — la capitalisation ne réutilise que les unités **partagées**. Pas de réutilisation fabriquée de ce qui appartient au goal lui-même.
+</Field>
+
+<Field name="Deux modes de réutilisation, déclarés" type="S31 + §24.6">
+  Les unités-**spec** (miroir, fixture, contrat) sont rejouées par **expansion d'une behavior-macro** (une fonction pure, dry-run, §24.6) ; les unités-**geste** par **recall procédural** depuis une entrée mémoire `KindProcedural` (S31). Le spike exerce les deux.
+</Field>
+
+<Field name="Capitaliser ≠ apprendre les critères" type="le mur, §8">
+  La capitalisation passe **plus tard** par le mur — `firewall.ViaIdea` → idée → miroir → `/goal` — et ne **touche jamais** la fitness (§8 : les poids sont déclarés, jamais appris). Le spike mesure le **payoff** qui justifie ce chemin, il ne l'emprunte pas.
+</Field>
+
+<Field name="Le verdict est calculé, jamais déclaré" type="KRD §8 — anti-Goodhart">
+  Le go/no-go tombe de trois gardes **déclarées** : la réduction sur la paire similaire dépasse le plancher ∧ le contrôle dissimilaire reste sous le plafond ∧ la mesure est reproductible. Si l'une manque → **NO-GO**, et le sujet COMPOUND **s'arrête** (spike-gate de la roadmap).
+</Field>
+
+## Ce que le spike a mesuré (déterministe, sans LLM)
+
+| paire | goal-2 sans capture → avec capture | réduction | garde |
+|---|---|---|---|
+| **`order → invoice` (SIMILAIRE)** | **7800 → 1940** | **75,1 %** | plancher 25 % ✓ |
+| `order → migration` (DISSIMILAIRE) | 7100 → 5920 | 16,6 % | plafond 20 % ✓ (pas de faux positif) |
+
+Sur la paire similaire, **5 unités** reviennent par **recall procédural** et **2** par **expansion de behavior-macro**. L'unité intrinsèque (`write_operation`) reste **dérivée plein** dans les deux cas.
+
+## Verdict : GO
+
+Capturer le motif du 1er goal réduit l'effort du 2ᵉ goal similaire de **75,1 %** (7800 → 1940 tokens), bien au-dessus du plancher de 25 %, **sans** fabriquer d'économie sur un goal dissimilaire (16,6 % ≤ 20 %), et de façon **reproductible**. La capitalisation **paie** → on poursuit vers **CE02** (ADR « boucle de capitalisation » : le motif durable devient procédural + behavior réutilisable **via le mur**, jamais la fitness).
+
+## Les questions restées ouvertes (OpenQuestions)
+
+- **L'estimateur de tokens.** Les coûts par unité sont des **estimations** calibrées sur la boucle §6 (tokenizer provider indisponible hors-ligne) : le **mécanisme** (capture → replay) et son **sens** sont prouvés, pas le chiffre absolu ; CE02+ re-mesurera sur de vrais runs `/goal`.
+- **La « similarité » non opérationnalisée.** Ici la similarité est codée dans le partage d'unités. Le **vrai router** (CE05 / `MatchRole`, S33) devra **décider algorithmiquement** qu'un goal suivant est assez proche (similarité d'embedding S31, pgvector) — **un algorithme, pas un prompt**.
+- **Staleness / curation.** Un motif capturé peut **dériver** ; **S26** (QD curation, promotion ssi `MirrorGreen`) gouverne l'admission ; CE04 re-vérifiera l'expansion contre un miroir avant réutilisation.
+
+<Note>Si ce spike avait conclu « gain non rentable » ou « réutilisation fabriquée sur un goal dissimilaire », le sujet COMPOUND se serait **arrêté là** — c'est le rôle d'un spike-gate : refuser à bon escient.</Note>

@@ -1,0 +1,51 @@
+---
+title: "CE01 (interne) · Mesurer la capitalisation dans /spike/compound/ — Implémentation · Méta · Méta-méta"
+description: "Journal interne du spike CE01. Module Go isolé aidos.spike/compound (n'importe pas back/), confiné à /spike/compound/ (cliquet OFF, T0, jetable). Modélise un goal comme une suite ordonnée de work-units à coût en tokens ; Capture() extrait le motif partagé (fonction pure), CostOf() recoûte le 2ᵉ goal avec/sans capture, MeasureDelta()/Decide() calculent le verdict go/no-go contre un plancher déclaré (25 %) + un plafond dissimilaire (20 %) + une reproductibilité. Verdict GO : 7800 → 1940 tokens (75,1 %) sur la paire similaire, 16,6 % sur le contrôle dissimilaire, reproductible. Twin TypeScript (lib/compound.ts) + panneau /compound + e2e Playwright + mirror vitest/fast-check. OpenQuestions CE01-1..5."
+keywords: ["aidos", "krd", "spike", "compound", "CE01", "capitalisation", "work-units", "Capture", "CostOf", "MeasureDelta", "Decide", "verdict", "go/no-go", "behavior-macro", "KindProcedural", "recall procédural", "déterminisme", "reproductibilité", "fonction pure", "module isolé", "/spike/compound", "firewall.ViaIdea", "le mur", "twin TypeScript", "/compound", "Playwright", "fast-check", "S26", "S31", "§24.6", "§84", "OpenQuestion", "spike-gate"]
+---
+
+<Info>Page **« Pour moi »** — le journal de bord interne, tout y est. Concept lisible : [Pour les futurs utilisateurs → CE01](/steps/concept/ce01-spike-compound).</Info>
+
+## Implémentation
+
+**Où.** Tout sous `/spike/compound/` — un **module Go isolé** (`module aidos.spike/compound`, `go.mod` propre) qui **n'importe pas** `back/`. C'est volontaire : un spike est **jetable** (KRD §84) ; rien ne doit pouvoir graduer par inadvertance, et le module réel n'est pas pollué.
+
+**Le modèle.** Un goal (idée → miroir → rouge → vert) est modélisé comme une **suite ordonnée de work-units** : `load_context_pack`, `derive_mirror`, `write_fixture`, `scaffold_package`, `write_operation` (intrinsèque), `project_go_ts`, `wire_ui_control`, `run_sensors`. Chaque unité a un **coût en tokens** estimé et un drapeau `Shareable`. Deux goals **similaires** partagent toutes les unités `Shareable` (le **motif**) et ne diffèrent que par l'unité intrinsèque.
+
+**Les fichiers.**
+
+- `model.go` — le cœur. `Capture(goal)` extrait le **motif** (chaque unité partagée, taguée par son **mode de replay** : `captureMode` route les unités-spec — `derive_mirror`/`write_fixture`/`cross_contract`/`expand_behavior` — vers `ReusedBehavior` (expansion §24.6), le reste vers `ReusedProcedural` (recall S31)). `CostOf(goal, captured, via)` recoûte : une unité partagée **et** capturée coûte `replayCost = 20` (le coût **déclaré**, conservateur, du recall + lecture de l'artefact), sinon ses tokens pleins. `hashPattern` **content-adresse** le motif (noms triés → hash stable). **Toutes pures.**
+- `fixture.go` — les deux goals AIDOS (`goal-order-archive`, `goal-invoice-archive`) + le **contrôle dissimilaire** (`goal-unrelated-migration`, qui ne partage que `load_context_pack`).
+- `measure.go` — `MeasureDelta(first, second)` capture `first` puis coûte `second` **avec** et **sans** capture ; `Decide()` calcule le `Verdict` : `ReductionFloor = 0.25` (plancher déclaré sur la paire similaire), `DissimilarCeil = 0.20` (plafond anti-faux-positif), plus une **reproductibilité** (recalcule et compare). GO ssi les trois gardes passent.
+- `measure_test.go` — la **preuve exécutable** de falsifiabilité : `TestSpikeVerdict` (imprime le rapport), `TestCaptureReducesSimilarGoal`, `TestIntrinsicUnitNeverReused`, `TestCaptureHelpsOnlySimilar` (garde faux-positif), `TestCaptureSplitsProceduralVsBehavior`, `TestReproducible` (rejoue 100×).
+- `cmd/verdict/main.go` — imprime mesures + verdict (`go run ./cmd/verdict`).
+
+**Résultat mesuré.** Paire similaire : **7800 → 1940 tokens (75,1 %)**, 5 unités par recall procédural + 2 par expansion de behavior-macro, l'unité intrinsèque reste à 1800 tokens. Contrôle dissimilaire : **16,6 %** (≤ 20 %). **`Decide().Go == true`**, rationale : la capitalisation paie largement sans fabriquer de réutilisation → poursuivre vers CE02.
+
+**Le twin Workbench.** `front/web/lib/compound.ts` est le **jumeau TypeScript** déterministe (mêmes constantes, même `captureMode`, même `decide`), couvert par `lib/compound.test.ts` (vitest + **fast-check** : même entrée → même sortie, et les chiffres exacts du probe Go). Le panneau `/compound` (`CompoundPanel.tsx`) est **action-capable** : un bouton « Mesurer le delta » exécute `decide()` à l'écran et rend le badge GO/NO-GO, les tokens avec/sans capture, la répartition de réutilisation, le contrôle dissimilaire et la rationale. Un **e2e Playwright** (`tests/e2e/compound.spec.ts`) prouve que le contrôle s'exécute (GO, 7800 → 1940, 75,1 %, 16,6 %).
+
+**Determinism-first.** Le probe est une **fonction pure** : aucun LLM, aucune horloge, aucun rng. La mesure, le **pattern hash** et le verdict sont **reproductibles** (`TestReproducible` Go + le mirror `fast-check` TS). C'est le **mirror de reproductibilité** imposé par le mandat §6 — *l'expansion d'un motif capturé est une fonction pure, pas un modèle appris* (roadmap CE : « PAS d'apprentissage de la fitness »).
+
+## Méta
+
+**Pourquoi un spike, et pourquoi maintenant.** COMPOUND est une **idée séduisante** (« chaque goal facilite le suivant ») mais **fuzzy** : le gain réel sur *nos* goals, et surtout le **risque de faux positif** (capitaliser là où aucun motif n'est partagé), étaient inconnus. KRD §84 dit quoi faire d'une intention fuzzy : la **spiker** (cliquet OFF, T0, jetable) jusqu'à la rendre **falsifiable**, *avant* de payer un miroir. CE01 est ce spike, et la roadmap en fait un **spike-gate** : s'il conclut « gain non rentable » ou « réutilisation fabriquée », **le sujet entier s'arrête**.
+
+**La décision de conception qui compte : un contrôle dissimilaire.** La tentation était de mesurer *un* couple de goals similaires et d'annoncer un beau chiffre. Mais un modèle qui « aide » **tout** goal serait malhonnête : il confondrait *réutilisation réelle* et *artefact*. Le spike ajoute donc un **goal de contrôle sans rapport** (une migration) et un **plafond déclaré** (20 %) : la capitalisation ne doit **pas** y manufacturer d'économie. Le GO n'est défendable que **parce que** la paire similaire dépasse le plancher **et** que le contrôle reste sous le plafond — la garde anti-Goodhart est intégrée au verdict.
+
+**Le verdict est calculé, jamais déclaré (§8).** `Decide()` ne lit aucune confiance d'agent : il tombe de trois gardes déclarées (plancher ∧ plafond ∧ reproductibilité). Un GO incohérent fait **échouer** `TestSpikeVerdict`. On ne peut pas forcer le verdict.
+
+**Les OpenQuestions (jamais comblées en douce).**
+
+- **OQ-CE01-1** — l'**estimateur de tokens** est calibré sur la boucle §6, pas mesuré sur un vrai run agent ; CE02+ re-mesure sur de vrais `/goal`.
+- **OQ-CE01-2** — la **similarité** est codée ici ; le vrai router (CE05 / `MatchRole`, S33) doit la décider **algorithmiquement** (embeddings S31, pgvector), un algorithme jamais un prompt.
+- **OQ-CE01-3** — le **mur** : la capture ici ne persiste **rien** ; CE03 écrira l'entrée procédurale (below the wall, autorisé) et proposera la behavior candidate **uniquement** via `firewall.ViaIdea`.
+- **OQ-CE01-4** — **staleness/curation** : S26 (QD, promotion ssi `MirrorGreen`) gouverne l'admission ; CE04 re-vérifie l'expansion contre un miroir avant réutilisation.
+- **OQ-CE01-5** — **Linear** non authentifié dans cet environnement (seuls `authenticate`/`complete_authentication` exposés) ; l'issue CE01 n'a pu être déplacée par MCP — à régulariser au prochain restart authentifié.
+
+## Méta-méta
+
+**Ce que CE01 dit du système qui se construit lui-même.** Un OS qui prétend « chaque goal facilite le suivant » doit pouvoir **mesurer** ce bénéfice avant d'y croire. CE01 prouve que la **structure** d'un goal AIDOS (une suite d'unités dont la plupart sont des **gestes répétables** ou des **specs expansables**) est **capitalisable** — précisément parce que la boucle §6 est **standardisée par conception**. La réutilisabilité du motif est une propriété **émergente** de la régularité de la boucle, et c'est un signe que la boucle est bonne.
+
+**La capitalisation n'est jamais autorisée à enjamber le mur.** Le spike inscrit, dès l'amont, la règle qui gouvernera CE02–CE05 : on **capitalise** un motif (mémoire procédurale + behavior candidate) **via le mur** — `firewall.ViaIdea` → idée → miroir → `/goal` — et **jamais** la fitness. Capitaliser, c'est **proposer** la réutilisation d'un geste prouvé, **pas apprendre** un critère. La frontière capitalisation ≠ apprentissage (CE02) est posée ici : un motif est un **stepping stone** que `/goal` doit toujours re-figer, pas une vérité qui s'auto-installe.
+
+**Le déterminisme d'abord, même pour la capitalisation.** Le réflexe paresseux serait « laisse un agent décider quels goals se ressemblent et réutiliser ce qu'il juge utile ». CE01 refuse : il **modélise** l'expansion du motif en **code déterministe** (`Capture`/`CostOf`, fonctions pures), mesure de façon **reproductible**, et n'admettrait un LLM que comme **exception gatée**. C'est le mandat determinism-first appliqué à la boucle qui capitalise : *ce qui peut être une fonction pure doit l'être ; le LLM est l'exception, jamais la commodité.*
