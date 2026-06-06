@@ -301,7 +301,9 @@
               "steps/concept/el08-anchor-cascade",
               "steps/internals/el08-anchor-cascade",
               "steps/concept/el09-besoin-completeness",
-              "steps/internals/el09-besoin-completeness"
+              "steps/internals/el09-besoin-completeness",
+              "steps/concept/el10-level-mirror-form",
+              "steps/internals/el10-level-mirror-form"
             ]
           }
         ]

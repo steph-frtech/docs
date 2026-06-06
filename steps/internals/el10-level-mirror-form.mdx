@@ -1,0 +1,47 @@
+---
+title: "EL10 · La forme de miroir par niveau — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals d'EL10 : back/runtime/besoin/mirrorform.go (LevelMirrorForm(level) → MirrorForm, totale sur les 9 rungs, ≡ derive-mirror pour les 5 couverts) + validators.go (ValidateViewSchema / ValidateJourneySchema, les validateurs déterministes neufs pour les rungs sans package Go) + le twin TS lib/besoin-completeness.ts + les miroirs property (rapid, fast-check) + l'e2e Playwright + la route /compound-besoin-mirrorform. Tout est fonction pure ; aucun miroir réel écrit ; above-the-wall."
+keywords: ["aidos", "krd", "besoin", "LevelMirrorForm", "MirrorForm", "ValidateViewSchema", "ValidateJourneySchema", "mirrorform.go", "validators.go", "derive-mirror", "besoin-completeness.ts", "rapid", "fast-check", "Playwright", "fonction pure", "le mur", "EL10", "runtime/besoin"]
+---
+
+<Note>Côté internals (le journal de construction — tout). Pour la vue concept, voir [Pour les futurs utilisateurs → EL10](/steps/concept/el10-level-mirror-form).</Note>
+
+## Implémentation
+
+EL10 enrichit `back/runtime/besoin/mirrorform.go` (la table) et construit `back/runtime/besoin/validators.go` (les validateurs neufs), avec le twin TS `front/web/lib/besoin-completeness.ts` (byte-équivalent), la route `/compound-besoin-mirrorform` et son e2e Playwright.
+
+### `LevelMirrorForm(level) → (MirrorForm, ok)` (`mirrorform.go`)
+
+`MirrorForm` est l'ensemble fermé `{gherkin_n0, screen_fixture, fixture_n2, property_n1}`. Le map total : `product/journey → gherkin_n0`, `view → screen_fixture`, `control/action/operation/policy → fixture_n2`, `entity/invariant → property_n1`. `DerivedMirrorCovers(level)` nomme les 5 rungs que `derive-mirror` couvre déjà (`entity/policy/operation/control/action`). Pour eux la table porte la **même** forme que `derive-mirror` ; pour `product/journey/view` la forme est fraîchement déclarée. Un niveau hors-grammaire → `ok=false`.
+
+### `ValidateViewSchema` / `ValidateJourneySchema` (`validators.go`)
+
+Les validateurs déterministes neufs pour les deux rungs **sans package Go** (vérifié : `back/kernel/{view,journey}` absents). `SchemaResult{Valid, Field, Reason}` est le verdict pur.
+
+- `ValidateViewSchema(body)` — exige un `goal` non vide + ≥1 zone **nommée** + ≥1 donnée **nommée**. « Nommé » = chaîne non vide, ou objet `{name: "…"}` au nom non vide (helper `namedList`). Un corps qui parse mais ne liste aucune zone échoue.
+- `ValidateJourneySchema(body)` — exige un `gherkin` non vide ET parsable (`isParsableGherkin` : au moins un Given ET When ET Then, insensible à la casse).
+- `ValidateLevelSchema(level, body)` dispatche vers ces deux validateurs **uniquement** pour `view`/`journey` (`ok=false` pour tout autre rung — validé ailleurs).
+
+### Source unique de vérité (pas de fork)
+
+`candescend.go` (EL07) **délègue** désormais à `ValidateJourneySchema`/`ValidateViewSchema` dans ses règles de parse `journey`/`view` : il existe exactement **une** règle de schéma `view` et **une** règle `journey` dans tout le code — jamais deux copies qui dérivent. C'est l'application directe de `determinism-first` : une seule fonction pure fait autorité.
+
+### Les miroirs (red→green)
+
+- `mirrorform_property_test.go` (rapid) — (1) `LevelMirrorForm` totale sur les 9 rungs ; (2) pour les 5 rungs couverts, sa sortie ≡ l'oracle `deriveMirrorOracle` (le test échoue si la table forke `derive-mirror`) ; `DerivedMirrorCovers` nomme exactement ces 5 rungs ; (3) non-Level → `ok=false` ; (4) déterministe (rapid) ; (5) `ValidateViewSchema` rejette un corps sans zones, `ValidateJourneySchema` rejette un non-Gherkin, les corps bien formés passent ; `ValidateLevelSchema` n'owne que `view`+`journey`.
+- `front/web/lib/besoin-completeness.test.ts` (vitest + fast-check) — le twin TS : table totale, accord oracle pour les 5 couverts, `null` hors-grammaire, validateurs view/journey, dispatch view+journey, déterminisme.
+- `tests/e2e/besoin-mirrorform.spec.ts` (Playwright) — l'écran rend la forme par rung (badge `delegated`/`declared`) ; valider une vue bien formée passe, casser les zones vire au rouge ; valider un journey passe, casser le Gherkin vire au rouge.
+
+### La route `/compound-besoin-mirrorform`
+
+`BesoinMirrorformPanel.tsx` est **action-capable** (`ui-completeness`) : la table des 9 rungs (forme + source) ; deux éditeurs de corps (`view`, `journey`) avec « Valider », « Casser les zones » / « Casser le Gherkin » (fault-injection dans les deux sens), « Réinitialiser ». Tout est calculé par le twin déterministe, jamais par un LLM. Thémé (ADR 0010), bilingue FR d'abord (ADR 0011).
+
+## Méta
+
+**Pourquoi une table NEUVE et pas `derive-mirror` seule ?** `derive-mirror` est la dérivation de forme pour les vérités du **noyau** — elle ne connaît que les 5 rungs kernel. Le *compound du besoin* vit **au-dessus du mur** et élicite 3 rungs de plus (`product/journey/view`). Forker la table de `derive-mirror` créerait deux sources divergentes ; la recopier serait un monstre de duplication. La résolution : la table **délègue** pour les 5 rungs couverts (et une property épingle l'accord, transformant tout fork futur en rouge) et **déclare** pour les 3 rungs neufs. C'est le compromis honnête : zéro réinvention sur ce qui existe, déclaration explicite sur ce qui manque.
+
+**Pourquoi des validateurs neufs ?** Parce que `view` et `journey` n'ont **aucun** package Go (contrairement à `entity`, `operation`, etc.). Les skills `view`/`action` aident l'humain à *formuler* — elles ne *valident* rien. Sans validateur déterministe, le « enough » d'un `view` resterait un jugement ; EL10 le rend **calculé** (but + zones nommées + données). C'est `determinism-first` : ce qui peut être une fonction pure DOIT l'être.
+
+## Méta-méta
+
+EL10 illustre la **règle de complétude appliquée au méta-niveau** : une loi (la complétude, EL09) ne peut s'auto-appliquer sans une **table de formes** qui dit, pour chaque nature de vérité-besoin, quelle forme de preuve la satisfait. EL09 pose la question (« ce rung a-t-il son miroir de la BONNE forme ? ») ; EL10 fournit la réponse déterministe et close. Le garde-fou que cela ajoute (méta-loop, CLAUDE.md §5) : la forme de preuve n'est jamais un choix d'agent — c'est un lookup pur, épinglé contre `derive-mirror` pour les rungs partagés, déclaré et testé pour les rungs neufs. Aucun nouvel artefact ne **retire** une garde : EL10 n'ajoute que des fonctions pures au-dessus du mur, et resserre EL07 (une seule règle de schéma view/journey au lieu de deux). Le juge reste le code.

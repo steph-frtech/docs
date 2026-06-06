@@ -1,0 +1,45 @@
+---
+title: "EL10 · La forme de miroir par niveau (LevelMirrorForm + les validateurs view/journey)"
+description: "EL10 construit la table neuve LevelMirrorForm(level) → MirrorForm : la forme de miroir attendue par rung. Pour les 5 rungs que la skill derive-mirror couvre déjà, la table délègue (zéro fork) ; pour product/journey/view, qu'elle ne connaît pas, elle porte la forme fraîchement déclarée. EL10 livre aussi les validateurs déterministes neufs view (but + zones nommées + données) et journey (Gherkin parsable), car aucun package ne backe view/journey. Tout est fonction pure ; aucun miroir n'est écrit (le mur)."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "LevelMirrorForm", "MirrorForm", "forme de miroir", "derive-mirror", "validateur", "view", "journey", "Gherkin", "fonction pure", "le mur", "EL09", "EL10", "runtime/besoin"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL10](/steps/internals/el10-level-mirror-form).</Note>
+
+## En une phrase
+
+EL10 répond à une question que la complétude (EL09) pose mais ne peut résoudre seule : **« par quelle forme de miroir prouve-t-on CE rung ? »** — pour les rungs `product`/`journey`/`view` que la machinerie existante (`derive-mirror`) ne connaît pas, et avec les **validateurs de schéma** que `view` et `journey` n'avaient pas.
+
+## Le problème que ça résout
+
+La loi de complétude (EL09) exige que tout niveau résolu porte son **miroir-de-niveau** *de la bonne forme*. Mais « la bonne forme » est une **table** : un `product` se prouve par un parcours Gherkin (N0), une `entity` par une property (N1), une `operation` par une fixture (N2). La skill `derive-mirror` connaît déjà cette table — mais **seulement pour les 5 rungs du noyau** (`entity/policy/operation/control/action`). Le *compound du besoin* élicite aussi `product`, `journey` et `view`, que `derive-mirror` **ne couvre pas**. Sans EL10 :
+
+1. **Le rung sans forme.** Un `product` résolu n'a aucune forme de miroir déclarée — EL09 ne sait pas quoi exiger.
+2. **Le fork silencieux.** On serait tenté de recopier la table de `derive-mirror`, créant deux sources qui divergent.
+3. **Le `view`/`journey` non validés.** Il n'existe **aucun** package qui vérifie qu'un `view` a bien un but + des zones nommées, ou qu'un `journey` est du Gherkin parsable — les skills `view`/`action` *assistent le dialogue*, elles ne **valident** rien de façon déterministe.
+
+## Les idées-clés
+
+<Field name="LevelMirrorForm — la table par rung" type="fonction pure totale">
+  `LevelMirrorForm(level) → MirrorForm` est totale sur les 9 rungs de la grammaire. La forme : `product/journey` → Gherkin N0, `view` → fixture-écran, `control/action/operation/policy` → fixture N2, `entity/invariant` → property N1. Un niveau hors-grammaire → aucune forme (pas de fabrication).
+</Field>
+
+<Field name="Délégation, pas duplication" type="zéro fork">
+  Pour les **5 rungs** que `derive-mirror` couvre déjà, la table porte la **même** forme — une property épingle l'accord (si la table divergeait de `derive-mirror`, le test virerait au rouge). Pour `product/journey/view`, la table porte la forme **fraîchement déclarée** : c'est l'unique endroit où ces trois formes existent.
+</Field>
+
+<Field name="Les validateurs view/journey (neufs)" type="schéma déterministe">
+  `view` : un corps valide déclare un **but** non vide + au moins une **zone nommée** + au moins une **donnée nommée** (un écran sans zone n'est pas un écran). `journey` : un corps valide est du **Gherkin parsable** (au moins un Given/When/Then). Un blob de texte libre échoue. Ce sont des fonctions pures du corps — un contrôle structurel, jamais un jugement LLM.
+</Field>
+
+<Field name="Le mur" type="aucune écriture">
+  EL10 **annexe une forme** et **lit un corps** — il n'écrit **aucun** miroir, aucune vérité. Les vrais miroirs sont écrits sous le mur par l'app-builder (S68) via `/goal`.
+</Field>
+
+## La preuve (le rouge prouvé)
+
+La property pin que `LevelMirrorForm` est totale sur les 8 rungs, et que pour les 5 rungs couverts sa sortie est **identique** à l'oracle `derive-mirror` (pas de fork). Les validateurs : un `view` sans zones échoue ; un `journey` non-Gherkin échoue ; un corps bien formé passe. Sur l'écran [`/compound-besoin-mirrorform`](/steps/internals/el10-level-mirror-form), vous pouvez **casser les zones** ou **casser le Gherkin** et voir le validateur virer au rouge en direct.
+
+## Ce que ça donne à l'étape suivante
+
+EL09 (complétude) consomme `LevelMirrorForm` pour savoir quelle forme exiger ; EL17 (le RedBacklog) annexera à chaque Idea sa forme de miroir attendue via cette même table — **sans l'écrire** (le miroir reste à l'utilisateur via `/goal`). La forme de preuve suit ainsi le besoin jusqu'à l'app-builder.
