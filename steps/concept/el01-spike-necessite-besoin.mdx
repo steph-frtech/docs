@@ -1,0 +1,62 @@
+---
+title: "EL01 · Spike de nécessité — le besoin doit-il suivre l'architecture ?"
+description: "EL01 est un SPIKE de nécessité (KRD §84 : cliquet OFF, rigueur T0, jetable) confiné à /spike/besoin/. Il sonde une seule question avant de construire le track « compound du besoin » : une boîte texte-libre (la S64 « capturez votre idée » actuelle) suffit-elle à capturer un besoin d'app, ou faut-il forcer l'utilisateur à l'expliquer rung par rung ? Le MÊME besoin — la demo checkout S46, « a customer places an order from their cart » — est capturé deux façons : un BesoinGraph top-down (product→journey→view→control→action→operation→entity) avec porte de forçage, vs un prompt plat. Verdict calculé, jamais déclaré, sans LLM : GO — le BesoinGraph émet 5 Ideas ordonnées, dépendances résolues, typées des 4 métadonnées et ancrées (+4 sur le blob unique du prompt plat), versus 1 candidate indifférenciée que l'agent devrait deviner. Si le spike avait conclu « pas plus riche », le track EL se serait arrêté là. La leçon est harvestée en Idea DRAFT (sans miroir, sans version) qui ancre EL02+."
+keywords: ["aidos", "krd", "spike", "besoin", "compound du besoin", "BesoinGraph", "architecture-following requirements", "verticale", "§23", "rung", "product", "journey", "view", "control", "action", "operation", "entity", "NoEmit", "porte de forçage", "prompt plat", "boîte texte-libre", "S64", "richesse", "déterminisme", "go/no-go", "spike-gate", "/spike", "cliquet OFF", "rigueur T0", "le mur", "idea_capture", "harvest", "Idea DRAFT", "EL01", "EL02", "S46", "checkout", "§84", "OpenQuestion"]
+---
+
+<Note>Côté concept — aucune ligne de code graduée (un spike est **jetable**). Pour le détail d'implémentation, voir [Pour moi → EL01](/steps/internals/el01-spike-necessite-besoin).</Note>
+
+## En une phrase
+
+EL01 est un **spike de nécessité** (KRD §84 : **cliquet OFF, rigueur T0, jetable**) confiné à `/spike/besoin/`. Il répond à une seule question avant qu'on construise le track « compound du besoin » : **une boîte texte-libre suffit-elle à capturer un besoin d'app, ou faut-il forcer l'utilisateur à l'expliquer niveau par niveau, dans l'ordre de l'architecture ?** Verdict **calculé, jamais déclaré** : **GO**.
+
+## Le problème que ça résout
+
+AIDOS interdit **`prompt → code`** (la règle fondatrice) : l'humain possède la **vérité** (le « quoi »), l'agent possède l'**implémentation** (le « comment »), et **le mur** les sépare. Pourtant, l'entrée de l'app-builder (la S64 « capturez votre idée ») est aujourd'hui **une seule boîte de texte** : l'utilisateur jette un prompt plat, et l'agent doit **inférer** toute la verticale KRD §23 (`product → journey → view → control → action → operation → entity`) à partir de ce blob. C'est exactement le raccourci que le mur interdit. L'idée du track : **forcer l'utilisateur à expliquer son app rung par rung**, au-dessus du mur, pour que le besoin **suive l'architecture**. Mais avant de bâtir le substrat (grammaire, graphe, porte de forçage, MCP, hook, wizard), il faut **prouver** que ça vaut la peine. Le spike le **mesure**.
+
+## Les idées-clés
+
+<Field name="Un spike, pas une fonctionnalité" type="KRD §84 — cliquet OFF">
+  EL01 n'ajoute **aucune** vérité au noyau, **aucun** miroir, **aucun** code réel. Tout vit sous `/spike/besoin/` et sera **jeté** ; `/harvest` proposera, `/goal` figera, le vrai paquet `back/runtime/besoin` sera **construit** à EL02+. Le mur reste intact : zéro écriture `kernel` / `mirrors` / `fitness`.
+</Field>
+
+<Field name="Le même besoin, capturé deux façons" type="la demo checkout S46">
+  On prend « a customer places an order from their cart » (les ancres S46 lues **verbatim**, rien d'inventé) et on le capture comme **BesoinGraph** top-down rung-par-rung **et** comme **prompt plat**. On **compte** la richesse des deux backlogs d'Ideas produits.
+</Field>
+
+<Field name="journey et view sont NoEmit" type="la jointure honnête avec ideas.ProposesKinds()">
+  Le closed set existant `ideas.ProposesKinds()` est `control|policy|operation|action|entity|product` — `journey` et `view` n'y sont **pas**. Donc ces deux rungs **n'émettent aucune Idea** : ils **seedent les ancres** des rungs mappants en dessous (jamais un cast silencieux `journey→product`).
+</Field>
+
+<Field name="La richesse est comptée, jamais jugée" type="determinism-first §6/§8">
+  « Plus riche » est un **entier** calculé par fonction pure : nombre d'Ideas émises, refs sortantes résolues, nœuds portant les 4 métadonnées, nœuds ancrés, ordre topologique présent. Aucun LLM ne juge — le code compte.
+</Field>
+
+<Field name="Le verdict est calculé, jamais déclaré" type="KRD §8 — anti-Goodhart">
+  Le GO tombe d'une **dominance stricte** sur chaque axe (plus d'Ideas que le plancher déclaré, plus de refs résolues, plus de typage, plus d'ancres) ∧ l'ordre topologique présent côté graphe, absent côté prompt ∧ la mesure reproductible. Si l'une manque → **NO-GO**, et le track EL **s'arrête** (spike-gate de la roadmap).
+</Field>
+
+## Ce que le spike a mesuré (déterministe, sans LLM)
+
+| richesse du backlog | BesoinGraph | prompt plat | Δ |
+|---|---|---|---|
+| Ideas émises (rungs mappants) | **5** | 1 | **+4** |
+| à ref sortante résolue | 5 | 0 | +5 |
+| portant les 4 métadonnées | 5 | 0 | +5 |
+| portant des `anchors_above` | 4 | 0 | +4 |
+| backlog ordonné (topologique) | oui | non | dominance |
+| rungs NoEmit seedant les ancres | 2 | 0 | — |
+
+Le BesoinGraph émet **5 Ideas** dans l'ordre `product → control → action → operation → entity`, chacune typée et résolvant sa ref `@rung` ; `journey`/`view` sont **2 nœuds NoEmit** qui seedent les ancres sans émettre. Le prompt plat ne donne **qu'1 candidate** indifférenciée, non typée, sans ordre ni arête.
+
+## Verdict : GO
+
+Capturer le besoin en **BesoinGraph top-down avec porte de forçage** produit un backlog **strictement plus riche/ordonné** que la boîte texte-libre, bien au-dessus du plancher déclaré (gain d'Ideas ≥ 3), de façon **reproductible**. La boîte plate force `prompt → code` (le mur l'interdit) ; le BesoinGraph force l'utilisateur à **expliquer son app niveau par niveau, au-dessus du mur**. Le track est **nécessaire** → on poursuit vers **EL02** (la grammaire close `BesoinLevel`). On **harveste** l'Idea-ancre « le besoin doit suivre l'architecture, niveau par niveau » — une candidate **DRAFT** (sans miroir, sans version figée), promotion = `/goal` plus tard.
+
+## Les questions restées ouvertes (OpenQuestions)
+
+- **Portée v1.** Seuls les 7 rungs §23 + les bandes `invariant`/`policy` sont visés ; `saga`/`temporal`/`globalinvariant` restent **hors-grammaire-v1** (à trancher en EL02) — déclaré, jamais une complétude prétendue.
+- **La métrique de richesse.** Le spike **compte** (Ideas/refs/typage/ancres) comme proxy de « plus riche » ; la **vraie gate** (EL07 `CanDescend` + EL08 `ShrinkOptionSpace`) mesurera le **rétrécissement d'un OptionSpace énumérable déclaré**, pas un simple comptage. Le spike prouve le **mécanisme** et son **sens**, pas la métrique finale.
+- **Le mur.** La capture ici ne persiste **rien** ; EL14/EL15 captureront l'Idea via `idea-intake` `idea_capture` (provenance `human`, utterance verbatim) — le spike modélise le payoff qui le justifie, pas le chemin mur.
+
+<Note>Si ce spike avait conclu « le BesoinGraph n'est pas plus riche que le prompt plat », le track EL se serait **arrêté là** — c'est le rôle d'un spike-gate : refuser à bon escient, avant de payer le moindre miroir.</Note>

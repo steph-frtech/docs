@@ -283,7 +283,9 @@
               "steps/concept/mk03-ingestion-door",
               "steps/internals/mk03-ingestion-door",
               "steps/concept/el00-cible-app-emise",
-              "steps/internals/el00-cible-app-emise"
+              "steps/internals/el00-cible-app-emise",
+              "steps/concept/el01-spike-necessite-besoin",
+              "steps/internals/el01-spike-necessite-besoin"
             ]
           }
         ]

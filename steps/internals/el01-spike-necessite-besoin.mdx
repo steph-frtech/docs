@@ -1,0 +1,54 @@
+---
+title: "EL01 (interne) · Mesurer la nécessité dans /spike/besoin/ — Implémentation · Méta · Méta-méta"
+description: "Journal interne du spike EL01. Module Go isolé aidos.spike/besoin (n'importe pas back/), confiné à /spike/besoin/ (cliquet OFF, T0, jetable). Modélise le MÊME besoin (la demo checkout S46) capturé deux façons : un BesoinGraph top-down rung-par-rung avec porte de forçage vs un prompt plat. EmitFromGraph/EmitFromFlat projettent chacun un backlog d'Ideas (fonction pure) ; Measure compte la richesse ; Compare/Decide calculent le verdict go/no-go contre un plancher déclaré (gain d'Ideas ≥ 3) + une dominance stricte sur chaque axe + une reproductibilité. Verdict GO : 5 Ideas ordonnées/typées/résolues/ancrées vs 1 blob, +4 d'Ideas, reproductible. Harvest() lève la leçon en Idea DRAFT (sans miroir, sans version). Twin TypeScript (lib/besoin-necessity.ts) + panneau /besoin-necessity + e2e Playwright + mirror vitest/fast-check. OpenQuestions EL01-1..4."
+keywords: ["aidos", "krd", "spike", "besoin", "EL01", "BesoinGraph", "rung", "verticale §23", "EmitFromGraph", "EmitFromFlat", "Measure", "Compare", "Decide", "Harvest", "richesse", "dominance stricte", "NoEmit", "anchors_above", "verdict", "go/no-go", "déterminisme", "reproductibilité", "fonction pure", "module isolé", "/spike/besoin", "idea_capture", "le mur", "Idea DRAFT", "twin TypeScript", "/besoin-necessity", "Playwright", "fast-check", "S46", "checkout", "§84", "OpenQuestion", "spike-gate"]
+---
+
+<Info>Page **« Pour moi »** — le journal de bord interne, tout y est. Concept lisible : [Pour les futurs utilisateurs → EL01](/steps/concept/el01-spike-necessite-besoin).</Info>
+
+## Implémentation
+
+**Où.** Tout sous `/spike/besoin/` — un **module Go isolé** (`module aidos.spike/besoin`, `go.mod` propre) qui **n'importe pas** `back/`. C'est volontaire : un spike est **jetable** (KRD §84) ; rien ne doit pouvoir graduer par inadvertance, et le module réel n'est pas pollué.
+
+**Le modèle.** Le **même besoin** (la demo checkout S46, « a customer places an order from their cart ») est capturé **deux façons** :
+
+- un **`BesoinGraph`** = un nœud par rung SOURCE §23 (`product, journey, view, control, action, operation, entity`), ordonné top-down, chaque rung mappant **typé** (les 4 métadonnées : `truth_kind`, `verifiability`, `scope`, `authority`) et résolvant sa **ref sortante** vers le rung plus profond (`control.triggers→action`, `action.invoke→operation`, `operation.mutate→entity`) ;
+- un **`FlatPrompt`** = un seul blob de texte, sans structure de rung, sans métadonnée, sans arête.
+
+**Les fichiers.**
+
+- `model.go` — le cœur. `Rung` + `rungOrder` (l'ordre total clos §23). `emits(rung)` : `journey`/`view` sont **NoEmit** (la jointure honnête avec `ideas.ProposesKinds()`, qui ne les contient pas). `EmitFromGraph(g)` projette le graphe en backlog ordonné : chaque nœud **mappant** devient un `BacklogItem` (avec `topoRank`, `refResolves`, `fullyTyped`, `anchorsAbove`), les nœuds **NoEmit** seedent les ancres sans émettre. `EmitFromFlat(p)` projette le prompt en **1 candidate** indifférenciée (non typée, non résolue, non ancrée, non ordonnée). `Measure(bl)` **compte** la richesse. `Hash()` content-adresse graphe et prompt (ordre sémantique préservé). **Toutes pures.**
+- `fixture.go` — les deux captures du besoin S46, corps lus **verbatim** des ancres (`SeedIdea`, `entities.Order`, `operation.CreateOrder`, `control.CheckoutButton`, `action.CheckoutSubmit`). Rien d'inventé (§8 honnêteté).
+- `measure.go` — `Compare(need, g, p)` mesure les deux et calcule les **deltas** ; `Decide()` calcule le `Verdict` : `MinIdeaGain = 3` (plancher déclaré), **dominance stricte** exigée sur chaque axe (Ideas ≥ plancher, refs résolues, typage, ancres), ordre topologique présent côté graphe et absent côté prompt, plus une **reproductibilité** (recalcule et compare). GO ssi tout passe.
+- `harvest.go` — `Harvest()` lève la **leçon durable** en `DraftIdea` : `Proposes:"product"`, l'intent verbatim, `Status:"draft"`, **`HasMirror:false`, `HasVersion:false`** (la double absence = un besoin, pas une vérité), + les OpenQuestions. C'est une **proposition** que l'`idea-intake` MCP capturerait via `idea_capture` — jamais une écriture noyau.
+- `measure_test.go` — la **preuve exécutable** de falsifiabilité : `TestVerdictIsGo`, `TestBacklogStrictlyRicher`, `TestFlatPromptIsUntyped`, `TestBacklogIsTopologicallyOrdered`, `TestReproducible` (rejoue 100×), `TestHarvestIsDraftNoTruth` (le mur).
+- `cmd/verdict/main.go` — imprime le tableau de richesse + le verdict + l'Idea harvestée (`go run ./cmd/verdict`).
+
+**Résultat mesuré.** BesoinGraph : **5 Ideas** ordonnées (`product→control→action→operation→entity`), 5 à ref résolue, 5 typées, 4 ancrées, 2 rungs NoEmit seedés. Prompt plat : **1** candidate, 0 résolue/typée/ancrée, non ordonnée. **Δ Ideas = +4** (≥ plancher 3). **`Decide().Go == true`**, reproductible.
+
+**Le twin Workbench.** `front/web/lib/besoin-necessity.ts` est le **jumeau TypeScript** déterministe (même `rungOrder`, même NoEmit, même `decide`), couvert par `lib/besoin-necessity.test.ts` (vitest + **fast-check** : même besoin → même verdict, et les chiffres exacts du probe Go). Le panneau `/besoin-necessity` (`BesoinNecessityPanel.tsx`) est **action-capable** : un bouton « Comparer les deux captures » exécute `decide()` à l'écran et rend le badge GO/NO-GO, le tableau de richesse côte à côte, les deltas, la rationale, et la **carte de l'Idea harvestée** (DRAFT, sans miroir, sans version). Un **e2e Playwright** (`tests/e2e/besoin-necessity.spec.ts`) prouve que le contrôle s'exécute (GO, 5 vs 1 Ideas, Δ +4, carte DRAFT).
+
+**Determinism-first.** Le probe est une **fonction pure** : aucun LLM, aucune horloge, aucun rng. La projection du besoin en backlog, le comptage de richesse et le verdict sont **reproductibles** (`TestReproducible` Go + le mirror `fast-check` TS). C'est le **mirror de reproductibilité** imposé par le mandat §6 — *projeter un besoin en backlog est une fonction pure, jamais une inférence d'agent.*
+
+## Méta
+
+**Pourquoi un spike, et pourquoi maintenant.** « Forcer le besoin à suivre l'architecture » est une **idée séduisante** mais le **coût neuf** est réel (un schéma Postgres `besoin`, un MCP, un paquet Go, un hook, deux skills, deux routes). Avant de payer ce substrat, KRD §84 dit de **spiker** : rendre l'intention **falsifiable** d'abord. La roadmap en fait un **spike-gate** : si une boîte texte-libre produisait un backlog aussi riche que le BesoinGraph, le track entier s'arrêterait.
+
+**La décision de conception qui compte : compter, pas juger.** La tentation était de « demander à un LLM si le BesoinGraph est plus riche ». Le spike refuse : la richesse est un **vecteur d'entiers** (Ideas, refs résolues, typage, ancres, ordre) calculé par fonction pure, et le GO exige une **dominance stricte sur chaque axe** + un **plancher déclaré**. C'est la garde anti-Goodhart intégrée au verdict — on ne peut pas « se noter » riche.
+
+**L'honnêteté du contrôle plat.** Le prompt plat n'est pas un homme de paille : il modélise **fidèlement** ce qu'une seule boîte de texte permet d'inférer **sans deviner** — exactement **1** candidate indifférenciée, parce que tout le reste (rungs, ordre, métadonnées, arêtes) serait un raccourci `prompt → code` que le mur interdit. La domination du BesoinGraph n'est défendable que **parce que** le contrôle est honnête.
+
+**Les OpenQuestions (jamais comblées en douce).**
+
+- **OQ-EL01-1** — **portée v1** : `saga`/`temporal`/`globalinvariant` restent hors-grammaire-v1 (à trancher EL02), déclaré, pas une complétude prétendue.
+- **OQ-EL01-2** — la **métrique de richesse** : le spike compte ; la vraie gate (EL07 `CanDescend` + EL08 `ShrinkOptionSpace`) mesurera le rétrécissement d'un **OptionSpace énumérable** — le spike prouve le mécanisme, pas la métrique finale.
+- **OQ-EL01-3** — le **mur** : la capture ici ne persiste **rien** ; EL14/EL15 captureront l'Idea via `idea_capture` (provenance human, utterance verbatim).
+- **OQ-EL01-4** — **Linear** non authentifié dans cet environnement (seuls `authenticate`/`complete_authentication` exposés) ; l'issue EL01 n'a pu être déplacée par MCP — à régulariser au prochain restart authentifié.
+
+## Méta-méta
+
+**Ce que EL01 dit du système qui se construit lui-même.** Un OS qui interdit `prompt → code` doit **prouver** que sa porte d'entrée (la capture du besoin) respecte cette interdiction. EL01 montre que la **structure** de la verticale §23 — sept rungs ordonnés, des arêtes qui résolvent, des bandes transversales — est **capturable comme un graphe déterministe**, et que ce graphe est **mesurablement plus riche** qu'un blob. La richesse émerge précisément de la **régularité de la verticale** : c'est un signe que l'architecture KRD est une bonne ossature pour élucider un besoin.
+
+**La capture du besoin n'enjambe jamais le mur.** Le spike inscrit, dès l'amont, la règle qui gouvernera EL02–EL19 : un BesoinGraph vit **au-dessus du mur**, chaque nœud mappant sort comme **Idea** via `idea_capture` (`HasMirror` toujours faux), et la promotion en vérité reste l'écriture du miroir via `/goal`. Capturer un besoin, c'est **proposer** une structure, **pas figer** une vérité. Le schéma `besoin` est **distinct** de la vérité, jamais une exception au mur.
+
+**Le déterminisme d'abord, même pour l'élicitation.** Le réflexe paresseux serait « laisse un agent lire le prompt et inférer toute l'app ». EL01 refuse : il **modélise** la projection besoin→backlog en **code déterministe** (`EmitFromGraph`/`Measure`/`Decide`, fonctions pures), mesure de façon **reproductible**, et n'admettrait un LLM que comme **exception gatée** (plus tard, EL13, pour le seul dialogue d'interview, re-vérifié contre le schéma). C'est le mandat determinism-first appliqué à la porte d'entrée du besoin : *le juge est le code, jamais le LLM qui se note.*
