@@ -1,0 +1,68 @@
+---
+title: "EL13 · /compound-besoin — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals d'EL13 : la skill ombrelle /compound-besoin + son backing pur-Go (back/runtime/besoin/interview.go). EnterableLevel(graph, metaOf) → le premier rung SOURCE pas encore enough (réutilise CanDescend, EL07), jamais une bande. DispatchOf(level) → la table close des gestes (grill/view/action/generic), totale sur la grammaire, fail-closed. RecordAnswer(graph, level, body, utterance, meta) → InterviewResult : décide par CODE le routage record/off_altitude/spike — off-altitude par IsOffAltitude (EL12), floue → /spike via la porte légale à trois sauts (idea_capture → idea_grill → idea_spike), sinon enregistré (status drafting, upsertNode) et resolved CALCULÉ (CanDescend.enough), jamais déclaré. NextPrompt(graph, metaOf) → le briefing déterministe (niveau, geste, AnchorsAbove EL08, BranchTree EL12). Miroir acceptance Godog (tests/runtime/compound-besoin.feature : 3 réponses ferment 3 branches → resolved, floue → /spike, off-altitude rejeté par schéma, le LLM ne déclare jamais resolved) + property rapid (interview_property_test.go : déterminisme, resolved = CanDescend.enough, graphe inchangé sur off-altitude/spike). Jumeau TS lib/besoin-interview.ts byte-équivalent + vitest/fast-check 12/12 ; route Workbench /compound-besoin action-capable ; e2e Playwright besoin-interview.spec.ts 5/5. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "EL13", "back/runtime/besoin", "interview.go", "compound-besoin", "EnterableLevel", "DispatchOf", "Gesture", "RecordAnswer", "InterviewResult", "AnswerRouting", "NextPrompt", "InterviewPrompt", "upsertNode", "off-altitude", "schema-mismatch", "IsOffAltitude", "spike", "SpikeGate", "idea_capture", "idea_grill", "idea_spike", "resolved", "CanDescend", "AnchorsAbove", "BranchTree", "CertifyMetadata", "anti-Goodhart", "déterminisme", "le LLM mène le code juge", "Godog", "rapid", "property test", "fast-check", "vitest", "le mur", "ui-completeness", "Playwright", "EL07", "EL08", "EL12", "EL15", "EL19", "Implémentation", "Méta", "Méta-méta"]
+---
+
+<Note>Côté « Pour moi » — les internals complets. La page concept est [ici](/steps/concept/el13-compound-besoin-interview).</Note>
+
+## Implémentation
+
+EL13 livre **deux artefacts** : la skill ombrelle `.claude/skills/compound-besoin/SKILL.md` (le geste rejouable) et son **backing pur-Go** `back/runtime/besoin/interview.go` (l'autorité déterministe). Le backing est **pur/total/déterministe** et n'écrit **aucune** vérité (le mur) ; il compose les capacités déjà prouvées (EL07/EL08/EL12/EL04), jamais un espace forké. Quatre surfaces, le LLM exclu de chacune.
+
+### `DispatchOf(level Level) → (Gesture, bool)`
+
+La table **close, déclarée** `dispatchTable` mappe chaque rung à son geste : `product → grill`, `view → view`, `control`/`action → action`, le reste (`journey`/`operation`/`entity` + les bandes) → `generic`. Hors-grammaire → `(GestureGeneric, false)` (fail-closed, jamais une devinette LLM). Le `Gesture` est un enum clos (`grill`/`view`/`action`/`generic`).
+
+### `EnterableLevel(graph, metaOf func(Level) Metadata) → (Level, bool)`
+
+Le niveau entrable est **calculé** : on parcourt `Levels()` (les 7 rungs SOURCE en ordre de descente — **jamais une bande**) et on renvoie le **premier** dont `CanDescend(graph, l, metaOf(l)).Enough` est faux. C'est le forçage : un niveau s'ouvre seulement quand son parent est `enough`. `ok=false` quand chaque rung SOURCE est `enough` (la descente atteint la feuille `entity`). `metaOf` nil → métadonnées vides (total).
+
+### `RecordAnswer(graph, level, body, utterance, meta) → InterviewResult`
+
+Le **recorder déterministe** d'un tour. Le LLM a déjà formulé la question et paraphrasé l'utterance en `body` + `utterance` (verbatim) ; `RecordAnswer` **décide le routage par CODE**, dans cet ordre :
+
+1. **hors-grammaire** → `RouteOffAltitude` + `BlockReason{BESOIN_NODE_ABSENT}` (rien à enregistrer).
+2. **off-altitude** (`IsOffAltitude(level, body)`, EL12) — le corps n'a pas le `besoin_level_schema` du niveau : `RouteOffAltitude`, graphe **inchangé**, `BlockReason{BESOIN_BODY_VACANT_OR_MALFORMED}` nommant le mismatch (et, via `ClassifyAltitude`, le niveau qui ressemble — `or_open_level:<best>`). Un corps `entity` (`attributes`) à `product` atterrit ici, **par schéma**.
+3. **floue → /spike** (`CertifyMetadata(probe, meta).RouteToSpike`, EL04) — une `verifiability` non-vérifiable : `RouteSpike`, graphe **inchangé**, `SpikeRoute = SpikeGate = [idea_capture, idea_grill, idea_spike]` (la porte légale à trois sauts ; **jamais** une capture directe en `spiking` — `idea_spike` est un *advance*). L'interview **ne descend pas**.
+4. **record** — sinon `upsertNode` pose/met-à-jour le nœud (status `NodeDrafting`, `Refs` = `outgoingRefsFor(level)` depuis `OutgoingRef` EL02, provenance `{Source:"human", Detail: utterance}` verbatim), et le verdict EL07 est **recalculé** : `Resolved = CanDescend(next, level, meta).Enough` — **calculé, jamais déclaré par le LLM**.
+
+`InterviewResult{Graph, Level, Routing, Verdict, Resolved, OpenBranches, SpikeRoute, BlockReason}`. Sur un tour rejeté/floue, `Graph` est le graphe **d'origine** (le `graph_hash` ne bouge pas — prouvé par property). `upsertNode` reconstruit le graphe en remplaçant le nœud du niveau (l'interview en-mémoire **accumule** une réponse ; l'historique append-only par-ligne appartient à EL15/Postgres).
+
+### `NextPrompt(graph, metaOf) → InterviewPrompt`
+
+Le **briefing déterministe** que la skill tend au LLM pour un tour : `{Level, Gesture, Anchors (AnchorsAbove EL08), OpenBranches (BranchTree EL12), Done}`. Le LLM **formule** depuis ce briefing ; il ne choisit ni le niveau, ni le geste, ni les ancres, ni les branches. `Done=true` quand `EnterableLevel` n'a plus de rung (la descente est complète).
+
+### Miroir acceptance — Godog (N0)
+
+`tests/runtime/compound-besoin.feature` + `interview_bdd_test.go`, écrit **ROUGE d'abord** (les symboles `EnterableLevel`/`RecordAnswer`/`InterviewResult` inexistants → échec de compilation, la preuve du rouge), puis VERT. Les **trois done-criteria** sont chacun un scénario :
+
+- *the product level is resolved when three answers close its branches* — `intent` + `scenarios` right-sized + `selects` (archétypes de vue retenus) + `completeMeta` → `routing=record`, **`resolved=true`**, provenance `human` (aucune vérité écrite) ;
+- *a fuzzy answer routes to /spike, never a descent* — `fuzzyMeta` (verifiability `unverifiable`) → `routing=spike`, `SpikeRoute = idea_capture,idea_grill,idea_spike`, **pas resolved**, **graphe inchangé** ;
+- *an off-altitude answer is rejected by schema* — un corps `attributes` à `product` → `routing=off_altitude`, `BlockReason` nomme le « schéma », **graphe inchangé** ;
+- *the LLM never declares resolved — the code recomputes it* — un product schema-valide qui ne sélectionne rien → `routing=record` mais **pas resolved** (l'anti-vacuité reste ouverte) — le code recalcule, le LLM ne décrète pas.
+
+### Miroir reproductibilité — rapid (N1)
+
+`interview_property_test.go` : `DispatchOf` **total** sur la grammaire (+ fail-closed) ; `EnterableLevel` ne renvoie que des **rungs SOURCE** et est déterministe ; `RecordAnswer` **déterministe** (même args → JSON byte-identique) ∧ `Resolved == CanDescend.enough` (calculé) ; un tour off-altitude/spike laisse le `graph_hash` **inchangé** ; `NextPrompt` déterministe ∧ ses `OpenBranches` **égalent** `BranchTree` (pas de fork).
+
+### Jumeau TS + UI action-capable
+
+`front/web/lib/besoin-interview.ts` est le **jumeau byte-équivalent** (compose les twins `besoin-branchtree`/`besoin-candescend`/`besoin-grammar`), couvert par `besoin-interview.test.ts` (**vitest + fast-check, 12/12**). La route Workbench **`/compound-besoin`** est **action-capable** (`ui-completeness`, §6.7) : « Enregistrer la réponse » exécute `recordAnswer`, « Niveau entrable » exécute `enterableLevel + dispatchOf` ; thémée (ADR 0010), bilingue FR-default (ADR 0011). L'e2e Playwright `tests/e2e/besoin-interview.spec.ts` prouve **5/5** que chaque control exécute (record/spike/off_altitude/anti-vacuité/enterable).
+
+## Méta
+
+**Pourquoi ces choix ?**
+
+- **Le LLM mène, le code juge.** EL13 est l'endroit où le mandat `determinism-first` (§6/§8) est le plus tendu : on *veut* du LLM (formuler une question avec naturel, paraphraser une utterance), mais tout ce qui peut être une fonction pure **l'est** et **fait autorité**. `EnterableLevel`, `DispatchOf`, `RecordAnswer`, `Resolved` — toutes pures. Le LLM est l'exception barricadée, isolée au seul dialogue, re-vérifiée contre le schéma déterministe.
+- **`resolved` calculé, jamais déclaré (anti-Goodhart).** Le piège classique : l'agent qui se note lui-même. Ici `RecordAnswer` ne lit jamais une « confiance » du LLM ; il recalcule `CanDescend.enough`. Le scénario Godog dédié le prouve : un product qui parse mais ne sélectionne rien est `record` **et pas resolved**.
+- **Off-altitude par schéma, pas par opinion.** On réutilise `IsOffAltitude` (EL12) : `!MatchesSchema(claimed, body)`. Un corps `entity` à `product` échoue le set de champs déclaré — pas un jugement LLM d'« altitude ». Le `BlockReason` nomme la porte (`answer_at_the_current_altitude`, `or_open_level:<best>`).
+- **Floue → /spike par la porte légale.** Une réponse non-vérifiable n'est pas forcée vers le bas : `SpikeGate = [idea_capture, idea_grill, idea_spike]`. On a vérifié dans `idea-intake` qu'`idea_spike` est un *advance* (`grilled→spiking`), jamais une capture — donc la route **commence** par `idea_capture` (draft). Honnêteté de provenance : le besoin descend seulement quand il est falsifiable.
+- **Aucune écriture vérité.** `RecordAnswer` renvoie un `BesoinGraph` (type sans `Version` ni `Mirror` — par construction). La persistance passe par l'MCP EL15 (`besoin_capture_*`). Le scénario *no kernel truth was written* l'asserte.
+- **Réutilisation, zéro réinvention.** `CanDescend` (EL07), `AnchorsAbove` (EL08), `BranchTree`/`IsOffAltitude`/`ClassifyAltitude` (EL12), `CertifyMetadata` (EL04), `OutgoingRef` (EL02), `records.Hash` (via `Graph.Hash`). EL13 **orchestre** ; il ne re-juge rien.
+
+**Portée honnête (déclarée).** Les bandes transversales (`invariant`/`policy`) ne sont **pas** dans la descente d'`EnterableLevel` — elles sont dialoguées latéralement par `/besoin-invariant` (EL14, OpenQuestion d'enchaînement, non bloquante). `upsertNode` accumule en-mémoire ; l'append-only par-ligne est EL15. Un manque vers un niveau plus profond (forward-dep) est une **OpenQuestion portée** (`enough=true`), jamais un résiduel bloquant (bootstrap §6).
+
+## Méta-méta
+
+**Ce que ça prouve sur la méthode.** EL13 est la démonstration vivante que *« le LLM assiste, le code juge »* n'est pas un slogan mais une **architecture** : un geste où l'IA est utile (le dialogue) **sans** être autorisée à décider de la complétude, de l'altitude, ou de la descente. Le miroir BDD est le juge non-gameable ; le property mirror pin la reproductibilité ; l'e2e prouve que le verdict pur se rend **exécutable** à l'écran sans ré-implémenter la gate côté front. Le mur n'est jamais franchi : un geste d'interview, par nature conversationnel, **n'écrit toujours aucune vérité** — il produit un `BesoinGraph` que la seule porte (EL15 → `idea-intake`) persiste. C'est le ratchet appliqué à l'élicitation : chaque tour ajoute une dent (une branche fermée), rien ne casse en silence ce qui précède (les ancres figées, EL08), et le `done` du niveau est **calculé**, jamais déclaré.

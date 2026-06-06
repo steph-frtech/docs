@@ -307,7 +307,9 @@
               "steps/concept/el11-besoin-gate",
               "steps/internals/el11-besoin-gate",
               "steps/concept/el12-branchtree-decision-tree",
-              "steps/internals/el12-branchtree-decision-tree"
+              "steps/internals/el12-branchtree-decision-tree",
+              "steps/concept/el13-compound-besoin-interview",
+              "steps/internals/el13-compound-besoin-interview"
             ]
           }
         ]

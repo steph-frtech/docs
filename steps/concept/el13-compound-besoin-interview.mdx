@@ -1,0 +1,66 @@
+---
+title: "EL13 · /compound-besoin (l'interview forcée niveau par niveau — le LLM mène, le code juge)"
+description: "EL13 est la skill ombrelle /compound-besoin : l'interview du besoin un niveau à la fois, au-dessus du mur. Le LLM mène le dialogue (formule la question, paraphrase l'utterance) mais chaque verdict est une fonction PURE faisant autorité : enterableLevel calcule le niveau entrable, dispatchOf est la table close des gestes, recordAnswer décide le routage par CODE — une réponse off-altitude est rejetée par schéma (EL12), une réponse floue routée vers /spike (idea_capture → idea_grill → idea_spike, jamais une descente), sinon enregistrée et le verdict resolved est CALCULÉ (CanDescend.enough), jamais déclaré. Above le mur : l'interview n'écrit aucune vérité — sa sortie est le BesoinGraph à appender via l'MCP EL15."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "interview", "compound-besoin", "EnterableLevel", "niveau entrable", "DispatchOf", "geste", "grill", "view", "action", "RecordAnswer", "routage", "off-altitude", "schema-mismatch", "spike", "idea_capture", "idea_grill", "idea_spike", "resolved", "CanDescend", "anti-Goodhart", "déterminisme", "le LLM mène le code juge", "le mur", "EL07", "EL08", "EL12", "EL13", "runtime/besoin"]
+---
+
+<Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL13](/steps/internals/el13-compound-besoin-interview).</Note>
+
+## En une phrase
+
+EL13 est **l'interview** du besoin : on vous interroge **un niveau à la fois**, le LLM **mène** le dialogue, mais **le code juge** — quel niveau travailler, si une réponse est au bon étage, et si le niveau est vraiment fini.
+
+## Le problème que ça résout
+
+Décrire une app, c'est descendre une échelle : le produit, puis le parcours, puis l'écran, puis le bouton, puis l'action, puis l'opération, puis l'entité. Si on vous laisse tout dire d'un coup dans une boîte de texte, vous mélangez les étages — et personne ne peut prouver que vous avez assez dit pour descendre.
+
+EL13 **force** la descente : un niveau ne s'ouvre que quand le précédent est suffisant. Et il **barricade le LLM** : l'IA peut formuler une question avec naturel, mais elle ne décide rien d'important. Trois pièges qu'on évite :
+
+1. **Le LLM qui improvise le plan.** Si l'IA choisit elle-même quel niveau attaquer, deux interviews du même besoin divergent. Ici, le niveau entrable est **calculé** (`enterableLevel`).
+2. **Le LLM qui décrète « c'est bon ».** Si l'IA déclare un niveau `resolved`, vous n'avez aucune garantie. Ici, `resolved` est **calculé** par `CanDescend` (EL07) — jamais déclaré.
+3. **Le LLM qui devine l'altitude.** Si vous répondez « une tâche a un titre et une échéance » alors qu'on parle du *produit*, c'est une réponse `entity`, pas `product`. EL13 le **détecte par schéma** (EL12), pas par intuition.
+
+## Les idées-clés
+
+<Field name="Le niveau entrable est CALCULÉ" type="le forçage, jamais deviné">
+  `enterableLevel` parcourt les rungs dans l'ordre de la descente et renvoie **le premier qui n'est pas encore suffisant**. Un niveau ne s'ouvre que quand son parent est `enough`. C'est le forçage : on ne planifie pas l'écran avant d'avoir cadré le produit.
+</Field>
+
+<Field name="Le geste est dispatché par une table close" type="grill / view / action / generic">
+  `dispatchOf(level)` est une table **déclarée** : `product` → `/grill` (le triage de l'intention), `view` → `/view`, `control`/`action` → `/action`, le reste → le dialogue de branches générique. Le LLM ne choisit pas le geste ; il l'exécute.
+</Field>
+
+<Field name="Enregistrer une réponse est une décision de CODE" type="record / off_altitude / spike">
+  `recordAnswer` regarde la réponse et décide :
+  <br />• **off-altitude** — la réponse échoue le schéma du niveau (un corps d'`attributes` au niveau `product`) : rejetée, **pas** descendue ;
+  <br />• **floue → /spike** — une réponse non-vérifiable est routée vers `/spike` par la **porte légale à trois sauts** `idea_capture → idea_grill → idea_spike`, jamais une descente ;
+  <br />• **record** — sinon la réponse est enregistrée et `resolved` est **recalculé**.
+</Field>
+
+<Field name="resolved est CALCULÉ, jamais déclaré" type="anti-Goodhart, §8">
+  Le LLM ne dit **jamais** « ce niveau est résolu ». Il enregistre la réponse ; le code recalcule `CanDescend.enough`. Le juge est le code.
+</Field>
+
+<Field name="Tout reste au-dessus du mur" type="le mur, §2">
+  L'interview n'écrit **aucune vérité**. Sa sortie est le `BesoinGraph` à appender via l'MCP EL15 (`besoin-intake`). Le chemin vers la vérité reste `idée → miroir → /goal → approbation humaine`.
+</Field>
+
+## Un exemple
+
+On vous interroge au niveau `product`. Le LLM vous demande, avec naturel : « En une phrase, à quoi sert votre app, et quels sont ses deux ou trois parcours principaux ? »
+
+- Vous répondez « un suivi de tâches, on crée et on coche une tâche » + vous retenez deux archétypes de parcours → les branches se ferment, **`resolved`**.
+- Vous répondez « je veux que les gens soient heureux » (non-falsifiable) → **routé vers /spike** (`idea_capture → idea_grill → idea_spike`), pas de descente : on rend l'idée falsifiable d'abord.
+- Vous répondez « une tâche a un titre et un état » → EL13 voit un corps `entity` au niveau `product` : **off-altitude**, rejeté par schéma, on vous le dit.
+
+## Ce que ça vous donne
+
+- Une interview **reproductible** : le même besoin produit le même parcours de questions.
+- Une IA qui **vous aide** à formuler, sans jamais décider à votre place de ce qui est « assez ».
+- Une protection contre les réponses **au mauvais étage** et les intentions **trop floues**, attrapées tôt, au-dessus du code.
+
+## Pour aller plus loin
+
+- [EL07 · CanDescend (la gate de forçage)](/steps/concept/el07-candescend-forcing-gate) — le verdict `enough` que l'interview lit, jamais ne déclare.
+- [EL12 · BranchTree (l'arbre de décision)](/steps/concept/el12-branchtree-decision-tree) — les branches posées + l'altitude par schema-mismatch.
+- [EL08 · la cascade des ancres](/steps/concept/el08-anchor-cascade) — les ancres figées que chaque niveau lit en grounding.
