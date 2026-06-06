@@ -1,0 +1,65 @@
+---
+title: "GV03 · Ledger Merkle tamper-evident + Decision-BOM (internals)"
+description: "Internals de GV03 : back/runtime/agentrun/ledger.go — Append/Root/Verify/DeriveBOM, chaîne de Merkle pure et totale sur records.Canonicalize+Hash, append-only, sous la ligne d'eau. Le miroir property ROUGE d'abord (altérer/supprimer/réordonner → racine change → Verify rouge), prouvé par fault-injection. Twin front + panneau action-capable + e2e. Trois couches : Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "GV03", "ledger.go", "agentrun", "Merkle", "tamper-evident", "Decision-BOM", "records.Hash", "Canonicalize", "rapid", "fast-check", "Playwright", "AAI09", "append-only", "determinism-first", "fault-injection", "le mur"]
+---
+
+<Note>Côté « Pour moi » — l'internal complet (tout). Pour la vue concept, voir [Pour les futurs utilisateurs → GV03](/steps/concept/gv03-ledger-merkle).</Note>
+
+## Implémentation
+
+### Le package : `back/runtime/agentrun/ledger.go`
+
+GV03 ajoute le **ledger Merkle** au-dessus des exécutions `AgentRun` déjà journalisées (S52/BA28). Il **réutilise** le schéma d'adresse de contenu S01/S02 (`records.Canonicalize` + `records.Hash`), jamais une nouvelle primitive.
+
+Surface publique, toutes **pures, totales, déterministes** (pas d'horloge, pas de rng, pas d'I/O) :
+
+- `DeriveBOM(r AgentRun) DecisionBOM` — projette le **Decision-BOM** d'une exécution : `run` (son adresse de contenu), `agent`, `goal`, `red_work_item`, `context_pack`, `impl`, `seed`, `result`. Ce sont exactement les champs qui ont déterminé l'`ID` de l'exécution, donc le BOM ne peut pas dériver.
+- `Append(ledger, r) ([]LedgerEntry, error)` — **append-only** : chaîne une nouvelle entrée depuis la racine de tête (`GenesisRoot` pour un journal vide). Copy-on-grow — la slice de l'appelant n'est jamais mutée (anti-overwrite §9).
+- `Root(ledger) string` — la racine de tête : l'adresse de contenu de **tout le journal ordonné** (`GenesisRoot` si vide).
+- `Verify(ledger) VerifyResult` — le **juge déterministe** : recalcule la chaîne ; rouge au premier `index`/`entry_hash`/`prior_root`/`root` qui ne recolle pas, avec un `TamperKind` actionnable.
+- `BuildLedger(runs) ([]LedgerEntry, error)` — replie une séquence d'exécutions en un ledger vérifié.
+
+### La chaîne
+
+Chaque entrée porte deux empreintes :
+
+- `entry_hash = Hash(Canonicalize({index, bom}))` — l'intégrité **par-ligne** (l'`index` y entre, donc un réordonnancement qui garde les mêmes BOM casse quand même).
+- `root = Hash(Canonicalize({prior_root, entry_hash}))` — le **repli de Merkle** : la racine plie tout le préfixe ordonné dans une seule empreinte.
+
+C'est ce repli inter-ligne qui referme le trou *AAI09* que l'adresse par-ligne (BA28) laissait : une suppression ou un réordonnancement change la racine.
+
+### Le miroir property — ROUGE d'abord
+
+`ledger_property_test.go` (rapid) épingle six invariants, dont le done-criterion (un *tamper* rend `Verify` rouge ; append-only ; déterministe) :
+
+1. **Reproductibilité** — mêmes exécutions ordonnées ⇒ même racine ; un ledger frais vérifie OK.
+2. **ALTER** — changer un champ d'un BOM ⇒ `entry_hash_mismatch` rouge + racine d'un rebuild honnête différente.
+3. **DELETE** — retirer une ligne est *tamper-evident* par **exactement un** des deux signaux : racine de tête changée (suppression en queue, vs l'ancre de confiance) **ou** chaîne cassée (`Verify` rouge, suppression au milieu).
+4. **REORDER** — échanger deux lignes distinctes ⇒ `Verify` rouge.
+5. **APPEND-ONLY** — `Append` ne mute ni la slice de l'appelant ni le préfixe.
+6. **Decision-BOM fidèle** — `DeriveBOM` porte exactement les champs de décision.
+
+**Preuve que le rouge précède le vert (fault-injection).** En dégradant `ledger.go` à l'équivalent BA28 (l'`entry_hash` ignore l'`index`, le `root` ignore le `prior_root`, `Verify` lâche les gardes structurels), le test `TestLedger_Reorder_TurnsRed` passe **rouge** (`reordering rows 0/1 must fail verification`). Restauré, tout est **vert**. La chaîne de Merkle est donc *load-bearing* — pas un ornement.
+
+### Le twin front + le panneau action-capable
+
+`front/web/lib/governance.ts` réplique le **comportement** (Append/Root/Verify/DeriveBOM) avec un `canonicalize` + un **SHA-256 synchrone pur** (browser-safe, sans dépendance). Le digest n'a pas à être byte-identique à Go : ce qui est épinglé est l'**invariant** (tamper ⇒ rouge), indépendant de la primitive de hash. `governance.test.ts` (Vitest + fast-check) le prouve ; `ledgerAudit()` est la projection que le panneau rend.
+
+Le panneau `/governance` (`components/GovernancePanel.tsx`) gagne le bouton **« Vérifier le ledger Merkle »** (`data-testid="verify-ledger"`) : un clic **exécute** `ledgerAudit()` et rend la racine, le badge intact, et les trois falsifications (alter/delete/reorder). Thémé (ADR 0010), bilingue fr+en (ADR 0011). `tests/e2e/governance.spec.ts` ajoute 3 e2e Playwright qui prouvent que le contrôle s'exécute (9 tests verts au total).
+
+## Méta
+
+**Pourquoi du code, pas un agent ?** Une racine de Merkle **est** un algorithme de hachage — une fonction pure et totale des corps d'exécution ordonnés. Un « agent d'audit qui décide si le ledger a été falsifié » serait un *determinism gap* (§8 : *le juge est déterministe*). Ici, c'est la **chaîne** qui décide : `Verify` recalcule, byte à byte, et la falsification est mécanique. Le miroir de reproductibilité (même journal ⇒ même verdict) clôt la porte LLM.
+
+**Pourquoi réutiliser `records` ?** ADR 0007 — *reuse, don't reinvent*. L'adresse de contenu du noyau (S01/S02) est déjà la primitive ; GV03 la **plie** en une chaîne, il ne forge pas un second schéma de hash. Une seule définition d'« empreinte » dans tout AIDOS.
+
+**Pourquoi sous la ligne d'eau ?** Le ledger est de la **télémétrie d'audit**, pas une vérité. `LedgerEntry` ne porte ni `version` ni `mirror` — il est *inreprésentable* comme une `CoucheAgent`, exactement comme l'`AgentRun`. GV03 **resserre** la traçabilité (ce que l'ADR 0037/GV02 a décidé d'adopter), il n'ouvre **aucune** autorité au-dessus du mur.
+
+**Pourquoi append-only ?** Anti-overwrite §9 : `Append` est copy-on-grow, le préfixe est immuable. Le journal ne se réécrit pas ; il **croît**. C'est ce qui rend la racine une ancre de confiance stable qu'un auditeur peut épingler.
+
+## Méta-méta
+
+GV03 illustre la **forme du resserrement** d'AIDOS face à un outil externe (l'AGT). GV01 *mesure* le trou (AAI09), GV02 *décide* (ADR 0037 : adopter le ledger Merkle en augmentation), GV03 *grave* — un miroir rouge d'abord, du code déterministe ensuite, un panneau action-capable enfin. À aucun moment l'outil externe ne devient une **autorité** : il devient un **miroir** (une preuve exécutable) et une **projection** (du code pur). C'est la règle du *Méta-méta* de la gouvernance d'AIDOS : **chaque pilier adopté est un resserrement du mur, jamais une couche au-dessus de lui**.
+
+Et c'est *fractal* : la même discipline (rouge → vert → fault-injection → twin → e2e → docs) qui code une feature code aussi un **garde-fou de gouvernance**. Le garde-fou qui prouve qu'on ne peut pas effacer une trace d'agent est lui-même prouvé par un miroir qu'on ne peut pas truquer — *le juge qui surveille les agents est lui-même un juge déterministe*. Le méta-loop n'ajoute que des garde-fous ; il n'en retire jamais (§5).

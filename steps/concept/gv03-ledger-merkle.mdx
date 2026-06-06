@@ -1,0 +1,41 @@
+---
+title: "GV03 · Le journal d'audit inviolable (Merkle) — toute falsification se voit"
+description: "GV03 transforme le journal des exécutions d'agents en un ledger tamper-evident : chaque entrée chaîne la racine de la précédente (chaîne de Merkle). Altérer, supprimer ou réordonner une seule ligne change la racine du journal entier — et la vérification passe rouge. Avec, en prime, le Decision-BOM : la liste exacte des ingrédients d'une décision. Vue concept, sans code."
+keywords: ["aidos", "krd", "governance", "GV03", "Merkle", "ledger", "audit", "tamper-evident", "inviolable", "Decision-BOM", "append-only", "déterminisme", "AAI09", "OWASP", "répudiation", "traçabilité", "le mur"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — la vue concept, sans code. Pour l'internal complet, voir [Pour moi → GV03](/steps/internals/gv03-ledger-merkle).</Note>
+
+## L'idée en une phrase
+
+GV03 rend le **journal d'audit** des exécutions d'agents **inviolable** : on ne peut plus en retirer une ligne ni en changer l'ordre sans que ça se **voie** — parce que chaque entrée scelle la précédente dans une **chaîne de Merkle**.
+
+## Pourquoi ce pas existe
+
+Avant GV03, AIDOS donnait déjà une **adresse de contenu** à chaque exécution (une empreinte calculée sur son contenu). Conséquence : si on **modifiait** une ligne, son empreinte ne correspondait plus — la falsification était détectée.
+
+Mais il restait un trou, identifié par le cross-check de GV01 (le risque OWASP *AAI09 — Untraceability & Repudiation*) : ce hachage **par-ligne** ne disait rien si on **supprimait** discrètement une exécution entière, ou si on **inversait** deux lignes. Chaque ligne restante était parfaitement valide ; rien ne signalait qu'il en manquait une, ou que l'ordre avait changé. Un agent — ou quelqu'un — pouvait **répudier** une décision en effaçant sa trace.
+
+## Ce que GV03 ajoute
+
+Une **chaîne** entre les lignes. Chaque entrée du journal embarque la **racine** (l'empreinte cumulée) de tout ce qui précède, puis produit une **nouvelle racine** qui la contient. La dernière racine est donc une empreinte de **tout le journal, dans l'ordre**.
+
+Du coup, trois falsifications deviennent visibles :
+
+- **Altérer** une ligne → son empreinte ne recolle plus → vérification **rouge**.
+- **Supprimer** une ligne → la racine finale **change** (et la chaîne se casse en aval) → détecté.
+- **Réordonner** deux lignes → l'ordre est scellé dans les empreintes → vérification **rouge**.
+
+C'est exactement le trou *AAI09* refermé.
+
+## Le Decision-BOM
+
+GV03 ajoute aussi, pour chaque exécution journalisée, un **Decision-BOM** (*Bill-Of-Materials* d'une décision) : la liste précise des **ingrédients** qui ont déterminé l'issue — quel agent, quel /goal, quel élément rouge travaillé, quel ContextPack reçu, quelle implémentation, quelle graine, quel résultat. C'est ce qu'un auditeur doit pouvoir lire pour **reproduire** une décision. Le Decision-BOM n'est pas une note à part : c'est une **projection fidèle** de l'exécution, donc il ne peut pas raconter autre chose que ce qui s'est passé.
+
+## Ce qui reste vrai (le mur)
+
+Le journal vit **sous la ligne d'eau** : c'est de la **télémétrie d'audit**, pas une vérité gelée. GV03 n'ajoute donc **aucune autorité au-dessus du mur** ; il **resserre** la traçabilité, comme l'ADR d'adoption (GV02) l'a décidé. Le *Microsoft agent-governance-toolkit* nous a donné l'idée du ledger Merkle ; AIDOS l'adopte **en augmentation** — jamais en remplacement du mur structurel.
+
+## Comment vous le voyez
+
+Dans le Workbench, le panneau **Gouvernance** porte un bouton **« Vérifier le ledger Merkle »**. Un clic construit un journal de démonstration, affiche sa **racine**, confirme qu'il est **intact**, puis montre les trois falsifications passer **rouge** ou changer la racine. Tout est **déterministe** : même entrée, même racine, à chaque fois.
