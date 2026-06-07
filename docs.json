@@ -190,6 +190,8 @@
               "steps/internals/s60-goal-stream-blocks",
               "steps/concept/s61-auth-sessions",
               "steps/internals/s61-auth-sessions",
+              "steps/concept/s62-project-members",
+              "steps/internals/s62-project-members",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

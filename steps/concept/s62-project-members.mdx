@@ -1,0 +1,66 @@
+---
+title: "S62 · Qui peut quoi sur ce projet ? (adhésion & propriété)"
+description: "S62 ajoute la jointure project_members (identité × projet × rôle owner/editor/viewer) : les requêtes d'un projet filtrent par adhésion, et project.owner_ref (S53) gagne enfin un owner réel. Troisième couche du mur : l'authentification (S61) prouve QUI vous êtes, l'adhésion prouve que vous êtes membre de CE projet. Un non-membre est refusé NOT_A_MEMBER ; un viewer lit mais ne peut pas muter. Inviter, retirer, changer un rôle sont des server actions sous le mur, append-only. L'adhésion vit hors du Kernel."
+keywords: ["aidos", "krd", "S62", "adhésion", "membership", "project_members", "owner", "editor", "viewer", "rôle", "gradient", "propriété", "ownership", "owner_ref", "NOT_A_MEMBER", "ROLE_FORBIDDEN", "non-membre", "viewer", "muter", "inviter", "retirer", "changer un rôle", "accounts", "le mur", "troisième couche", "RLS", "S55", "S61", "S53", "multi-locataire", "déterminisme", "below the line"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S62](/steps/internals/s62-project-members).</Note>
+
+## En une phrase
+
+S61 a répondu à *qui êtes-vous ?* **S62 répond à la question suivante : *qui peut quoi sur CE projet ?*** — il ajoute la jointure **adhésion** (identité × projet × rôle) qui décide, après l'authentification, si vous êtes membre de ce projet et ce que votre rôle vous autorise.
+
+## Le problème que S62 résout
+
+Être authentifié (S61) prouve **que vous existez**, pas **que vous appartenez à ce projet**. Sans une adhésion explicite, n'importe quelle identité valide pourrait toucher n'importe quel projet — l'isolation multi-locataire (S55) serait incomplète. Et `project.owner_ref` de S53 n'était qu'une chaîne libre : un projet n'avait pas de **vrai** propriétaire.
+
+## Ce que S62 apporte
+
+<CardGroup cols={2}>
+  <Card title="La jointure d'adhésion" icon="user-group">
+    Une ligne <code>accounts.project_members</code> par (identité × projet × rôle). C'est elle qui dit : « cette personne est membre de ce projet, avec ce rôle ».
+  </Card>
+  <Card title="Le gradient de rôle" icon="layer-group">
+    Trois rôles, déclarés et fermés : <code>owner ⊃ editor ⊃ viewer</code>. Un viewer lit ; un editor lit et mute ; un owner administre en plus l'adhésion.
+  </Card>
+  <Card title="Un non-membre est refusé" icon="ban">
+    Une identité valide mais sans ligne d'adhésion dans le projet est refusée <code>NOT_A_MEMBER</code> — indépendamment de l'authentification. La troisième couche du mur.
+  </Card>
+  <Card title="Un owner réel" icon="crown">
+    <code>project.owner_ref</code> (S53) résout désormais vers un vrai propriétaire : le créateur reçoit une adhésion owner, et seuls les owners administrent.
+  </Card>
+</CardGroup>
+
+## La troisième couche du mur
+
+AIDOS empile trois vérifications **indépendantes**, posées par des étapes différentes — forcer l'une n'ouvre jamais les autres :
+
+- **Couche 0 — l'authentification (S61).** *Qui êtes-vous ?* Un anonyme est refusé `UNAUTHENTICATED`.
+- **Couches 1 & 2 — le mur de scope + la RLS (S55).** *L'opération vise-t-elle le projet actif, sous votre identité ?*
+- **Couche 3 — l'adhésion (S62).** *Êtes-vous membre de CE projet, et votre rôle permet-il CETTE opération ?* Sinon `NOT_A_MEMBER` ou `ROLE_FORBIDDEN`.
+
+L'adhésion est **propre à un projet** : être membre du projet A ne vous rend pas membre du projet B. Un membre de A qui vise B lit **zéro ligne**.
+
+## Le viewer ne peut pas muter
+
+Le cœur du gradient, illustré :
+
+| Rôle | Lire | Muter | Administrer l'adhésion |
+|---|:---:|:---:|:---:|
+| **viewer** | oui | **non** | non |
+| **editor** | oui | oui | non |
+| **owner** | oui | oui | **oui** |
+
+Un viewer qui tente de muter est refusé `ROLE_FORBIDDEN`. Inviter, retirer ou changer un rôle est réservé à l'owner.
+
+## Inviter, retirer, changer un rôle
+
+Ces trois gestes sont des **server actions sous le mur** : ils écrivent `accounts.project_members` directement (comme `/store`), jamais le Kernel. Tout est **append-only** : changer un rôle révoque l'ancienne ligne et en écrit une nouvelle ; retirer un membre marque la ligne révoquée (la suppression dure GDPR est S116). Chaque geste est **gardé** par le gradient : seul un owner administre.
+
+## Où le voir dans le Workbench
+
+Le panneau **Adhésions de projet** (`/project-members`) liste les membres d'un projet et expose les contrôles **inviter / changer un rôle / retirer** — chacun exécutable depuis l'écran, chacun gardé par le rôle de l'identité actrice. Tentez d'inviter en tant que viewer : le refus `ROLE_FORBIDDEN` s'affiche.
+
+## En quoi c'est fidèle au KRD
+
+L'adhésion vit **hors du Kernel** (zone `accounts`, comme l'auth S61). Le gradient de rôle est **déclaré, jamais appris** (§8). La décision d'autorisation est une **fonction pure** : même (adhésion, opération) ⇒ même verdict — aucun LLM n'entre. C'est une vérité de *travail* (qui peut quoi), pas une vérité *produit* — le mur sur le Kernel reste intact.

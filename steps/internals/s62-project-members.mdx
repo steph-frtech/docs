@@ -1,0 +1,63 @@
+---
+title: "S62 · Adhésion & propriété de projet — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S62 : l'autorité d'adhésion pure back/runtime/membership (Authorize(membership, projectID, op) → NOT_A_MEMBER si nil/autre-projet/rôle-invalide, ROLE_FORBIDDEN si rôle trop bas ; CanAdminister owner-only ; NewMembership content-adressé records.Hash idempotent), la migration project_members_baseline.sql (accounts.project_members content-adressé append-only soft-delete + app.is_member SECURITY DEFINER + REPLACE app.in_active_scope qui ajoute le prédicat d'adhésion à la RLS S55), le jumeau front lib/membership.ts (même adresse de contenu que le Go), les server actions invite/role/remove sous le mur, les miroirs (fixture back non-membre/viewer, rapid gradient+per-project+reproductibilité, Testcontainers RLS deux couches, Vitest+fast-check front, Playwright /project-members). Réutilise S53 projects, S55 RLS, S61 accounts/users, records.Hash. Det. : autorité pure, zéro LLM."
+keywords: ["aidos", "krd", "S62", "membership", "Authorize", "CanAdminister", "NewMembership", "NOT_A_MEMBER", "ROLE_FORBIDDEN", "Role", "owner", "editor", "viewer", "OpKind", "project_members", "accounts", "is_member", "in_active_scope", "RLS", "SECURITY DEFINER", "GUC", "app.identity", "app.project", "content-adressé", "records.Hash", "append-only", "soft-delete", "revoked_at", "lib/membership", "server action", "Testcontainers", "rapid", "fast-check", "Playwright", "le mur", "hors Kernel", "S53", "S55", "S61", "déterminisme"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Le concept est [ici](/steps/concept/s62-project-members).</Note>
+
+## En une phrase
+
+S62 ajoute une **troisième couche** au mur — le prédicat d'**adhésion** — sous la forme d'une autorité pure (`back/runtime/membership`) et de son jumeau RLS (`app.is_member` greffé dans `app.in_active_scope` de S55) : une identité valide sans ligne d'adhésion dans le projet est refusée `NOT_A_MEMBER`, un viewer qui mute est refusé `ROLE_FORBIDDEN`, et `project.owner_ref` (S53) résout vers une vraie ligne owner — le tout déterministe, append-only, **hors du Kernel**.
+
+## Implémentation
+
+### Le cœur pur `back/runtime/membership`
+
+- `Role` est le triplet fermé `owner | editor | viewer` (pas de quatrième rôle — le miroir property l'épingle). `canMutate` = owner+editor ; `canAdminister` = owner seul. Le gradient est **déclaré, jamais appris** (§8).
+- `OpKind` = `read | mutate | administer`, le set fermé des opérations contre un projet.
+- `Authorize(m *Membership, projectID string, op OpKind) Decision` est **pure et totale** :
+  - `m == nil` **ou** rôle invalide **ou** `m.ProjectID != projectID` **ou** projectID vide ⇒ `NOT_A_MEMBER` (fail-closed — un membre de A est un non-membre de B).
+  - sinon : `read` toujours `allow` ; `mutate` `allow` ssi `canMutate` ; `administer` `allow` ssi `canAdminister` ; op inconnue refusée (jamais de défaut ouvert).
+  - le refus porte un `BlockReason{code, severity, explanation, how_to_fix[]}` (la forme actionnable §2).
+- `CanAdminister(m, projectID)` est le prédicat que les server actions invite/remove/role gardent : seul un owner du projet cible administre.
+- `NewMembership(identity, projectID, role) (Membership, error)` construit la ligne **content-adressée** : `id = records.Hash(Canonicalize({kind:"project_member", identity, project_id, role}))` — **idempotent** (même triplet ⇒ même id), un changement de rôle écrit une **nouvelle** ligne.
+
+`membership` est un **paquet feuille** (il importe `kernel/records`, rien du gateway) — pas de cycle.
+
+### La migration `back/migrations/project_members_baseline.sql`
+
+1. **`accounts.project_members`** : `id, identity, project_id, role, body jsonb, version, created_at, revoked_at`. Contraintes : `role IN (owner,editor,viewer)`, `id = version` (KRD §12), un **index unique** sur `(identity, project_id) WHERE revoked_at IS NULL` (une seule adhésion active par couple — un changement de rôle révoque puis insère).
+2. **`app.is_member(row_project_id) → bool`** en `SECURITY DEFINER` (search_path épinglé) : `EXISTS` une ligne non-révoquée pour `current_setting('app.identity')`. Le `DEFINER` permet à l'agent de ne PAS avoir de GRANT direct sur la table dans le prédicat.
+3. **`CREATE OR REPLACE app.in_active_scope`** : S55 exigeait *le projet actif match + l'identité présente* ; S62 ajoute `AND app.is_member(row_project_id)` — **strictement plus serré**, jamais plus large, donc aucune garantie antérieure n'est affaiblie. Une identité valide non-membre voit zéro ligne (la couche RLS de `NOT_A_MEMBER`).
+4. **GRANTs** below-the-line : l'agent lit/écrit `project_members` (invite/remove/role) mais **pas DELETE/TRUNCATE** (soft-delete ; le hard GDPR est S116). Le **mur** sur kernel/mirrors est réaffirmé (no-op si déjà révoqué).
+
+### Le jumeau front `front/web/lib/membership.ts`
+
+La même autorité en TS pur : `newMembership` produit un id **byte-identique** au Go — le corps canonique a les clés **triées alphabétiquement** (`identity, kind, project_id, role`, sans espaces) pour matcher `records.Canonicalize`. `authorize` / `canAdminister` répliquent le verdict. C'est ce qui garde le panneau action-capable sans appel réseau pour la décision.
+
+### Les server actions `front/web/app/project-members/actions.ts`
+
+`inviteMemberAction`, `changeRoleAction`, `removeMemberAction` écrivent `accounts.project_members` **sous le mur**. Chacune lit l'adhésion de l'identité **actrice** (`actingMembership`, repli déterministe sur la fixture démo si la table n'existe pas encore) puis passe par `adminGate` (= `authorize(..., administer)`) : un non-owner est refusé `ROLE_FORBIDDEN`/`NOT_A_MEMBER` **avant** toute écriture. Invite/role révoquent l'ancienne ligne et insèrent la nouvelle (append-only) ; remove marque `revoked_at` (jamais de `DELETE` SQL).
+
+## Les miroirs
+
+| Miroir | Forme | Ce qu'il épingle |
+|---|---|---|
+| `membership_fixture_test.go` | fixture (workflow) | non-membre → `NOT_A_MEMBER` pour read/mutate/administer ; viewer lit mais ne mute pas ; gradient owner/editor/viewer |
+| `membership_property_test.go` | rapid (∀) | gradient sur tous (rôle, op) ; adhésion per-projet ; **reproductibilité** (même triplet ⇒ même id ; `Authorize` déterministe) |
+| `project_members_roundtrip_test.go` | Testcontainers (N5) | la RLS : non-membre lit zéro ligne, membre lit sa ligne, owner_ref résout owner, isolation per-projet — la **deuxième** couche, indépendante du Go |
+| `lib/membership.test.ts` | Vitest + fast-check | jumeau front des critères + reproductibilité (id 64-hex idempotent) |
+| `project-members.spec.ts` | Playwright (journey) | la route est action-capable : invite/role/remove exécutent ; un viewer-acteur est refusé `ROLE_FORBIDDEN` |
+
+Les critères de done de la feuille de route — *non-membre refusé `NOT_A_MEMBER`*, *viewer ne peut muter*, *invite/remove/role via server action below-the-line* — sont épinglés **directement** par la fixture + la property + le Playwright.
+
+## Méta
+
+S62 **réutilise** sans réinventer : `kernel/records.Hash` (l'adresse de contenu partagée par projets/users/adhésions), le schéma `accounts` de S61, `projects.project` de S53, et la **RLS** de S55 (qu'il greffe au lieu de la doubler). Le jumeau front partage **une seule** adresse de contenu avec le Go (corps canonique identique) — pas de double-typage de l'id. Le mur reste à deux niveaux (hook + GRANTs) et n'est qu'**augmenté** d'un prédicat, jamais affaibli (meta-loop : on AJOUTE une garde, on n'en retire jamais).
+
+Forward-dependencies enregistrées (OpenQuestions, non bloquantes) : la porte canonique unique sera le MCP d'adhésion (ADR 0009) + l'identité propagée par la passerelle (S58/S61) ; en attendant, le Workbench écrit le schéma `accounts` via server action, et l'identité actrice est choisie via le champ `actor` (cockpit démo).
+
+## Méta-méta
+
+Le geste prouvé ici est **« autoriser, c'est calculer, pas demander »**. Toute la décision d'adhésion est une fonction pure et totale : aucun LLM n'entre, le verdict est reproductible, et le miroir de reproductibilité (rapid + fast-check) le garde rouge si jamais quelqu'un glissait un agent là où une fonction suffit (un *écart de déterminisme* §6/§8). L'autorité (le gradient des rôles) est **déclarée** dans le code, pas inférée — la même discipline que « les poids sont déclarés, jamais appris ». Et la défense reste **en profondeur** : le Go (couche applicative) et la RLS (couche base) rougissent **indépendamment** sur le même fait — un bug dans l'un est rattrapé par l'autre.
