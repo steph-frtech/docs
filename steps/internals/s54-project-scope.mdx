@@ -1,0 +1,65 @@
+---
+title: "S54 · Project-scope du truth-store — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S54 : la migration expand-contract project_scope_baseline.sql (project_id + FK + backfill __system__ sur kernel·mirrors·ideas·changesets·dag·brain·context), le paquet pur back/archive/projectscope (seed content-adressé, ensemble clos ScopedTables, ScopedSelect déterministe, EmitMigration reproductible), les miroirs (property rapid + roundtrip Testcontainers : zéro perte, FK résolvent, isolation A↛B), le jumeau TS lib/projectScope, le MCP project-scope, la route /project-scope."
+keywords: ["aidos", "krd", "S54", "project_id", "projectscope", "migration", "expand-contract", "backfill", "__system__", "seed", "content-addressed", "ScopedTables", "ScopedSelect", "EmitMigration", "Testcontainers", "rapid", "fast-check", "zéro perte", "append-only", "FK", "isolation", "le mur", "RLS", "S55", "déterminisme", "reproductible", "MCP", "ADR 0009"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Le concept est [ici](/steps/concept/s54-project-scope).</Note>
+
+## En une phrase
+
+S54 fait traverser un `project_id` (FK) à **chaque** table de vérité et dérivée, **rapatrie sans perte** le graphe singleton dans un projet seed `__system__` content-adressé, et garantit que toute lecture est scopée — le tout **déterministe et reproductible**, le mur inchangé.
+
+## Implémentation
+
+### La migration — `back/migrations/project_scope_baseline.sql`
+
+Expand-contract, **forward-only**, **idempotente** :
+
+1. **Seed** : `INSERT … ON CONFLICT DO NOTHING` du projet `__system__` (id == version == `records.Hash` du corps canonique) + sa racine DAG (`projects.dag_root`).
+2. **Par table** (un bloc `DO $$` sur un `ARRAY` de paires `schema.table`, dans l'ordre CLAUDE.md §1) :
+   - **EXPAND** : `ADD COLUMN IF NOT EXISTS project_id text` (l'ancien code continue d'insérer sans `project_id`) ;
+   - **BACKFILL** : `UPDATE … SET project_id = <seed> WHERE project_id IS NULL` — **la seule** mutation de données, elle remplit une colonne neuve, ne réécrit aucun corps, n'efface aucune ligne ;
+   - **CONTRACT** : `SET DEFAULT <seed>` puis `SET NOT NULL` ;
+   - **FK** : `ADD CONSTRAINT …_project_fk FOREIGN KEY (project_id) REFERENCES projects.project (id)` ;
+   - **INDEX** : `…_project_idx ON (project_id)`.
+3. **Le mur** : `REVOKE INSERT, UPDATE, DELETE, TRUNCATE … FROM aidos_agent` ré-asserté sur `kernel`/`mirrors` — la migration ne peut pas affaiblir S02/S04.
+
+Tables scopées : `kernel.truth`, `kernel.layer`, `kernel.link`, `mirrors.mirror`, `ideas.idea`, `changesets.changeset`, `dag.phase`, `brain.memory_item`, `context.context_graph_decision`.
+
+### Le paquet pur — `back/archive/projectscope`
+
+Aucune I/O, aucune horloge, aucun LLM (determinism-first) :
+
+- `SystemSeed()` — le projet `__system__` content-adressé, **même schéma** `records.Hash ∘ records.Canonicalize` que tout projet (S53). Le slug `__system__` ne passe **pas** la regex utilisateur ; le seed est donc construit **directement** depuis son corps canonique — c'est volontaire : un humain ne peut jamais minter un projet qui collisionne avec `__system__`. Empreinte pinnée : `1a4332ab3616ddfb699b668ae4a4078593231e5f996e6b8f1fd1e44b6a4c5004`.
+- `ScopedTables()` — l'**ensemble clos et ordonné** des tables scopées : la **source unique** que la migration ET le chemin de lecture lisent (anti-dérive).
+- `ScopedSelect(schema, table)` — le constructeur de lecture **déterministe** : porte **toujours** `WHERE project_id = $1`, **refuse** une table hors-ensemble (`ErrUnknownScopedTable`) — jamais de requête non scopée.
+- `EmitMigration()` — réémet le DDL de scope (expand→backfill→contract+FK+index par table) : **mêmes entrées → octets identiques** (le critère « émission reproductible »).
+
+### Les miroirs
+
+- `project_scope_property_test.go` (rapid) — seed content-adressé & stable ; **pin SQL↔Go** (le littéral de la migration == `SystemSeed().ID`, et le corps embarqué hashe vers le seed) ; `ScopedSelect` toujours scopé, pur, refuse l'inconnu ; `EmitMigration` reproductible ; l'ensemble Go == les tables du fichier SQL.
+- `migration_roundtrip_test.go` (Testcontainers, **Postgres réel**) — **zéro perte** (compte avant == après sur un graphe singleton préexistant) + backfill au seed ; **toutes les FK résolvent** (insert au seed OK, insert à un projet inexistant refusé) ; **isolation A↛B** (une lecture scopée A ne renvoie aucune ligne B) ; mur inchangé ; **idempotence** (réappliquer = no-op).
+- Jumeau front `front/web/lib/projectScope.test.ts` (Vitest + fast-check) — l'id du seed == le pin Go ; `scopedSelect` toujours `$1` ; ensemble clos identique. **6/6.**
+
+### Surfaces
+
+- **MCP** `back/mcp/projectscope` (ADR 0009, un op = un outil) : `scope_tables`, `scope_select_sql`, `scope_seed`, `scope_migration_sql` — projections pures, zéro écriture.
+- **Route** `/project-scope` — action-capable : le bouton « Construire la lecture scopée » **exécute** `ScopedSelect` ; thémée (ADR 0010), bilingue (ADR 0011, parité 3272/3272) ; e2e Playwright **5/5**.
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Expand-contract plutôt qu'un `ALTER` brutal** : l'EXPAND laisse l'ancien code écrire pendant la transition ; le BACKFILL puis le CONTRACT verrouillent l'invariant sans fenêtre de casse. C'est la discipline `migrate` (ADR 0003) appliquée au truth-store lui-même.
+- **Un ensemble clos comme source unique** : la migration et la lecture lisent la **même** liste `ScopedTables()`. Ajouter une table scopée = ajouter une entrée, jamais un one-off dans le SQL — la dérive Go↔SQL est rendue impossible (et un test l'assure).
+- **Le seed adressé par contenu** : `__system__` n'est pas un id arbitraire ; c'est l'empreinte de son corps. Le pin SQL↔Go interdit qu'un copier-coller introduise une divergence silencieuse.
+- **`project_id` est une colonne de scope, pas une porte** : le mur ne change pas. La RLS keyée identité (S55) viendra **par-dessus** cette colonne — défense en profondeur, deux couches indépendantes.
+
+## Méta-méta — la garantie de niveau 3
+
+S54 est gouverné par les **trois disciplines inviolables** :
+
+1. **Mirror-first** : la property + le roundtrip Testcontainers sont écrits avant le code ; ils sont le `/goal`. « Done » est **calculé** (zéro perte ∧ FK résolvent ∧ isolation ∧ émission reproductible), jamais déclaré.
+2. **Le mur tient** : la migration ré-asserte `SELECT`-only sur `kernel`/`mirrors` ; un test de grants le prouve. Aucune écriture de vérité n'est ajoutée — `project_id` n'ouvre aucune porte.
+3. **Determinism-first** : tout ce qui décide (seed, ensemble scopé, requête scopée, émission de migration) est une **fonction pure faisant autorité**, doublée d'un **miroir de reproductibilité** (même entrée → même sortie). Aucun LLM n'entre — il n'y a rien d'irréductiblement génératif ici.
+
+La conséquence : un truth-store qui devient multi-tenant **sans jamais perdre une ligne** ni affaiblir le mur, et dont l'isolation projet-à-projet est **dans la requête**, prouvée contre un Postgres réel.

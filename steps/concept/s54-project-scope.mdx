@@ -1,0 +1,50 @@
+---
+title: "S54 · Le truth-store devient multi-tenant — chaque vérité porte son projet"
+description: "S54 fait passer le truth-store d'AIDOS d'un graphe singleton indivis à un truth-store multi-tenant : une migration expand-contract ajoute un project_id (FK) à CHAQUE table de vérité et dérivée — kernel·mirrors·ideas·changesets·dag·brain·context. Le graphe préexistant (la démo Order) est rapatrié SANS PERTE (append-only) dans un projet seed __system__ content-adressé. Toute lecture est scopée (WHERE project_id = $1) : une requête du projet A ne renvoie JAMAIS une ligne du projet B. La migration est reproductible ; le mur reste inchangé (project_id est une colonne de scope, pas une porte d'écriture)."
+keywords: ["aidos", "krd", "S54", "project_id", "scope projet", "multi-tenant", "truth-store", "migration", "expand-contract", "Atlas", "backfill", "zéro perte", "append-only", "__system__", "seed", "démo Order", "FK", "clé étrangère", "ScopedSelect", "WHERE project_id", "isolation", "lecture croisée", "graphes disjoints", "le mur", "RLS", "S53", "S55", "kernel", "mirrors", "ideas", "changesets", "dag", "brain", "context", "déterminisme", "reproductible"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S54](/steps/internals/s54-project-scope).</Note>
+
+## En une phrase
+
+S53 a livré le **projet** comme concept ; **S54 le rend réel dans la base** : il fait traverser un `project_id` à **chaque vérité** du truth-store et **rapatrie** le graphe qui existait déjà — la démo Order — dans un projet d'accueil nommé `__system__`, **sans rien perdre**.
+
+## Le problème que S54 résout
+
+Avant S54, AIDOS écrivait toute sa vérité dans **un seul graphe global** : les tables `kernel`, `mirrors`, `ideas`, `changesets`, `dag`, `brain`, `context` n'avaient **aucune** colonne qui dise « à quel projet appartient cette ligne ». S53 a introduit l'**enregistrement** projet, mais les vérités, elles, ne savaient toujours pas se rattacher à un projet.
+
+S54 pose la **colonne de rattachement** : un `project_id` (une clé étrangère vers `projects.project`) sur **chacune** de ces neuf tables. C'est la fondation concrète du multi-tenant — sans elle, deux apps construites avec AIDOS partageraient encore le même tas de vérités.
+
+## Ce que vous obtenez
+
+<CardGroup cols={2}>
+  <Card title="Chaque vérité porte son projet" icon="key">
+    `kernel·mirrors·ideas·changesets·dag·brain·context` reçoivent toutes un `project_id`. Une vérité sait désormais à quelle app elle appartient.
+  </Card>
+  <Card title="Zéro perte sur l'existant" icon="shield-check">
+    La migration est **append-only** : elle n'efface rien, ne réécrit aucun corps. Le nombre de lignes avant est exactement le nombre de lignes après.
+  </Card>
+  <Card title="Le projet seed __system__" icon="box-archive">
+    Le graphe préexistant (la démo Order) rejoint un projet d'accueil `__system__`, adressé par contenu comme tout projet — il ne reste jamais « orphelin ».
+  </Card>
+  <Card title="Lecture scopée garantie" icon="filter">
+    Toute lecture porte `WHERE project_id = $1`. Une requête du projet A ne renvoie **jamais** une ligne du projet B : l'isolation est dans la requête, pas dans la confiance.
+  </Card>
+</CardGroup>
+
+## La promesse d'isolation
+
+Le cœur de S54 est une garantie simple et vérifiable : **une requête scopée au projet A ne peut pas voir une ligne du projet B**. Cette garantie n'est pas une politesse — elle est mécanique. Le constructeur de lecture (`ScopedSelect`) ajoute **toujours** la clause de scope ; il **refuse** une table qui n'est pas dans l'ensemble scopé plutôt que d'émettre une requête « ouverte ». L'isolation est donc impossible à oublier.
+
+<Note>S54 pose la **colonne** et la **FK** ; la seconde couche du mur — la RLS Postgres keyée sur l'identité propagée — arrive en **S55**, de sorte qu'une réclamation forgée à la passerelle ne puisse toujours rien lire d'un autre projet.</Note>
+
+## Où le voir dans le Workbench
+
+Le panneau **Scope projet** (`/project-scope`) montre le projet seed `__system__` (avec son empreinte de contenu), les neuf tables scopées et leurs clés/index, et un bouton **« Construire la lecture scopée »** : choisissez une table, cliquez, et vous voyez la requête déterministe `WHERE project_id = $1` qu'AIDOS utiliserait. Une table hors de l'ensemble est refusée — jamais de requête non scopée fabriquée.
+
+## Ce que S54 ne fait pas (volontairement)
+
+- Il **n'efface** rien (la suppression dure GDPR est S116).
+- Il **n'affaiblit pas le mur** : `project_id` est une colonne de **scope**, pas une porte d'écriture ; l'agent garde un accès **lecture seule** sur `kernel`/`mirrors`.
+- Il **ne pose pas encore la RLS** keyée sur l'identité — c'est S55.

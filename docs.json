@@ -172,6 +172,8 @@
               "steps/internals/s52-couche-agent",
               "steps/concept/s53-projects",
               "steps/internals/s53-projects",
+              "steps/concept/s54-project-scope",
+              "steps/internals/s54-project-scope",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",
