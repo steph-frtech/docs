@@ -1,0 +1,66 @@
+---
+title: "S57 (interne) · Le switcher project_id — cookie AIDOS_PROJECT, résolveur pur, isolation __system__"
+description: "Journal de build S57 : le shell projet Workbench (route /projets en mode vierge-ou-modèle) + le project switcher dans WorkbenchHeader. Cœur déterministe lib/activeProject.ts (resolveActiveProjectId : cookie + projets → id actif, pure), miroir de reproductibilité Vitest+fast-check 14/14. Lecture serveur lib/activeProjectServer.ts via le cookie AIDOS_PROJECT (sibling de NEXT_LOCALE). ProjectSwitcher self-fetch (Server Action) car WorkbenchHeader est client et rendu par 48 routes. Action duplicateProjectAction (fork = racine isolée, S56). e2e tests/e2e/project-switcher.spec.ts 5/5. i18n parité 3337/3337. Trois couches : Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "S57", "project switcher", "activeProject", "resolveActiveProjectId", "ACTIVE_PROJECT_COOKIE", "AIDOS_PROJECT", "NEXT_LOCALE", "activeProjectServer", "switcherContext", "ProjectSwitcher", "duplicateProjectAction", "selectableProjects", "__system__", "isolation", "fonction pure", "miroir de reproductibilité", "fast-check", "Vitest", "Playwright", "ui-completeness", "le mur", "below the line", "ADR 0010", "ADR 0011", "déterminisme"]
+---
+
+<Note>Côté interne — le journal de build. Pour la vue produit, voir [Pour les futurs utilisateurs → S57](/steps/concept/s57-project-switcher).</Note>
+
+## Implémentation
+
+### Ce qui a été construit
+
+| Artefact | Rôle |
+|---|---|
+| `front/web/lib/activeProject.ts` | Cœur **déterministe** : `resolveActiveProjectId(cookie, projects)` (résolveur pur), `selectableProjects` (filtre `active`), `isSystemProject`, `activeProjectLabel`, la constante `ACTIVE_PROJECT_COOKIE = "AIDOS_PROJECT"`. |
+| `front/web/lib/activeProject.test.ts` | **Miroir de reproductibilité** (Vitest + fast-check) — **14/14** : même entrée → même sortie ; `__system__` jamais sélectionné silencieusement ; archivé/supprimé jamais switchable. |
+| `front/web/lib/activeProjectServer.ts` | Lecture **serveur** : lit le cookie `AIDOS_PROJECT` + le snapshot live, résout l'id actif via le résolveur pur. |
+| `front/web/components/projectSwitcherAction.ts` | Server Action `switcherContext()` — le switcher self-fetch (read-only). |
+| `front/web/components/ProjectSwitcher.tsx` | Le menu déroulant : écrit le cookie côté client (`document.cookie`, comme `LanguageSwitcher`) + `router.refresh()`. Rendu dans `WorkbenchHeader` (sidebar desktop + barre mobile). |
+| `front/web/app/projects/actions.ts` | + `duplicateProjectAction` — fork = nouveau projet content-adressé + sa propre racine de DAG (S56), ne partageant aucun nœud source. |
+| `front/web/app/projects/ProjectsPanel.tsx` | + le toggle **vierge / depuis-un-modèle** + le sélecteur de projet source. |
+| `tests/e2e/project-switcher.spec.ts` | e2e **5/5** : blank-vs-template, create, duplicate, switch (cookie épinglé, persiste au reload), `__system__` jamais actif par défaut. |
+| `messages/{fr,en}.json` | namespace `projectSwitcher` + clés `projects` (mode/source/duplicate). Parité **3337/3337**. |
+
+### Le résolveur — la décision est du code, pas un prompt
+
+```ts
+export function resolveActiveProjectId(
+  cookieValue: string | undefined,
+  projects: SwitchableProject[],
+): string | null {
+  const selectable = selectableProjects(projects);     // active seulement
+  if (cookieValue) {
+    const hit = selectable.find((p) => p.id === cookieValue);
+    if (hit) return hit.id;                              // 1. cookie explicite gagne
+  }
+  const nonSystem = selectable.find((p) => p.slug !== SYSTEM_SLUG);
+  if (nonSystem) return nonSystem.id;                   // 2. jamais __system__ par défaut
+  return null;                                          // 3. rien de sélectionnable
+}
+```
+
+La règle 1 est la **seule** porte par laquelle `__system__` devient actif (un match de cookie exact, explicite). La règle 2 garantit l'isolation : sans cookie, le seed démo n'est **jamais** préféré.
+
+### Sensors
+
+- `tsc --noEmit` : clean.
+- Biome : clean (un `role="group"` corrigé en `<fieldset>`).
+- Vitest mirror : 14/14. Playwright S57 : 5/5. Playwright S53 (non-régression) : 5/5.
+- i18n parité : 3337/3337 (9 clés ajoutées par locale).
+
+## Méta
+
+**Pourquoi un cookie, pas une route ?** ADR 0011 a tranché pour la langue : le contexte transversal (langue, et maintenant projet) vit dans un cookie *cookie-mode*, **sans préfixe d'URL**, pour que les 48 routes du Workbench restent intactes. Le projet actif est la **même nature** de contexte transversal que la langue — il méritait le **même mécanisme**. `AIDOS_PROJECT` est littéralement le frère de `NEXT_LOCALE`.
+
+**Pourquoi le switcher self-fetch ?** `WorkbenchHeader` est un Client Component rendu par 48 pages. Threader le contexte projet en props à travers 48 pages serait fragile et bruyant. Le switcher appelle donc une **Server Action** (`switcherContext`) au montage : la résolution déterministe tourne **côté serveur** (là où le cookie et la base sont), le client n'affiche que le verdict. Le mur est respecté : c'est une lecture, l'écriture du cookie reste un geste client local.
+
+**Pourquoi le résolveur est-il pur (determinism-first) ?** « Quel projet est actif ? » est exactement le genre de décision que CLAUDE.md §6 exige en **code faisant autorité** : un mapping clos (cookie + liste → id), reproductible, jamais un jugement LLM. Le miroir fast-check pin la reproductibilité ET l'invariant d'isolation (`__system__` jamais préféré) — un anti-faux-positif sur la frontière exacte du seed.
+
+## Méta-méta
+
+**La frontière du seed est un invariant, pas une politesse.** L'isolation de `__system__` n'est pas « on évite de l'afficher » — c'est une **propriété prouvée** (`fc.property` : si `__system__` est résolu sans cookie, alors aucun autre projet sélectionnable n'existe). C'est la forme KRD de l'honnêteté : la garantie est **falsifiable** et **testée à la frontière**, pas affirmée en prose.
+
+**Le switch est une lecture, structurellement.** Le geste le plus dangereux d'un cockpit multi-tenant serait qu'un changement de projet écrive quelque part. Ici, par construction, le switch ne fait que poser un cookie de **scope de lecture** : il se branche sur `projectScope.scopedSelect` de S54 (toujours `WHERE project_id = $1`). Le mur (couche hook + couche RLS de S55) reste l'autorité ; le switcher ne le contourne jamais, il ne fait que choisir *quel* projet la RLS laissera lire. La sécurité ne dépend donc **pas** de la correction du switcher — elle est doublée au niveau Postgres.
+
+**Le cookie comme primitive transversale réutilisable.** S57 généralise le pattern « contexte transversal = cookie cookie-mode + résolveur pur côté serveur » au-delà de la langue. La même forme servira les futurs contextes transversaux du cockpit (environnement, cellule active en EPIC 11) : un cookie nommé, un résolveur pur déterministe avec un miroir de reproductibilité, un self-fetch côté header. Une dent ajoutée au cliquet, jamais retirée.

@@ -1,0 +1,37 @@
+---
+title: "S57 · Le shell projet — liste, création vierge-ou-modèle, et le switcher qui épingle l'app active"
+description: "S57 livre le shell multi-tenant côté Workbench (EPIC 1 de l'app-builder). La route /projets liste vos projets, les crée (vierge OU depuis un modèle = duplication d'une racine isolée, S56), les archive/restaure/supprime (doux, append-only). Un project switcher dans la barre du Workbench ÉPINGLE le project_id actif dans un cookie AIDOS_PROJECT — exactement comme NEXT_LOCALE épingle la langue : aucun préfixe d'URL, donc les 48 routes existantes restent intactes — puis re-scope chaque panel à ce projet. La résolution du projet actif est une FONCTION PURE déterministe ; le projet seed __system__ (la démo Order) n'est JAMAIS sélectionné silencieusement : il reste isolé. Le switch ne change que le SCOPE DE LECTURE (S54) ; il n'écrit aucune vérité."
+keywords: ["aidos", "krd", "project switcher", "switcher de projet", "shell projet", "/projets", "project_id actif", "cookie AIDOS_PROJECT", "NEXT_LOCALE", "vierge vs modèle", "blank vs template", "duplication", "racine isolée", "re-scoping", "isolation", "__system__", "seed isolé", "fonction pure déterministe", "scope de lecture", "le mur", "below the line", "S53", "S54", "S56", "ADR 0011", "ADR 0010", "EPIC 1", "déterminisme", "ui-completeness"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S57](/steps/internals/s57-project-switcher).</Note>
+
+## En une phrase
+
+S57 livre le **shell projet** : l'écran où vous **listez**, **créez** (vierge ou depuis un modèle) et gérez vos projets, **plus** le **switcher** dans la barre du Workbench qui **épingle l'app active** (un cookie, comme la langue) et **re-scope tout le cockpit** à ce projet — sans jamais sélectionner silencieusement la démo `__system__`.
+
+## Le problème que ça résout
+
+S53 a créé le projet, S54 a fait descendre `project_id` sur toute la vérité, S55 a posé le mur project-aware, S56 a donné à chaque projet sa racine de DAG isolée. Mais **côté écran**, rien ne disait *« sur quel projet suis-je en train de travailler ? »*. Sans un sélecteur d'app actif, chaque panel du Workbench ne saurait pas quel projet lire. S57 est cette **boussole** : un projet actif, épinglé, partagé par tous les panels.
+
+## Ce que vous obtenez
+
+- **La route `/projets`** : la liste de vos projets (nom, slug, cycle de vie, racine de DAG), et un **flux de création à deux modes** :
+  - **Vierge** — un projet vide, tout neuf.
+  - **Depuis un modèle** — vous choisissez un projet source et le **dupliquez** : une **racine de DAG isolée** (S56), ne partageant **aucun** nœud avec la source.
+  - Plus **archiver / restaurer / supprimer (en doux)** chaque projet, toujours append-only.
+- **Le switcher de projet** dans la barre latérale (et la barre mobile) du Workbench : un menu déroulant qui **épingle** le projet actif. Le choisir **écrit un cookie** `AIDOS_PROJECT` et **rafraîchit** : chaque panel relit alors son scope sur ce projet.
+
+## Les garanties
+
+- **Comme la langue, pas comme l'URL.** Le projet actif vit dans un **cookie** (`AIDOS_PROJECT`), exactement comme la langue vit dans `NEXT_LOCALE` (ADR 0011). **Aucun préfixe d'URL** : vos 48 routes du Workbench restent inchangées.
+- **La démo `__system__` reste isolée.** Le projet seed (la démo Order de S54) n'est **jamais** choisi par défaut : il ne devient actif que si vous le sélectionnez **explicitement**. Arriver sans cookie (ou avec un cookie périmé/forgé) vous place toujours sur un projet **non-système**.
+- **Résolution déterministe.** « Quel projet est actif, vu le cookie et la liste des projets ? » est une **fonction pure** : même entrée → même sortie. Un cookie qui nomme un projet archivé ou inexistant retombe proprement sur le premier projet non-système.
+- **Le switch ne touche pas au mur.** Sélectionner un projet ne change que le **scope de lecture** (S54) ; **aucune vérité** (kernel/mirrors/fitness) n'est jamais écrite depuis l'écran.
+- **Tout par écran (ui-completeness).** Créer, dupliquer, archiver, restaurer, supprimer, switcher — chaque opération a un **bouton** atteignable **et exécutable**, prouvé par un e2e Playwright.
+
+## Ce qui vient ensuite
+
+- **S58** : la passerelle MCP-over-HTTP — le switcher et les panels piloteront alors le vrai moteur Go par-dessus le project_id actif.
+- **S59** : le SDK client typé + la bascule des panels read-only vers des lectures live project-scopées (sur le projet que ce switcher épingle).
+- **S62** : un propriétaire réel (un utilisateur) derrière les projets, l'adhésion filtrant la liste offerte par le switcher.
