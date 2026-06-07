@@ -1,0 +1,72 @@
+---
+title: "S61 · Authentification + sessions + modèle compte + identité deux couches — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S61 : le cœur d'authentification pur back/runtime/authn (Authenticate(principal, disposition) → UNAUTHENTICATED si principal anonyme, pour TOUTE disposition, en amont du routage ; NewUser content-addressé pour accounts.users ; Principal.GUCs → app.identity de la RLS), la composition back/runtime/gateway/authgate.go (AuthenticatedRoute = auth couche 0 PUIS Route, identité vérifiée propagée jamais celle du body), la migration accounts_baseline.sql (schéma accounts hors Kernel : users id/email/identity_provider content-addressé + sessions, GRANTs below-the-line, mur réaffirmé), les jumeaux front lib/authn.ts + lib/auth-gate.ts, les miroirs (rapid back, fixture back, Godog+Testcontainers login→session→scopé + valid-identity-no-RLS-row, Vitest+fast-check front, Playwright /auth). Réutilise S55 projectwall+RLS, S58 gateway/registre, records.Hash. Det. : authentification + propagation pures, zéro LLM ; vérification JWT déléguée (primitive crypto irréductible)."
+keywords: ["aidos", "krd", "S61", "authn", "Authenticate", "Principal", "UNAUTHENTICATED", "Disposition", "NewUser", "accounts", "users", "sessions", "identity_provider", "GUCs", "app.identity", "AuthenticatedRoute", "authgate", "gateway", "projectwall", "RLS", "deux couches", "Testcontainers", "Godog", "rapid", "fast-check", "Playwright", "records.Hash", "content-addressé", "le mur", "hors Kernel", "S55", "S58", "déterminisme", "JWT", "Auth.js", "OIDC"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Le concept est [ici](/steps/concept/s61-auth-sessions).</Note>
+
+## En une phrase
+
+S61 ajoute une **couche 0 d'authentification** (`back/runtime/authn`) en amont du routeur S58 : un appel anonyme vers une écriture-vérité est refusé `UNAUTHENTICATED` **avant** tout accès aux données, l'identité vérifiée est propagée dans le scope de la passerelle **et** dans le GUC `app.identity` de la RLS Postgres (S55) — **deux couches indépendantes** — le tout déterministe (la vérification du JWT, primitive crypto irréductible, est déléguée à un seam ; la décision d'autorisation est pure), avec le modèle compte `accounts.users` content-addressé **hors du Kernel**.
+
+## Implémentation
+
+### Le cœur pur `back/runtime/authn`
+
+- `Principal{Identity, Email, Provider}` est le caller **résolu et vérifié** (la sortie d'une session/JWT validés). `Identity` est l'**unique** valeur qui propage aux deux murs. `IsAnonymous()` = sujet vide.
+- `Authenticate(p Principal, _ Disposition) Decision` est **pur et total** : un principal anonyme est refusé `UNAUTHENTICATED` pour **toute** disposition (`truth_write` **ou** `below_line`) — **pas de porte anonyme** ; un principal résolu est authentifié et renvoyé pour que les murs scope/zone continuent. Le refus précède tout — il n'atteint aucune donnée (le critère property).
+- `NewUser(email, provider) (User, error)` construit la ligne `accounts.users` **content-addressée** : `id = records.Hash(Canonicalize({kind:"user", email, identity_provider}))` (le même hash que les projets S53) — **idempotent**, et un changement écrit une nouvelle ligne. `User.AsPrincipal()` projette vers le `Principal`.
+- `Principal.GUCs() SessionGUCs` projette vers la valeur de `SET LOCAL app.identity` que la RLS keye (couche 2). Un principal anonyme rend une identité **vide** → la RLS voit zéro ligne (fail-closed).
+
+`authn` est un **paquet feuille** : la disposition est re-déclarée (pas importée de `gateway`) pour que `gateway` dépende de `authn`, jamais l'inverse (pas de cycle).
+
+### La composition `back/runtime/gateway/authgate.go`
+
+`(*Registry).AuthenticatedRoute(p Principal, call Call) RouteDecision` enchaîne **auth (couche 0) PUIS `Route` (couche 1)**. L'ordre **est** la défense : un anonyme est refusé `UNAUTHENTICATED` avant même le `Lookup` du tool (`Tool` nil, aucune donnée). Sinon l'identité **vérifiée** est forcée dans `call.Scope.Identity` (le body de la requête ne la fixe jamais — la passerelle fait confiance à la session vérifiée, pas au corps), puis `Route` applique scope-puis-zone. `OutcomeUnauthenticated` + `CodeUnauthenticated` rejoignent la surface de refus de la passerelle.
+
+### La migration `back/migrations/accounts_baseline.sql`
+
+Le schéma `accounts` est la **zone auth** du truth-store, **hors Kernel** :
+- `accounts.users(id, email, identity_provider, body, version, superseded_by, created_at)` — content-addressé (`CHECK id = version`), email non vide, index `(email, identity_provider)`.
+- `accounts.sessions(token_id, user_id → users.id, expires_at, revoked_at)` — append-only ; le JWT lui-même n'est pas stocké (la passerelle le vérifie).
+- **GRANTs** : `aidos_agent` lit/écrit `accounts` below-the-line (ouvrir une session), **soft-delete only** (pas de `DELETE`/`TRUNCATE` — le hard delete GDPR est S116).
+- **Le mur réaffirmé** : `REVOKE` sur `kernel.truth` / `mirrors.mirror` (skip-if-missing) — la migration ne **peut pas** affaiblir la clôture des zones de vérité.
+
+Expand-only, forward-only, idempotente (re-run = no-op).
+
+### Les jumeaux front
+
+- `lib/authn.ts` — le jumeau déterministe de `authn` : `authenticate`, `isAnonymous`, `gucs`, `CODE_UNAUTHENTICATED`, `AUTH_PROVIDERS` (l'ensemble clos GitHub/Google rendu au login).
+- `lib/auth-gate.ts` — le jumeau de `authgate.go` : `authenticatedRoute(principal, tool, scope, target)` (auth puis `route`, identité vérifiée propagée) + `refuseUnauthenticated(project, tool)` qui **exécute** l'appel anonyme et rend le vrai `UNAUTHENTICATED` (le critère property côté écran).
+- `/auth` (`page.tsx` + `AuthPanel.tsx` + `actions.ts`) : connexion (provider + email → `signInAction`), carte de session (identité/email/fournisseur), et **« Tenter sans authentification »** (`attemptUnauthenticatedAction`) → toast `UNAUTHENTICATED`. Namespace i18n `auth` (FR+EN), parité **3441/3441** ; nav : entrée `/auth` dans le groupe `start`.
+
+### Les miroirs
+
+- **Invariant (rapid, back)** `authn_property_test.go` : ∀ principal anonyme → `UNAUTHENTICATED` pour toute disposition, jamais de principal fuité ; ∀ résolu → authentifié, identité préservée ; `Authenticate` déterministe ; `NewUser` content-addressé/idempotent (emails distincts ⇒ ids distincts) ; `GUCs` fail-closed.
+- **Fixture (back, paquet gateway)** `authgate_fixture_test.go` : écriture-vérité anonyme → `UNAUTHENTICATED` (aucun tool) ; lecture below-line anonyme → refusée aussi (pas de porte anonyme) ; below-line authentifié → routé ; écriture-vérité authentifiée → encore refusée par la **zone** (`GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET`) ; **mauvais projet** authentifié → refusé par le **scope** (auth ≠ authz) ; la passerelle propage l'identité **vérifiée**, pas celle du body.
+- **Godog + Testcontainers (live Postgres)** `accounts_rls_roundtrip_test.go` : **login → session → accès projet scopé** (un utilisateur OIDC vérifié, sa ligne `accounts.users`, sa session, `app.identity` + `app.project` keyent la RLS → il lit sa ligne) ; **deux couches** : une identité **valide** à la passerelle mais **sans** la ligne RLS correspondante (scopée sur un projet où elle n'a aucune ligne) lit **zéro** — la RLS est une couche seconde **indépendante**, pas un miroir de la passerelle.
+- **Reproductibilité (Vitest+fast-check, front)** `lib/authn.test.ts` + `lib/auth-gate.test.ts` : les mêmes propriétés que rapid, plus la composition (anonyme → `UNAUTHENTICATED` sans tool ; below-line authentifié routé sous l'identité vérifiée ; zone/scope refusés ; déterminisme). Suite front **1011/1011**.
+- **e2e (Playwright)** `tests/e2e/auth.spec.ts` — **5/5** : login → session → identité propagée ; **le critère** : un appel anonyme vers `kernel_write` → toast `UNAUTHENTICATED` + `howToFix[]` ; un autre endpoint (`mirror_write`) → même code ; pas de porte anonyme (sujet vide refusé) ; la nav expose `/auth`.
+
+### Réutilisation (jamais réinventé)
+
+Le **classifieur de scope** (`projectwall.Classify`) et la **RLS keyée identité** (`project_rls_baseline.sql`, GUC `app.identity`) sont ceux de **S55** — S55 a livré le mécanisme RLS, S61 branche la **vraie** identité dessus. Le **routeur + registre fermé** sont ceux de **S58** (`gateway`). Le **content-address** (`records.Hash`/`Canonicalize`) est celui de S02/S53. S61 n'ajoute que la couche 0 (`authn`), sa composition (`authgate`), et la zone `accounts`.
+
+## Méta
+
+**Pourquoi une couche 0 séparée et pas un check dans `Route` ?** Parce que l'authentification répond à une question **différente** du routage : *qui appelle ?* avant *que peut-il faire ?*. La garder en amont, dans un paquet feuille, rend l'ordre des défenses **explicite** (auth → scope → zone) et permet de prouver, par fixture, qu'un anonyme est refusé **sans même chercher le tool** — donc sans toucher la moindre donnée. Mêler les deux aurait flouté le critère « n'atteint aucune donnée ».
+
+**Pourquoi déléguer la vérification du JWT ?** Vérifier une signature cryptographique est une primitive **irréductible** (et fournie par Auth.js/une lib OIDC). La déterminisme-first ne demande pas de réécrire la crypto — elle demande que **la décision d'autorisation** au-dessus soit pure. `Authenticate` reçoit un `Principal` **déjà** résolu (le verdict de la vérification) et décide de façon pure ; le seam crypto est isolé au plus petit point, câblé par le serveur HTTP.
+
+**Pourquoi la passerelle écrase-t-elle l'identité du body ?** Parce que faire confiance à une identité fournie par la requête **serait** la faille forgée que S55 nomme. `AuthenticatedRoute` force `Scope.Identity = principal.Identity` (la session vérifiée) : le body peut prétendre ce qu'il veut, seul le sujet vérifié compte — et c'est **ce** sujet qui descend à la RLS.
+
+**Pourquoi `accounts` hors du Kernel ?** Un compte n'est pas une vérité du **produit** (un comportement, un contrat, un invariant) ; c'est une donnée d'exploitation. La mettre dans le Kernel l'aurait soumise au cliquet et au mur des vérités — un non-sens. Elle a sa zone below-the-line, et le mur sur Kernel/miroirs/fitness est réaffirmé inchangé par la migration elle-même.
+
+## Méta-méta
+
+**Determinism-first (CLAUDE.md §6/§8).** Tout le jugement de S61 est **code pur faisant autorité** : `Authenticate` (un prédicat sur le sujet), `NewUser` (un hash content-addressé), `GUCs` (une projection), `AuthenticatedRoute` (une composition pure). Aucun LLM n'entre dans une décision d'authentification — il n'aurait rien à y faire qu'une fonction ne fasse mieux et de façon **pinnée** par les miroirs property (rapid back + fast-check front). Le seul point irréductiblement non-pur (la vérification de signature JWT) est délégué, isolé, et son verdict re-vérifié en aval (le `Principal` résolu re-traverse `IsAnonymous`). « Même entrée → même décision » est prouvé.
+
+**Le mur tient, et deux fois (CLAUDE.md §2).** S61 **n'écrit aucune vérité** : `accounts` est hors Kernel, et le mur sur les zones de vérité est réaffirmé par la migration. Mieux : S61 **renforce** la défense en profondeur — l'identité réelle descend jusqu'à la RLS, si bien qu'un bug de passerelle ne fait fuiter ni l'identité ni l'isolation (le test « identité valide mais pas de ligne RLS → zéro » le prouve sur Postgres vivant). La méta-règle d'accrétion (§5) tient : S61 **ajoute** une couche 0 (UNAUTHENTICATED) et une zone (`accounts`), il ne retire aucun garde-fou.
+
+**La complétude.** Chaque capacité porte son miroir vivant : le cœur a son property test, la composition sa fixture, le round-trip deux couches son Godog+Testcontainers live, l'écran son e2e — pas de capacité headless, pas de monstre. L'identité ainsi posée est la **fondation** des épics de gouvernance (autorité S63, porte d'approbation S66/S85, équipe S110, collaboration S113, facturation S114) : tous liront *qui agit* par cette même couche, deux fois enforcée.

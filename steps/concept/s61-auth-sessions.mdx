@@ -1,0 +1,61 @@
+---
+title: "S61 · Qui êtes-vous ? (authentification, sessions, identité à deux couches)"
+description: "S61 donne une identité à AIDOS : connexion OAuth/OIDC + sessions (Auth.js côté Workbench, JWT vérifié par la passerelle) et un modèle compte (accounts.users : id, email, fournisseur d'identité). L'identité résolue se propage dans CHAQUE appel à la passerelle ET descend jusqu'à la RLS Postgres (S55) — jamais gateway-only. Un appel non authentifié à une écriture-vérité est refusé UNAUTHENTICATED et n'atteint AUCUNE donnée projet. L'auth vit hors du Kernel."
+keywords: ["aidos", "krd", "S61", "authentification", "auth", "OAuth", "OIDC", "Auth.js", "next-auth", "session", "JWT", "compte", "accounts", "users", "email", "identity_provider", "fournisseur d'identité", "identité", "propagation", "deux couches", "RLS", "Postgres", "UNAUTHENTICATED", "non authentifié", "écriture-vérité", "le mur", "passerelle", "gateway", "S55", "défense en profondeur", "déterminisme"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S61](/steps/internals/s61-auth-sessions).</Note>
+
+## En une phrase
+
+S60 a rendu la cabine vivante. **S61 répond à une question qui manquait : *qui êtes-vous ?*** — il ajoute la connexion (OAuth/OIDC), les sessions, un modèle de compte, et surtout il fait **descendre votre identité jusqu'au fond**, pas seulement à la porte d'entrée.
+
+## Le problème que S61 résout
+
+Jusqu'ici, AIDOS savait isoler les projets (S55), mais l'identité du caller était un placeholder. Or un système multi-locataire a besoin de savoir **qui** agit : pour ouvrir les bons projets, tracer qui a voulu quoi, et plus tard gouverner les approbations.
+
+Le piège classique : authentifier **seulement à la passerelle**. Si l'auth ne vit qu'à la porte, un bug de passerelle ouvre tout — identité ET isolation tombent d'un coup. S61 refuse ce raccourci.
+
+## Ce que S61 apporte
+
+<CardGroup cols={2}>
+  <Card title="Connexion OAuth/OIDC" icon="right-to-bracket">
+    Vous vous connectez via un fournisseur (GitHub, Google…). Auth.js mène la danse OIDC côté Workbench ; la passerelle **vérifie le JWT** à chaque appel.
+  </Card>
+  <Card title="Un modèle de compte" icon="id-card">
+    Chaque utilisateur est une ligne <code>accounts.users</code> : un id (l'adresse de contenu), un email vérifié, un fournisseur d'identité. Simple, append-only, **hors du Kernel**.
+  </Card>
+  <Card title="L'identité descend jusqu'au fond" icon="layer-group">
+    La même identité résolue est utilisée par la passerelle (couche 1) **ET** par la RLS Postgres (couche 2). Une seule valeur, deux murs indépendants.
+  </Card>
+  <Card title="Pas de porte anonyme" icon="ban">
+    Un appel sans session valide vers une écriture-vérité est refusé <code>UNAUTHENTICATED</code> **avant** tout routage — il n'atteint **aucune** donnée projet.
+  </Card>
+</CardGroup>
+
+## Pourquoi « deux couches » ?
+
+Imaginez deux serrures sur la même porte, posées par deux serruriers différents. Forcer l'une n'ouvre jamais l'autre.
+
+- **Couche 1 — la passerelle.** Elle vérifie votre JWT et propage votre identité dans la décision de routage.
+- **Couche 2 — la RLS Postgres.** La base elle-même ne montre que les lignes de votre projet, **keyée sur la même identité** (un GUC `app.identity`). Même si la passerelle avait un bug, la base ne livrerait rien hors de votre périmètre.
+
+Le test décisif : une identité **valide à la passerelle** mais **sans la ligne correspondante** côté base ne lit **rien**. L'authentification ne suffit pas à voir des données — c'est bien deux couches, pas un miroir l'une de l'autre.
+
+## L'auth vit hors du Kernel
+
+Le `Kernel` est le coffre de la vérité (les comportements, les contrats, les invariants). Votre compte n'est **pas** une vérité du produit : c'est une donnée d'exploitation. S61 lui donne sa **propre zone** (`accounts`), en-dessous du mur — le mur sur le Kernel/miroirs/fitness ne change pas d'un iota.
+
+## Ce que ça vous apporte
+
+- Vous vous **connectez** et AIDOS sait qui vous êtes — pour ouvrir vos projets et tracer vos actions.
+- Votre identité est **enforcée deux fois** : un bug à un endroit ne fait pas fuiter vos données.
+- Un appel non authentifié est **refusé tôt et clairement** (`UNAUTHENTICATED`), sans jamais toucher la moindre donnée.
+
+## Tout se fait par écran
+
+Le panneau **« Authentification »** est actionnable. Vous choisissez un fournisseur et vous **vous connectez** : votre identité résolue s'affiche (l'unique valeur qui descend aux deux murs). Un second contrôle **tente un appel non authentifié** vers une écriture-vérité : il est refusé `UNAUTHENTICATED` et son `BlockReason` réel surgit en toast — la preuve, à l'écran, qu'un appel anonyme n'atteint aucune donnée. Un test de bout en bout (Playwright) épingle ce critère.
+
+## La suite
+
+Une fois l'identité réelle en place, les épics suivants y branchent l'**autorité** (qui peut approuver quoi), la **porte d'approbation** d'équipe et la **collaboration** — tous ont besoin de savoir, de façon sûre et deux fois enforcée, *qui agit*.
