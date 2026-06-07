@@ -1,0 +1,55 @@
+---
+title: "S60 · Streaming live (red-set / RedWorkQueue / senseurs) + panel /blocks — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S60 : le stream du goal ouvert front/web/lib/goal-stream (décodeur pur goalStreamDecoder = jamais double-typé, streamGoal via readVia sur le tool below-the-line changeset_status du registre fermé S58, fallback démo déterministe demoGoalStream réutilisant ORDER_DISCOUNT_GOAL.redSet, source live|démo), le catalogue de refus front/web/lib/blocks (refuseTruthWrite via lib/gateway.route, CATALOG_CODES = codes déclarés du mur/gateway/goal, jamais inventés), les deux miroirs de reproductibilité (goal-stream.test.ts + blocks.test.ts, Vitest+fast-check 17/17), les panneaux /goal-stream et /blocks (action-capables, badge source, toast inline), l'e2e tests/e2e/blocks.spec.ts (5 cas dont le critère : une écriture-vérité refusée surface son BlockReason). Réutilise S59 SDK, S58 routeur/registre, S29 goal twin, S22 red-wave types, S13 BlockReason. Det. : décodage + routage purs, zéro LLM."
+keywords: ["aidos", "krd", "S60", "goal-stream", "goalStreamDecoder", "streamGoal", "changeset_status", "demoGoalStream", "redSet", "RedWorkQueue", "RedWorkRow", "SensorRow", "blocks", "refuseTruthWrite", "CATALOG_CODES", "BlockReason", "how_to_fix", "GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET", "AGENT_CROSS_PROJECT_WRITE", "GOAL_STILL_RED", "source", "live", "démo", "fallback", "déterminisme", "fast-check", "Vitest", "Playwright", "toast", "readVia", "registre fermé", "S59", "S58", "S29", "S22", "S13", "le mur", "ChangeSet"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Le concept est [ici](/steps/concept/s60-goal-stream-blocks).</Note>
+
+## En une phrase
+
+S60 **stream** le goal ouvert du projet (set rouge / RedWorkQueue / senseurs réels) à travers la porte S58 via le SDK typé S59, avec **fallback démo déterministe** dont le set rouge **égale** celui que le moteur calcule, et fait remonter au refus d'écriture le **vrai `BlockReason` actionnable** dans un panel global `/blocks` + un toast inline — le tout **déterministe** (décodage + routage purs, zéro LLM), en réutilisant les jumeaux S29/S22 et les codes de refus du mur, jamais réinventés.
+
+## Implémentation
+
+### Le stream `front/web/lib/goal-stream.ts`
+
+Le décodeur `goalStreamDecoder` est la **source unique** de la forme streamée (`GoalStream` = `{goalId, redSet[], queue: RedWorkRow[], sensors: SensorRow[]}`). Les `reason`/`status` réutilisent les ensembles **clos** de `lib/red-wave` (S22) — un `reason`/`status`/`verdict` hors-ensemble fait **rejeter** le payload (→ `null`). `streamGoal(scope)` lit via `readVia` (le helper S59) le tool **below-the-line `changeset_status`** — un vrai outil du **registre fermé S58** (qui rapporte le ChangeSet DRAFT ouvert et son set rouge) — puis décode ; tout échec (pas d'endpoint / transport / payload malformé / — fidélité au registre — outil non exposé) retombe sur `demoGoalStream()`, tagué `source`.
+
+Le fallback **ne re-dérive rien** : il réutilise `ORDER_DISCOUNT_GOAL.redSet` (le jumeau S29) verbatim, dérive une ligne `open`/`version_stale` par miroir rouge, et les senseurs depuis `STOP_RED`. C'est ce qui rend vrai le critère **« set rouge streamé == set rouge calculé »**, même hors-ligne.
+
+### Le catalogue de refus `front/web/lib/blocks.ts`
+
+`CATALOG_CODES` énumère les codes **déclarés** que le moteur peut lever — `AGENT_CROSS_PROJECT_WRITE` (mur, S55 `lib/projectWall`), `GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET` + `GATEWAY_UNKNOWN_TOOL` (passerelle, S58 `lib/gateway`), `GOAL_STILL_RED` (stop non-gameable, S29 `lib/goal`). **Aucun code, aucune prose n'est inventé ici** : ce sont les mêmes objets que les jumeaux pinent. `refuseTruthWrite(identity, project, tool)` **exécute** `lib/gateway.route` sur un outil de la zone-vérité et retourne le `BlockReason` réel levé (code + sévérité + explication + `howToFix[]`), ou `null` si (contre attente) l'appel a routé. `TRUTH_WRITE_TOOLS = [kernel_write, mirror_write, fitness_write]`.
+
+### Les panneaux
+
+- **`/goal-stream`** (`page.tsx` + `GoalStreamPanel.tsx`) : lit le stream au chargement (`streamGoalAction`), affiche set rouge / RedWorkQueue / senseurs avec un badge `live`/`démo` (`data-testid="stream-source"`), et un bouton **« Rafraîchir le stream »** (`refresh-button`) qui ré-exécute la lecture SDK.
+- **`/blocks`** (`page.tsx` + `BlocksPanel.tsx`) : rend le catalogue groupé par origine (`catalog-list`) et un contrôle **« Tenter l'écriture »** (`refuse-button`) sur un `<select>` des outils zone-vérité ; le refus surgit en **toast inline** (`block-toast` / `toast-code`) avec son `howToFix[]`.
+
+Deux namespaces i18n `goalStream` + `blocks` (FR+EN), parité **3413/3413**. Nav : deux entrées dans le groupe `start` de `WorkbenchHeader`.
+
+### Les miroirs
+
+- **Reproductibilité (frozen N1 front)** : `lib/goal-stream.test.ts` + `lib/blocks.test.ts` — Vitest + fast-check, **17/17**. Propriétés : le décodeur **rejette** tout payload malformé (non-objet, champ manquant, mauvais type, reason/status/verdict hors-ensemble) et est **reproductible** (même entrée → même sortie) ; `streamGoal` retombe **déterministe** (pas d'endpoint, transport qui lève, payload malformé) et rend `live` sur un payload bien formé ; **`demoGoalStream().redSet === ORDER_DISCOUNT_GOAL.redSet`** (le critère, prouvé) ; `refuseTruthWrite` rend le `BlockReason` réel avec un `howToFix[]` **non vide**, est **déterministe**, et un outil non exposé lève `GATEWAY_UNKNOWN_TOOL` (jamais un route) ; le catalogue n'énumère que des codes déclarés.
+- **e2e (Playwright)** : `tests/e2e/blocks.spec.ts` — **5/5**. Le catalogue liste les codes ; **le critère central** : « Tenter l'écriture » (kernel_write) → toast `GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET` + `howToFix[]` rendu ; un autre outil zone-vérité (mirror_write) → même code ; `/goal-stream` affiche set rouge/queue/senseurs sur `Order.discount.fixture`, badge `démo` hors-ligne ; le rafraîchissement exécute et reste peuplé.
+
+### Réutilisation (jamais réinventé)
+
+Le **SDK** (`readVia`, décodeurs combinables) est celui de **S59** ; le **routeur + registre fermé** ceux de **S58** (`lib/gateway`) ; le **goal twin** (`ORDER_DISCOUNT_GOAL`, `STOP_RED`) celui de **S29** ; les **types red-wave** (reason/status) ceux de **S22** ; les **codes BlockReason** ceux du mur S55 / passerelle S58 / goal S29 (= la forme S13 §44.5). S60 n'ajoute que la couche stream-décodage + le catalogue + les deux écrans.
+
+## Méta
+
+**Pourquoi `changeset_status` et pas un outil dédié ?** Parce que le registre S58 est **fermé** : un panneau ne peut appeler qu'un outil **réellement exposé**. Inventer `changeset_open_goal` aurait été un mensonge (l'outil n'existe pas) ; `readVia` l'aurait d'ailleurs rejeté côté client (fidélité au registre) et serait **toujours** retombé sur la démo — jamais de `live`. On lit donc l'outil de statut existant, qui porte le ChangeSet DRAFT ouvert et son set rouge. Honnêteté : pas de cible inventée.
+
+**Pourquoi le fallback réutilise-t-il le jumeau S29 ?** Pour que le critère « streamé == calculé » tienne **par construction**, même hors-ligne. Si la démo re-dérivait le set rouge par un chemin parallèle, elle pourrait diverger du calcul du moteur — exactement le risque de double-source que S59 a banni pour les types. Une seule définition du set rouge (le jumeau S29), réutilisée.
+
+**Pourquoi exécuter un vrai refus plutôt que l'afficher en dur ?** Parce qu'un refus affiché en dur prouverait seulement qu'on sait écrire du texte rouge. `refuseTruthWrite` **passe par le routeur** (le même mur que le serveur vivant) : le toast rend l'objet **réel** levé par le mur. C'est la différence entre *montrer* une règle et *l'exécuter* — la loi `ui-completeness` (pas de capacité headless).
+
+## Méta-méta
+
+**Determinism-first (CLAUDE.md §6/§8).** Tout S60 est code pur faisant autorité : le **décodage** est un décodeur (validation structurelle, pas un agent qui devine), le **fallback** est une fonction (échec → démo), le **refus** est un routage pur (`route`), le **catalogue** est une table déclarée. Le seul point impur est le transport réseau, isolé dans `readVia`/`callGateway` (hérité de S59). Aucun LLM n'entre dans une lecture de stream ni dans la levée d'un refus — il n'aurait rien à y faire qu'une fonction ne fasse mieux et de façon **pinnée** par les miroirs property (17/17). « Même entrée → même sortie » est prouvé sur le décodeur, le fallback et le refus.
+
+**Le mur tient, vivant (CLAUDE.md §2).** S60 **lit** (below-the-line, scope porté) et **fait surface** les refus — il n'**écrit jamais** de vérité. `refuseTruthWrite` ne contourne rien : il déclenche le refus pour le **montrer**, et aucune vérité n'est écrite (la vérité ne bouge que par propose → ChangeSet → approbation). Rendre le mur **visible et exécutable depuis l'écran** ne l'affaiblit pas — au contraire, c'est la condition pour qu'un humain réel comprenne et répare. La méta-règle d'accrétion (§5) tient : S60 **ajoute** des garde-fous (le décodeur honnête du stream, le catalogue de refus lisible), il n'en retire aucun.
+
+**La complétude.** Chaque capacité introduite porte son miroir vivant : le stream a son property test, le refus le sien, chaque panneau son e2e — pas de capacité sans miroir (pas de monstre). Le streaming s'étend au-delà du goal (la même mécanique vaut pour toute lecture vivante) ; `/goal-stream` et `/blocks` sont les deux premiers prouvés de bout en bout, et le couple SDK+routeur reste l'unique chemin que les épics suivants réutiliseront pour piloter le moteur depuis l'écran.

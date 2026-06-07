@@ -184,6 +184,8 @@
               "steps/internals/s58-gateway",
               "steps/concept/s59-gateway-sdk",
               "steps/internals/s59-gateway-sdk",
+              "steps/concept/s60-goal-stream-blocks",
+              "steps/internals/s60-goal-stream-blocks",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

@@ -1,0 +1,60 @@
+---
+title: "S60 · La cabine devient vivante (goal en direct + refus actionnables)"
+description: "S60 rend le Workbench vivant : la passerelle stream le goal ouvert du projet actif — son set rouge (la todo-list des miroirs encore rouges qui SONT le goal), sa file de travail (RedWorkQueue) et l'état RÉEL des senseurs — et fait remonter, au moindre refus d'écriture, le vrai BlockReason actionnable (code, sévérité, explication, comment-réparer). Un panneau global /blocks liste les refus possibles et permet d'en déclencher un pour le voir surface en toast inline ; un panneau /goal-stream montre le goal vivant, tagué live ou démo. Le set rouge streamé égale, octet pour octet, le set rouge calculé par le moteur."
+keywords: ["aidos", "krd", "S60", "goal", "set rouge", "red set", "RedWorkQueue", "file de travail", "senseurs", "BlockReason", "refus", "actionnable", "code", "sévérité", "comment-réparer", "how_to_fix", "toast", "blocks", "goal-stream", "live", "démo", "streaming", "passerelle", "gateway", "Workbench", "le mur", "ChangeSet", "S58", "S59", "déterminisme"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S60](/steps/internals/s60-goal-stream-blocks).</Note>
+
+## En une phrase
+
+S59 a rebranché les panneaux sur la **vraie** porte. **S60 rend la cabine vivante** : elle montre en direct **ce qu'il vous reste à prouver** (le set rouge du goal ouvert), et quand le mur **refuse** une écriture, elle vous dit **pourquoi et comment réparer** — en clair, sur l'écran.
+
+## Le problème que S60 résout
+
+Un goal, dans AIDOS, c'est une intention en cours de preuve : son **set rouge** est la liste des comportements (les miroirs) encore au rouge — exactement la todo-list de ce qu'il reste à faire. Jusqu'ici, le panneau du goal affichait un exemple figé. Vous ne voyiez pas le **vrai** set rouge de **votre** projet, ni l'avancement réel des senseurs.
+
+Et quand une opération était refusée par le mur (parce qu'elle tentait d'écrire une vérité directement, ou de toucher un autre projet), le refus restait **opaque** : un code dans un journal, loin de l'écran.
+
+## Ce que S60 apporte
+
+<CardGroup cols={2}>
+  <Card title="Le goal en direct" icon="signal-stream">
+    Le panneau **« Goal en direct »** stream le goal ouvert du projet : son **set rouge** (ce qu'il reste à prouver), sa **file de travail** (chaque cible rouge, sa raison, son statut) et l'**état réel des senseurs** (vert / rouge par miroir).
+  </Card>
+  <Card title="Le set rouge est le vrai" icon="equals">
+    Le set rouge affiché **égale** celui que le moteur calcule pour ce goal — octet pour octet. Pas de re-calcul approximatif côté écran : on lit, on affiche, on ne devine pas.
+  </Card>
+  <Card title="Les refus deviennent lisibles" icon="triangle-exclamation">
+    Le panneau **« Refus (BlockReason) »** liste les refus possibles et permet d'en **déclencher un**. Le refus surgit en **toast inline** : son code, sa sévérité, son explication et surtout **comment réparer**.
+  </Card>
+  <Card title="On voit toujours d'où ça vient" icon="tag">
+    Comme depuis S59, le goal affiche un repère <code>live</code> ou <code>démo</code> : vous savez si vous regardez le vrai état du projet ou le secours déterministe (hors-ligne).
+  </Card>
+</CardGroup>
+
+## Qu'est-ce qu'un « set rouge » ?
+
+Quand vous ouvrez un goal, AIDOS dérive l'ensemble exact des miroirs qui doivent passer au vert pour que ce goal soit tenu. **Ce rouge EST le goal** : tant qu'un miroir du set est rouge, le goal n'est pas atteint ; quand tout le set est vert (et que rien d'antérieur n'a cassé), il l'est. Le set rouge n'est donc pas une décoration — c'est **la définition mécanique de « ce qu'il reste à faire »**, et S60 vous le montre vivant.
+
+## Qu'est-ce qu'un « BlockReason » ?
+
+Un `BlockReason` est un **refus honnête et actionnable**. Quand le mur dit non, il ne dit jamais juste « non » : il porte quatre choses — un **code** (l'identité du refus), une **sévérité**, une **explication** (pourquoi), et une liste **comment-réparer** (les gestes concrets pour débloquer). S60 fait remonter ces objets **réels** à l'écran : ce ne sont pas des messages réécrits pour l'occasion, ce sont exactement ceux que le mur lève.
+
+## Pourquoi déclencher un refus exprès ?
+
+Parce que *tout se fait par écran*. Pour prouver que le refus est réel et lisible, le panneau `/blocks` vous laisse **tenter une écriture de vérité** (par exemple écrire directement dans le noyau). Le mur la **refuse** — aucune vérité n'est écrite — et son `BlockReason` surgit en toast. Vous voyez, en direct, la règle d'or d'AIDOS s'appliquer : **la vérité ne bouge que par une proposition approuvée (un ChangeSet)**, jamais par une écriture directe.
+
+## Ce que ça vous apporte
+
+- Vous voyez **en continu** ce qu'il reste à prouver sur votre goal — le set rouge réel, pas une maquette.
+- Quand quelque chose est refusé, vous comprenez **pourquoi** et savez **quoi faire** — sans fouiller un journal.
+- La cabine reste **honnête** : repère de provenance (live/démo), refus déterministes (même cause → même refus).
+
+## Tout se fait par écran
+
+Deux nouveaux panneaux, tous deux actionnables. **« Goal en direct »** : un bouton « Rafraîchir le stream » relit le goal à travers la porte. **« Refus (BlockReason) »** : un bouton « Tenter l'écriture » exécute une écriture-vérité et fait surface le refus en toast. Un test de bout en bout (Playwright) prouve le critère central : **une écriture-vérité refusée fait bien surface son BlockReason actionnable**.
+
+## La suite
+
+Avec une cabine désormais **live et vivante**, les épics suivants y branchent les vrais gestes : capturer votre idée, la griller, ouvrir un goal qui persiste — toujours derrière la même porte gardée, toujours avec des refus lisibles.
