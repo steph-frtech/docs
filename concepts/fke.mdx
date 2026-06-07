@@ -92,7 +92,24 @@ Le kernel a **deux facettes parallèles** — fonctionnelle et sécurité — ch
 | Contrat sécurité (permissions, capabilities) | ↔ | Police + scans (SAST / DAST / SBOM / gitleaks) |
 | Evidence sécurité attendue | ↔ | Evidence sécurité observée (scans verts, audit Merkle) |
 
-Le **Contrat** apparie enfin le **Code** (et le Contrat sécurité apparie la Police) : plus aucun slot orphelin. Le code reste optionnel **par émission** (un kernel déclaratif voit son contrat satisfait par pure projection), jamais par absence de partenaire. La **sécurité est une facette complète** — sa propre spec, ses abuse cases, son threat model, son contrat, ses preuves — strictement parallèle au fonctionnel : **une faille de sécurité non reflétée est un monstre, exactement comme un test manquant.** Et **chaque étage du macro pipeline est lui-même un kernel** avec ce micro pipeline : les couches hautes composent, les basses exécutent, les invariants remontent, les preuves réconcilient.
+Le **Contrat** apparie enfin le **Code** (et le Contrat sécurité apparie la Police) : plus aucun slot orphelin. Le code reste optionnel **par émission** (un kernel déclaratif voit son contrat satisfait par pure projection), jamais par absence de partenaire.
+
+## Quatre lentilles, un seul squelette
+
+La sécurité n'est pas la seule facette. Le **même squelette de six paires** se lit à travers **quatre lentilles canoniques** — c'est l'unification de FKE :
+
+| Lentille | La question qu'elle pose | Preuve dominante |
+|---|---|---|
+| **Fonctionnel** | fait-il ce qu'on veut ? (par l'exemple) | tests, code, résultats |
+| **Invariants ∀** | est-ce vrai sur TOUS les chemins ? | property / fuzz / mutation |
+| **Sécurité** | résiste-t-il aux attaques ? | tests séc, police, scans |
+| **Performance / Budgets** | assez rapide, pas trop cher, assez fiable ? | benchmark, load test, métrage |
+
+Chaque lentille a les six mêmes paires (Spec → Comportement → Scénarios → Modèle/Domaine → Contrat → Evidence ↔ leurs reflets), lues sous son angle : pour les **invariants**, le « comportement » est *ce qui tient sur tout chemin*, le « modèle » est *le domaine de quantification*, le « contrat » est *le contre-exemple banni* (∃¬), prouvés par property tests + générateurs ; pour la **performance**, le « comportement » est *sous charge*, le « contrat » est *le budget* (HarnessCostBudget), prouvé par load tests (k6) + métrage runtime.
+
+**Les facettes sont effondrables** (même règle anti-explosion que le kernel effondré) : un kernel n'instancie une lentille **que s'il porte cette nature de vérité**. La lentille **fonctionnelle est toujours là** ; une fonction pure porte F + Invariants ; un endpoint PII porte F + Sécurité + Performance ; une vue déclarative peut n'avoir que F. On n'instancie jamais une facette vide.
+
+La **conscience** compare toutes les paires instanciées (jusqu'à 6 × 4) : **une faille de sécurité, une régression de perf ou un invariant non prouvé sont des monstres, exactement comme un test fonctionnel manquant.** Et **chaque étage du macro pipeline est lui-même un kernel** avec ce micro pipeline : les couches hautes composent, les basses exécutent, les invariants remontent, les preuves réconcilient.
 
 ## Le vibe est contenu, jamais interdit
 
