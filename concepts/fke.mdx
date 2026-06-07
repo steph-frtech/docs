@@ -43,37 +43,56 @@ Ces dix slots ne sont pas une fiche statique : c'est une **traversée**. Une **e
 Le 1-pour-1 est **strict** : huit paires-miroir, chaque vérité déclarée a exactement un reflet prouvé.
 
 ```text
-ENTRÉE (textuelle)  — besoin · chat · ticket · incident
-   │  DÉCLARÉ (cerveau gauche)
-   ├─▶ Spec (P1)  · Comportement (P2)  · Scénarios (P3)  · Scénarios sécurité (P4)
-   ├─▶ Modèle (P5)  · Contrat (P6)  · Sécurité (P7)  · Evidence attendue (P8)
-   ↓   VALIDATION — Decision Card (accept · reject · amend · defer)
-═════════════════ MUR D'INTENTION ═════════════════
-   │  PROUVÉ (cerveau droit) — le reflet 1-pour-1
-   ├─▶ Documentation (P1) ◀ Spec        ├─▶ Résultats (P2) ◀ Comportement
-   ├─▶ Tests (P3) ◀ Scénarios           ├─▶ Tests sécurité (P4) ◀ Scénarios sécurité
-   ├─▶ Projection données (P5) ◀ Modèle ├─▶ Code (P6) ◀ Contrat
-   ├─▶ Sécurité implémentée (P7) ◀ Sécurité ├─▶ Evidence observée (P8) ◀ Evidence attendue
-   ↓   EXÉCUTION (l'acte : lance Code + Tests → Résultats + Evidence observée)
-═══════════════ MUR SÉCURITÉ / POLICE ═══════════════
-   ↓  POLICE (allow · block · audit · approval)
-   ↓  CONSCIENCE — compare les 8 paires (P1…P8)
-   ├─ aligné → PROMOTION (vérité stable, entre au Kernel Graph)
-   └─ divergence → LOOPBACK CIBLÉ : remonte au slot exact de la paire divergente
+              ENTRÉE (textuelle) — besoin · chat · ticket · incident
+                        │  DÉCLARÉ (cerveau gauche)
+   ┌──── FONCTIONNEL ────────────────┐   ┌──── SÉCURITÉ ───────────────────────┐
+   │ Spec · Comportement · Scénarios │   │ Spec séc. · Abuse cases · Scén. séc. │
+   │ Modèle · Contrat · Evidence att.│   │ Threat model · Contrat séc. · Evi.séc│
+   └────────────────┬─────────────────┘   └────────────────┬────────────────────┘
+                    ↓   VALIDATION — Decision Card (accept · reject · amend · defer)
+══════════════════════════ MUR D'INTENTION ══════════════════════════
+                    ↓   PROUVÉ (cerveau droit) — reflet 1-pour-1
+   ┌──── FONCTIONNEL ────────────────┐   ┌──── SÉCURITÉ ───────────────────────┐
+   │ Documentation ◀ Spec            │   │ Doc séc. ◀ Spec séc.                 │
+   │ Résultats     ◀ Comportement    │   │ Résultats séc.(denials) ◀ Abuse cases│
+   │ Tests         ◀ Scénarios       │   │ Tests séc.(+evals) ◀ Scénarios séc.  │
+   │ Projection    ◀ Modèle          │   │ Sécurité implém.(authz) ◀ Threat mdl │
+   │ Code          ◀ Contrat         │   │ Police + scans ◀ Contrat séc.        │
+   │ Evidence obs. ◀ Evidence att.   │   │ Evidence séc.obs. ◀ Evidence séc.    │
+   └────────────────┬─────────────────┘   └────────────────┬────────────────────┘
+                    ↓   EXÉCUTION (lance Code + Tests → Résultats + Evidence)
+═════════════════════ MUR SÉCURITÉ / POLICE ═════════════════════
+   ↓  POLICE (allow · block · audit · approval — ambiante)
+   ↓  CONSCIENCE — compare les 12 paires (6 fonctionnelles ∧ 6 sécurité)
+   ├─ aligné → PROMOTION (vérité stable → Kernel Graph)
+   └─ divergence (fonctionnelle OU sécurité) → LOOPBACK CIBLÉ vers le slot exact
 ```
+
+Le kernel a **deux facettes parallèles** — fonctionnelle et sécurité — chacune une anatomie 1-pour-1 complète (six paires + six paires = douze).
+
+**Facette FONCTIONNELLE :**
 
 | Déclaré (dessus) | ↔ | Prouvé (dessous) |
 |---|---|---|
 | Spec | ↔ | Documentation |
 | Comportement | ↔ | Résultats |
 | Scénarios | ↔ | Tests |
-| Scénarios sécurité | ↔ | Tests sécurité |
 | Modèle | ↔ | Projection données |
 | Contrat | ↔ | Code |
-| Sécurité | ↔ | Sécurité implémentée (police) |
 | Evidence attendue | ↔ | Evidence observée |
 
-Le **Contrat** apparie enfin le **Code** : il n'y a plus de slot orphelin. Le code reste optionnel **par émission** (un kernel déclaratif — vue, policy — voit son contrat satisfait par pure projection), jamais par absence de partenaire. La **sécurité est une colonne complète** (deux paires : P4 et P7), strictement parallèle à la colonne fonctionnelle. Et **chaque étage du macro pipeline est lui-même un kernel** avec ce micro pipeline : les couches hautes composent, les basses exécutent, les invariants remontent, les preuves réconcilient.
+**Facette SÉCURITÉ (le même squelette, lu en menaces) :**
+
+| Déclaré (dessus) | ↔ | Prouvé (dessous) |
+|---|---|---|
+| Spec sécurité (finalité, classification des données) | ↔ | Doc sécurité (threat model, runbook) |
+| Abuse cases (comportements d'attaque) | ↔ | Résultats sécurité (denials, blocks) |
+| Scénarios sécurité | ↔ | Tests sécurité (+ evals injection / exfiltration) |
+| Threat model (surfaces, acteurs) | ↔ | Sécurité implémentée (authz, allowlist, sandbox, redaction) |
+| Contrat sécurité (permissions, capabilities) | ↔ | Police + scans (SAST / DAST / SBOM / gitleaks) |
+| Evidence sécurité attendue | ↔ | Evidence sécurité observée (scans verts, audit Merkle) |
+
+Le **Contrat** apparie enfin le **Code** (et le Contrat sécurité apparie la Police) : plus aucun slot orphelin. Le code reste optionnel **par émission** (un kernel déclaratif voit son contrat satisfait par pure projection), jamais par absence de partenaire. La **sécurité est une facette complète** — sa propre spec, ses abuse cases, son threat model, son contrat, ses preuves — strictement parallèle au fonctionnel : **une faille de sécurité non reflétée est un monstre, exactement comme un test manquant.** Et **chaque étage du macro pipeline est lui-même un kernel** avec ce micro pipeline : les couches hautes composent, les basses exécutent, les invariants remontent, les preuves réconcilient.
 
 ## Le vibe est contenu, jamais interdit
 
