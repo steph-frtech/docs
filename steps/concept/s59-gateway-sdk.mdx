@@ -1,0 +1,58 @@
+---
+title: "S59 · Brancher l'interface sur la vraie porte (SDK typé + cutover)"
+description: "S59 fabrique un petit client typé (un SDK) au-dessus de la passerelle S58, puis bascule les panneaux du Workbench à plus forte valeur (store · records · mirrors · version-dag · red-wave · completeness · kernel-debt · ideas · goal · changeset) des données figées (les fixtures TS) vers des lectures live, project-scopées, qui passent par la porte HTTP. Deux garanties tiennent l'ensemble : le client ne re-déclare jamais les types (jamais double-typé — le type est dérivé du décodeur), et le décodeur rejette tout message mal formé / retombe de façon déterministe sur une démo quand la base est injoignable. Chaque panneau converti affiche d'où vient ce qu'il montre : live ou démo."
+keywords: ["aidos", "krd", "S59", "SDK", "client typé", "cutover", "bascule", "fixtures", "live", "démo", "decoder", "décodeur", "double-typé", "source", "project-scopé", "passerelle", "gateway", "Workbench", "déterminisme", "fallback", "store", "records", "mirrors", "version-dag", "red-wave", "completeness", "kernel-debt", "ideas", "goal", "changeset", "S58", "S60"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S59](/steps/internals/s59-gateway-sdk).</Note>
+
+## En une phrase
+
+S58 a posé **une seule porte** devant tous les services d'AIDOS. **S59 fabrique la clé** : un petit client typé qui ouvre cette porte proprement, et il **rebranche** les panneaux du Workbench dessus — au lieu d'afficher des données figées, ils lisent enfin le **vrai** état du projet.
+
+## Le problème que S59 résout
+
+Avant S59, ≈ 95 % du Workbench affichait des **données figées** : de jolis exemples écrits en dur dans le code (les *fixtures*). Seuls deux panneaux (`/store`, `/records`) lisaient la vraie base. Résultat : la cabine de pilotage était belle mais **ne montrait pas votre projet** — elle montrait une maquette.
+
+La passerelle S58 a ouvert le chemin (une porte HTTP vers tous les services), mais le front ne s'en servait pas encore. S59 fait deux choses : il **fabrique le client** qui parle à cette porte, et il **bascule** les panneaux les plus importants pour qu'ils lisent en direct, à travers elle.
+
+## Ce que S59 garantit
+
+<CardGroup cols={2}>
+  <Card title="Jamais double-typé" icon="link">
+    Le client décrit la forme de chaque réponse **une seule fois** (dans un *décodeur*). Le type que voit le panneau est **dérivé** de ce décodeur — jamais ré-écrit à côté. Impossible que les deux divergent : il n'y a qu'une seule source.
+  </Card>
+  <Card title="Le décodeur rejette le mal formé" icon="shield-check">
+    Si la porte renvoie un message bizarre ou incomplet, le décodeur le **refuse en bloc** — il ne devine pas, ne complète pas. Le panneau retombe alors proprement sur la démo. Pas de demi-donnée, pas d'affichage faux.
+  </Card>
+  <Card title="Démo déterministe en secours" icon="database">
+    Quand la base est injoignable, le panneau **ne reste pas blanc** : il sert un jeu de démo fixe, toujours le même. La cabine reste utilisable et démontrable, même hors-ligne.
+  </Card>
+  <Card title="On voit toujours d'où ça vient" icon="tag">
+    Chaque panneau converti affiche un repère <code>live</code> ou <code>démo</code> : vous savez en un coup d'œil si ce que vous regardez est le vrai état du projet ou un secours.
+  </Card>
+</CardGroup>
+
+## « Jamais double-typé » — pourquoi c'est important
+
+Quand on lit des données venues d'ailleurs, on a deux besoins : **vérifier** que le message a la bonne forme (à l'exécution), et **connaître** sa forme (pour écrire le code). La tentation est d'écrire ces deux choses séparément — une fonction de vérification *et* une description de type. Mais alors elles **dérivent** : on corrige l'une, on oublie l'autre, et un jour le code croit à une forme que la réalité n'a plus.
+
+S59 supprime ce risque à la racine : la **description du type est extraite du vérificateur**. Il n'y a qu'une déclaration. Le panneau ne re-déclare rien — il **hérite** du type que le décodeur produit. C'est le sens de « jamais double-typé » : une seule vérité de forme, des deux côtés à la fois.
+
+## Le secours déterministe — pourquoi ce n'est pas un bug masqué
+
+Retomber sur une démo quand la base est coupée pourrait ressembler à « cacher la panne ». Ce n'est pas le cas, pour deux raisons. D'abord, le panneau **dit** qu'il est en mode démo (le repère `démo`) — rien n'est masqué. Ensuite, le secours est **déterministe** : même entrée, même résultat, toujours. C'est ce qui rend le Workbench testable et démontrable sans dépendre d'une base allumée — la même discipline que `/store` et `/records` suivaient déjà.
+
+## Ce que ça vous apporte
+
+- Vos panneaux montrent enfin **votre projet réel**, lu en direct à travers la porte gardée de S58.
+- Vous restez **isolé** : chaque lecture porte votre projet actif ; la porte refuse côté serveur tout ce qui viserait ailleurs.
+- L'interface reste **fiable** : jamais un affichage faux à partir d'un message mal formé ; jamais un écran blanc quand la base tombe.
+
+## Tout se fait par écran
+
+Le panneau **« Passerelle MCP-HTTP »** est le premier converti : sa liste des services est désormais lue **via le SDK** à travers la porte, avec un repère <code>live</code> / <code>démo</code> visible. Hors-ligne (aucune passerelle branchée), il affiche <code>démo</code>, reste **entièrement peuplé** et **toujours actionnable** — le bouton « Router » continue d'exécuter le garde. Un test de bout en bout (Playwright) prouve cette bascule : le secours déterministe, la surface peuplée, l'action qui fonctionne quand même.
+
+## La suite
+
+S60 ajoute le **streaming** : la passerelle pousse en continu l'état vivant du projet (le *red set*, la file de travail, les senseurs) et fait remonter les vrais <code>BlockReason</code> au refus d'écriture — la cabine devient non seulement live, mais **vivante**.

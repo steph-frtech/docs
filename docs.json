@@ -182,6 +182,8 @@
               "steps/internals/s57-project-switcher",
               "steps/concept/s58-gateway",
               "steps/internals/s58-gateway",
+              "steps/concept/s59-gateway-sdk",
+              "steps/internals/s59-gateway-sdk",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

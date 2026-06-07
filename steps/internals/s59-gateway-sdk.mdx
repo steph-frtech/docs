@@ -1,0 +1,59 @@
+---
+title: "S59 · SDK client typé + cutover des fixtures — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S59 : le SDK TS front/web/lib/gateway-sdk (décodeurs purs combinables, type DÉRIVÉ du décodeur via Decoded<typeof dec> = jamais double-typé, transport JSON-RPC/HTTP project-scopé callGateway/callMeta vers la passerelle S58, readVia/decodeVia = lecture live → décodage → fallback démo déterministe avec source live|démo), le miroir de reproductibilité front/web/lib/gateway-sdk.test.ts (Vitest+fast-check 9/9 : décodeur rejette tout mal formé, fallback déterministe quand la base est injoignable, registre fermé respecté), le cutover du panneau /gateway (gatewaySurface lit la surface via callMeta+decodeVia, badge source), l'e2e tests/e2e/gateway-cutover.spec.ts (4 cas : fallback démo, surface peuplée, action-capable, reproductible). Réutilise S58 lib/gateway (registre fermé), S57 active project, S55 scope. Det. : décodage pur, zéro LLM."
+keywords: ["aidos", "krd", "S59", "SDK", "gateway-sdk", "Decoder", "Decoded", "double-typé", "readVia", "callGateway", "callMeta", "decodeVia", "source", "live", "démo", "fallback", "déterminisme", "fast-check", "rapid", "Vitest", "cutover", "fixtures", "Playwright", "JSON-RPC", "MCP-over-HTTP", "StreamableHTTPHandler", "structuredContent", "registre fermé", "S58", "S57", "S55", "le mur", "ChangeSet", "project-scopé"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Le concept est [ici](/steps/concept/s59-gateway-sdk).</Note>
+
+## En une phrase
+
+S59 fabrique un **SDK TS typé** au-dessus de la passerelle S58 où le **type est dérivé du décodeur** (jamais double-typé), avec un **fallback démo déterministe** quand la base est injoignable (`source: "live" | "demo"`), puis **bascule** le panneau `/gateway` de la surface figée vers une lecture live à travers la porte — le tout **déterministe** (décodage pur, zéro LLM), en réutilisant le registre fermé S58, le scope projet S57/S55, jamais re-implémentés.
+
+## Implémentation
+
+### Le SDK `front/web/lib/gateway-sdk.ts`
+
+Un seul module, trois briques.
+
+**1. Le décodeur, source unique de la forme.** Un `Decoder<T>` est une fonction **pure** `(raw: unknown) => T | null` : il valide et retourne `T`, ou `null` si le message est mal formé. Le type statique `T` est ensuite **inféré** du décodeur — jamais ré-écrit :
+
+```ts
+export type Decoder<T> = (raw: unknown) => T | null;
+export type Decoded<D> = D extends Decoder<infer T> ? T : never; // le hinge "jamais double-typé"
+```
+
+Des combinateurs purs (`isObject`, `str`, `num`, `arr`) composent les décodeurs sans `any`. Le panneau écrit son décodeur **une fois** et obtient son type par `Decoded<typeof dec>` — aucune `interface` parallèle tenue à la main.
+
+**2. Le transport project-scopé.** `callGateway(scope, tool, args)` émet **un** `tools/call` JSON-RPC/HTTP vers la passerelle S58 (servie par le `StreamableHTTPHandler` du SDK Go), en portant l'identité et le projet actif dans les en-têtes (`x-aidos-identity` / `x-aidos-project`) — le mur est appliqué **côté serveur**. C'est la **seule surface impure** ; elle ne lève jamais : tout échec (pas d'endpoint, transport, non-2xx, enveloppe/`result`/`structuredContent` malformés) retourne `{ok:false}`. Fidélité au registre fermé S58 : un outil non exposé est rejeté **avant** d'atteindre le réseau (`lookup` de `lib/gateway`). `callMeta` est le pendant pour les méta-outils propres à la passerelle (`gateway_servers/tools/route`), hors registre fronté.
+
+**3. La lecture avec secours déterministe.** `readVia(scope, tool, args, decoder, demo)` enchaîne : appel → décodage → verdict **binaire**. Succès → `{data, source:"live"}` ; n'importe quel échec → `{data: demo, source:"demo"}`. Jamais une demi-donnée, jamais une valeur coercée. `decodeVia` fait de même sur un résultat de méta-outil déjà obtenu.
+
+### Le cutover du panneau `/gateway`
+
+`app/gateway/actions.ts#gatewaySurface` ne renvoie plus la surface figée : il lit `gateway_servers` + `gateway_tools` **via le SDK** (`callMeta` → `decodeVia`), avec le **jumeau déterministe** S58 (`lib/gateway`) en fallback, et calcule `source: "live"` seulement si **les deux** méta-lectures ont décodé du live. Le `GatewayPanel` affiche un badge `live` / `démo` (`data-testid="surface-source"`). Deux nouvelles clés i18n (`sourceLive`/`sourceDemo`, FR+EN, parité 3361/3361).
+
+### Les miroirs
+
+- **Reproductibilité (frozen N1 front)** : `lib/gateway-sdk.test.ts` — Vitest + fast-check, **9/9**. Propriétés : le décodeur **rejette** tout JSON non conforme (jamais de partiel) ; il est **reproductible** (même entrée → même sortie) ; `readVia` retombe **déterministe** sur la démo (pas d'endpoint, transport qui lève, payload malformé) et rend `live` sur un payload bien formé ; le registre fermé est respecté (un outil inconnu n'atteint jamais le fil) ; le type panneau est l'inféré du décodeur (assignation type-level + round-trip).
+- **e2e (Playwright)** : `tests/e2e/gateway-cutover.spec.ts` — **4/4**. Hors-ligne (aucun `AIDOS_GATEWAY_HTTP_URL`), le badge affiche `démo`, la surface reste peuplée (les 13 serveurs), le bouton « Router » exécute encore le garde, et le fallback est reproductible entre deux rechargements. Les 6 e2e S58 restent verts (10/10 au total sur le panneau).
+
+### Réutilisation (jamais réinventé)
+
+Le registre fermé + le routeur sont ceux de **S58** (`lib/gateway`) ; le scope projet vient de **S57** (cookie actif) / **S55** (prédicat). Le SDK n'ajoute que la couche transport+décodage+fallback. Aucune dépendance nouvelle : `fetch` natif, `fast-check` déjà présent.
+
+## Méta
+
+**Pourquoi un décodeur plutôt qu'un type ?** Parce qu'un type TS s'efface à la compilation : il ne **protège pas** à l'exécution contre un message déformé venu du réseau. Et un vérificateur écrit *à côté* d'un type **dérive**. S59 fait du décodeur la **source unique** : la validation runtime *et* le type compile-time sortent de la même déclaration (`Decoded<typeof dec>`). « Jamais double-typé » n'est pas un confort de style — c'est l'élimination structurelle d'une classe de bugs (le type qui ment sur la réalité).
+
+**Pourquoi le fallback est-il une garantie, pas un masque ?** Parce qu'il est (a) **étiqueté** (`source:"demo"` rendu à l'écran) — rien n'est caché — et (b) **déterministe** — même entrée, même secours. C'est la même discipline que `/store` et `/records` (S01/S02) : le Workbench reste **autonome** (testable, démontrable) sans base allumée, et il **dit la vérité** sur la provenance de ce qu'il montre.
+
+**Pourquoi le verdict du décodeur est-il binaire ?** Pour interdire la coercition silencieuse. Un décodeur qui « répare » un message produirait une donnée que personne n'a écrite — une hallucination déterministe. Le `null`-ou-rien force le choix honnête : ou bien la forme exacte (live), ou bien la démo (assumée).
+
+## Méta-méta
+
+**Determinism-first sur le plan front (CLAUDE.md §6/§8).** Tout ce qui *peut* être une fonction pure **doit** l'être : ici, le **décodage est un décodeur** (validation structurelle), pas un « agent qui devine la forme » ; le **fallback est une fonction** (échec → démo), pas un jugement de modèle. Le seul point impur est le transport (le réseau), isolé à `callGateway/callMeta` ; tout en aval est reproductible et **pinné** par le miroir property. Un LLM n'entre nulle part dans la lecture d'un panneau — il n'aurait rien à y faire qu'une fonction ne fasse mieux et de façon vérifiable.
+
+**Le mur tient au cutover (CLAUDE.md §2).** Le SDK **lit** (below-the-line) et porte le scope ; il ne **fabrique jamais** une écriture de vérité — celles-ci restent réservées à propose → ChangeSet. La porte applique le mur **côté serveur** (S58) ; le client ne fait que s'y conformer (registre fermé respecté avant même le réseau). Brancher le front sur la vraie porte **n'élargit** donc rien : c'est un raccordement, pas une dérogation. La méta-règle d'accrétion (§5) est respectée — S59 **ajoute** un garde-fou (le décodeur honnête + l'étiquette de provenance), il n'en retire aucun.
+
+**La complétude.** Chaque capacité de lecture introduite porte son miroir de reproductibilité (le property test) et chaque panneau converti porte son e2e — pas de capacité sans miroir vivant (pas de monstre). Le cutover s'étend panneau par panneau ; `/gateway` est le premier prouvé de bout en bout, et le SDK est l'unique chemin typé que les suivants réutiliseront.
