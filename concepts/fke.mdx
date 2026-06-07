@@ -119,6 +119,34 @@ Quatre précisions pour bien le lire : le **Raw Signal Store** a plusieurs entr�
 
 Le **cerveau gauche** lit vos signaux bruts (chat, tickets, logs, prototypes) et propose les slots du dessus — il ne code pas. Le **cerveau droit** reçoit uniquement des kernels validés dans un contexte minimal et produit les reflets du dessous — il ne modifie jamais seul le dessus. La **conscience** compare en permanence les paires réfléchies et produit rapports et **decision cards** ; elle est un *agrégateur déterministe* des preuves existantes — jamais un second juge dont il faudrait croire l'avis.
 
+## L'écran AI Lab — le cockpit (trialogue)
+
+La surface principale n'est ni un chat ni un éditeur : c'est un **trialogue** à trois zones où le mur est *visible* et franchi seulement par une décision.
+
+```text
+┌──────────────┬──────────────────────────────┬───────────────────┐
+│ GAUCHE       │ CENTRE — la couche navigable │ DROITE            │
+│ VIBE / CHAT  │ le kernel courant + son      │ À VALIDER         │
+│              │ anatomie 1-pour-1            │                   │
+│ on chate, on │  ┌ DESSUS (déclaré) ▲proposé │ DECISION CARDS    │
+│ discute ;    │  │ Spec Comport. Scénarios…  │ [accept][amend]   │
+│ le cerveau   │  ├──── MUR D'INTENTION ──────│ [reject][defer]   │
+│ gauche       │  │ Doc Résultats Tests Code… │ blast radius ●●○○ │
+│ COMPILE en   │  └ DESSOUS (prouvé) 🟢🟢🔴🟢… │ ─────────────     │
+│ slots        │                              │ CONSCIENCE        │
+│ PROPOSÉS     │ chaque paire = un voyant     │ 7/8 alignées      │
+│ (jamais en   │ 🟢 aligné 🔴 diverge 🟡 sous │ ─────────────     │
+│ vérité)      │ ▸ clic paire → la gauche se  │ PROMOTION GATE    │
+│              │   scope, la droite montre    │ ⛔ 1 paire rouge  │
+│ [Envoyer]    │   ses impacts                │                   │
+└──────────────┴──────────────────────────────┴───────────────────┘
+ RAW SIGNAL → LEFT BRAIN → [VALIDATION] ═MUR═ RIGHT BRAIN → CONSCIENCE → [PROMOTION]
+```
+
+Vos deux idées sont le **même écran à zoom différent** : en **conversationnel** (zoom arrière) vous parlez à gauche et les impacts à valider arrivent à droite ; en **navigationnel** vous sélectionnez une couche/paire au centre, **la gauche se scope dessus** (vous « chatez sur la couche ») et la droite montre *ses* impacts.
+
+La règle d'or : **le chat ne change jamais une vérité.** Il produit des signaux bruts puis des **slots proposés** (au-dessus du mur, en amber) ; la seule façon de muter la vérité est un **clic à droite** (decision card → ChangeSet → approbation). Les écarts affichés sont **calculés** (diff sémantique, blast radius, red wave), jamais l'avis d'un modèle. Le bas du mur est en **lecture seule** : on ne hand-édite pas le code depuis l'écran, on change la vérité d'au-dessus qu'il reflète. Le **Loopback ciblé** se voit : une paire 🔴 surligne le slot exact d'au-dessus à reconsidérer.
+
 ## Ce que ça change pour vous
 
 Vous ne « promptez » plus du code : vous **déclarez** des vérités (en votre langue), le système les **prouve** (E0→E7, du typecheck à la preuve runtime), et **rien ne change de sens en silence** — toute divergence remonte vers vous comme une carte de décision claire : accepter, amender, corriger, refuser.
