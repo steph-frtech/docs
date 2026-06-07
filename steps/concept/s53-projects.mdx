@@ -1,0 +1,37 @@
+---
+title: "S53 · Le projet, scope racine multi-tenant — chaque vérité appartient à une app"
+description: "S53 livre le project comme concept Kernel de PREMIER RANG qui scope toute vérité (fondation multi-tenant, EPIC 1 de l'app-builder). Jusqu'ici AIDOS était UN graphe global indivis. Un project (slug, name, owner_ref, created_at, lifecycle active|archived|deleted) est content-adressé (son empreinte SHA-256), unique par owner sur son slug, reçoit un nœud racine de DAG isolé, et SCOPE toute vérité future. Deux utilisateurs (ou deux apps) ne se télescopent jamais : deux graphes-projets sont disjoints, aucune lecture croisée. La suppression est DOUCE (append-only) ; la suppression dure GDPR est S116. Le scoping est une FONCTION PURE. Écrit SOUS le mur, via le chemin store — la vérité (kernel/mirrors/fitness) reste hors de portée."
+keywords: ["aidos", "krd", "project", "projet", "multi-tenant", "scope racine", "ProjectScope", "slug", "owner_ref", "lifecycle", "active | archived | deleted", "soft-delete", "content-addressed", "adressage par contenu", "nœud racine DAG", "graphes disjoints", "lecture croisée", "isolation", "fonction pure", "le mur", "chemin store", "below the line", "S02", "S24", "S54", "S55", "S62", "S116", "EPIC 1", "déterminisme"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S53](/steps/internals/s53-projects).</Note>
+
+## En une phrase
+
+S53 livre le **projet** : le concept Kernel de **premier rang** qui **scope toute vérité**. Avant S53, AIDOS était **un** graphe global indivis — aucune notion de « à qui appartient cette vérité ». Désormais chaque vérité appartient à **un projet**, et deux projets sont **disjoints** : ils ne se lisent jamais l'un l'autre.
+
+## Le problème que ça résout
+
+Vous voulez construire **votre** application avec AIDOS. Un autre utilisateur veut construire **la sienne**. Le truth-store (le Postgres où vivent les vérités) est **singleton** : sans frontière, vos deux apps se télescoperaient dans le même graphe. Le projet est cette frontière. C'est le **prérequis de tout le reste** : multi-tenant, identité, passerelle, modeleur, boucle-build, déploiement — tout se scope au projet.
+
+## Ce que vous obtenez
+
+Une route Workbench **`/projets`** où vous :
+
+- **Créez** un projet : un *slug* (l'identifiant stable, unique chez vous), un *nom*, un *propriétaire*. Le projet reçoit une **empreinte** (son adresse de contenu) et un **nœud racine de DAG** isolé.
+- **Archivez / restaurez / supprimez (en doux)** un projet — son cycle de vie est `actif → archivé → supprimé`, **toujours append-only** : rien n'est jamais détruit physiquement (la suppression dure GDPR viendra en S116).
+
+## Les garanties
+
+- **Unicité par propriétaire.** Deux propriétaires peuvent avoir un projet « boutique » ; un même propriétaire ne le peut pas. Le slug est votre clé humaine, unique chez vous.
+- **Disjonction.** Le projet A et le projet B ne partagent **aucune** ligne. Le *scoping* — « ne me montre que les vérités de ce projet » — est une **fonction pure** : même entrée, même sortie, jamais une lecture croisée.
+- **Adressage par contenu.** L'id d'un projet **est** l'empreinte de son contenu (réutilise le schéma S02). Créer deux fois le même projet est idempotent ; changer son cycle de vie produit une nouvelle empreinte (rien n'est écrasé).
+- **Le mur tient.** Un projet est écrit **sous** le mur (le schéma `projects` n'est pas `kernel`/`mirrors`/`fitness`), via le chemin store — comme le magasin de contenu. Aucune vérité n'est écrite depuis l'écran.
+
+## Ce qui vient ensuite
+
+- **S54** : la colonne `project_id` descend sur `kernel·mirrors·ideas·changesets·dag·brain·context` (la migration project-scope du truth-store).
+- **S55** : le mur project-aware + la RLS Postgres keyée identité (défense en profondeur).
+- **S57** : le shell projet (liste, création, switcher) câblé.
+- **S62** : un *propriétaire réel* (un utilisateur) derrière `owner_ref`.
+- **S116** : la suppression **dure** GDPR (cette étape ne fait que le soft-delete).

@@ -170,6 +170,8 @@
               "steps/internals/s51-harness-economics",
               "steps/concept/s52-couche-agent",
               "steps/internals/s52-couche-agent",
+              "steps/concept/s53-projects",
+              "steps/internals/s53-projects",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

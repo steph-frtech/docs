@@ -1,0 +1,47 @@
+---
+title: "S53 · Le projet, scope racine multi-tenant — internals (Implémentation · Méta · Méta-méta)"
+description: "Le détail d'implémentation de S53 : le package Go pur back/kernel/project (Project content-adressé via S01/S02 records.Hash/Canonicalize, Lifecycle clos active|archived|deleted, New/Validate/Archive/Restore/SoftDelete append-only, la Registry qui prouve slug-unique-par-owner en code pur, Scope[T Scopable] la fonction de scoping pure générique, RootNode qui réutilise dag.NodeID S24 pour un nœud racine DAG par projet), la migration expand-only projects_baseline.sql (schéma projects, projects.project content-adressé + index unique (owner_ref, slug) sur les têtes non-deleted, projects.dag_root FK, GRANTs below-the-line sans DELETE, le mur sur kernel/mirrors/fitness ré-asserté), le serveur MCP project (ADR 0009 — project_create/list/get/archive/restore/delete, pas de hard-delete), le twin déterministe lib/project.ts byte-identique au Go (canonicalBody/contentAddress/canCreate/scope) + Vitest+fast-check, la route /projects action-capable + Server Actions + e2e Playwright. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "project", "back/kernel/project", "Project", "Lifecycle", "Registry", "Scope", "Scopable", "RootNode", "New", "Validate", "Archive", "Restore", "SoftDelete", "OwnerSlug", "CanonicalBody", "Canonicalize", "Hash", "dag.NodeID", "projects.project", "projects.dag_root", "index unique owner_ref slug", "expand-only", "append-only", "below the line", "le mur", "soft-delete", "MCP project", "ADR 0009", "lib/project.ts", "twin déterministe", "byte-identique", "rapid", "Vitest", "fast-check", "Testcontainers", "déterminisme", "S02", "S24", "S54", "S55", "S116", "EPIC 1"]
+---
+
+<Note>Côté implémentation — le détail interne. Pour le concept et l'usage, voir [Pour les futurs utilisateurs → S53](/steps/concept/s53-projects).</Note>
+
+## En une phrase
+
+S53 ajoute `back/kernel/project` — un package Go **pur** qui modélise le projet comme un record content-adressé (id = `Hash(Canonicalize(body))`, scheme S01/S02), avec un `Lifecycle` clos à trois (soft-delete append-only), une `Registry` qui prouve l'unicité du slug par owner en **code pur**, une fonction `Scope` de scoping **pure et générique**, et un `RootNode` qui réutilise `dag.NodeID` (S24) pour donner un nœud racine de DAG à chaque projet.
+
+## Implémentation
+
+<Steps>
+  <Step title="back/kernel/project/project.go — le record Project (pur)">
+    `Project` porte `slug`, `name`, `owner_ref`, `created_at`, `lifecycle`. `CanonicalBody()` marshale un corps `{kind:"project", …}` puis le passe à `records.Canonicalize` (tri lexicographique des clés, scheme S02) ; `New`/`NewWithLifecycle` posent `id == version == records.Hash(canon)`. `Validate` re-vérifie l'invariant d'adressage par contenu. Le `Lifecycle` ∈ `{active, archived, deleted}` est **clos** (`Lifecycles()`, `isKnownLifecycle`). `Archive`/`Restore`/`SoftDelete` re-émettent une **NOUVELLE** ligne au nouvel état (append-only — l'id change car le lifecycle fait partie de l'adresse). `Scope[T Scopable](projectID, rows)` est la **fonction de scoping pure générique** : elle renvoie exactement les lignes du projet, jamais une d'un autre (deux graphes disjoints ne se lisent jamais). `Disjoint(a, b)` = `a != b`.
+  </Step>
+  <Step title="back/kernel/project/registry.go — l'unicité du slug par owner (pur)">
+    `Registry` est le gate déterministe : `NewRegistry(heads)` indexe `OwnerSlug(owner, slug)` pour chaque tête **non-deleted** (un projet supprimé en doux libère son slug ; un archivé le garde). `CanCreate(owner, slug)` et `Create(...)` refusent un doublon owner+slug avec `ErrDuplicateSlug`, autorisent le même slug sous un autre owner. **Aucun LLM** — l'unicité est une décision de code.
+  </Step>
+  <Step title="back/kernel/project/dag.go — un nœud racine DAG par projet">
+    `RootNode(p)` réutilise `dag.NodeID(nil, StratumAbove, projectLabel(p))` (S24, **jamais** un hash forké) ; `projectLabel(p) = "project:" + slug + "@" + id` rend la racine **unique par projet** et reproductible. La genèse est une ligne de vérité humaine (`StratumAbove`). Fonction pure — l'enregistrement dans `projects.dag_root` se fait sous la ligne via le chemin store.
+  </Step>
+  <Step title="back/migrations/projects_baseline.sql — expand-only, append-only, le mur">
+    Crée le schéma `projects` (NOUVEAU), `projects.project` (content-adressé, `body jsonb`, `CHECK` sur le lifecycle), un **index unique `(owner_ref, slug)`** sur les têtes `superseded_by IS NULL AND lifecycle <> 'deleted'` (défense en profondeur, miroir de la `Registry`), et `projects.dag_root` (un root par projet, **FK** vers `projects.project`). GRANTs below-the-line : l'agent a INSERT/SELECT/UPDATE, **pas** DELETE/TRUNCATE (soft-delete only). Le mur sur `kernel.truth/layer/link` + `mirrors.mirror` est **ré-asserté SELECT-only** — la migration prouve qu'elle ne l'affaiblit pas.
+  </Step>
+  <Step title="back/mcp/project — le serveur MCP (ADR 0009)">
+    Une op = un outil : `project_create` (content-adresse + gate d'unicité + INSERT projet + DAG root en une transaction), `project_list`, `project_get`, `project_archive`, `project_restore`, `project_delete` (soft). **Pas** d'outil de hard-delete (la suppression dure est S116). Le `Store` (store.go) persiste une décision déjà prise par les fonctions pures `project.*` (determinism-first : l'algorithme gagne, le store défère).
+  </Step>
+  <Step title="Le twin front + les miroirs (red → green)">
+    `lib/project.ts` est le twin déterministe **byte-identique** au Go : `canonicalBody` émet les clés triées (`created_at, kind, lifecycle, name, owner_ref, slug`), `contentAddress` hashe en SHA-256 hex — l'id calculé côté Workbench **égale** celui du moteur (vérifié : `7b420a85…310ec`). `canCreate` et `scope` rejouent l'unicité et la disjonction. Miroirs : `project_property_test.go` (rapid — adressage, unicité, disjonction, scope pur, lifecycle clos, soft-delete libère le slug) ; `project_dag_test.go` (fixture — racine DAG par projet, disjointe) ; `migration_roundtrip_test.go` (Testcontainers — round-trip JSONB, CHECK lifecycle, index unique, FK du root, GRANTs sans DELETE) ; `lib/project.test.ts` (Vitest+fast-check — la repro côté front) ; `tests/e2e/projects.spec.ts` (Playwright — chaque control s'exécute).
+  </Step>
+</Steps>
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Réutilisation, pas de fork.** L'adressage par contenu est `records.Hash`/`Canonicalize` (S01/S02) ; le nœud racine est `dag.NodeID` (S24) ; l'écriture est le **chemin store** (comme `/store`, S01). Aucun schéma de hash, aucun DAG, aucun chemin d'écriture n'est réinventé.
+- **Déterminisme-first.** Adressage, validation de slug, gate d'unicité, transition de cycle de vie, scoping : **toutes** des fonctions pures et autoritaires — jamais un LLM. Un agent qui « déciderait » qu'un slug est libre, ou qui scoperait par jugement, serait un **écart de déterminisme**. Le twin TS doit rester byte-identique au Go ; un test Vitest pinne l'empreinte exacte.
+- **Le mur, sous la ligne.** Le projet est *below the line* : c'est une frontière de tenant, pas une vérité métier. La double couche (GRANTs Postgres sans DELETE + ré-assertion SELECT-only sur kernel/mirrors) garantit que l'ajout du schéma `projects` **n'ouvre aucune porte** vers la vérité.
+- **Append-only partout.** Aucune transition ne mute une ligne : archive/restore/delete émettent une nouvelle ligne content-adressée et déplacent la tête (`superseded_by`). Le soft-delete (S53) et le hard-delete GDPR (S116) sont délibérément deux opérations distinctes.
+
+## Méta-méta — la garantie de niveau 3
+
+- **La complétude.** Chaque capacité du step porte son miroir vivant (property + fixture + roundtrip + Vitest + e2e) — aucun monstre (vérité sans miroir, ou miroir orphelin). Le scoping, qui est le cœur de l'isolation multi-tenant, est prouvé par une propriété de **partition** (`|Scope(A)| + |Scope(B)| == total`) et de **non-recouvrement**.
+- **Le juge est le miroir.** « Done » n'est pas déclaré : il est calculé sur le rouge → vert des miroirs, le vert antérieur intact (le build back reste vert), et l'absence de monstre. Le verdict d'unicité et de disjonction est une mesure de code, jamais un avis.
+- **Forward-deps honnêtes.** `project_id` sur les sept schémas (S54), la RLS keyée identité (S55), le propriétaire réel (S62), la suppression dure (S116) sont des **OpenQuestions documentées**, pas des dettes silencieuses — cette étape pose le scope racine, et seulement lui.
