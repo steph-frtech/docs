@@ -1,0 +1,89 @@
+---
+title: "S56 · Racines DAG par projet + namespace content-adressé + frontière — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S56 : le paquet pur back/archive/projectdag (genèse DAG par projet via project.RootNode, namespace content-adressé project/<id>/, branch/checkout/rebranch fencés sur la frontière, Merge gardé CROSS_PROJECT_MERGE qui délègue au moteur S122, Duplicate qui forke une racine isolée, Archive/Restore qui masquent sans détruire), les miroirs (fixture des trois done-criteria + property rapid d'isolation/reproductibilité/frontière/append-only), le jumeau TS lib/projectDag, le MCP project (8 outils, ADR 0009), la route action-capable /project-dag + son e2e Playwright. Réutilise S24 dag, S122 merge, S53 project, jamais re-implémentés."
+keywords: ["aidos", "krd", "S56", "projectdag", "DAG", "version space", "RootNode", "NodeID", "content-adressé", "namespace", "branch", "checkout", "rebranch", "merge", "CROSS_PROJECT_MERGE", "CROSS_PROJECT_NODE", "Duplicate", "fork", "Archive", "Restore", "append-only", "frontière", "SameProject", "BlockReason", "rapid", "fast-check", "fixture", "property", "MCP", "ADR 0009", "S24", "S122", "S53", "déterminisme", "le mur"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Le concept est [ici](/steps/concept/s56-project-dag).</Note>
+
+## En une phrase
+
+S56 partitionne l'**espace des versions** par projet — une **genèse DAG** + un **namespace content-adressé** par projet, et **tous** les mouvements (branch/checkout/rebranch) + la **fusion** restent dans la **frontière** du projet (un prédicat pur) — le tout **déterministe**, en **réutilisant** S24 (DAG), S122 (merge) et S53 (project), jamais re-implémentés.
+
+## Implémentation
+
+### Le paquet pur `back/archive/projectdag`
+
+Aucune I/O, aucune horloge, aucun LLM, aucune écriture (determinism-first, §6/§8). Le type central :
+
+```go
+type ProjectDAG struct {
+    projectID string
+    genesisID string
+    d         dag.DAG   // la valeur DAG S24, réutilisée telle quelle
+    masked    bool      // archivé = masqué (jamais détruit)
+}
+```
+
+- **Genèse** : `Genesis(p project.Project) ProjectDAG` réutilise `project.RootNode(p)` (S53) — la racine est content-adressée *sur le projet*, donc deux projets ⇒ deux racines disjointes, et le même projet ⇒ toujours la même racine (reproductible).
+- **Namespace** : `ContentNamespace(projectID) = "project/" + projectID + "/"`, et `NamespaceKey(projectID, key)` préfixe une clé du content-store S01 — **pas** un nouveau schéma de hash, juste un préfixe de clé du head pointer, pour que deux projets ne se télescopent pas sur la même clé logique.
+- **Mouvements fencés** : `Branch`/`CheckoutAncestor`/`Rebranch` vérifient d'abord `Contains(node)` ; un nœud hors frontière ⇒ refus `CROSS_PROJECT_NODE`. Sinon ils **délèguent** à `dag.Branch` / `dag.CheckoutAncestor` / `dag.Rebranch` (S24) — la logique de version n'est jamais dupliquée.
+- **Fusion gardée** :
+
+  ```go
+  func Merge(leftProjectID, rightProjectID string, base merge.Base,
+             left, right merge.Branch, heads links.Heads) (merge.MergeResult, *BlockReason) {
+      if !SameProject(leftProjectID, rightProjectID) {
+          return merge.MergeResult{}, crossProjectMergeReason(leftProjectID, rightProjectID)
+      }
+      return merge.MergeSemantic(base, left, right, heads), nil // l'oracle S122, intact
+  }
+  ```
+
+  `SameProject(a, b) = a == b && a != ""` est la **frontière** — le prédicat pur, jumeau de celui de S55. Cross-projet ⇒ `CROSS_PROJECT_MERGE` **avant** que le moteur de merge ne tourne.
+- **Duplicate** : `Duplicate(src, dst) = Genesis(dst)` — une racine **neuve** content-adressée sur `dst`, donc ne partageant **aucun** id de nœud avec `src` ; `src` est read-only (`_ = src`). C'est la primitive *duplicate-from-template* / *fork this app* (consommée par S81).
+- **Archive/Restore** : `Archive()` lève le flag `masked` **sans toucher** `d` (append-only) ; `Heads()` renvoie `nil` quand masqué mais `HeadsIncludingMasked()` renvoie toujours les nœuds — la preuve que rien n'est détruit. `Restore()` baisse le flag.
+
+### Les BlockReasons
+
+Deux codes stables, forme actionnable partagée (`code, severity, explanation, how_to_fix[]`) :
+
+- `CROSS_PROJECT_MERGE` — fusion entre deux projets ;
+- `CROSS_PROJECT_NODE` — mouvement vers un nœud hors frontière.
+
+### Les miroirs (rouge d'abord, §6)
+
+- **Fixture** `projectdag_fixture_test.go` — les **trois done-criteria** de la spec, plus le refus :
+  1. `TestFixture_PhaseInAInvisibleFromHeadsOfB` — une phase coupée dans A n'apparaît jamais dans les heads de B, et B ne peut pas naviguer sur un nœud de A ;
+  2. `TestFixture_DuplicateForksIsolatedRoot` — la genèse du fork ≠ celle de la source, ne partage aucun nœud, démarre à un seul head ;
+  3. `TestFixture_ArchiveMasksWithoutDestroying` — archive masque la vue par défaut, garde tous les nœuds, restore ramène les mêmes heads ;
+  4. `TestFixture_CrossProjectMergeRefused` — cross-projet ⇒ `CROSS_PROJECT_MERGE` ; même projet ⇒ le moteur S122 rend un verdict.
+- **Property** `projectdag_property_test.go` (rapid) — reproductibilité de la genèse, isolation de deux projets distincts (genèses + namespaces disjoints, B ne gagne jamais un nœud de A quelle que soit la suite de branches de A), la frontière qui gouverne la fusion (allowed ⟺ SameProject), et archive/restore réversible + append-only.
+
+### Le jumeau TS `front/web/lib/projectDag.ts`
+
+Réplique byte-pour-byte des **prédicats déterministes** dont l'UI a besoin : `contentNamespace`, `sameProject`, `mergeGuard` (→ `CROSS_PROJECT_MERGE`), `branch` (→ `CROSS_PROJECT_NODE`), `archive`/`restore`, `duplicate`. Les **ids de nœuds** (hash SHA-256 calculés par l'autorité Go via `records.Hash`) sont traités comme opaques ; le jumeau prouve la **logique de frontière** (isolation, append-only, refus) — la part que l'écran exécute. Pinné par `lib/projectDag.test.ts` (Vitest + fast-check, 8 tests).
+
+### Le MCP `back/mcp/projectdag` (ADR 0009)
+
+Huit outils, un par op backend, **purs** (no DB, no clock, no LLM) : `project_genesis`, `project_branch`, `project_checkout_ancestor`, `project_rebranch`, `project_duplicate`, `project_archive`, `project_restore`, `project_merge_guard`. Il **n'écrit rien** : il rend des valeurs d'espace de version ; enregistrer un nœud passe par le MCP `dag` (S24) sous le rôle privilégié.
+
+### La route action-capable `/project-dag`
+
+Thémée (ADR 0010) + bilingue fr/en (ADR 0011, parité 3328/3328). Quatre contrôles **exécutables** (Server Actions sur le jumeau) : brancher dans la frontière, garder une fusion (refus inter-projets affiché), forker une racine isolée, archiver/restaurer. E2e `tests/e2e/project-dag.spec.ts` (6 tests Playwright) prouve que chaque contrôle agit.
+
+## Méta
+
+**Pourquoi cette forme ?** Le DAG, le merge et la genèse existaient déjà (S24/S122/S53). Le piège déterministe aurait été de **re-coder** une version « project-aware » de chacun — une seconde implémentation, donc un risque de divergence (le même merge rendant deux verdicts). S56 fait l'inverse : il **enveloppe** les fonctions existantes d'un **fence pur** et leur **délègue** tout le travail. La frontière est la seule logique que ce paquet possède — exactement comme S55 ne possédait que le prédicat `Classify`.
+
+**Pourquoi `Duplicate` ne copie-t-il pas l'histoire ?** Parce que le contrat *vérifiable* de S56 est la **racine isolée** (genèse disjointe, zéro nœud partagé). Copier la structure d'un template sous la nouvelle frontière est un travail plus riche (S81) qui passe par une **ré-émission** sous le writer privilégié ; mélanger les deux ici aurait flou la preuve d'isolation. On livre la primitive minimale et vérifiable, on diffère le reste — une OpenQuestion *by design*, pas un résidu.
+
+**Le mur est inchangé (§2).** Ce paquet ne touche ni `kernel`, ni `mirrors`, ni `fitness` ; il ne fait **aucune** écriture. Le fence de version est *au-dessous de la ligne* dans son effet (il gouverne le content-store/DAG), mais comme toute la couche, il **rend des valeurs** : la persistance reste la prérogative du rôle `aidos` via le MCP `dag`.
+
+## Méta-méta
+
+**Determinism-first, prouvé deux fois.** La frontière (`SameProject`), le namespace, les mouvements et le verdict de fusion sont des **fonctions pures totales** — même entrée, même sortie, jamais de panique. Le miroir de reproductibilité (property rapid en Go + fast-check en TS) **pinne** cette propriété sur les deux plans (l'outillage AIDOS et l'écran). Aucun LLM n'entre : décider qu'une fusion est inter-projets est un **calcul**, pas un jugement.
+
+**La complétude tient.** Chaque capacité que S56 introduit (genèse, namespace, mouvements fencés, fusion gardée, duplicate, archive/restore) porte son miroir vivant (fixture ∨ property), côté Go **et** côté TS. Pas de capacité headless (chaque op a un contrôle exécutable à l'écran, prouvé Playwright), pas de monstre (pas de vérité sans miroir, pas de miroir orphelin), pas d'agent là où une fonction suffit.
+
+**Le cliquet ne recule pas.** S56 n'**ajoute** que des garde-fous (deux refus, une frontière) au-dessus de S53–S55 ; il n'en retire aucun, et il réutilise les fonctions S24/S122/S53 sans les modifier — le passé vert reste vert.

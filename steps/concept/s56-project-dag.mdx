@@ -1,0 +1,56 @@
+---
+title: "S56 · Chaque projet a son propre arbre de versions"
+description: "S56 donne à chaque projet construit avec AIDOS sa propre genèse DAG et son propre espace de noms content-adressé. Brancher, revenir en arrière (checkout), re-brancher et fusionner (merge) restent strictement à l'intérieur de la frontière du projet : une phase coupée dans le projet A est invisible des heads du projet B, une fusion entre deux projets différents est refusée avec le code CROSS_PROJECT_MERGE, dupliquer-depuis-un-template forke une racine isolée qui ne partage aucun nœud avec la source, et archiver masque la vue de version sans jamais rien détruire (append-only) — restaurer ramène exactement les mêmes heads. C'est le pendant, côté espace de versions, de l'isolation multi-tenant posée par S53–S55."
+keywords: ["aidos", "krd", "S56", "DAG", "arbre de versions", "version space", "projet", "multi-tenant", "branch", "checkout", "rebranch", "merge", "CROSS_PROJECT_MERGE", "duplicate", "template", "fork", "archive", "restore", "append-only", "content-adressé", "namespace", "isolation", "frontière", "phase stable", "BlockReason", "S53", "S54", "S55", "déterminisme"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S56](/steps/internals/s56-project-dag).</Note>
+
+## En une phrase
+
+S55 a posé le **garde** qui empêche un projet de **lire/écrire** les lignes d'un autre ; **S56 isole l'arbre des versions** : chaque projet a sa propre histoire (sa genèse, ses branches, ses phases stables), et aucune opération de version ne peut franchir d'un projet à l'autre.
+
+## Le problème que S56 résout
+
+AIDOS versionne la vérité comme un **DAG** (un graphe orienté sans cycle), pas comme une ligne : on peut **brancher** une alternative, **revenir** à une phase antérieure, **re-brancher** de là, et **fusionner** deux branches — sans jamais rien détruire (la loi *append-only*).
+
+Jusqu'à S55, cet arbre était **unique et indivis**. Pour qu'un inconnu construise *son* app sans toucher celle d'un autre, il faut que **l'arbre lui-même** soit cloisonné : la genèse de mon app, mes branches, mes phases stables ne doivent **jamais** apparaître dans l'arbre de la vôtre — ni l'inverse.
+
+## Ce que S56 garantit
+
+<CardGroup cols={2}>
+  <Card title="Une genèse par projet" icon="seedling">
+    Chaque projet démarre son arbre à une **racine** qui lui est propre, dérivée de son adresse de contenu. Deux projets ⇒ deux racines différentes, disjointes.
+  </Card>
+  <Card title="Les mouvements restent dans la frontière" icon="code-branch">
+    Brancher, checkout, re-brancher : on ne peut naviguer que sur **les phases de son propre projet**. Une phase d'un autre projet est **invisible** — et toute tentative d'y toucher est refusée.
+  </Card>
+  <Card title="Pas de fusion inter-projets" icon="ban">
+    Fusionner exige que les deux côtés soient le **même** projet. Une fusion entre deux projets est refusée d'emblée avec le code <code>CROSS_PROJECT_MERGE</code>.
+  </Card>
+  <Card title="Dupliquer forke une racine isolée" icon="copy">
+    « Partir d'un template » ou « forker cette app » crée une **nouvelle racine** qui ne partage **aucun nœud** avec la source : un vrai nouveau départ, pas une référence dans l'arbre d'à côté.
+  </Card>
+</CardGroup>
+
+## Archiver, c'est masquer — jamais détruire
+
+Quand vous archivez un projet, sa vue de version est **masquée** : ses heads disparaissent de l'affichage par défaut. Mais **aucun nœud n'est supprimé** — c'est la loi *append-only* d'AIDOS. **Restaurer** ramène exactement les mêmes heads, intacts. Rien de ce que vous avez prouvé vrai ne peut être perdu par un archivage ; une suppression *dure* (RGPD) est, elle, une opération distincte et explicitement gardée, prévue bien plus loin (S116).
+
+## Pourquoi une « frontière » plutôt qu'un simple filtre
+
+La frontière du projet est un **prédicat pur** : « ces deux choses sont-elles le même projet ? ». Ce n'est pas un réglage qu'on peut oublier d'appliquer, ni un avis d'un modèle : c'est un calcul, toujours le même pour la même entrée. C'est ce qui rend l'isolation **vérifiable** — et c'est le jumeau, côté arbre des versions, du garde de lignes posé en S55.
+
+## Ce que ça vous apporte
+
+- Votre app a son **propre passé** : vous pouvez expérimenter, revenir en arrière, fusionner vos branches, sans jamais voir ni risquer l'app de quelqu'un d'autre.
+- Vous pouvez **partir d'un template** en sachant que votre copie est **vraiment** à vous (une racine neuve), pas un lien vers l'original.
+- Vous pouvez **archiver** une app sans la perdre : tout est gardé, et **restaurer** la ramène à l'identique.
+
+## Tout se fait par écran
+
+Le panneau **« DAG par projet »** du Workbench rend ces gestes **exécutables** : couper une phase dans la frontière, tenter une fusion (et voir le refus inter-projets s'afficher), forker une racine isolée, archiver puis restaurer — chaque bouton **agit**, et un test de bout en bout (Playwright) prouve qu'il agit vraiment.
+
+## La suite
+
+S57 ajoute le **shell projet** (liste, création, *switcher*) qui épingle le projet actif et re-scope tous les panneaux — pour que toute la cabine de pilotage parle du **bon** projet.
