@@ -31,7 +31,7 @@ Chaque kernel a dix emplacements (« slots »), **symétriques autour du mur** :
 Trois lectures de cette table :
 
 1. **Le miroir se généralise en quatre familles de paires.** Le test n'est qu'une des quatre : il y a aussi le **doc-miroir** (la doc dérivée du code doit re-dire le use case déclaré — la dérive documentaire devient mécaniquement détectable), le **data-miroir** (la donnée réelle doit refléter le modèle humain) et le **spec-miroir**. Une paire qui diverge = soit un bug en bas, soit une vérité à faire évoluer en haut — jamais un écart silencieux.
-2. **s8 est le seul slot sans reflet** — c'est précisément pourquoi l'agent le possède, et pourquoi il est *optionnel* : certains kernels (une vue, une policy) sont **déclaratifs purs**, entièrement émis, sans code propre.
+2. **Le code est optionnel par émission, jamais orphelin.** Dans la vue effondrée ci-dessus, le code (s8) semble sans partenaire ; la forme stricte (plus bas) le réconcilie : le code reflète le **Contrat**. Pour un kernel déclaratif (vue, policy), le contrat est satisfait par **pure projection** — le code est généré, pas écrit à la main (le code est une projection).
 3. **Le mur est aussi une frontière de langue.** Tout ce qui se lit — y compris les *retours* d'en bas (résultats, doc dérivée, données) — parle la **langue ubiquitaire** de votre domaine. Seuls les deux slots de code parlent machine. Vous ne lisez jamais une autre langue que la vôtre.
 
 Et tout est **fractal** : la même anatomie vaut pour un projet, une feature, une API, une fonction, un agent, une migration — un kernel-feuille peut « s'effondrer » (slots dérivés), mais jamais en dessous de l'incompressible : **une intention + sa paire de preuve**.
@@ -40,26 +40,40 @@ Et tout est **fractal** : la même anatomie vaut pour un projet, une feature, un
 
 Ces dix slots ne sont pas une fiche statique : c'est une **traversée**. Une **entrée textuelle** (un besoin, un chat, un ticket) s'éclate en les slots du dessus, chacun se reflète en dessous, la conscience compare les paires, puis on promeut — ou la divergence remonte. **C'est exactement le pipeline VIBE AI LAB, à l'échelle d'un seul kernel** :
 
+Le 1-pour-1 est **strict** : huit paires-miroir, chaque vérité déclarée a exactement un reflet prouvé.
+
 ```text
 ENTRÉE (textuelle)  — besoin · chat · ticket · incident
-   │  (le cerveau gauche éclate l'entrée)
-   ├─▶ SPEC (s1)            ├─▶ COMPORTEMENT/BDD (s2)   ├─▶ MODÈLE (s3)
-   ├─▶ SCÉNARIO (s4)        └─▶ CONSIGNE SÉCURITÉ
-   ↓   DECISION CARD (accept · reject · amend · defer)
-══════════════ MUR D'INTENTION ══════════════
-   │  (le cerveau droit reflète chaque slot)
-   ├─▶ TEST (s5)            ├─▶ CODE (s8, optionnel)    ├─▶ PROJECTION DONNÉES (s7)
-   ├─▶ RÉSULTAT (s6)        ├─▶ DOC DÉRIVÉE (s9)        ├─▶ DOC FINALE (s10)
-   └─▶ SÉCURITÉ IMPLÉMENTÉE
-   ↓
-═══════════ MUR SÉCURITÉ / POLICE ═══════════
+   │  DÉCLARÉ (cerveau gauche)
+   ├─▶ Spec (P1)  · Comportement (P2)  · Scénarios (P3)  · Scénarios sécurité (P4)
+   ├─▶ Modèle (P5)  · Contrat (P6)  · Sécurité (P7)  · Evidence attendue (P8)
+   ↓   VALIDATION — Decision Card (accept · reject · amend · defer)
+═════════════════ MUR D'INTENTION ═════════════════
+   │  PROUVÉ (cerveau droit) — le reflet 1-pour-1
+   ├─▶ Documentation (P1) ◀ Spec        ├─▶ Résultats (P2) ◀ Comportement
+   ├─▶ Tests (P3) ◀ Scénarios           ├─▶ Tests sécurité (P4) ◀ Scénarios sécurité
+   ├─▶ Projection données (P5) ◀ Modèle ├─▶ Code (P6) ◀ Contrat
+   ├─▶ Sécurité implémentée (P7) ◀ Sécurité ├─▶ Evidence observée (P8) ◀ Evidence attendue
+   ↓   EXÉCUTION (l'acte : lance Code + Tests → Résultats + Evidence observée)
+═══════════════ MUR SÉCURITÉ / POLICE ═══════════════
    ↓  POLICE (allow · block · audit · approval)
-   ↓  CONSCIENCE — compare s1↔s10 · s2↔s9 · s3↔s7 · s4↔s5/s6 · sécu↔sécu
+   ↓  CONSCIENCE — compare les 8 paires (P1…P8)
    ├─ aligné → PROMOTION (vérité stable, entre au Kernel Graph)
-   └─ divergence → DECISION CARD qui REMONTE au-dessus du mur (la boucle)
+   └─ divergence → LOOPBACK CIBLÉ : remonte au slot exact de la paire divergente
 ```
 
-L'entrée donne la spec, le comportement, le scénario, le modèle, la consigne de sécurité ; de l'autre côté du mur viennent le test, le code, la projection, la documentation. **Chaque étage du macro pipeline est lui-même un kernel** avec ce micro pipeline : les couches hautes composent, les basses exécutent, les invariants remontent, les preuves réconcilient.
+| Déclaré (dessus) | ↔ | Prouvé (dessous) |
+|---|---|---|
+| Spec | ↔ | Documentation |
+| Comportement | ↔ | Résultats |
+| Scénarios | ↔ | Tests |
+| Scénarios sécurité | ↔ | Tests sécurité |
+| Modèle | ↔ | Projection données |
+| Contrat | ↔ | Code |
+| Sécurité | ↔ | Sécurité implémentée (police) |
+| Evidence attendue | ↔ | Evidence observée |
+
+Le **Contrat** apparie enfin le **Code** : il n'y a plus de slot orphelin. Le code reste optionnel **par émission** (un kernel déclaratif — vue, policy — voit son contrat satisfait par pure projection), jamais par absence de partenaire. La **sécurité est une colonne complète** (deux paires : P4 et P7), strictement parallèle à la colonne fonctionnelle. Et **chaque étage du macro pipeline est lui-même un kernel** avec ce micro pipeline : les couches hautes composent, les basses exécutent, les invariants remontent, les preuves réconcilient.
 
 ## Le vibe est contenu, jamais interdit
 
