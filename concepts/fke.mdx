@@ -131,6 +131,17 @@ La différence est profonde : les **facettes sont orthogonales** (régler la sé
 
 Le système de coordonnées complet d'une vérité : **niveau** (verticale, latérale/couplante) × **facette** (nature, orthogonale/séparante) × **côté du mur** (déclaré / prouvé) × **échelle** (projet ⊃ feature ⊃ fonction). La conscience compare dans une cellule ; le red wave propage le long de la verticale ; le mur traverse les quatre.
 
+## La causalité dans les deux sens (le WhyTree)
+
+La verticale propage la causalité **AVANT** : une vérité change → le **red wave** rougit ses conséquences (« qu'est-ce que je casse ? »). Il manquait le sens **ARRIÈRE** : d'un symptôme, remonter à la **cause racine** (« pourquoi ça a cassé ? »). C'est le **5-pourquoi**, mais redressé pour KRD :
+
+- ce n'est **pas une facette** — c'est un **geste déclenché par un échec** (`/why`), transversal aux 8 facettes ;
+- **déterministe d'abord** : on remonte le lien **`caused_by`** (l'inverse de l'`impacts`) là où le graphe connaît la cause ; le LLM ne sert qu'au « pourquoi » hors-graphe, et **chaque cause est reproduite ou rejetée** (anti-confabulation) ;
+- un **arbre** (fishbone), pas une ligne — plusieurs causes contributives ;
+- **il finit toujours en MIROIR** : la racine → `/learn` → un nouveau miroir d'anti-récurrence. Un WhyTree sans miroir n'est que du storytelling. C'est ce qui transforme « on a compris » en « ça ne peut plus revenir ».
+
+Red wave (avant) + WhyTree (arrière) ferment la causalité du graphe dans les deux sens.
+
 ## Le vibe est contenu, jamais interdit
 
 FKE ne rejette pas le vibe coding : il l'enferme dans le **Vibe Lab** — la zone d'exploration rapide (prototypes, spikes, comparaisons d'options) dont tout ce qui sort est `experimental`, jamais production. Le passage vers le durable est un **Promotion Gate** : intention claire, contrat, invariants, sécurité, preuves attendues, décision humaine — et l'artefact est **ré-émis depuis le kernel**, jamais promu tel quel.
