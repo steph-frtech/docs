@@ -121,6 +121,14 @@ S'il surgit une question (a) orthogonale, (b) sur les internals d'un kernel, (c)
 
 La **conscience** compare toutes les paires instanciées : **une faille de sécurité, une régression de perf, un invariant non prouvé ou une migration qui perd de la donnée sont des monstres, exactement comme un test fonctionnel manquant.** Et **chaque étage du macro pipeline est lui-même un kernel** avec ce micro pipeline : les couches hautes composent, les basses exécutent, les invariants remontent, les preuves réconcilient.
 
+## Les deux axes — la facette (orthogonale) et la verticale (latérale)
+
+Les facettes ne sont qu'**un** axe : la **nature** de la vérité. Une vérité a une **seconde coordonnée** — son **niveau dans la verticale** (`produit → parcours → vue → contrôle → action → opération → entité`). Toute vérité vit à l'**intersection** d'un niveau et d'une facette : « l'invariant ∀ de l'**opération** checkout », « le contrat de performance de la **vue** panier ».
+
+La différence est profonde : les **facettes sont orthogonales** (régler la sécurité ne touche pas la performance — elles n'interagissent pas, elles **séparent**). La **verticale, elle, n'est pas orthogonale : elle COUPLE.** Une vérité posée bas (sur l'entité) **contraint tous les niveaux qui la composent au-dessus** (l'opération, l'action, le contrôle, la vue) ; et quand elle change, le **red wave remonte cette ligne** et rougit ses consommateurs. **Les facettes isolent ; la verticale relie et propage.** C'était la ligne « non-orthogonale » qu'il manquait.
+
+Le système de coordonnées complet d'une vérité : **niveau** (verticale, latérale/couplante) × **facette** (nature, orthogonale/séparante) × **côté du mur** (déclaré / prouvé) × **échelle** (projet ⊃ feature ⊃ fonction). La conscience compare dans une cellule ; le red wave propage le long de la verticale ; le mur traverse les quatre.
+
 ## Le vibe est contenu, jamais interdit
 
 FKE ne rejette pas le vibe coding : il l'enferme dans le **Vibe Lab** — la zone d'exploration rapide (prototypes, spikes, comparaisons d'options) dont tout ce qui sort est `experimental`, jamais production. Le passage vers le durable est un **Promotion Gate** : intention claire, contrat, invariants, sécurité, preuves attendues, décision humaine — et l'artefact est **ré-émis depuis le kernel**, jamais promu tel quel.
