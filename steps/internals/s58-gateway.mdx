@@ -1,0 +1,104 @@
+---
+title: "S58 · Passerelle MCP-over-HTTP : routeur pur + mur côté serveur — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S58 : le paquet pur back/runtime/gateway (registre FERMÉ des outils des 13 serveurs MCP + namespace de vérité fencé, Route() total déterministe — scope d'abord via projectwall.Classify réutilisé, puis truth-write, puis below-the-line), le serveur MCP back/mcp/gateway servi sur DEUX transports (stdio + StreamableHTTPHandler du SDK Go = le HTTP honore le MCP), les miroirs (property rapid de déterminisme/totalité/non-élargissement, Pact par outil + provider-verification in-process, Godog round-trip jusqu'au Postgres live + Testcontainers prouvant que les GRANTs ne sont pas contournés), le jumeau TS lib/gateway, la route action-capable /gateway + son e2e Playwright. Réutilise S55 projectwall, ADR 0026 Pact, ADR 0009 MCP, jamais re-implémentés. Det. : pur routage, zéro LLM."
+keywords: ["aidos", "krd", "S58", "gateway", "passerelle", "MCP-over-HTTP", "JSON-RPC", "StreamableHTTPHandler", "registre", "Route", "Disposition", "below_line", "truth_write", "AGENT_CROSS_PROJECT_WRITE", "GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET", "GATEWAY_UNKNOWN_TOOL", "projectwall", "Classify", "Pact", "provider-verification", "Godog", "Testcontainers", "GRANT", "rapid", "fast-check", "MCP", "ADR 0009", "ADR 0026", "S55", "S57", "déterminisme", "le mur", "ChangeSet"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Le concept est [ici](/steps/concept/s58-gateway).</Note>
+
+## En une phrase
+
+S58 met **une seule porte HTTP/JSON-RPC** devant les 13 serveurs MCP d'AIDOS, avec un **routeur pur** qui applique le mur **côté serveur** (scope, puis vérité, puis below-the-line) — le tout **déterministe** (pur routage, zéro LLM), en **réutilisant** S55 (le prédicat `Classify`), le SDK Go MCP (le transport HTTP) et la vérification Pact in-process (ADR 0026), jamais re-implémentés.
+
+## Implémentation
+
+### Le cœur pur `back/runtime/gateway`
+
+Aucune I/O, aucune horloge, aucun LLM, aucune écriture (determinism-first, §6/§8). Deux fichiers : `gateway.go` (le routeur) et `registry.go` (le registre fermé, encodé comme donnée).
+
+Chaque outil porte une **disposition** — exactement deux valeurs (le registre est exhaustif) :
+
+```go
+type Disposition string
+const (
+    DispositionBelowLine  Disposition = "below_line"  // routé tel quel
+    DispositionTruthWrite Disposition = "truth_write" // refusé : passez par un ChangeSet
+)
+```
+
+`Route` est une **fonction pure totale** de `(registre, appel)`. L'**ordre des vérifications EST le mur** :
+
+```go
+func (r *Registry) Route(call Call) RouteDecision {
+    tool, ok := r.Lookup(call.Tool)
+    if !ok { return RouteDecision{Outcome: OutcomeUnknownTool, BlockReason: unknownToolReason(call.Tool)} }
+    // 1. SCOPE d'abord — le même prédicat que la RLS Postgres (S55), réutilisé.
+    if d := projectwall.Classify(call.Scope, call.Target); d.Verdict == projectwall.VerdictDeny {
+        return RouteDecision{Outcome: OutcomeRefusedScope, BlockReason: fromProjectWall(d.BlockReason)}
+    }
+    // 2. ZONE ensuite — une écriture de vérité ne passe jamais en direct.
+    if tool.Disposition == DispositionTruthWrite {
+        return RouteDecision{Outcome: OutcomeRefusedTruthWrite, BlockReason: truthWriteReason(tool)}
+    }
+    // 3. Below-the-line — on route.
+    return RouteDecision{Outcome: OutcomeRoute, Tool: &tool}
+}
+```
+
+Quatre issues terminales : `route`, `refused_scope`, `refused_truth_write`, `unknown_tool`. Le scope est vérifié **avant** la zone : une écriture de vérité vers le mauvais projet est d'abord une fuite de scope.
+
+### Le registre fermé `DefaultTools()`
+
+Tous les outils réels des 13 serveurs (`store_*`, `mirror_replay`/`ratchet_check`, `changeset_*`, `dag_*`, `idea_*`/`convert_to_markdown`, `memory_*`, `context_*`, `evolve_*`, `backtest_*`, `telemetry_query`/`incident_*`, `pact_verify`, `run_mutation`/`read_threshold`, `project_*`) sont **below-the-line** — aucun ne détient de GRANT pour écrire `kernel`/`mirrors`/`fitness` (c'est le mur par construction ; les outils `changeset_*` **sont** la porte légale de la vérité, ils proposent/appliquent par le gate, jamais une écriture brute). À cela s'ajoute le **namespace de vérité fencé** — `kernel_write`, `mirror_write`, `fitness_write` — qui n'est l'outil d'**aucun** serveur : c'est la porte qu'un appelant naïf ou hostile pourrait forger. On l'enregistre en `truth_write` pour que la passerelle le **refuse** explicitement (avec un BlockReason qui pointe le ChangeSet) plutôt que de le 404'er silencieusement. Le mur côté serveur est **explicite**, pas incident.
+
+### Les BlockReasons
+
+Forme actionnable partagée (`code, severity, explanation, how_to_fix[]`). Trois codes stables : `AGENT_CROSS_PROJECT_WRITE` (réexporté de S55), `GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET`, `GATEWAY_UNKNOWN_TOOL`.
+
+### Le serveur MCP `back/mcp/gateway` (ADR 0009), sur DEUX transports
+
+Trois outils, un par op : `gateway_route` (la décision du mur), `gateway_tools` (la surface fermée), `gateway_servers` (les 13 serveurs). Le **même** serveur MCP est servi sur **deux** transports — stdio (le plan MCP) **et** HTTP via le `StreamableHTTPHandler` du SDK Go (le plan HTTP, `JSONResponse:true` pour un fil déterministe) :
+
+```go
+func httpHandler() http.Handler {
+    srv := newMCPServer()
+    return mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
+        &mcp.StreamableHTTPOptions{JSONResponse: true})
+}
+```
+
+« Le HTTP honore le MCP » est ainsi **littéral** : c'est le même serveur, deux portes.
+
+### Les miroirs (rouge d'abord, §6)
+
+- **Property** `gateway_property_test.go` (rapid, N1) — `Route` déterministe (même entrée → même décision), totale et terminale (une route porte un outil, un refus porte un BlockReason), le **non-élargissement** (un appel inter-projets / à identité forgée n'est **jamais** routé, quel que soit l'outil → `AGENT_CROSS_PROJECT_WRITE`), et une écriture de vérité **toujours** refusée (`GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET`).
+- **Unitaire** `gateway_test.go` — la **complétude** (chacun des 13 serveurs expose ≥1 outil, pas de serveur headless), le routage below-the-line, le refus d'outil inconnu, le scope **avant** la zone, la reproductibilité de `DefaultTools()`.
+- **Transport** `transport_integration_test.go` — le serveur monté sur les **deux** plans (in-memory MCP **et** httptest) : un appel below-the-line route à l'identique des deux côtés (le HTTP honore le MCP), et les deux refus (scope, truth-write) sont rendus **par HTTP**.
+- **Pact** `pact_test.go` (provider-verification, N5, ADR 0026) — un contrat **par outil** exposé (le jeu de champs du résultat), vérifié **in-process** contre le `StreamableHTTPHandler` (net/http/httptest, sans démon externe) : chaque interaction honore exactement son contrat (aucun champ en plus/en moins).
+- **Round-trip** `roundtrip_bdd_test.go` (Godog N0 + Testcontainers N5, skip si Docker absent) — deux done-criteria **directement contre Postgres** : (1) un appel below-the-line (`store_put`/`store_get`) routé par la passerelle **round-trip** jusqu'au content-store **vivant** (octets identiques au retour) ; (2) agissant **comme le rôle fencé `aidos_agent`**, une écriture dans `kernel.truth` est **refusée par Postgres** (`permission denied`) — la passerelle **ne contourne pas les GRANTs**.
+
+### Le jumeau TS `front/web/lib/gateway.ts`
+
+Réplique byte-pour-byte du routeur (les dispositions, le registre fermé, l'ordre scope→truth-write, les codes), réutilisant `lib/projectWall.classify` (S55). Pinné par `lib/gateway.test.ts` (Vitest + fast-check, 8 tests : déterminisme, totalité, non-élargissement, refus de vérité, outil inconnu, route, complétude des 13 serveurs).
+
+### La route action-capable `/gateway`
+
+Thémée (ADR 0010) + bilingue fr/en (ADR 0011, parité 3359/3359, nouveau namespace `gateway`). Le contrôle **« Router »** (Server Action sur le jumeau) **exécute** `gateway.route` et rend la décision + le BlockReason ; le panneau liste les 13 serveurs frontés. E2e `tests/e2e/gateway.spec.ts` (6 tests Playwright) prouve chaque branche (route, projet croisé, écriture de vérité, outil inconnu, appel personnalisé).
+
+## Méta
+
+**Pourquoi un routeur pur séparé du dispatch ?** La **décision** (router / refuser) est un calcul déterministe et testable à l'infini ; le **dispatch** réel d'un appel routé vers le handler de son serveur est un seam à effets de bord que la passerelle HTTP câblera (le *cutover* S59 s'appuie dessus). Les séparer permet de **prouver le mur** sans monter quinze backends, et de garder le cœur 100 % pur.
+
+**Pourquoi enregistrer un namespace de vérité qui n'est l'outil d'aucun serveur ?** Parce que le mur côté serveur doit être **explicite**. Sans cela, une tentative d'écriture de vérité tomberait sur un « outil inconnu » — vrai, mais peu pédagogique. En la classant `truth_write`, la passerelle rend le **bon** refus (« passez par un ChangeSet »), exactement le message dont l'appelant a besoin.
+
+**Pourquoi réutiliser `projectwall.Classify` ?** Le piège déterministe aurait été de **ré-écrire** la règle d'isolation à la passerelle — une seconde implémentation, donc un risque que la passerelle autorise ce que la RLS refuse. S58 appelle **le même prédicat** que S55, qui est lui-même le jumeau de la RLS Postgres : les trois couches refusent le **même** appel, indépendamment.
+
+**Le mur est inchangé (§2).** Ce paquet ne touche ni `kernel`, ni `mirrors`, ni `fitness`. La passerelle **n'élargit jamais** ce qu'un appelant peut faire — elle le **restreint**. Le test Testcontainers le prouve jusque dans Postgres : agissant comme `aidos_agent`, l'écriture de vérité est refusée par le GRANT, pas par bienveillance.
+
+## Méta-méta
+
+**Determinism-first, prouvé sur les deux plans.** `Route` (et son jumeau TS) est une fonction pure totale ; le miroir de reproductibilité (property rapid en Go + fast-check en TS) **pinne** « même entrée → même décision » sur l'outillage AIDOS **et** sur l'écran. Aucun LLM n'entre : décider qu'un appel franchit le mur est un **calcul**, jamais un jugement — « pur routage, zéro LLM ».
+
+**Le HTTP honore le MCP, prouvé quatre fois.** Transport (même serveur, deux plans), Pact (un contrat par outil, provider-verification in-process), Godog (round-trip below-the-line jusqu'au Postgres vivant), Testcontainers (les GRANTs ne sont pas contournés) : les quatre done-criteria de la spec sont verts, et redonnent rouge indépendamment si on casse ce qu'ils gardent.
+
+**La complétude tient, le cliquet ne recule pas.** Chaque serveur nommé expose ≥1 outil (pas de capacité headless), chaque capacité porte son miroir vivant (Go **et** TS), chaque contrôle de l'écran est exécutable (prouvé Playwright). S58 n'**ajoute** que des garde-fous (une porte, trois refus) au-dessus de S53–S57 ; il n'en retire aucun et ne modifie aucune fonction réutilisée — le passé vert reste vert.

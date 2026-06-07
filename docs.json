@@ -180,6 +180,8 @@
               "steps/internals/s56-project-dag",
               "steps/concept/s57-project-switcher",
               "steps/internals/s57-project-switcher",
+              "steps/concept/s58-gateway",
+              "steps/internals/s58-gateway",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

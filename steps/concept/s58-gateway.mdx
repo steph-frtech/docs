@@ -1,0 +1,56 @@
+---
+title: "S58 · Une seule porte HTTP pour tous les outils d'AIDOS"
+description: "S58 expose CHAQUE outil MCP existant d'AIDOS (store · mirror-runner · changeset · dag · idea-intake · memory · context · evolve · backtester · telemetry-reader · pact-verifier · mutation-runner · project) derrière une seule porte HTTP/JSON-RPC, project-scopée et gardée. Le mur est appliqué côté serveur : un appel below-the-line est routé jusqu'à son service, un appel qui vise un autre projet ou qui forge une identité est refusé (AGENT_CROSS_PROJECT_WRITE), une écriture de vérité directe est refusée (GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET) car la vérité ne bouge que par un ChangeSet. C'est la passerelle qui débloque toute la cabine de pilotage pilotée par l'interface : le front parle HTTP à un seul endroit, et cet endroit ne laisse jamais franchir le mur."
+keywords: ["aidos", "krd", "S58", "passerelle", "gateway", "MCP", "MCP-over-HTTP", "JSON-RPC", "HTTP", "outils", "store", "changeset", "dag", "below-the-line", "vérité", "ChangeSet", "AGENT_CROSS_PROJECT_WRITE", "GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET", "mur", "project-scopé", "isolation", "routage", "déterminisme", "S55", "S57", "S59"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S58](/steps/internals/s58-gateway).</Note>
+
+## En une phrase
+
+AIDOS a une **quinzaine de petits services** (un par capacité : stocker, versionner, se souvenir, vérifier…). **S58 met une seule porte devant tous** — une porte HTTP, gardée, qui sait par quel projet vous arrivez et qui **ne laisse jamais franchir le mur**.
+
+## Le problème que S58 résout
+
+Chaque capacité d'AIDOS vit dans son propre **serveur MCP** : un pour le stockage, un pour l'historique des changements (ChangeSet), un pour l'arbre des versions, un pour la mémoire, un pour la vérification de contrats, et ainsi de suite. C'est propre — mais pour l'interface (le Workbench), parler à quinze adresses différentes, chacune avec sa façon de se connecter, est ingérable.
+
+Il faut **une seule entrée** : un endroit unique où le front envoie « fais ceci avec cet outil, pour ce projet », et où **toutes** les capacités sont joignables. Mais une porte unique ne doit surtout pas devenir une **porte dérobée** : il faut qu'à cet endroit précis, le **mur** d'AIDOS soit appliqué — sinon on aurait construit le moyen de le contourner.
+
+## Ce que S58 garantit
+
+<CardGroup cols={2}>
+  <Card title="Tous les outils, une seule porte" icon="door-open">
+    Les 13 serveurs MCP d'AIDOS sont exposés derrière **une** surface HTTP/JSON-RPC. Le front (et tout appelant) parle à un seul endroit pour atteindre n'importe quelle capacité.
+  </Card>
+  <Card title="Le bon projet, toujours" icon="id-card">
+    Chaque appel porte le **projet actif** et votre **identité**. Un appel qui vise un autre projet, ou qui prétend être quelqu'un d'autre, est refusé avec <code>AGENT_CROSS_PROJECT_WRITE</code> — le même refus que la base de données applique elle-même.
+  </Card>
+  <Card title="La vérité passe par la grande porte" icon="shield-halved">
+    On ne peut **pas** écrire de la vérité (le noyau, les miroirs) directement par la passerelle. Une telle tentative est refusée avec <code>GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET</code> : la vérité ne bouge que par un **ChangeSet** (idée → miroir → /goal → approbation).
+  </Card>
+  <Card title="Un registre fermé" icon="list-check">
+    La passerelle n'expose qu'une **liste fermée** d'outils — jamais un passage arbitraire. Un outil inconnu est refusé (<code>GATEWAY_UNKNOWN_TOOL</code>), pas silencieusement laissé filer.
+  </Card>
+</CardGroup>
+
+## « Below-the-line » : ce qui passe librement
+
+AIDOS sépare deux mondes par une **ligne de flottaison**. *Au-dessus* : la **vérité** (le noyau, les miroirs, le barème) — intouchable en écriture directe. *Au-dessous* : tout le reste — stocker des octets, lire l'historique, compiler un contexte, se souvenir, vérifier un contrat. La passerelle **laisse passer librement** les opérations du dessous (les *below-the-line*) : elles vont jusqu'à leur service et reviennent. Elle ne **bloque** que ce qui franchirait le mur — et toujours avec une explication actionnable.
+
+## Pourquoi le garde est au serveur, pas au navigateur
+
+Le contrôle ne peut pas vivre dans l'interface : un appelant malveillant pourrait simplement ne pas l'exécuter. S58 met le garde **côté serveur**, à la porte — l'endroit que **tout le monde** doit franchir. Et ce garde est un **calcul pur** : pour la même entrée (qui, quel projet, quel outil), toujours la même décision. Pas un réglage qu'on oublie, pas un avis d'un modèle : un algorithme, vérifiable, le **même prédicat** que la base de données applique de son côté (S55).
+
+## Ce que ça vous apporte
+
+- Votre app se pilote depuis **une seule adresse** : toute la cabine de pilotage parle à la passerelle.
+- Vous êtes **isolé** : un appel ne peut jamais toucher un autre projet que le vôtre, même s'il essaie.
+- La vérité de votre app reste **sous votre main** : rien ne la modifie par la bande — il faut toujours passer par un ChangeSet approuvé.
+
+## Tout se fait par écran
+
+Le panneau **« Passerelle MCP-HTTP »** du Workbench rend la porte **lisible et exécutable** : il liste les serveurs exposés, et son bouton **« Router »** fait passer un appel par le garde — on choisit un outil, un projet cible, une identité, et on voit la décision s'afficher : *routé*, ou *refusé* avec le bon code (projet croisé, écriture de vérité, outil inconnu). Un test de bout en bout (Playwright) prouve que chaque cas agit vraiment.
+
+## La suite
+
+S59 **branche** réellement le front sur la passerelle (le *cutover*) : les panneaux du Workbench cessent de calculer en local et appellent la porte HTTP. S60 y ajoute le **streaming** pour les opérations longues.
