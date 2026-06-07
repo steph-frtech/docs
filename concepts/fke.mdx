@@ -94,30 +94,32 @@ Le kernel a **deux facettes parallèles** — fonctionnelle et sécurité — ch
 
 Le **Contrat** apparie enfin le **Code** (et le Contrat sécurité apparie la Police) : plus aucun slot orphelin. Le code reste optionnel **par émission** (un kernel déclaratif voit son contrat satisfait par pure projection), jamais par absence de partenaire.
 
-## Quatre lentilles, un seul squelette
+## Huit lentilles, un seul squelette
 
-La sécurité n'est pas la seule facette. Le **même squelette de six paires** se lit à travers **quatre lentilles canoniques** — c'est l'unification de FKE :
+La sécurité n'est pas la seule facette. Le **même squelette de six paires** se lit à travers **huit lentilles canoniques** — c'est l'unification de FKE :
 
 | Lentille | La question qu'elle pose | Preuve dominante |
 |---|---|---|
 | **Fonctionnel** | fait-il ce qu'on veut ? (par l'exemple) | tests, code, résultats |
 | **Invariants ∀** | est-ce vrai sur TOUS les chemins ? | property / fuzz / mutation |
 | **Sécurité** | résiste-t-il aux attaques ? | tests séc, police, scans |
-| **Performance / Budgets** | assez rapide, pas trop cher, assez fiable ? | benchmark, load test, métrage |
+| **Performance / Budgets** | assez rapide, pas trop cher (charge normale) ? | benchmark, load test, métrage |
+| **Fiabilité / Résilience** | survit-il aux **pannes** (dégradation, reprise) ? | chaos / fault-injection, failover, restore |
 | **Évolutivité / Migration** | la vérité tient-elle dans le temps, sur de vraies données ? | migration, backfill, restore, `as-of` |
 | **Maintenabilité / Structure** | reste-t-il sain — pas « vert dehors, pourri dedans » ? | arch-fitness, le second cliquet structurel |
+| **Expérience / Utilisabilité** | est-il **bon à utiliser** ? (vérité molle, falsifiable) | ExperienceClaim : usabilité, A/B, télémétrie |
 
-Chaque lentille a les six mêmes paires (Spec → Comportement → Scénarios → Modèle/Domaine → Contrat → Evidence ↔ leurs reflets), lues sous son angle. La **maintenabilité** est le **second cliquet** de KRD : un kernel peut avoir tous ses tests verts, être sûr, rapide, durable… et rester un plat de spaghettis à dépendances circulaires. Cette facette (arch-fitness : no-global-mutable, call-graph acyclique, fonction pure, frontières tenues) ne peut que **tenir ou s'améliorer** — elle attrape le « tests verts, système pourri ».
+Chaque lentille a les six mêmes paires (Spec → Comportement → Scénarios → Modèle/Domaine → Contrat → Evidence ↔ leurs reflets), lues sous son angle. La **maintenabilité** est le **second cliquet** de KRD (« tests verts, système pourri »). La **fiabilité** demande « survit-il à une dépendance morte / un crash ? » — orthogonale à la performance (rapide ≠ résilient) et à l'évolutivité (durable au changement ≠ tolérant à la panne). L'**expérience** est une **vérité molle** (§13.6) : prouvée expérientiellement (usabilité, A/B, télémétrie), falsifiable par la réalité — elle **informe** la décision sans la **bloquer** comme un invariant dur (sous-contraindre l'UX serait l'erreur symétrique).
 
-**Pourquoi exactement six.** Elles répondent au sextet fondamental d'une vérité : **correct par l'exemple · vrai partout · sûr · viable · durable · sain.** Le modèle se ferme là **par construction** — un test de décision classe tout autre candidat :
+**Pourquoi huit — et comment je l'ai vérifié.** Croisement au modèle de qualité canonique **ISO 25010** : il valide F, S, B (efficiency), M ; sa Compatibility = nos arêtes (Pact) ; sa Portability ⊂ V ; et il révèle **deux oublis** que j'avais repliés à tort — **Usability → Expérience (X)** et **Reliability → Fiabilité (R)**. (Note : nos **Invariants ∀** ne sont pas un attribut ISO mais un axe de *rigueur de preuve*, ∃ vs ∀.) L'octuor : **correct par l'exemple · vrai partout · sûr · viable · résilient · durable · sain · utilisable.** Au-delà, un test de décision classe tout autre candidat :
 
 - **dimension latérale** (une **arête** entre kernels) : Contrats/Pact, Composition — déjà des liens du graphe avec leur miroir, pas des facettes ;
-- **sous-lentille** (raffinement DANS une facette) : Déterminisme & Concurrence ⊂ Invariants ∀ · Conformité/GDPR ⊂ Sécurité · Observabilité & Réversibilité ⊂ Performance · UX/a11y/i18n ⊂ Fonctionnel · Portabilité ⊂ Évolutivité ;
+- **sous-lentille** (raffinement DANS une facette) : Déterminisme & Concurrence ⊂ Invariants ∀ · Conformité/GDPR ⊂ Sécurité · a11y/i18n ⊂ Expérience · Réversibilité/recovery ⊂ Fiabilité · Observabilité ⊂ Fiabilité/Performance · Portabilité ⊂ Évolutivité ;
 - **propriété du graphe** (Provenance) ou **du changeset** (Reviewability), pas du kernel.
 
-S'il surgit une question (a) orthogonale, (b) sur les internals d'un kernel, (c) non réductible aux six — ce sera la 7ᵉ. Les candidats sérieux tombent tous ailleurs.
+S'il surgit une question (a) orthogonale, (b) sur les internals d'un kernel, (c) non réductible aux huit — ce sera la 9ᵉ. Après croisement ISO, les candidats sérieux tombent tous ailleurs.
 
-**Les facettes sont effondrables** : un kernel n'instancie une lentille **que s'il porte cette nature de vérité**. La fonctionnelle est toujours là ; une fonction pure porte F + Invariants + Maintenabilité ; un endpoint PII porte tout ; une vue déclarative n'a que F. On n'instancie jamais une facette vide.
+**Les facettes sont effondrables** : un kernel n'instancie une lentille **que s'il porte cette nature de vérité**. La fonctionnelle est toujours là ; une fonction pure porte F + Invariants + Maintenabilité ; un endpoint PII user-facing porte tout (F+I+S+B+R+V+M+X) ; une vue déclarative n'a que F + X. On n'instancie jamais une facette vide.
 
 La **conscience** compare toutes les paires instanciées : **une faille de sécurité, une régression de perf, un invariant non prouvé ou une migration qui perd de la donnée sont des monstres, exactement comme un test fonctionnel manquant.** Et **chaque étage du macro pipeline est lui-même un kernel** avec ce micro pipeline : les couches hautes composent, les basses exécutent, les invariants remontent, les preuves réconcilient.
 
