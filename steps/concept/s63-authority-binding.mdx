@@ -1,0 +1,54 @@
+---
+title: "S63 · Qui a le droit de figer une vérité ? (liaison autorité & provenance)"
+description: "S63 remplace « l'humain » abstrait de l'AuthorityGraph par un USER RÉEL : via son rôle d'adhésion (S62), un user est lié à une autorité (approver/veto/escalation) PAR SCOPE (S16). Une proposition d'écriture-vérité exige alors l'approbation d'un user détenant l'autorité du scope, sinon INSUFFICIENT_AUTHORITY. Chaque Idea/ChangeSet enregistre l'humain agissant comme provenance — jamais un placeholder. Un override reste une décision ENREGISTRÉE : ChangeSet + ADR + provenance, jamais un contournement silencieux."
+keywords: ["aidos", "krd", "S63", "autorité", "authority", "AuthorityGraph", "approver", "veto", "escalation", "scope", "provenance", "humain réel", "placeholder", "INSUFFICIENT_AUTHORITY", "PLACEHOLDER_ACTOR", "OVERRIDE_NOT_RECORDED", "override", "ChangeSet", "ADR", "S16", "S62", "adhésion", "membership", "écriture-vérité", "le mur", "déterminisme", "decision enregistrée"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S63](/steps/internals/s63-authority-binding).</Note>
+
+## En une phrase
+
+S62 a répondu à *qui peut quoi sur ce projet ?* **S63 répond à la question suivante : *qui a le droit de FIGER une vérité, et sous quelle responsabilité ?*** — il lie un **user réel** (via son rôle d'adhésion) à une **autorité** par scope, et exige que toute écriture-vérité nomme l'humain qui la porte.
+
+## Le problème que S63 résout
+
+L'AuthorityGraph (S16) sait dire « pour admettre une vérité du domaine *checkout*, il faut l'approbation du rôle *product_owner* ». Mais *product_owner* est un rôle **abstrait** : rien ne le rattachait à une personne réelle. Et S16 lisait l'ensemble des approbations « accordées » depuis nulle part — un **placeholder**. S63 ancre cet ensemble dans un user réel et impose que la provenance nomme l'humain.
+
+## Ce que S63 apporte
+
+<CardGroup cols={2}>
+  <Card title="L'humain lié à l'autorité" icon="user-shield">
+    Un <strong>binding déclaré</strong> (rôle d'adhésion × domaine → rôles d'autorité) : un owner du projet détient, par exemple, le rôle d'autorité <code>product_owner</code> sur le domaine <em>checkout</em>.
+  </Card>
+  <Card title="L'autorité par scope" icon="diagram-project">
+    Les rôles détenus sont calculés POUR un domaine : un user peut détenir une autorité sur <em>checkout</em> et aucune sur <em>billing</em>.
+  </Card>
+  <Card title="Sinon, INSUFFICIENT_AUTHORITY" icon="ban">
+    Une proposition d'écriture-vérité par un user qui ne détient AUCUN rôle d'autorité requis par le scope est refusée <code>INSUFFICIENT_AUTHORITY</code>.
+  </Card>
+  <Card title="La provenance, jamais un placeholder" icon="fingerprint">
+    Chaque Idea/ChangeSet enregistre l'humain agissant — identité réelle + nom affiché. Un acteur « system »/« agent »/« tbd » est refusé <code>PLACEHOLDER_ACTOR</code>.
+  </Card>
+</CardGroup>
+
+## Le gradient d'autorité, ancré dans l'adhésion
+
+S63 réutilise le gradient d'adhésion de S62 (`owner ⊃ editor ⊃ viewer`) comme **plancher** : un binding award ses rôles d'autorité à tout membre dont le rôle atteint au moins le plancher. Conséquence — un **owner** détient un sur-ensemble des autorités d'un **editor**, lui-même un sur-ensemble de celles d'un **viewer**. L'autorité monte avec le rôle, jamais l'inverse.
+
+## L'override n'est pas un contournement
+
+Un humain peut **outrepasser** un blocage — mais ce n'est jamais une édition silencieuse. Un override est une **décision ENREGISTRÉE** (CLAUDE.md §8) : il exige
+
+1. un **ChangeSet** (la transaction append-only qui le porte),
+2. un **ADR** (le *pourquoi* écrit),
+3. une **provenance** d'acteur réel (l'humain qui décide).
+
+Un override auquel il manque l'un des trois est refusé `OVERRIDE_NOT_RECORDED`. La vérité n'est jamais éditée en place : l'override s'ajoute, il ne détruit rien.
+
+## Le juge est du code
+
+La décision — détient-il l'autorité du scope ? la provenance est-elle réelle ? l'override est-il enregistré ? — est **déterministe** : une fonction pure, le même input donnant le même verdict. Aucun LLM n'entre dans le jugement (CLAUDE.md §8). Le mur tient : la décision ne lit ni n'écrit la vérité ; promouvoir reste `idée → miroir → /goal → approbation humaine`.
+
+## Là où ça se voit
+
+Le panneau Workbench **/authority-binding** rend tout cela exécutable à l'écran : proposer une écriture-vérité (et lire le verdict admise / `INSUFFICIENT_AUTHORITY` / `VETOED` / `PLACEHOLDER_ACTOR`), voir la provenance enregistrée, et enregistrer un override (refusé tant que le ChangeSet, l'ADR ou la raison manquent).

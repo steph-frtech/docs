@@ -1,0 +1,44 @@
+---
+title: "S63 · Liaison autorité & provenance — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S63 : le binding pur back/runtime/authoritybinding qui ancre l'AuthorityGraph (S16) dans un user réel via son rôle d'adhésion (S62). ResolveGrantedRoles(membership, domain, bindings) calcule les rôles d'autorité détenus (déduplés, triés) ; DecideProposal exige un acteur réel (RequireRealActor, sinon PLACEHOLDER_ACTOR) puis lance authority.Decide sur l'ensemble ancré — un user sans autorité du scope ⇒ INSUFFICIENT_AUTHORITY. NewOverride forge une décision ENREGISTRÉE (ChangeSet + ADR + provenance, sinon OVERRIDE_NOT_RECORDED) content-adressée records.Hash. Le jumeau front lib/authority-binding.ts produit la MÊME adresse de contenu que le Go (a5c38ff1…). Miroirs : fixture back (7 scénarios), rapid (déterminisme/gradient/placeholder/override/tri), Vitest+fast-check front, Playwright /authority-binding. Réutilise S16 authority, S62 membership, records.Hash. Det. : juge pur, zéro LLM."
+keywords: ["aidos", "krd", "S63", "authoritybinding", "AuthorityRoleBinding", "ResolveGrantedRoles", "DecideProposal", "RequireRealActor", "RealActor", "NewOverride", "Override", "INSUFFICIENT_AUTHORITY", "PLACEHOLDER_ACTOR", "OVERRIDE_NOT_RECORDED", "VETOED", "authority.Decide", "AuthorityGraph", "approver", "veto", "escalation", "provenance", "placeholder", "membership", "gradient", "owner", "editor", "viewer", "ChangeSet", "ADR", "content-adressé", "records.Hash", "lib/authority-binding", "rapid", "fast-check", "Playwright", "le mur", "déterminisme", "S16", "S62", "S20", "S27"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Le concept est [ici](/steps/concept/s63-authority-binding).</Note>
+
+## En une phrase
+
+S63 est la **jointure porteuse** entre trois briques déjà construites — l'AuthorityGraph S16 (qui admet une vérité), l'adhésion S62 (qui est un membre réel et à quel rôle), et la provenance S27/S20 (qui a voulu quoi) : un paquet pur `back/runtime/authoritybinding` ancre l'ensemble abstrait « granted » de S16 dans un **user réel** via un **binding déclaré**, exige une **provenance réelle** (jamais un placeholder), et fait de tout **override** une décision **enregistrée** (ChangeSet + ADR + provenance) — le tout déterministe, **hors du Kernel**.
+
+## Implémentation
+
+### Le cœur pur `back/runtime/authoritybinding`
+
+- `AuthorityRoleBinding{Domain, MinProjectRole, Roles}` — la table **déclarée** (CLAUDE.md §8 : déclarée, jamais apprise) : un membre dont le rôle d'adhésion atteint `MinProjectRole`, dans `Domain`, détient ces `Roles` d'autorité. `Domain` vide = wildcard (octroie dans tous les domaines).
+- `ResolveGrantedRoles(m *membership.Membership, domain, bindings) []authority.Role` — la jointure S63 : l'ensemble des rôles d'autorité que le membre détient pour ce domaine, **dédupliqué et trié** (sortie déterministe). Un non-membre (nil) ou un rôle invalide n'octroie rien. C'est l'ensemble « granted » que `authority.Decide` (S16) consomme — mais ancré dans un user réel.
+- `RequireRealActor(RealActor) *BlockReason` — refuse l'acteur vide/blanc/placeholder. La denylist fermée (`"", system, agent, aidos, tbd, placeholder, anonymous, …`) est matchée trimée + minuscule. `"agent"`/`"system"` sont explicites : l'agent possède l'implémentation, jamais la vérité (le mur).
+- `DecideProposal(g, truth, actor, m, bindings) ProposalDecision` — le **gate** : (1) exige un acteur réel sinon `PLACEHOLDER_ACTOR` ; (2) ancre les rôles via `ResolveGrantedRoles` ; (3) lance `authority.Decide` (précédence S16/ADR 0016 : veto domine → aucun approbateur ⇒ bloqué → tous ⇒ admis → partiel ⇒ escaladé) ; (4) re-mappe « aucune approbation » en `INSUFFICIENT_AUTHORITY` (le critère de done).
+- `NewOverride(code, changeSetRef, adrRef, actor, reason) (Override, *BlockReason)` — forge la décision enregistrée : exige un acteur réel + ChangeSet + ADR + raison, sinon `OVERRIDE_NOT_RECORDED`. L'id est content-adressé via `records.Hash(records.Canonicalize(body))` (idempotent, jamais une voie de hachage forkée).
+
+### Le jumeau front `front/web/lib/authority-binding.ts`
+
+Réimplémente `decideProposal`, `resolveGrantedRoles`, `requireRealActor`, `validateOverride`, `toProvenanceDetail` — **byte-pour-byte** la logique Go (les deux jumeaux ne dérivent jamais). L'adresse de contenu de l'override est **identique** au Go (vérifié : `cs-123`/`ADR 0042`/`user-owner`/Olga/exception ⇒ `a5c38ff113a25a9f…`), les clés du corps canonique triées alphabétiquement pour matcher `records.Canonicalize`.
+
+### Le panneau `front/web/app/authority-binding/`
+
+`page.tsx` + `AuthorityBindingPanel.tsx` + `actions.ts` (server actions). Action-capable (ui-completeness, §7) : **proposer** (décide + affiche le verdict et la provenance) et **enregistrer un override** (refusé tant que ChangeSet/ADR/raison manquent). Thémé ADR 0010, bilingue next-intl ADR 0011 (namespace `authorityBinding`, parité de clés fr=en). Aucune vérité écrite depuis l'écran (le mur).
+
+## Les miroirs
+
+- **Fixture back** (`authoritybinding_fixture_test.go`, 7+ scénarios) — le critère de done verbatim : approbateur détenant l'autorité ⇒ admis ; sans autorité ⇒ `INSUFFICIENT_AUTHORITY` ; placeholder ⇒ `PLACEHOLDER_ACTOR` ; veto détenu ⇒ `VETOED` ; override = ChangeSet + ADR + provenance ; provenance nomme l'humain ; non-membre n'octroie rien ; parité d'adresse Go↔TS.
+- **Property/rapid** (`authoritybinding_property_test.go`) — déterminisme (même input ⇒ même verdict), gradient monotone (owner ⊇ editor ⊇ viewer), placeholder toujours refusé, override toujours enregistré ∧ idempotent, `ResolveGrantedRoles` trié + dédupliqué.
+- **Front** (`lib/authority-binding.test.ts`) — Vitest + fast-check, mêmes done-criteria + reproductibilité + parité d'adresse.
+- **Playwright** (`tests/e2e/authority-binding.spec.ts`, 5 tests) — chaque contrôle s'exécute à l'écran : admis, `INSUFFICIENT_AUTHORITY`, `PLACEHOLDER_ACTOR`, override enregistré puis `OVERRIDE_NOT_RECORDED`.
+
+## Méta
+
+S63 **ne réinvente rien** : il compose S16 (`authority.Decide`, `AdmissionDecision`, précédence ADR 0016), S62 (`membership.Role`, `NewMembership`), et le substrat de hachage S01/S02 (`records.Hash`/`Canonicalize`). Sa seule nouveauté est l'**ancrage** — le binding qui transforme un rôle d'autorité abstrait en un droit porté par un user réel — et l'**exigence de provenance**. Le mur est ré-affirmé, pas modifié : la décision est en lecture seule contre la vérité ; un override passe par un ChangeSet (above-the-line, voie CLI `aidos` via /goal). La frontière déterministe : *aucun* LLM n'entre dans le jugement — détenir l'autorité, nommer l'humain, enregistrer l'override sont des fonctions pures.
+
+## Méta-méta
+
+C'est le point où « l'humain » du Tome (KRD §13.8 : « remplacer l'humain abstrait par une autorité explicite ») cesse d'être une abstraction et devient une **personne traçable**. Le pattern est anti-Goodhart (§8) : on ne peut pas se déclarer autorisé — l'autorité est **calculée** depuis un binding déclaré et un rôle d'adhésion réel ; on ne peut pas écrire une vérité anonyme — la provenance est **forcée** ; on ne peut pas contourner en silence — l'override est une **décision enregistrée** dont le coût (ChangeSet + ADR) est rendu explicite. Trois portes, trois fonctions pures, un seul humain nommé derrière chaque écriture-vérité. La forward-dependency reconnue (la persistance canonique de l'override via le moteur de ChangeSet S20 sous l'identité propagée S58/S61) est une OpenQuestion *par design* — elle ne bloque pas le pas (CLAUDE.md §6, exception bootstrap).
