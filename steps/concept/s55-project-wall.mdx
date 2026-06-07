@@ -1,0 +1,65 @@
+---
+title: "S55 · Le mur devient conscient du projet — deux verrous au lieu d'un"
+description: "S55 rend le mur d'AIDOS project-aware : l'agent ne lit/écrit below-the-line que pour le projet courant, sous son identité propagée. Une écriture croisée (un scope projet A qui vise une ligne du projet B) ou une identité forgée à la passerelle est refusée avec le code AGENT_CROSS_PROJECT_WRITE. La défense est en profondeur : un hook PreToolUse (couche 1) ET une RLS Postgres keyée sur l'identité (couche 2) appliquent la même règle à deux endroits indépendants — casser l'un n'ouvre jamais l'autre. Le routeur de contexte ne compile un ContextPack que depuis le sous-graphe du projet actif : un pack du projet A contient zéro nœud du projet B."
+keywords: ["aidos", "krd", "S55", "mur", "wall", "project-aware", "multi-tenant", "RLS", "row-level security", "défense en profondeur", "identité", "S61", "passerelle", "identité forgée", "AGENT_CROSS_PROJECT_WRITE", "BlockReason", "hook", "PreToolUse", "écriture croisée", "isolation", "projet", "project_id", "ContextRouter", "ContextPack", "sous-graphe", "S53", "S54", "le mur", "déterminisme", "algorithme"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S55](/steps/internals/s55-project-wall).</Note>
+
+## En une phrase
+
+S54 a posé la **colonne** qui dit à quel projet appartient chaque vérité ; **S55 met le garde devant** : l'agent ne peut **lire ni écrire** que les données du **projet courant**, sous **sa propre identité** — et cette règle est appliquée **deux fois**, à deux endroits qui ne dépendent pas l'un de l'autre.
+
+## Le problème que S55 résout
+
+S54 sait *à quel projet* appartient une ligne, mais rien n'**empêche** encore un agent travaillant sur le projet A de toucher une ligne du projet B. Tant que l'isolation repose sur « la requête a pensé à filtrer », elle est fragile : un oubli, un bug de passerelle, une réclamation forgée — et deux apps construites avec AIDOS se mélangent.
+
+S55 transforme l'isolation en **mécanisme**, pas en confiance. Et il la **double** : si une couche est contournée, l'autre tient.
+
+## Les deux verrous
+
+<CardGroup cols={2}>
+  <Card title="Couche 1 — le hook PreToolUse" icon="shield-halved">
+    Avant qu'un outil n'agisse, un garde déterministe vérifie : « cette opération est-elle dans le projet actif, sous l'identité active ? ». Sinon, elle est refusée — avec un message qui nomme la porte légale.
+  </Card>
+  <Card title="Couche 2 — la RLS Postgres" icon="database">
+    Même si le hook est contourné, la base elle-même ne montre au rôle agent **aucune ligne** d'un autre projet : la sécurité au niveau des lignes (RLS) est keyée sur (le projet actif, l'identité propagée).
+  </Card>
+</CardGroup>
+
+<Note>La clé : les deux couches sont **indépendantes**. Le critère de S55 est qu'elles « rougissent » **séparément** — casser le hook ne désactive pas la RLS, et casser la RLS ne désactive pas le hook. C'est la définition même de la défense en profondeur.</Note>
+
+## L'identité, pas seulement le projet
+
+Un point subtil mais décisif : la RLS ne se contente pas du `project_id` que la requête **réclame**. Elle exige aussi l'**identité propagée** (celle de l'utilisateur réel, branchée en S61). Pourquoi ? Parce qu'une réclamation **forgée à la passerelle** — « je suis sur le projet B » — ne doit pas suffire à lire le projet B. En keyant sur l'identité *en plus* du projet, S55 garantit qu'un bug de passerelle ne contourne **ni** l'identité **ni** le mur.
+
+C'est pourquoi S55 livre le **mécanisme** RLS, et S61 le **branche** sur l'identité réelle : une réclamation valide côté passerelle mais sans la bonne identité ne lit **rien**.
+
+## Le contexte aussi est scopé
+
+Le **routeur de contexte** d'AIDOS (celui qui compile le « pack » minimal qu'un agent reçoit pour travailler un objectif) ne pioche désormais que dans le **sous-graphe du projet actif**. La garantie est nette et vérifiable : **un ContextPack du projet A contient zéro nœud du projet B**. L'agent ne peut même pas *voir* la vérité d'un autre projet, encore moins la toucher.
+
+<Note>Le routeur reste un **algorithme**, pas un prompt : il *filtre* un graphe par règles déclarées, il n'« invente » jamais ce qu'il inclut. Le projet est simplement le filtre le plus extérieur.</Note>
+
+## Ce que vous obtenez
+
+<CardGroup cols={2}>
+  <Card title="Isolation inviolable" icon="lock">
+    Un projet ne peut ni lire ni écrire un autre — garanti par deux verrous indépendants, pas par la discipline.
+  </Card>
+  <Card title="Refus actionnable" icon="circle-info">
+    Un refus porte le code `AGENT_CROSS_PROJECT_WRITE` et explique comment faire les choses légalement (basculer de projet, agir sous son identité).
+  </Card>
+  <Card title="Identité au cœur" icon="fingerprint">
+    Une identité forgée à la passerelle ne lit rien : la base vérifie l'identité, pas seulement le projet réclamé.
+  </Card>
+  <Card title="Contexte cloisonné" icon="layer-group">
+    L'agent ne reçoit que le contexte de son projet : zéro fuite de vérité entre apps.
+  </Card>
+</CardGroup>
+
+## Essayez-le
+
+La route **/project-wall** du Workbench rend le mur **exécutable** : entrez un scope actif (identité + projet) et une cible (projet + une identité éventuellement forgée), cliquez sur « Classer », et voyez le verdict — autorisé, ou refusé avec le `BlockReason` complet. Trois presets reproduisent les cas nommés : même projet (autorisé), projet croisé (refusé), identité forgée (refusé).
+
+<Note>Le mur ne change pas (CLAUDE.md §2) : la RLS gouverne le **scope** (quel projet), jamais la **ligne de flottaison** (quelles zones). L'agent garde un accès `SELECT` seul sur `kernel`/`mirrors` ; S55 ajoute l'isolation par projet **par-dessus**, pas à la place.</Note>

@@ -1,0 +1,73 @@
+---
+title: "S55 · Mur project-aware + RLS keyée identité — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S55 : le paquet pur back/runtime/projectwall (classificateur cross-project, code AGENT_CROSS_PROJECT_WRITE, identité+projet), la migration project_rls_baseline.sql (RLS Postgres keyée sur app.project ET app.identity, défense en profondeur couche 2), le project-scoping du ContextRouter (un pack du projet A contient zéro nœud du projet B), les miroirs (property rapid + fixture hook + roundtrip Testcontainers RLS : isolation, identité forgée refusée, fault-injection indépendante), le jumeau TS lib/projectWall, le MCP project-wall, la route /project-wall."
+keywords: ["aidos", "krd", "S55", "projectwall", "mur", "RLS", "row-level security", "AGENT_CROSS_PROJECT_WRITE", "défense en profondeur", "identité", "S61", "app.project", "app.identity", "current_setting", "POLICY", "FORCE ROW LEVEL SECURITY", "hook", "PreToolUse", "ContextRouter", "ContextPack", "cross-project", "Testcontainers", "rapid", "fast-check", "fault-injection", "isolation", "déterminisme", "algorithme", "MCP", "ADR 0009", "le mur"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Le concept est [ici](/steps/concept/s55-project-wall).</Note>
+
+## En une phrase
+
+S55 rend le mur **conscient du projet** par **deux couches indépendantes** — un classificateur pur (hook PreToolUse) et une **RLS Postgres keyée sur (projet, identité)** — et **scope le ContextRouter au projet actif**, le tout **déterministe**, le mur de la ligne de flottaison inchangé.
+
+## Implémentation
+
+### Couche 1 — le classificateur pur `back/runtime/projectwall`
+
+Aucune I/O, aucune horloge, aucun LLM (determinism-first) :
+
+- `Scope{Identity, ActiveProject}` — le scope actif, keyé sur **les deux** : l'identité propagée (S61) ET le projet épinglé (S57). `IsZero()` ⇒ pas de scope actif (fail-closed).
+- `Target{ProjectID, ClaimedIdentity}` — la cible d'une op below-the-line : le projet des lignes + l'identité revendiquée (vide = héritée ; une valeur différente = réclamation **forgée**).
+- `Classify(scope, target) → Decision` — le prédicat **exact** que la RLS applique aussi :
+
+  ```
+  allow ssi  scope non-zéro
+        ET   identité effective == scope.Identity   (pas de réclamation forgée)
+        ET   target.ProjectID == scope.ActiveProject (pas d'inter-projets)
+  ```
+
+  Tout échec ⇒ `deny` avec le `BlockReason{Code: AGENT_CROSS_PROJECT_WRITE, …}` + `how_to_fix`. Une cible sans projet (`ProjectID == ""`) n'est **pas** project-scopée → `allow` (c'est le mur S04 qui gouverne la zone, pas celui-ci).
+
+### Couche 2 — la RLS Postgres `back/migrations/project_rls_baseline.sql`
+
+Expand-contract, **forward-only**, **idempotente** (drop-then-create des policies) :
+
+1. `app.in_active_scope(row_project_id)` — fonction `STABLE` : vrai ssi `nullif(current_setting('app.project', true),'')` == `row_project_id` **ET** `current_setting('app.identity', true)` est non-vide. Une requête qui ne pose **ni** GUC voit **zéro** ligne (`current_setting(..., true)` = `NULL` → prédicat faux : fail-closed).
+2. Sur **chaque** table scopée (l'ensemble miroir de `projectscope.ScopedTables()`, S54) : `ENABLE` + `FORCE ROW LEVEL SECURITY`, puis une `POLICY … FOR ALL TO aidos_agent USING (app.in_active_scope(project_id)) WITH CHECK (app.in_active_scope(project_id))` — le `USING` fence la **lecture/maj/suppression**, le `WITH CHECK` refuse une **écriture** cross-projet (le même `AGENT_CROSS_PROJECT_WRITE`). Un `CONTINUE WHEN to_regclass(qual) IS NULL` saute une table absente (même discipline qu'en S54).
+3. Le mur inchangé : `REVOKE INSERT/UPDATE/DELETE` ré-asserté sur `kernel`/`mirrors` ; le rôle `aidos` (qui applique les ChangeSets) reçoit `BYPASSRLS`.
+
+<Note>Pourquoi deux GUC de session et pas un rôle DB par projet : AIDOS est multi-tenant sur **un** truth-store (S53/S54) ; un rôle par projet ne passe pas à l'échelle et ne porte pas l'identité. La requête pose `SET LOCAL app.project / app.identity` dans sa transaction ; la RLS les lit par ligne.</Note>
+
+### Le project-scoping du ContextRouter — `back/runtime/context`
+
+Chaque nœud du graphe (`Layer`, `Mirror`, `Contract`, `MemoryRecord`) et le `Goal` gagnent un champ `Project`. `Compile` applique un **fence de projet en premier** (le scope le plus extérieur) dans chaque boucle : un nœud dont le `Project` diffère de `goal.Project` est exclu (`ReasonCrossProject`) et n'entre dans **aucune** section du pack. Un `Project` vide (le singleton / le seed `__system__`) n'applique **aucun** fence — rétro-compatible avec le corpus S33.
+
+### Les miroirs
+
+- `projectwall_property_test.go` (rapid) — `Classify` pur & stable ; verdict binaire (deny ⇒ toujours un `BlockReason`) ; cross-projet **toujours** refusé ; même-projet+identité **toujours** autorisé ; **identité forgée** refusée ; zéro-scope fail-closed ; cible sans projet pass-through.
+- `projectwall_fixture_test.go` — les scénarios nommés du critère : même projet (allow), projet croisé (deny), **identité forgée côté passerelle** (deny), pas de scope (deny), cible non scopée (allow).
+- `context_router_project_property_test.go` (rapid) — **un ContextPack du projet A contient zéro nœud du projet B** (sur les quatre sections) ; un goal à projet vide ne fence rien (rétro-compat).
+- `project_rls_roundtrip_test.go` (Testcontainers, **Postgres réel**, en tant que rôle `aidos_agent`) — **isolation RLS** (scopé A : voit sa ligne, zéro ligne B) ; **écriture cross-projet refusée** par le `WITH CHECK` ; **identité forgée/absente** : `app.project` posé mais `app.identity` non posé ⇒ zéro ligne ; **fault-injection indépendante** : retirer la RLS (drop policy + disable) **ré-ouvre** la fuite — preuve que la RLS *était* le garde, indépendamment du hook ; **idempotence**.
+- Jumeau front `front/web/lib/projectWall.test.ts` (Vitest + fast-check) — code byte-identique au Go ; mêmes branches de verdict ; `classify` pur. **9/9.**
+
+### Surfaces
+
+- **MCP** `back/mcp/projectwall` (ADR 0009, un op = un outil) : `wall_classify`, `wall_block_code` — projections pures, zéro écriture.
+- **Route** `/project-wall` — action-capable : le bouton « Classer » **exécute** `Classify` (via le jumeau TS) et rend le verdict + `BlockReason` ; trois presets (même/croisé/forgé) ; thémée (ADR 0010), bilingue (ADR 0011, parité 3296/3296) ; e2e Playwright **5/5**.
+
+## Méta — pourquoi c'est construit ainsi
+
+- **Deux couches, un seul prédicat** : le hook (Go) et la RLS (SQL) encodent **la même** règle `allow ssi (scope, identité, projet)`. Les écrire deux fois est délibéré — c'est la défense en profondeur : un bug dans l'une ne perce pas l'autre. Le jumeau TS encode une **troisième** copie pour l'UI, pinnée au Go octet pour octet.
+- **Keyer sur l'identité, pas seulement le projet** : si la RLS ne lisait que `app.project`, un bug de passerelle posant le mauvais projet bypasserait tout. En exigeant aussi `app.identity`, une réclamation forgée ne lit rien — l'auth (S61) n'est jamais *gateway-only*.
+- **Le fence de projet est le scope le plus extérieur** dans le routeur : il passe **avant** branche et bounded-context, parce qu'un nœud d'un autre projet ne doit jamais être *considéré*, même comme contrat public croisé.
+- **Distinct du mur S04** : ce mur-ci gouverne le **scope** (quel projet) parmi les zones que l'agent **peut** écrire ; le mur de la ligne de flottaison gouverne la **zone** (kernel/mirrors/fitness, jamais). Orthogonaux, les deux tiennent.
+
+## Méta-méta — la garantie de niveau 3
+
+S55 est gouverné par les **trois disciplines inviolables** :
+
+1. **Mirror-first** : property + fixture (hook) + roundtrip Testcontainers (RLS) + property routeur sont écrits avant le code ; ils sont le `/goal`. « Done » est **calculé** (les deux couches rougissent indépendamment ∧ pack A sans nœud B ∧ identité forgée refusée), jamais déclaré.
+2. **Le mur tient** : la migration ré-asserte `SELECT`-only sur `kernel`/`mirrors` (test de grants) ; la RLS ajoute l'isolation **par-dessus**, n'ouvre aucune porte d'écriture de vérité.
+3. **Determinism-first** : le classificateur, le prédicat RLS et le routeur sont des **fonctions pures / un algorithme faisant autorité**, doublés de **miroirs de reproductibilité** (même entrée → même verdict / même pack). Le routeur est explicitement « un algorithme, pas un prompt ». Aucun LLM n'entre — rien ici n'est irréductiblement génératif.
+
+La conséquence : une isolation multi-tenant **inviolable** parce que **doublée et indépendante**, keyée sur l'identité réelle, et un agent qui ne reçoit jamais que le contexte de son propre projet — prouvé contre un Postgres réel.
