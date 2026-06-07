@@ -105,15 +105,19 @@ La sécurité n'est pas la seule facette. Le **même squelette de six paires** s
 | **Sécurité** | résiste-t-il aux attaques ? | tests séc, police, scans |
 | **Performance / Budgets** | assez rapide, pas trop cher, assez fiable ? | benchmark, load test, métrage |
 | **Évolutivité / Migration** | la vérité tient-elle dans le temps, sur de vraies données ? | migration, backfill, restore, `as-of` |
+| **Maintenabilité / Structure** | reste-t-il sain — pas « vert dehors, pourri dedans » ? | arch-fitness, le second cliquet structurel |
 
-Chaque lentille a les six mêmes paires (Spec → Comportement → Scénarios → Modèle/Domaine → Contrat → Evidence ↔ leurs reflets), lues sous son angle : pour les **invariants**, le « contrat » est *le contre-exemple banni* (∃¬), prouvé par property tests ; pour la **performance**, le « contrat » est *le budget*, prouvé par k6 + métrage ; pour l'**évolutivité**, le « scénario » est *rename+backfill / split d'entité / changement de cardinalité*, prouvé par migration expand-contract + restore.
+Chaque lentille a les six mêmes paires (Spec → Comportement → Scénarios → Modèle/Domaine → Contrat → Evidence ↔ leurs reflets), lues sous son angle. La **maintenabilité** est le **second cliquet** de KRD : un kernel peut avoir tous ses tests verts, être sûr, rapide, durable… et rester un plat de spaghettis à dépendances circulaires. Cette facette (arch-fitness : no-global-mutable, call-graph acyclique, fonction pure, frontières tenues) ne peut que **tenir ou s'améliorer** — elle attrape le « tests verts, système pourri ».
 
-**Pourquoi exactement cinq.** Elles répondent au quintet fondamental d'une vérité : **correct par l'exemple · vrai partout · sûr · viable · durable dans le temps.** Le modèle se ferme là — tout autre candidat échoue le test :
+**Pourquoi exactement six.** Elles répondent au sextet fondamental d'une vérité : **correct par l'exemple · vrai partout · sûr · viable · durable · sain.** Le modèle se ferme là **par construction** — un test de décision classe tout autre candidat :
 
-- une **dimension latérale** (une **arête** entre kernels, pas une lentille sur un nœud) : **Contrats / Interopérabilité** (Pact avec les voisins) et **Composition** — déjà des liens du graphe avec leur propre miroir (Pact), pas des facettes ;
-- une **sous-lentille** (un raffinement DANS une facette) : Conformité/Vie privée (GDPR) ⊂ Sécurité ; UX / accessibilité / i18n ⊂ Fonctionnel (vérité molle) ; Réversibilité / opérabilité ⊂ Performance.
+- **dimension latérale** (une **arête** entre kernels) : Contrats/Pact, Composition — déjà des liens du graphe avec leur miroir, pas des facettes ;
+- **sous-lentille** (raffinement DANS une facette) : Déterminisme & Concurrence ⊂ Invariants ∀ · Conformité/GDPR ⊂ Sécurité · Observabilité & Réversibilité ⊂ Performance · UX/a11y/i18n ⊂ Fonctionnel · Portabilité ⊂ Évolutivité ;
+- **propriété du graphe** (Provenance) ou **du changeset** (Reviewability), pas du kernel.
 
-**Les facettes sont effondrables** : un kernel n'instancie une lentille **que s'il porte cette nature de vérité**. La fonctionnelle est toujours là ; une fonction pure porte F + Invariants ; un endpoint PII porte F + Sécurité + Performance + Évolutivité ; une vue déclarative n'a que F. On n'instancie jamais une facette vide.
+S'il surgit une question (a) orthogonale, (b) sur les internals d'un kernel, (c) non réductible aux six — ce sera la 7ᵉ. Les candidats sérieux tombent tous ailleurs.
+
+**Les facettes sont effondrables** : un kernel n'instancie une lentille **que s'il porte cette nature de vérité**. La fonctionnelle est toujours là ; une fonction pure porte F + Invariants + Maintenabilité ; un endpoint PII porte tout ; une vue déclarative n'a que F. On n'instancie jamais une facette vide.
 
 La **conscience** compare toutes les paires instanciées : **une faille de sécurité, une régression de perf, un invariant non prouvé ou une migration qui perd de la donnée sont des monstres, exactement comme un test fonctionnel manquant.** Et **chaque étage du macro pipeline est lui-même un kernel** avec ce micro pipeline : les couches hautes composent, les basses exécutent, les invariants remontent, les preuves réconcilient.
 
