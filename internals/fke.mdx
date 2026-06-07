@@ -1,0 +1,45 @@
+---
+title: "FKE — le Livre XXX du Tome"
+description: "L'anatomie symétrique du kernel fondue au Tome : les huit décisions du grill (ADR 0044), ce qui existe déjà dans AIDOS, et la piste FK01-FK10 qui câble les deltas après S117."
+keywords: ["fke", "livre xxx", "adr 0044", "paire-miroir", "doc-miroir", "conscience", "truth_level", "e0-e7", "a0-a8", "kernel effondré", "fk01", "grill"]
+---
+
+<Info>
+  Page de fondation, côté **Pour moi**. FKE a été formalisé comme document fondateur puis **grillé branche par branche** (`/grill-with-docs`, 2026-06-07) et **fondu dans le Tome** : `KRD.md` → **LIVRE XXX**, sections FKE-1…FKE-45. Les huit décisions sont actées dans l'**ADR 0044**. Côté concept : [FKE — Fractal Kernel Engineering](/concepts/fke).
+</Info>
+
+## Implémentation
+
+**À venir — piste `FK01-FK10` (`docs/plan/ROADMAP-fke.md`), lancée APRÈS S117** (décision 8 du grill : zéro collision avec le build app-builder en cours). Au moment du grill, l'implémentation EXISTANTE couvre déjà la majorité des organes FKE — c'est la preuve par construction :
+
+| Organe FKE | Implémentation AIDOS existante |
+|---|---|
+| Intent Wall | le mur — hook PreToolUse + GRANTs Postgres (deux couches) |
+| Vibe Lab / Promotion Gate | `/spike` (ratchet OFF, confiné) · `/harvest` + `/grill` + `/goal` |
+| Cerveau gauche / droit | l'interview EL (compound du besoin) · la boucle-build S83 |
+| Police / policy-as-code | agentlayer 5 axes + enforcers fail-closed + ledger Merkle (GV) |
+| Memory Wall | le memory-firewall (`ToKernel` bloqué, `ViaIdea` seul chemin) |
+| Context Pack / doom-loop | ContextRouter (un algorithme, pas un prompt) · `BUILD_LOOP_NO_PROGRESS` |
+| Evidence / paire de preuve | miroirs N0-N5, mutation, fault-injection, « done is computed » |
+| Runtime loop / legacy | RealityMirror → `/learn` · strangler-fig + miroirs de caractérisation |
+
+Les sections de cette couche seront complétées au vert de chaque étape FK (FK01 `truth_level`+parité · FK02 expand E · FK03 dérivation s9 · FK04 doc-miroirs · FK05 conscience+`/conscience` · FK06 A0-A8 · FK07 lexicon · FK08 complétude 10-slots · FK09 contract E post-S117 · FK10 projections d'outillage).
+
+## Méta
+
+Les vérités et miroirs que la piste FK devra prouver, tels que décidés au grill :
+
+- **Le doc-miroir est jugé par calcul** : s9/s10 sont *dérivées* déterministiquement du code/AST ; la comparaison s2↔s9 est **ensembliste** (concepts du lexique, behaviors énumérés, erreurs couvertes). Divergence structurelle = **bloquante** ; prose = **advisory** (un LLM signale, n'arbitre jamais). Miroir : fault-injection — retirer un behavior du code rougit la paire ; éditer la prose seule ne bloque pas.
+- **La parité du niveau de vérité** : `truth_level` est stocké mais écrit uniquement par la fonction de transition déterministe ; le miroir `stored_level == computed_level` rougit sur toute divergence — le stockage est un cache prouvé du calcul, jamais une seconde source.
+- **La conscience n'invente aucun verdict** : property — son rapport ne contient que des verdicts *sourcés* des juges existants (runner, complétude, SemanticDiff, RealityMirror, senseurs, ledger) ; mêmes verdicts d'entrée → même rapport.
+- **L'autonomie monte par preuve** : property — la promotion A0→A8 est une fonction pure de l'historique AgentRun ; A8 inatteignable sur action critique.
+- **L'incompressible** : fault-injection — un kernel sans s1 ou sans paire de preuve (s4↔s5/s6) est un monstre ; un kernel-feuille légalement effondré passe.
+- **Expand-contract E0-E7** : property — le mapping N→E est total (même miroir → même E) ; la phase contract ne perd aucun miroir (N déprécié via lifecycle, jamais supprimé).
+
+## Méta-méta
+
+- **La place dans le cliquet.** FKE ne touche ni le mur ni la fitness : il **renforce la loi de complétude** (de « une vérité ↔ un miroir vivant » vers « quatre familles de paires + gabarit effondrable ») — un garde-fou ne peut qu'être AJOUTÉ, jamais retiré (méta-loi §5). Le minimum incompressible garantit que le gabarit n'affaiblit rien : il étend la loi sans l'amollir.
+- **L'anti-Goodhart tenu.** Les deux tentations écartées au grill sont exactement celles que §8 vise : un *jugement LLM* des doc-miroirs (le juge doit être déterministe) et une *conscience-évaluatrice* (le « second agent qui valide » n'est pas une preuve). Les deux sont réduites au rôle d'advisory, re-vérifiées par le calcul.
+- **L'honnêteté v8.1.** Par la formule du Tome (« un concept n'est accepté que s'il possède définition, record, propagation, hook et exemple »), le LIVRE XXX entre avec **définition + exemples** ; ses **records/hooks/propagations** arrivent par FK01-FK10 — d'ici là, les deltas sont des OpenQuestions datées, pas des vérités opérantes.
+- **Les décisions** : ADR 0044 (les huit forks, alternatives rejetées incluses) ; termes canoniques au §161 du Tome (FKE, conscience, paire-miroir, kernel effondré, Vibe Lab, Promotion Gate) ; placement au §162 (→ Livre XXX) ; glossaire partagé dans `CONTEXT-MAP.md`.
+- **La frontière constructrice/construite inchangée** : AIDOS reste Go (ADR 0040), l'app émise reste Hono/TS fonctionnel + IaC Pulumi/TS (ADR 0043) — FKE les décrit tous deux comme instances de la même anatomie, à travers les plans (fractalité).

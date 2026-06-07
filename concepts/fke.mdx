@@ -1,0 +1,49 @@
+---
+title: "FKE — Fractal Kernel Engineering"
+description: "La discipline universelle dont KRD est la méthode et AIDOS le runtime : toute demande à une IA devient un kernel à l'anatomie symétrique autour du mur — quatre paires-miroir, des preuves à la place de la confiance, une conscience qui réconcilie."
+keywords: ["fke", "fractal kernel engineering", "kernel", "mur", "paire-miroir", "doc-miroir", "conscience", "vibe lab", "promotion gate", "evidence", "krd", "aidos"]
+---
+
+<Note>
+  Côté concept — aucune ligne de code. FKE vit dans le Tome (`KRD.md`, LIVRE XXX) : c'est la **discipline universelle** dont **KRD** est la méthode produit-logiciel et **AIDOS** le runtime de référence (FKE ⊃ KRD ⊃ AIDOS — ADR 0044). Pour la mécanique vue du dedans, voir [Pour moi → FKE, le Livre XXX](/internals/fke).
+</Note>
+
+## En une phrase
+
+**Fractal Kernel Engineering** : le vibe donne l'idée, le kernel donne le contrat, le harness donne le cadre, la police donne les limites, l'evidence donne la confiance, la conscience donne l'alignement. Ce n'est pas du *prompt-to-code* — c'est du **vibe-to-kernel-to-evidence**.
+
+## Le code n'est pas la vérité
+
+Dans FKE, toute demande adressée à une IA — créer, corriger, refactorer, documenter, tester, sécuriser, migrer, déployer — est d'abord transformée en **kernel** : une unité typée de sens, contrat, comportement, preuve, sécurité et liens. Le code n'est qu'une **projection exécutable** d'un kernel d'intention validé. La vraie sortie du système n'est pas un fichier : c'est un **graphe vivant de kernels** qui sait expliquer pourquoi chaque artefact existe, quel contrat il respecte, quelles preuves le valident et quelle décision l'a promu.
+
+## L'anatomie symétrique — le mur comme plan de miroir
+
+Chaque kernel a dix emplacements (« slots »), **symétriques autour du mur** : tout ce que l'humain déclare au-dessus a son **reflet vérifiable** en dessous.
+
+| Au-dessus (l'humain possède) | | En-dessous (l'agent reflète) |
+|---|---|---|
+| s1 · La spec textuelle | ↔ | s10 · La documentation finale |
+| s2 · Les use cases (BDD) | ↔ | s9 · La doc **dérivée du code** |
+| s3 · Le modèle de donnée *au sens humain* | ↔ | s7 · La projection en données |
+| s4 · Les scénarios + preuves attendues | ↔ | s5 · Le code du test · s6 · Le résultat |
+| — | | s8 · **Le code lui-même — optionnel** |
+
+Trois lectures de cette table :
+
+1. **Le miroir se généralise en quatre familles de paires.** Le test n'est qu'une des quatre : il y a aussi le **doc-miroir** (la doc dérivée du code doit re-dire le use case déclaré — la dérive documentaire devient mécaniquement détectable), le **data-miroir** (la donnée réelle doit refléter le modèle humain) et le **spec-miroir**. Une paire qui diverge = soit un bug en bas, soit une vérité à faire évoluer en haut — jamais un écart silencieux.
+2. **s8 est le seul slot sans reflet** — c'est précisément pourquoi l'agent le possède, et pourquoi il est *optionnel* : certains kernels (une vue, une policy) sont **déclaratifs purs**, entièrement émis, sans code propre.
+3. **Le mur est aussi une frontière de langue.** Tout ce qui se lit — y compris les *retours* d'en bas (résultats, doc dérivée, données) — parle la **langue ubiquitaire** de votre domaine. Seuls les deux slots de code parlent machine. Vous ne lisez jamais une autre langue que la vôtre.
+
+Et tout est **fractal** : la même anatomie vaut pour un projet, une feature, une API, une fonction, un agent, une migration — un kernel-feuille peut « s'effondrer » (slots dérivés), mais jamais en dessous de l'incompressible : **une intention + sa paire de preuve**.
+
+## Le vibe est contenu, jamais interdit
+
+FKE ne rejette pas le vibe coding : il l'enferme dans le **Vibe Lab** — la zone d'exploration rapide (prototypes, spikes, comparaisons d'options) dont tout ce qui sort est `experimental`, jamais production. Le passage vers le durable est un **Promotion Gate** : intention claire, contrat, invariants, sécurité, preuves attendues, décision humaine — et l'artefact est **ré-émis depuis le kernel**, jamais promu tel quel.
+
+## Les trois cerveaux et la conscience
+
+Le **cerveau gauche** lit vos signaux bruts (chat, tickets, logs, prototypes) et propose les slots du dessus — il ne code pas. Le **cerveau droit** reçoit uniquement des kernels validés dans un contexte minimal et produit les reflets du dessous — il ne modifie jamais seul le dessus. La **conscience** compare en permanence les paires réfléchies et produit rapports et **decision cards** ; elle est un *agrégateur déterministe* des preuves existantes — jamais un second juge dont il faudrait croire l'avis.
+
+## Ce que ça change pour vous
+
+Vous ne « promptez » plus du code : vous **déclarez** des vérités (en votre langue), le système les **prouve** (E0→E7, du typecheck à la preuve runtime), et **rien ne change de sens en silence** — toute divergence remonte vers vous comme une carte de décision claire : accepter, amender, corriger, refuser.

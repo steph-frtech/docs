@@ -26,6 +26,7 @@
           {
             "group": "Le modèle KRD (concepts)",
             "pages": [
+              "concepts/fke",
               "concepts/visual-map",
               "concepts/proof-levels",
               "concepts/kernel-mirror",
@@ -57,6 +58,7 @@
             "pages": [
               "internals/overview",
               "internals/the-wall-and-ratchet",
+              "internals/fke",
               "internals/the-stack",
               "internals/repo-structure"
             ]
