@@ -1,0 +1,50 @@
+---
+title: "S87 · Votre app émise a enfin un serveur qui démarre"
+description: "S87 ajoute l'émetteur du serveur de l'app émise : un service Hono/TypeScript BOOTABLE, généré déterministiquement depuis le Kernel — main + router + middleware + une route de santé GET /healthz + un handler par operation SYNCHRONE (qui délègue à l'interpréteur Go, jamais une règle métier réécrite) + le worker pour les operations ASYNC (S73). Câblé sur TOUTES les operations du Kernel. Plus le nouveau target TargetPulumiProgram : votre StackManifest devient un programme Pulumi/TS (infra-as-code typée, ADR 0043). Même Kernel → octets byte-identiques qui compilent ; programme Pulumi FN02-pur."
+keywords: ["aidos", "krd", "S87", "Hono", "TypeScript", "serveur émis", "emitted server", "scaffold", "bootable", "healthz", "router", "middleware", "handler", "operation sync", "worker async", "S73", "interpréteur Go", "callback", "ADR 0040", "Pulumi", "TargetPulumiProgram", "infra-as-code", "IaC", "StackManifest", "ADR 0043", "Traefik", "docker.Container", "byte-identique", "FN02", "déterminisme", "EPIC 9"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S87](/steps/internals/s87-hono-emitter).</Note>
+
+## En une phrase
+
+S87 émet **le serveur de votre app** : depuis les operations que vous avez déclarées dans le Kernel, AIDOS génère un service **Hono/TypeScript qui démarre vraiment** — une route de santé, un endpoint par operation, un worker pour le travail en arrière-plan — et **émet aussi le programme d'infrastructure** (Pulumi/TS) qui le déploie. Tout est déterministe : le même Kernel produit, octet pour octet, le même code.
+
+## Le problème que S87 résout
+
+Aux étapes précédentes, AIDOS savait émettre les *morceaux* de votre app : les types TypeScript, le schéma de base, les handlers d'API, le worker async (S74). Mais il manquait **l'assemblage qui boote** : un `main` qui monte un serveur HTTP, branche le middleware, expose une route de santé, et câble *toutes* vos operations sur de vraies routes. Sans ça, votre app restait une collection de fichiers — pas un service que l'on lance.
+
+S87 émet cet assemblage. Le résultat n'est pas un squelette à compléter à la main : c'est un **serveur Hono complet, bootable**, dont chaque endpoint délègue le travail à l'interpréteur de l'Operation-DSL (le sidecar Go, ADR 0040) — votre règle métier vit dans le Kernel, le serveur ne la réécrit jamais.
+
+## Ce que le serveur émis contient
+
+- **Un `main` + un router Hono** — le point d'entrée qui monte l'app.
+- **Du middleware** — un en-tête d'identification de l'app, déterministe, sans I/O.
+- **Une route de santé `GET /healthz`** — répond `{ status: "ok" }`. C'est la sonde que Traefik et le bootstrap interrogent pour savoir que le service est vivant.
+- **Un handler par operation SYNCHRONE** — chaque operation `createOrder`, `cancelOrder`… devient une route `POST` qui décode la requête et **délègue à l'interpréteur** (`deps.interpret`). Aucune règle métier dupliquée.
+- **Un worker pour les operations ASYNC** (S73) — il draine l'outbox transactionnelle et dispatche les effets typés (cron, queue, webhook, notification) ; un effet n'est jamais joué deux fois.
+
+Le serveur est **câblé sur TOUTES les operations du Kernel** : une operation sync → une route, une operation async → un dispatcher de worker. Rien n'est oublié, rien n'est inventé.
+
+## L'infra aussi est du code émis : Pulumi/TS
+
+« Il faut un langage infra-as-code » (ADR 0043) : S87 ajoute un nouveau **target d'émission**, `TargetPulumiProgram`. Votre **StackManifest** — la déclaration de votre stack (les services, leurs images, le réseau) — devient un **programme Pulumi/TypeScript** : une `docker.Network` partagée, un `docker.Container` par service, et les labels Traefik sur le serveur (le seul service exposé publiquement). 
+
+L'infra devient **typée et testable** : on vérifie le programme sans provisionner quoi que ce soit. Et « un programme → toutes les cibles » : Docker + Traefik aujourd'hui, k8s/cloud demain, par simple changement de configuration de stack.
+
+## La garantie qui compte : même Kernel → mêmes octets
+
+Comme tous les émetteurs d'AIDOS, S87 est une **fonction pure** : pas d'horloge, pas de hasard, pas de LLM. Le même Kernel produit **exactement les mêmes octets**, sur toute machine, à chaque exécution. Ce n'est pas « presque pareil » : c'est byte-identique (un hash le prouve). Et le code émis — serveur, worker, programme Pulumi — est **fonctionnel pur** (FN02) : aucune variable mutable au niveau module, les dépendances arrivent en paramètres. Le serveur émis compile et démarre ; le programme Pulumi est pur et stable.
+
+## Ce que vous faites à l'écran
+
+Le panneau **Scaffold serveur Hono/TS + Pulumi** (`/hono-emitter`) a deux contrôles, exécutables depuis l'écran :
+
+- **Émettre le serveur** — choisissez la surface (serveur Hono ou worker async) et émettez : vous voyez le code Hono rendu (`createApp`, `GET /healthz`, une route `POST` par operation sync) et son adresse de contenu.
+- **Émettre le programme Pulumi** — émettez l'infra : vous voyez le programme Pulumi/TS (réseau partagé, un container par service, labels Traefik).
+
+Rien n'est écrit dans la vérité : l'écran **rend du code comme une valeur** (une projection, S78 régénère), jamais une écriture Kernel. C'est le mur (§2).
+
+## En résumé
+
+S87 transforme votre Kernel en une **app qui boote** : un serveur Hono/TS complet câblé sur toutes vos operations, son worker async, et le programme Pulumi/TS qui le déploie — le tout émis déterministiquement, pur, byte-stable. Votre app n'est plus une collection de fichiers : c'est un service que l'on lance.

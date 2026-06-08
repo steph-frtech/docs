@@ -1,0 +1,73 @@
+---
+title: "S87 · Scaffold serveur Hono/TS + émetteur Pulumi — internals"
+description: "Pour moi : l'implémentation de S87 — l'émetteur back/runtime/honoemit qui projette les operations du Kernel en un serveur Hono/TS BOOTABLE (EmitServer : main+router+middleware+/healthz+un handler POST par operation sync délégant à l'interpréteur Go, ADR 0040) + son worker async (EmitWorker, S73/S74), et le StackManifest en un programme Pulumi/TS (EmitPulumiProgram, TargetPulumiProgram, ADR 0043). Le miroir fixture boote VRAIMENT le serveur sous node (Hono app.request) — /healthz vert, route d'operation end-to-end, worker drainant un job ; le miroir property pin la byte-identité + la pureté FN02. Plus le MCP hono-emitter, le twin front byte-identique, la route action-capable, et les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S87", "honoemit", "internals", "EmitServer", "EmitWorker", "EmitPulumiProgram", "ServerSpec", "StackManifest", "TargetHonoServer", "TargetHonoWorker", "TargetPulumiProgram", "Hono", "Pulumi", "docker.Container", "Traefik", "interpréteur Go", "callback", "outbox", "FN02", "byte-identique", "déterminisme", "node", "experimental-strip-types", "app.request", "rapid", "fast-check", "MCP", "hono-emitter", "twin", "mur", "ADR 0040", "ADR 0043", "OQ-S87-stackmanifest", "EPIC 9"]
+---
+
+<Note>Page « Pour moi » — le journal de construction complet. Côté usage produit, voir [Pour les futurs utilisateurs → S87](/steps/concept/s87-hono-emitter).</Note>
+
+## Implémentation
+
+### Objectif (une capacité vérifiable)
+
+Émetteur **déterministe** produisant un service **Hono/TS bootable** par projet (main + router + middleware + `/healthz` + handlers d'operation **sync ET async/workers** S73) câblé sur **TOUTES** les operations du Kernel ; **+** un nouveau target `TargetPulumiProgram` (StackManifest → programme Pulumi/TS, ADR 0043). **Done-criteria :** Godog — le serveur émis démarre, `GET /healthz` vert, une route d'operation répond end-to-end, un worker async traite un job ; property — même Kernel → scaffold byte-identique qui compile ; le programme Pulumi/TS émis est FN02-pur + byte-stable.
+
+### L'émetteur — `back/runtime/honoemit`
+
+Un paquet **pur** (aucune DB, horloge, rng, I/O, LLM, écriture). C'est le pendant app-builder du S36 (qui émet les handlers Go d'AIDOS) : honoemit émet le serveur **TS de l'app utilisateur** (Hono/fonctionnel, ADR 0040 — jamais du Go pour l'app utilisateur). Trois surfaces faisant autorité :
+
+- **`EmitServer(ServerSpec) → Artifact`.** Le serveur bootable. Le `ServerSpec` porte le projet + l'ensemble **complet** des operations du Kernel (`Op{Name, Async, Trigger}`). Le rendu :
+  - une **factory pure** `createApp(deps: Deps): Hono` — pas de binding mutable au niveau module (FN02) ; les dépendances (le callback interpréteur) arrivent en paramètre ;
+  - le **middleware** (`app.use("*", …)`) qui stampe un en-tête `x-app` ;
+  - la **sonde de santé** `app.get("/healthz", c => c.json({status:"ok"}, 200))` ;
+  - **un `app.post` par operation SYNC** (en ordre canonique de nom), qui décode le corps et **délègue à `deps.interpret(op, input)`** — l'interpréteur Go sidecar (ADR 0040 Déc.7) ; la règle métier n'est jamais réécrite.
+  Les operations **async** ne deviennent **pas** des routes HTTP — elles sont câblées dans le worker.
+- **`EmitWorker(ServerSpec) → Artifact`.** Pour chaque operation async (ordre canonique), un `dispatch<Op>(outbox, dispatcher)` qui draine l'outbox et dispatche les effets typés (les quatre `TriggerKind` de S73 : cron/queue/webhook_out/notification), plus — pour un trigger cron — l'échéance `_SCHEDULED_AT` constante. L'outbox et le dispatcher arrivent en **paramètres** (FN02).
+- **`EmitPulumiProgram(StackManifest) → Artifact`.** Le target `TargetPulumiProgram` (ADR 0043). Le rendu : `import * as docker`, une **factory pure** `program()`, une `docker.Network` partagée, **un `docker.Container` par service** (ordre canonique de nom) avec son image + son réseau, et les **labels Traefik** (router HTTPS websecure/tls) sur le service `role=server` (le seul exposé). Pas de binding mutable au niveau module.
+
+Chaque `Artifact` est content-adressé deux fois : par sa **source** (`SourceHash` = `records.Hash(records.Canonicalize(body))`, S02 réutilisé, jamais forké) et par sa **sortie** (`OutputHash` = digest des octets, la preuve de ré-émission byte-identique). En-tête `ProtectedMarker` : un fichier `gen/` hand-edité est interdit, la dérive se calcule.
+
+### La validation honnête (le mur, §2)
+
+`validateServer` / `validateManifest` sont **totales** : un spec sans projet/operation, une operation sans nom, un trigger async inconnu, un manifest sans service `role=server`, un rôle hors de l'**ensemble clos** (`ServiceRole`), deux ports internes identiques → un `BlockReason` typé (la forme S13, `how_to_fix` non vide), **jamais** un rendu partiel ni une route/un service deviné.
+
+### Le miroir fixture — le serveur boote VRAIMENT
+
+Le done-criterion N0 est un **parcours**, pas un match textuel : « le serveur émis **démarre**, `/healthz` vert, une route d'operation répond **end-to-end**, un worker async **traite un job** ». Donc `honoemit_fixture_test.go` :
+
+1. émet le serveur + le worker depuis le `checkoutSpec` (deux ops sync + une async) ;
+2. écrit le TS dans un dossier temporaire **sous la racine du repo** (pour que `import { Hono } from "hono"` résolve `node_modules/hono` vers le haut) ;
+3. **boote le serveur sous node** (`node --experimental-strip-types`), via le **client de test intégré de Hono** (`app.request`) — un vrai boot, sans réseau ;
+4. asserte : `GET /healthz` = 200 `{status:ok}` ; `POST /createorder` = 201 avec le résultat du callback interpréteur (end-to-end) ; le worker `dispatchSendReceipt` draine **un** job. node absent → `t.Skip` (les fixtures structurelles tournent quand même).
+
+### Le miroir property — byte-identité + pureté FN02
+
+`honoemit_property_test.go` (rapid, le slot Go gelé) pin ce qu'une fixture ne peut pas :
+- **byte-identité** : sur un `ServerSpec`/`StackManifest` arbitraire, `Emit*` est byte-identique **et invariant à l'ordre d'entrée** (l'ordre canonique de nom possède les octets) ; les hashes coïncident ;
+- **pureté FN02** : aucun module émis ne porte de binding mutable au niveau module (aucune ligne commençant par `let `/`var ` en colonne 0).
+
+### Le branchement MCP — `back/mcp/hono-emitter`
+
+ADR 0009 (tout op = un outil MCP). Cinq outils **purs** (aucun LLM, aucune écriture — le mur) : `emit_server`, `emit_worker`, `emit_pulumi`, `server_hash`, `manifest_hash`. `main_test.go` prouve chaque outil à la frontière MCP.
+
+### Le twin front + la route action-capable
+
+`front/web/lib/hono-emitter.ts` est le **twin déterministe** des émetteurs Go (rend les **mêmes octets** ; le hash d'en-tête est un digest FNV de prévisualisation, le content-hash Go restant l'autorité). `lib/hono-emitter.test.ts` (fast-check) : déterminisme + invariance d'ordre + pureté FN02 + toutes-les-ops-sync-câblées (6/6). La route `/hono-emitter` est **action-capable** (§7) : **deux** contrôles liés (émettre le serveur/worker ; émettre le programme Pulumi), thémée (ADR 0010) + bilingue (ADR 0011, namespace `honoEmitter`), câblée dans `WorkbenchHeader`. L'e2e `tests/e2e/hono-emitter.spec.ts` (4/4) prouve chaque contrôle exécutable contre la route live.
+
+### Forward-dependency assumée — OQ-S87-stackmanifest
+
+Le `StackManifest` comme record kind Kernel de premier rang est **DP02, pas encore bâti** (grep `stack_manifest` = 0). honoemit le modélise donc comme la **valeur** que l'émetteur Pulumi consomme (app + services + volumes + network), content-adressée via S02. Quand DP02 grave le kind `stack_manifest`, le décodeur s'y branche, l'émetteur est inchangé. honoemit ne **coine aucun nouveau kind** (le mur). C'est une **OpenQuestion documentée** (exception bootstrap CLAUDE.md §6), pas un résidu rouge.
+
+## Méta
+
+**Pourquoi un émetteur, pas un agent qui « écrit le serveur ».** Un serveur Hono est entièrement **dérivable** d'un Kernel : la liste des routes = les operations ; la délégation = un appel à l'interpréteur ; le worker = l'outbox + les triggers. Tout cela est une **fonction pure** (parse/route/render) — donc, par le mandat determinism-first (§6), ce **DOIT** être du code, jamais un LLM. Un agent qui « génère le serveur » serait un *determinism gap* : la même app produirait un code différent à chaque run, impossible à auditer, impossible à ré-émettre. L'émetteur byte-identique est ce qui rend le code émis **gouvernable** : il est une projection de la vérité, pas une création.
+
+**Pourquoi booter le serveur dans le test.** Le done-criterion dit « démarre » et « répond end-to-end ». Un match `strings.Contains` sur le code émis prouverait qu'il *ressemble* à un serveur, pas qu'il *boote*. En lançant le TS sous node avec le vrai Hono, le miroir prouve la chose réelle : le code compile (strip-types), l'app monte, `/healthz` répond, une route délègue au callback, le worker draine. Le miroir teste le comportement, pas l'apparence.
+
+**Pourquoi l'infra est du code émis (Pulumi/TS), pas un YAML.** Décision utilisateur (ADR 0043) : « il faut un langage infra-as-code ». Un `docker-compose.yml` direct serait un artefact opaque, non testable. Un programme Pulumi/TS est **typé et pur** — soumis au **même** mandat FN02 que l'app. Le compose devient une *projection* du programme (provider Docker), pas la cible primaire. L'app devient **TS de bout en bout** : Hono/TS + infra Pulumi/TS, gouvernées par le même mur.
+
+## Méta-méta
+
+**S87 est le point où l'app émise cesse d'être un modèle et devient un système qui tourne.** Jusqu'ici, AIDOS émettait des *fragments* (types, DDL, handlers, worker). S87 émet **l'assemblage qui boote** — et le fait que cet assemblage soit *prouvé bootable par un miroir qui le lance vraiment* est la garantie KRD : « toute capacité est prouvée en BDD avant d'exister ». Le serveur n'est pas « supposé démarrer » ; un miroir le démarre.
+
+**Le double déterminisme — code ET infra — verrouille le grain de la gouvernance.** En rendant *à la fois* le serveur et son programme d'infra des émissions byte-identiques FN02-pures, S87 étend le mur à la **couche déploiement** : ce qui déploie l'app est aussi une projection de la vérité, aussi auditable, aussi ré-émettable que l'app elle-même. Rien dans le runtime n'est écrit par un agent dans la boucle ; l'agent écrit le code des émetteurs **au build**, et les émetteurs — fonctions pures — produisent le reste. C'est la frontière que KRD trace partout : *l'agent code la constructrice au build ; il ne siège jamais dans la boucle runtime à faire ce qu'une fonction pourrait faire* (§8).

@@ -240,6 +240,8 @@
               "steps/internals/s85-build-approvals",
               "steps/concept/s86-build-console",
               "steps/internals/s86-build-console",
+              "steps/concept/s87-hono-emitter",
+              "steps/internals/s87-hono-emitter",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",
