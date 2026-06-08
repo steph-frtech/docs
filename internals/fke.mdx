@@ -1,16 +1,16 @@
 ---
 title: "FKE — le Livre XXX du Tome"
-description: "L'anatomie symétrique du kernel fondue au Tome : les huit décisions du grill (ADR 0044), ce qui existe déjà dans AIDOS, et la piste FK01-FK10 qui câble les deltas après S117."
-keywords: ["fke", "livre xxx", "adr 0044", "paire-miroir", "doc-miroir", "conscience", "truth_level", "e0-e7", "a0-a8", "kernel effondré", "fk01", "grill"]
+description: "L'anatomie du kernel fondue au Tome : le squelette 1-pour-1, les 8 facettes (croisées ISO 25010), les 2 axes, la conscience, la causalité arrière (WhyTree), le cockpit — ce qui existe déjà dans AIDOS et la piste FK01-FK16 post-S117."
+keywords: ["fke", "livre xxx", "adr 0044", "adr 0045", "8 facettes", "deux axes", "conscience", "whytree", "caused_by", "cockpit ai lab", "paire-miroir", "truth_level", "e0-e7", "iso 25010", "fk"]
 ---
 
 <Info>
-  Page de fondation, côté **Pour moi**. FKE a été formalisé comme document fondateur puis **grillé branche par branche** (`/grill-with-docs`, 2026-06-07) et **fondu dans le Tome** : `KRD.md` → **LIVRE XXX**, sections FKE-1…FKE-45. Les huit décisions sont actées dans l'**ADR 0044**. Côté concept : [FKE — Fractal Kernel Engineering](/concepts/fke).
+  Page de fondation, côté **Pour moi**. FKE a été formalisé comme document fondateur, **grillé itérativement** (`/grill-with-docs`, juin 2026) et **fondu dans le Tome** : `KRD.md` → **LIVRE XXX**, sections FKE-1…FKE-45. Décisions actées dans **ADR 0044** (fusion + 8 forks initiaux) et **ADR 0045** (l'anatomie complète : 8 facettes, 2 axes, WhyTree, cockpit). Côté concept : [FKE — Fractal Kernel Engineering](/concepts/fke).
 </Info>
 
 ## Implémentation
 
-**À venir — piste `FK01-FK10` (`docs/plan/ROADMAP-fke.md`), lancée APRÈS S117** (décision 8 du grill : zéro collision avec le build app-builder en cours). Au moment du grill, l'implémentation EXISTANTE couvre déjà la majorité des organes FKE — c'est la preuve par construction :
+**Les deltas code = piste `FK01-FK16` (`docs/plan/ROADMAP-fke.md`), enchaînée APRÈS S117** (zéro collision avec le build app-builder). Au moment des grills, l'implémentation EXISTANTE couvrait déjà la majorité des organes FKE — c'est la preuve par construction :
 
 | Organe FKE | Implémentation AIDOS existante |
 |---|---|
@@ -21,25 +21,40 @@ keywords: ["fke", "livre xxx", "adr 0044", "paire-miroir", "doc-miroir", "consci
 | Memory Wall | le memory-firewall (`ToKernel` bloqué, `ViaIdea` seul chemin) |
 | Context Pack / doom-loop | ContextRouter (un algorithme, pas un prompt) · `BUILD_LOOP_NO_PROGRESS` |
 | Evidence / paire de preuve | miroirs N0-N5, mutation, fault-injection, « done is computed » |
+| Facette M (maintenabilité) | arch-fitness (go-arch-lint/depguard/dependency-cruiser, FN02) = le 2ᵉ cliquet §47 |
+| Facette R (fiabilité) | fault-injection, disjoncteur S83, outbox S73, restore |
+| Facette X (expérience) | ExperienceClaim §13.6 (vérité molle, déjà typée) |
+| Causalité AVANT | red wave §42 (cause→effets) ; l'arrière (`caused_by`) est FK12 |
 | Runtime loop / legacy | RealityMirror → `/learn` · strangler-fig + miroirs de caractérisation |
 
-Les sections de cette couche seront complétées au vert de chaque étape FK (FK01 `truth_level`+parité · FK02 expand E · FK03 dérivation s9 · FK04 doc-miroirs · FK05 conscience+`/conscience` · FK06 A0-A8 · FK07 lexicon · FK08 complétude 10-slots · FK09 contract E post-S117 · FK10 projections d'outillage).
+La couche **Implémentation** de chaque concept sera complétée au vert de son étape FK :
+
+- **FK-A — coordonnées** : FK01 `truth_level`+parité · FK02 les 8 facettes déclarées · FK03 la grille niveau×facette · FK04 complétude facet-aware.
+- **FK-B — miroirs étendus** : FK05 expand E0-E7 · FK06 dérive s9 · FK07 doc-miroirs · FK08 câbler S/R/V/M/X.
+- **FK-C — conscience & cockpit** : FK09 agrégateur + `/conscience` · FK10 A0-A8 · FK11 l'écran AI Lab `/ai-lab`.
+- **FK-D — causalité** : FK12 lien `caused_by` + red-wave inverse · FK13 WhyTree + `/why`.
+- **FK-E — projections** : FK14 lexicon · FK15 `CLAUDE.md` généré · FK16 bascule contract E (en dernier).
 
 ## Méta
 
-Les vérités et miroirs que la piste FK devra prouver, tels que décidés au grill :
+Les vérités et miroirs que la piste FK devra prouver :
 
-- **Le doc-miroir est jugé par calcul** : s9/s10 sont *dérivées* déterministiquement du code/AST ; la comparaison s2↔s9 est **ensembliste** (concepts du lexique, behaviors énumérés, erreurs couvertes). Divergence structurelle = **bloquante** ; prose = **advisory** (un LLM signale, n'arbitre jamais). Miroir : fault-injection — retirer un behavior du code rougit la paire ; éditer la prose seule ne bloque pas.
-- **La parité du niveau de vérité** : `truth_level` est stocké mais écrit uniquement par la fonction de transition déterministe ; le miroir `stored_level == computed_level` rougit sur toute divergence — le stockage est un cache prouvé du calcul, jamais une seconde source.
-- **La conscience n'invente aucun verdict** : property — son rapport ne contient que des verdicts *sourcés* des juges existants (runner, complétude, SemanticDiff, RealityMirror, senseurs, ledger) ; mêmes verdicts d'entrée → même rapport.
-- **L'autonomie monte par preuve** : property — la promotion A0→A8 est une fonction pure de l'historique AgentRun ; A8 inatteignable sur action critique.
-- **L'incompressible** : fault-injection — un kernel sans s1 ou sans paire de preuve (s4↔s5/s6) est un monstre ; un kernel-feuille légalement effondré passe.
-- **Expand-contract E0-E7** : property — le mapping N→E est total (même miroir → même E) ; la phase contract ne perd aucun miroir (N déprécié via lifecycle, jamais supprimé).
+- **L'anatomie 1-pour-1.** Six paires déclaré↔prouvé (Spec↔Doc · Comportement↔Résultats · Scénarios↔Tests · Modèle↔Projection · Contrat↔Code · Evidence-attendue↔observée). Property — chaque vérité déclarée a EXACTEMENT un reflet prouvé ; le Contrat apparie le Code (plus d'orpheline) ; le code optionnel **par émission**, pas par absence de partenaire.
+- **8 facettes, croisées ISO 25010** (F·I·S·B·R·V·M·X), effondrables. Property — un kernel n'instancie une facette que s'il porte cette nature de vérité (F toujours présente) ; chaque facette = le même squelette de 6 paires sous son angle. **Complétude facet-aware** : une paire requise manquante/divergente de toute facette = monstre.
+- **Le doc-miroir jugé par calcul** : s9/s10 dérivées déterministiquement du code/AST ; comparaison s2↔s9 **ensembliste** (lexique, behaviors, erreurs). Divergence structurelle **bloquante** ; prose **advisory** (un LLM signale, n'arbitre jamais). Fault-injection — retirer un behavior rougit la paire ; éditer la prose seule ne bloque pas.
+- **Parité du `truth_level`** : stocké mais écrit uniquement par la transition déterministe ; miroir `stored_level == computed_level` (divergence = rouge) — un cache prouvé du calcul, jamais une 2ᵉ source.
+- **La conscience n'invente aucun verdict** : property — son rapport ne contient que des verdicts *sourcés* des juges existants (runner, complétude, SemanticDiff, RealityMirror, senseurs, ledger) ; mêmes verdicts → même rapport. Aucun nouveau juge.
+- **Le WhyTree finit en miroir** : fixture — chaque cause du WhyTree est reproductible (sinon rejetée — anti-confabulation) ; un WhyTree sans miroir terminal est refusé (`WHYTREE_NO_MIRROR`) ; property — la remontée sur `caused_by` est déterministe.
+- **L'autonomie monte par preuve** : property — A0→A8 est une fonction pure de l'historique AgentRun ; A8 inatteignable sur action critique.
+- **Expand-contract E0-E7** : property — le mapping N→E est total ; la phase contract ne perd aucun miroir (N déprécié via lifecycle, jamais supprimé).
 
 ## Méta-méta
 
-- **La place dans le cliquet.** FKE ne touche ni le mur ni la fitness : il **renforce la loi de complétude** (de « une vérité ↔ un miroir vivant » vers « quatre familles de paires + gabarit effondrable ») — un garde-fou ne peut qu'être AJOUTÉ, jamais retiré (méta-loi §5). Le minimum incompressible garantit que le gabarit n'affaiblit rien : il étend la loi sans l'amollir.
-- **L'anti-Goodhart tenu.** Les deux tentations écartées au grill sont exactement celles que §8 vise : un *jugement LLM* des doc-miroirs (le juge doit être déterministe) et une *conscience-évaluatrice* (le « second agent qui valide » n'est pas une preuve). Les deux sont réduites au rôle d'advisory, re-vérifiées par le calcul.
-- **L'honnêteté v8.1.** Par la formule du Tome (« un concept n'est accepté que s'il possède définition, record, propagation, hook et exemple »), le LIVRE XXX entre avec **définition + exemples** ; ses **records/hooks/propagations** arrivent par FK01-FK10 — d'ici là, les deltas sont des OpenQuestions datées, pas des vérités opérantes.
-- **Les décisions** : ADR 0044 (les huit forks, alternatives rejetées incluses) ; termes canoniques au §161 du Tome (FKE, conscience, paire-miroir, kernel effondré, Vibe Lab, Promotion Gate) ; placement au §162 (→ Livre XXX) ; glossaire partagé dans `CONTEXT-MAP.md`.
-- **La frontière constructrice/construite inchangée** : AIDOS reste Go (ADR 0040), l'app émise reste Hono/TS fonctionnel + IaC Pulumi/TS (ADR 0043) — FKE les décrit tous deux comme instances de la même anatomie, à travers les plans (fractalité).
+- **Les deux axes (FKE-1.4).** Une vérité a deux coordonnées : sa **facette** (NATURE — axe orthogonal, qui *sépare* : régler la sécurité ne touche pas la perf) et son **niveau** dans la verticale produit→entité (axe latéral, qui *couple* : une vérité basse contraint ses rungs SOURCE au-dessus, et le red wave REMONTE cette ligne). Coordonnées complètes : niveau × facette × côté-du-mur × échelle-fractale.
+- **La causalité dans les deux sens.** Le red wave (§42) propage AVANT (cause→effets) ; le **WhyTree** (FKE-35.1) remonte ARRIÈRE (effet→cause racine) sur le lien `caused_by`. C'est le 5-pourquoi **redressé** : pas une facette (geste du loopback, transversal) ; déterministe sur le graphe ; LLM gaté + cause vérifiée ; un arbre (fishbone) ; terminaison en miroir.
+- **La place dans le cliquet.** FKE ne touche ni le mur ni la fitness : il **renforce la loi de complétude** (de « une vérité ↔ un miroir vivant » vers « toutes les paires de toutes les facettes instanciées ») — un garde-fou ne peut qu'être AJOUTÉ, jamais retiré (méta-loi §5). L'incompressible (intention + paire de preuve) garantit que le gabarit effondrable n'amollit rien.
+- **L'anti-Goodhart tenu.** Toutes les tentations de juge-non-déterministe ont été écartées : doc-miroirs jugés structurellement (prose advisory) ; conscience = agrégateur (aucun second juge) ; WhyTree = graphe + cause reproduite ; facette X = soft (informe, ne bloque pas — pas de sur-contrainte UX, l'erreur symétrique §13.4). Le juge reste le miroir déterministe (§8).
+- **La fermeture par construction + croisement externe.** Le modèle des facettes est **clos à 8** non par fatigue mais par un **test de décision** (facette intrinsèque vs arête vs sous-lentille vs propriété de graphe/changeset) **croisé contre ISO 25010** — qui a révélé deux oublis (R fiabilité, X expérience) en plus du 2ᵉ cliquet (M). Note : I (Invariants ∀) est un axe de **rigueur de preuve**, pas un attribut ISO.
+- **L'honnêteté v8.1.** Par la formule du Tome, le LIVRE XXX entre avec **définition + exemples** ; ses **records/hooks/propagations** arrivent par FK01-FK16 — d'ici là, des OpenQuestions datées, pas des vérités opérantes.
+- **Les décisions** : ADR 0044 (fusion + 8 forks) + ADR 0045 (anatomie complète) ; termes canoniques §161 (FKE, conscience, paire-miroir, facette, kernel effondré, Vibe Lab, Promotion Gate, pipeline VIBE AI LAB, WhyTree, caused_by, les deux axes) ; placement §162 (→ Livre XXX) ; glossaire partagé `CONTEXT-MAP.md`.
+- **Frontière constructrice/construite inchangée** : AIDOS reste Go (ADR 0040), l'app émise reste Hono/TS + IaC Pulumi/TS (ADR 0043) — FKE les décrit tous deux comme instances de la même anatomie (fractalité à travers les plans).
