@@ -1,0 +1,53 @@
+---
+title: "S85 · Vérité proposée par l'agent gatée au mur + approbation humaine — internals"
+description: "Pour moi : l'implémentation de S85 — le seam approbation (back/runtime/buildloop/approval) qui ferme la seule porte légale de la boucle vers une vérité. ProposeTruth (proposed, jamais admitted, content-addressé) ; RefuseDirectWrite qui projette agentlayer.MayWrite en AGENT_WRITE_ABOVE_WATERLINE ; Decide qui RÉUTILISE S63 authoritybinding.DecideProposal sur le graphe S16 et re-dérive le verdict (jamais le statut auto-asserté) ; Admitted (transition un-way, id inchangé) ; BuildInbox project-scopé. Le wiring buildloop.ProposeOnGreen ; le MCP build-approval (approval_propose/decide/inbox) ; le twin front byte-identique ; la route Workbench action-capable et les miroirs fixture+property+e2e. Plus les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S85", "approval", "approbation", "internals", "ProposeTruth", "RefuseDirectWrite", "Decide", "Admitted", "BuildInbox", "AgentTruthProposal", "TruthWrite", "proposed", "admitted", "AGENT_WRITE_ABOVE_WATERLINE", "INSUFFICIENT_AUTHORITY", "PLACEHOLDER_ACTOR", "NOT_A_TRUTH_WRITE", "MISSING_MIRROR", "authoritybinding", "DecideProposal", "AuthorityGraph", "membership", "agentlayer", "MayWrite", "ProposeOnGreen", "buildloop", "S52", "S63", "MCP", "build-approval", "twin", "byte-identical", "content-address", "déterminisme", "mur", "EPIC 8"]
+---
+
+<Note>Page « Pour moi » — le journal de construction complet. Côté usage produit, voir [Pour les futurs utilisateurs → S85](/steps/concept/s85-build-approvals).</Note>
+
+## Implémentation
+
+### Objectif (une capacité vérifiable)
+
+Quand le travail de la boucle de build implique une vérité, elle **PROPOSE** un ChangeSet (`proposed`, jamais `admitted`) ; un humain détenant l'autorité l'approuve depuis l'UI (réutilise S52 + S63) ; une **inbox d'approbation** surface les propositions de l'agent avec leurs miroirs. **Done-criteria :** une écriture agent above-the-waterline est refusée `AGENT_WRITE_ABOVE_WATERLINE` ; une vérité proposée exige l'approbation humaine avant d'atterrir.
+
+### Le seam — `back/runtime/buildloop/approval`
+
+Un paquet **pur** (aucune DB, horloge, rng, I/O, LLM). Quatre fonctions faisant autorité :
+
+- **`ProposeTruth(spec, project, agentRunRef, TruthWrite) → (AgentTruthProposal, *BlockReason)`.** La porte que la boucle appelle quand son travail implique une vérité. Elle plie les deux critères en un verdict :
+  - **Le mur.** `agentlayer.MayWrite(spec, target)` : si la cible résout *au-dessus* de la ligne de flottaison, c'est une vérité — l'écriture directe est refusée. Une cible *en dessous* n'est pas une vérité → `NOT_A_TRUTH_WRITE` (la porte propose→approbation est réservée aux vraies vérités ; une écriture below-the-line n'est jamais emballée en fausse proposition).
+  - **Pas de monstre.** Un miroir vide → `MISSING_MIRROR` (réutilise l'entrée canonique du registre `blockreason`).
+  - **La proposition légale.** Sinon un `AgentTruthProposal{Status: proposed}`, **content-addressé** (`records.Hash` sur un corps canonique qui EXCLUT le statut — l'identité d'une proposition est sa *vérité*, pas son cycle de vie, donc une proposition `admitted` hashe comme la `proposed` dont elle vient).
+- **`RefuseDirectWrite(spec, target) → *BlockReason`.** Le miroir du critère 1 : projette `agentlayer.MayWrite` en `AGENT_WRITE_ABOVE_WATERLINE` (ou `nil` below-the-line).
+- **`Decide(p, graph, actor, *membership, bindings) → AdmissionDecision`.** La porte d'approbation humaine — l'**unique** chemin de `proposed` à `admitted`. Elle **RÉUTILISE** `authoritybinding.DecideProposal` (S63) sur le graphe S16, ancrant l'ensemble « granted » abstrait dans le **membre humain réel** (S62 × les bindings déclarés). Le statut résultant est `admitted` **ssi** un humain réel détenant l'autorité approuve ; sinon la proposition **reste** `proposed` avec le BlockReason S63. Le verdict est **re-dérivé** du graphe d'autorité — il ne lit JAMAIS le statut auto-asserté de la proposition (un `admitted` forgé en mémoire est ignoré).
+- **`Admitted(p, d) → AgentTruthProposal`.** L'unique mutation du statut, **un-way**, **id inchangé** (l'admission est une transition sur la même identité, jamais une nouvelle proposition).
+- **`BuildInbox(project, proposals) → Inbox`.** La projection pure : exactement les propositions `proposed` du projet (une admise a atterri, exclue), en ordre stable trié par id, project-isolées.
+
+### Le wiring — `back/runtime/buildloop/propose.go`
+
+`ProposeOnGreen(spec, project, TurnOutput, ImpliedTruth)` : quand un tour de la boucle termine **GREEN** sur un goal qui implique une vérité, il appelle `approval.ProposeTruth` avec la vérité **déclarée par le goal** (jamais inférée par le LLM), le `AgentRun.ID` du build vert, et le diff-hash du tour. Un tour non-vert ne propose rien (il n'y a pas encore de vérité à faire atterrir). C'est l'alternative légale au refus direct que `Drive` (S83) stampe déjà sur l'action d'écriture.
+
+### Le MCP — `back/mcp/build-approval` (ADR 0009)
+
+Trois outils purs (un outil = une op backend) : `approval_propose`, `approval_decide`, `approval_inbox`. Aucun outil n'écrit une vérité — un build vert PROPOSE, un humain ADMET via le graphe d'autorité ; le kernel reste SELECT-only à l'agent. `main_test.go` prouve, **à la frontière MCP**, que la proposition est `proposed` jamais `admitted`, qu'un viewer est refusé `INSUFFICIENT_AUTHORITY`, qu'un placeholder est refusé `PLACEHOLDER_ACTOR`, et qu'une cible below-the-line / sans miroir est refusée.
+
+### Le front — `/build-approvals` (action-capable)
+
+`lib/build-approval.ts` est le **twin déterministe** byte-pour-byte du Go (même classifieur du mur, même transition proposed→admitted re-dérivée, même projection d'inbox), testé par `lib/build-approval.test.ts` (fast-check, 7/7). La route `/build-approvals` est **exécutable** : deux ops, chacune avec un contrôle lié (« Proposer la vérité » et « Approuver »), thémée (ADR 0010) et bilingue (ADR 0011, namespace `buildApprovals` fr/en). `tests/e2e/build-approvals.spec.ts` (3/3) prouve contre la route vive : proposer ajoute une proposition `proposed` avec son miroir ; approuver en *viewer* est refusé `INSUFFICIENT_AUTHORITY` (reste proposed) ; approuver en *owner* admet (la vérité atterrit, quitte l'inbox) ; une cible below-the-line est refusée `NOT_A_TRUTH_WRITE`.
+
+### Les miroirs (red → green)
+
+- `approval_fixture_test.go` — le done-criterion : `RefuseDirectWrite` refuse l'écriture directe ; `ProposeTruth` garde (NOT_A_TRUTH_WRITE / MISSING_MIRROR) ; une proposition reste `proposed` sous un viewer et n'atterrit que sous un owner réel ; un `admitted` forgé est re-dérivé ; un placeholder ne peut jamais admettre ; l'inbox surface exactement les `proposed` du projet, chacune avec son miroir.
+- `approval_property_test.go` (rapid) — déterminisme/totalité ; le mur refuse **toute** écriture directe above-the-waterline pour **tout** rôle ; `ProposeTruth` ne rend **jamais** `admitted` ; `Decide` re-dérive depuis l'autorité (jamais le statut d'entrée) ; idempotence du content-address ; fidélité + isolation de l'inbox.
+
+## Méta
+
+**Pourquoi un seam séparé et pas une extension de `agentlayer.Propose` ?** `agentlayer.Propose` (S52) est la proposition générique d'un agent BDD-writer ; S85 est la proposition **de la boucle de build**, qui doit (a) classifier *si* le travail implique une vérité (le mur, via `MayWrite`), (b) porter le **miroir** prouvant la vérité (no monster), (c) être **content-addressée** et **liée à l'AgentRun**, et (d) s'admettre par le graphe d'autorité **ancré dans un humain réel** (S63), pas par l'ensemble abstrait de S52. Le seam compose S52 + S63 + le mur sans dupliquer aucune décision : `Decide` **réutilise** `authoritybinding.DecideProposal` (un seul juge d'autorité), `RefuseDirectWrite` **réutilise** `agentlayer.MayWrite` (un seul classifieur du mur), le content-address **réutilise** `records.Hash` (un seul schéma de hash). Determinism-first : tout ce qui pouvait être une fonction pure l'est et fait autorité ; aucun LLM n'entre dans la décision.
+
+**Le statut hors du content-address.** C'est le point subtil : l'identité d'une proposition est sa **vérité** (cible/domaine/kind/miroir), pas son **statut**. Une proposition `admitted` hashe *identiquement* à la `proposed` dont elle vient — l'admission est une transition sur la même identité content-adressée, append-only, jamais une nouvelle proposition. Cela rend la re-proposition idempotente et l'audit traçable (le même id traverse les deux statuts).
+
+## Méta-méta
+
+S85 est l'endroit où **l'asymétrie qui EST le produit** devient opérationnelle sous la boucle-agent : « l'humain possède la vérité ; l'agent possède l'implémentation ; le harnais tient le mur » (CLAUDE.md §2). La boucle de build (S83) peut écrire du code librement dans le bac à sable (below the line), s'auto-certifier (S84), atteindre le vert — et pourtant elle ne peut **jamais** figer une vérité : la seule porte est `proposed → approbation humaine → admitted`. Le verdict d'admission est **re-dérivé du graphe d'autorité**, jamais lu sur la parole de l'agent (la circularité §8 interdite : un agent ne note jamais sa propre vérité). Et l'humain n'approuve jamais à l'aveugle — l'inbox porte le **miroir** : on approuve *ce qui est prouvé*. Le mur n'est pas un mur sans porte (chaque refus nomme sa porte : `how_to_fix` non-vide). C'est le KRD rendu exécutable par personne réelle, même quand un LLM est dans la boucle de construction.

@@ -1,0 +1,48 @@
+---
+title: "S85 · L'agent propose une vérité, vous l'approuvez"
+description: "S85 ferme la seule porte légale de la boucle de build vers une vérité : quand le travail de la boucle implique une vérité, elle ne l'écrit JAMAIS directement — elle PROPOSE un ChangeSet (proposed, jamais admitted), accompagné de son miroir. Un humain RÉEL détenant l'autorité du scope l'approuve depuis l'écran (réutilise S52 + S63) ; seulement alors la vérité atterrit. Une écriture agent au-dessus de la ligne de flottaison est refusée AGENT_WRITE_ABOVE_WATERLINE. L'agent possède l'implémentation, jamais la vérité."
+keywords: ["aidos", "krd", "S85", "approbation", "approval", "vérité proposée", "proposed", "admitted", "ChangeSet", "mur", "wall", "AGENT_WRITE_ABOVE_WATERLINE", "INSUFFICIENT_AUTHORITY", "PLACEHOLDER_ACTOR", "autorité", "authority", "inbox", "boucle de build", "build loop", "S52", "S63", "EPIC 8", "miroir"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S85](/steps/internals/s85-build-approvals).</Note>
+
+## En une phrase
+
+S85 fait que **la boucle qui construit votre app ne peut jamais figer une vérité toute seule** : quand son travail implique une vérité (une opération, une policy, un comportement), elle vous la **propose** — accompagnée de la preuve (le miroir) — et **vous, un humain détenant l'autorité, décidez** si elle atterrit.
+
+## Le problème que S85 résout
+
+Aux étapes précédentes, la boucle de build (S83) écrit du code et s'auto-certifie sur les senseurs réels (S84). Mais arrive un moment où **le travail de la boucle implique une vérité** : pas seulement du code dans le bac à sable, mais une **opération du noyau**, une **policy d'autorisation**, un **comportement** qui change ce que votre app *garantit*.
+
+C'est exactement là que le mur d'AIDOS doit tenir. **L'humain possède la vérité ; l'agent possède l'implémentation.** Si la boucle pouvait écrire la vérité directement, l'asymétrie qui fait tout le produit s'effondrerait : un agent pressé pourrait figer une garantie que personne n'a approuvée.
+
+S85 ferme la porte. La boucle a **un seul chemin légal** vers une vérité :
+
+```
+travail de la boucle implique une vérité
+        → elle PROPOSE un ChangeSet (proposed, jamais admitted)
+        → la proposition apparaît dans l'inbox, AVEC son miroir
+        → un humain détenant l'autorité du scope l'APPROUVE
+        → seulement alors la vérité atterrit (admitted)
+```
+
+## Deux garde-fous, toujours tenus
+
+**1. L'agent n'écrit jamais une vérité directement.** Si la boucle tente d'écrire au-dessus de la *ligne de flottaison* (le noyau, les miroirs, la fitness), le mur la refuse avec `AGENT_WRITE_ABOVE_WATERLINE`. La seule alternative légale, c'est de **proposer**.
+
+**2. Une vérité proposée exige l'approbation d'un humain réel détenant l'autorité.** La proposition naît `proposed` et **reste proposed** jusqu'à ce qu'un humain réel, membre du projet et détenant l'autorité du scope, l'admette. Un membre sans cette autorité (par exemple un *viewer*) est refusé `INSUFFICIENT_AUTHORITY` ; un « approbateur » qui n'est pas un humain réel (un placeholder) est refusé `PLACEHOLDER_ACTOR`. La proposition ne peut pas mentir : même si quelqu'un forge le statut « admitted » dans la requête, le verdict est **re-dérivé** du graphe d'autorité — jamais lu sur la proposition elle-même.
+
+## L'inbox d'approbation
+
+Chaque projet a son **inbox** : la liste des propositions en attente de la boucle, **chacune avec son miroir**. C'est délibéré — vous n'approuvez jamais à l'aveugle : vous approuvez **ce qui est prouvé**. Une proposition admise a *atterri* et quitte l'inbox.
+
+## Ce que vous faites à l'écran
+
+La route `/build-approvals` du Workbench est **exécutable**, pas en lecture seule :
+
+1. **Proposer la vérité** — vous décrivez la vérité qu'un build vert a impliquée (sa cible, son domaine, son type, et le miroir vert qui la prouve) ; AIDOS la propose (`proposed`). Une cible qui n'est pas une vérité est refusée `NOT_A_TRUTH_WRITE` ; une vérité sans miroir, `MISSING_MIRROR` (un monstre n'atterrit jamais).
+2. **Approuver** — sous votre identité humaine et votre rôle d'adhésion, vous admettez une proposition en attente. Un *owner* détenant l'autorité du scope l'admet ; un *viewer* est refusé, et la proposition reste en attente.
+
+## Pourquoi c'est important
+
+C'est le cœur du contrat d'AIDOS rendu **opérationnel par la boucle-agent** : même quand un LLM pilote la construction de votre app, **rien de ce qu'il produit ne devient une vérité sans qu'un humain détenant l'autorité ne l'approuve**, et toujours avec la preuve sous les yeux. L'agent accélère ; il ne décide pas.
