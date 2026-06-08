@@ -272,6 +272,8 @@
               "steps/internals/s102-arch-fitness",
               "steps/concept/s103-federation",
               "steps/internals/s103-federation",
+              "steps/concept/s104-strangler",
+              "steps/internals/s104-strangler",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

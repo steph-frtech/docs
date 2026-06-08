@@ -1,0 +1,43 @@
+---
+title: "S104 · Strangler-fig — geler le legacy, refactorer sans rien perdre"
+description: "S104 absorbe un système legacy dans la fédération SANS réécriture big-bang (le pattern strangler-fig, §50). On taille une cellule autour du legacy, on GÈLE son comportement courant avec des miroirs de caractérisation auto-générés (input→output, bug-for-bug), on publie son contrat, puis on laisse la boucle-build refactorer DANS la cellule gelée. Les miroirs de caractérisation restent VERTS à travers un refactor interne et le contrat publié est honoré ; tout changement de comportement (drift) ou contrat cassé est REFUSÉ. Rien de ce que faisait le legacy n'est silencieusement perdu."
+keywords: ["aidos", "krd", "S104", "strangler-fig", "legacy", "caractérisation", "characterization test", "cellule", "freeze", "refactor", "drift", "contrat publié", "boucle-build", "EPIC 11", "§50"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S104](/steps/internals/s104-strangler).</Note>
+
+## En une phrase
+
+S104 vous laisse **absorber du code legacy** dans votre app **sans le réécrire d'un coup** : on **gèle** son comportement actuel avec des tests auto-générés, puis on le refactore en toute sécurité — au moindre changement de comportement, AIDOS rougit.
+
+## Le problème que S104 résout
+
+Vous héritez d'un vieux module — un calcul de facturation, un moteur de tarification — que personne n'ose toucher : il marche, mais il n'a **aucun test**, et le réécrire d'un seul coup (« big-bang ») est le meilleur moyen de casser des comportements dont personne ne se souvient. Le pattern **strangler-fig** (§50, comme le figuier étrangleur qui pousse autour de son hôte) renverse le problème : on n'arrache pas le legacy, on **grandit autour de lui** jusqu'à pouvoir le retirer.
+
+## Les trois gestes
+
+### 1. Tailler une cellule autour du legacy
+
+On dessine une **frontière de cellule** (un bounded context, S100) autour du legacy. À l'intérieur : les nœuds internes du legacy. À l'extérieur : un **contrat publié** — la surface publique que le reste de la fédération consomme. Le legacy devient une cellule comme une autre, avec sa propre frontière.
+
+### 2. Geler son comportement courant — les tests de caractérisation
+
+Voici la clé. Un test KRD normal est écrit **d'abord**, en rouge, depuis une **intention** déclarée. Un **test de caractérisation** est l'inverse : il est **généré** depuis le comportement **observé** du legacy. Pour chaque trace observée (« avec cette entrée, le legacy a renvoyé cette sortie »), AIDOS génère un miroir qui fige **exactement ce que le legacy fait aujourd'hui** — y compris ses bizarreries, ses bugs historiques. C'est volontaire : un refactor ne doit **rien** changer d'observable, même les bugs (les corriger est un changement d'intention, qui passe par `idée → miroir → /goal`, jamais en douce).
+
+Ces miroirs sont **tagués « caractérisation »** pour qu'on ne les confonde jamais avec des miroirs d'intention. Ils ne sont pas un objectif rouge à atteindre : ils sont un **filet vert** à ne pas casser.
+
+### 3. Refactorer dans la cellule gelée
+
+La boucle-build refactore l'intérieur de la cellule. À chaque tentative, AIDOS rejoue les miroirs de caractérisation contre le comportement **observé** du code refactoré :
+
+- si chaque entrée gelée donne la **même** sortie **et** le contrat publié tient → le refactor est **ACCEPTÉ** ;
+- si **une** sortie change (un *drift*) → le miroir correspondant rougit, le refactor est **REFUSÉ** (`STRANGLER_CHARACTERIZATION_DRIFT`) ;
+- si le comportement est préservé mais le **contrat publié** casse → **REFUSÉ** (`STRANGLER_PUBLISHED_CONTRACT_BROKEN`).
+
+## Pourquoi c'est important pour vous
+
+Vous pouvez moderniser un vieux module **sans peur**. Vous gelez ce qu'il fait, vous le nettoyez à l'intérieur, et le filet de caractérisation **prouve** que vous n'avez rien cassé d'observable. Le contrat publié garantit que les cellules voisines ne voient **aucune** différence. Le figuier pousse, l'hôte peut être retiré, et **rien de ce que faisait le legacy n'est silencieusement perdu**.
+
+## Ce que S104 ne fait pas (encore)
+
+S104 livre le **substrat déterministe** : tailler, geler, juger un refactor. La génération des miroirs de caractérisation est **du code, jamais un LLM** (observer des traces → produire des fixtures est une projection pure). L'**enregistrement** réel des traces depuis un legacy qui tourne, et la **boucle-build** qui pilote le refactor, sont câblés par les étapes voisines (S83 boucle-build, S106 boucle de réalité). S104 prouve le **gel** et la **garde anti-drift**.

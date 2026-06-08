@@ -1,0 +1,51 @@
+---
+title: "S104 · Pour moi — le substrat strangler-fig : Carve, Freeze (miroirs de caractérisation auto-générés), Refactor anti-drift"
+description: "Pour moi : l'implémentation de S104 — back/archive/strangler (Carve : tailler une cellule observable autour du legacy, refuse l'inobservé ; Freeze : un miroir de caractérisation fixture par trace observée, content-adressé, tagué characterization ; Refactor : rejouer les miroirs gelés contre le comportement refactoré, ACCEPTÉ ssi tous verts ∧ contrat honoré, drift ou contrat cassé REFUSÉ), le MCP strangler (carve/freeze/refactor), le twin TS lib/strangler + la route action-capable /strangler, et les miroirs (fixture, rapid 5, fast-check 8/8, Playwright 5/5). Plus Méta et Méta-méta."
+keywords: ["aidos", "krd", "S104", "strangler", "strangler-fig", "Carve", "Freeze", "Refactor", "characterization mirror", "test de caractérisation", "drift", "contrat publié", "CharacterizationMirror", "RefactorVerdict", "records.Hash", "cell.Ref", "rapid", "fast-check", "Playwright", "MCP", "EPIC 11", "§50", "déterminisme"]
+---
+
+<Note>Côté « Pour moi » — le détail complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S104](/steps/concept/s104-strangler).</Note>
+
+## Implémentation
+
+S104 ajoute le **substrat strangler-fig** : `back/archive/strangler` (sous-système Archive — l'absorption de legacy, KRD §50). Tout est **pur, total, déterministe** et **n'écrit aucune vérité** (le mur) : la `StranglerCell` + ses miroirs de caractérisation sont rendus comme VALEUR ; leur persistance passe par un ChangeSet (le schéma `mirrors` est au-dessus de la ligne d'eau), jamais par une écriture directe.
+
+**Le principe : geler l'observé, garder anti-drift.** Trois fonctions pures :
+
+**`Carve(l Legacy) → (StranglerCell, error)`** — taille la frontière de cellule autour du legacy :
+- refuse un legacy sans trace observée (`ErrNoObservedBehaviour`) — on ne gèle pas l'inobservé ;
+- refuse une cellule sans nom (`ErrUnnamedCell`) ;
+- sinon trie nœuds internes + traces canoniquement et renvoie une `StranglerCell{Cell, InternalNodes, PublishedContract, Observed, Hash}` content-adressée (`Hash(Canonicalize(body))`, réutilise le substrat records S02).
+
+**`Freeze(sc StranglerCell) → []CharacterizationMirror`** — auto-génère **un** miroir de caractérisation par trace observée. Chaque miroir est un **fixture** (`TestKind = "fixture"`), tagué `Characterization = true` (pour que la complétude S12 ne le confonde jamais avec un miroir d'intention), content-adressé (`mirrorHash` — même trace ⇒ même id), trié par scénario. **C'est du code déterministe** : observer des traces → produire des fixtures est une projection pure, **jamais un LLM** « écris des tests ».
+
+**`Refactor(sc StranglerCell, mirrors []CharacterizationMirror, obs RefactorObservation) → RefactorVerdict`** — rejoue le filet gelé contre le comportement **observé** du code refactoré :
+1. pour chaque miroir : vert ssi `obs.Outputs[scenario]` est présent ET **byte-égal** à la sortie gelée sous canonicalisation (`sameOutput` réutilise `records.Canonicalize` — ordre de clés/espaces insignifiants). Une sortie divergente OU absente → rouge ;
+2. `ContractHonored` : si la cellule publie un contrat, le verdict observé du caller décide ; sinon vacuement vrai ;
+3. `Accepted = AllGreen ∧ ContractHonored`. Sinon `Block` : un drift (`STRANGLER_CHARACTERIZATION_DRIFT`, nomme les scénarios divergents) prime, puis un contrat cassé (`STRANGLER_PUBLISHED_CONTRACT_BROKEN`).
+
+`RefactorVerdict{Cell, Mirrors, AllGreen, ContractHonored, Accepted, Block}` — chaque champ est **calculé**, jamais déclaré.
+
+**Le MCP `aidos-strangler`** (`back/mcp/strangler`, ADR 0009 — chaque op backend = un outil) expose `carve`, `freeze`, `refactor`. Read-only (le mur) ; stdio ; pur, déterministe.
+
+**Le twin TS `lib/strangler.ts`** reproduit `carve`/`freeze`/`refactor` à l'identique (même canonicalisation, même hash FNV-1a déterministe) pour que la route `/strangler` affiche un résultat **live et déterministe** sans appeler le back. La route est **action-capable** (ui-completeness, §7) : DEUX contrôles liés à des Server Actions sur le twin — (1) **démarrer une cellule strangler** (carve + freeze), (2) **lancer un refactor** avec les toggles « casser le comportement » (drift) et « casser le contrat ». Thème ADR 0010, bilingue ADR 0011, entrée de nav `WorkbenchHeader`.
+
+**Les miroirs** (mirror-first, §6) :
+- `strangler_fixture_test.go` — 4 scénarios fixture : refactor préservant → vert ∧ contrat honoré ∧ accepté ; changement d'une sortie → drift refusé (exactement 1 miroir rouge) ; scénario perdu → drift ; contrat cassé → refusé ; carve sans observé → refusé.
+- `strangler_property_test.go` (rapid, 5 propriétés) — Carve déterministe ; Freeze déterministe ; **freeze-then-replay toujours accepté** (un no-op refactor ne rougit jamais) ; **any-drift toujours capté** (changer une sortie rougit son miroir et refuse) ; Refactor déterministe.
+- `lib/strangler.test.ts` (fast-check, 8/8) — les mêmes invariants côté twin.
+- `tests/e2e/strangler.spec.ts` (Playwright, 5/5) — la route rend les deux contrôles ; démarrer gèle 3 miroirs ; refactor préservant → accepté ; drift → `STRANGLER_CHARACTERIZATION_DRIFT` ; contrat cassé → `STRANGLER_PUBLISHED_CONTRACT_BROKEN`.
+
+## Méta
+
+**Pourquoi un test de caractérisation est l'inverse d'un miroir d'intention.** Le Mandat A de KRD : aucun code sans un scénario rouge écrit **d'abord**, depuis l'intention. S104 introduit la seule exception légitime à la *direction* (pas à la discipline) : un miroir de caractérisation est **généré** depuis le comportement **observé**, pas depuis l'intention. Il fige « ce que le legacy fait », bugs compris. La tension est réelle — un test généré n'est pas une vérité voulue. On la résout par un **tag** (`Characterization = true`) qui sépare nettement les deux natures : la complétude (S12) ne traite pas un miroir de caractérisation comme une vérité d'intention, et **changer** un comportement gelé exige un **nouveau** miroir d'intention via `idée → miroir → /goal` — jamais en éditant le miroir de caractérisation pour le faire passer (ce serait effacer le comportement du legacy en douce, un monstre).
+
+**Le mur, encore.** S104 est dans le sous-système Archive et ne franchit jamais la ligne d'eau : `Carve`/`Freeze`/`Refactor` rendent des valeurs. Geler des miroirs **propose** un ChangeSet (le schéma `mirrors` est au-dessus de la ligne) ; l'agent n'a aucun GRANT pour les écrire. Le refactor que la boucle-build pilote écrit du code **sous** la ligne (le bac à sable S82), jamais de la vérité.
+
+**Determinism-first.** La génération de miroirs de caractérisation est le cas d'école du mandat §6/§8 : « tout ce qui peut être une fonction pure DOIT être du code ». Observer des traces et en faire des fixtures est une **projection déterministe** — il n'y a aucune part de jugement irréductible, donc aucun LLM n'entre. Le juge d'un refactor est le **miroir gelé** (byte-égalité canonique), jamais un LLM « je pense que ça n'a pas changé ». Le miroir de reproductibilité (rapid + fast-check) épingle même-entrée → même-sortie sur les trois fonctions.
+
+## Méta-méta
+
+**Le figuier étrangleur comme schéma de migration sûre.** S104 est l'incarnation KRD d'une vérité plus large : on n'absorbe pas du legacy par confiance, on l'absorbe par **gel mesuré**. Le strangler-fig est le pendant, à l'échelle d'une cellule, de ce que le **ratchet** est à l'échelle d'un Kernel (S22/S40) et de ce que le **second ratchet structurel** (S102) est à l'échelle du graphe de cellules : un cliquet ne peut que tenir ou s'améliorer, jamais régresser silencieusement. Un miroir de caractérisation est un cliquet posé sur du **comportement non spécifié** — il transforme « ça marchait avant » (une croyance) en « ça donne exactement ceci » (une vérité vérifiable), sans jamais prétendre que ce comportement est *voulu*.
+
+**Pourquoi la grandeur vit dans le nombre de cellules.** §45 : une grosse app n'est jamais un Kernel unique mais une fédération délibérée. S104 ferme le dernier vide de l'EPIC 11 : comment une cellule **entre** dans la fédération quand elle vient d'un monde **sans miroirs**. La réponse — la tailler, la geler, publier son contrat — fait du legacy un **citoyen de première classe** de la fédération (sa propre cellule, son propre ratchet, son propre contrat) au lieu d'une masse non gouvernée. C'est l'asymétrie centrale d'AIDOS appliquée au passé : l'humain possède l'intention (les nouveaux miroirs), l'agent possède l'implémentation (le refactor), et le **harnais** — ici le filet de caractérisation — garantit que rien de prouvé-vrai (ou même seulement *observé*) ne casse en silence.
