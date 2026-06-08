@@ -1,0 +1,56 @@
+---
+title: "S71 · Des relations entre vos entités"
+description: "S71 ajoute au système de types de vos entités un nouveau type de nœud : la RELATION. Jusqu'ici une entité ne portait que des attributs scalaires (texte, entier, décimal, booléen, date). Désormais une entité peut RÉFÉRENCER une autre entité — une Commande pointe vers un Client, un Article appartient à une Commande — avec une cardinalité (un-vers-un, un-vers-plusieurs, plusieurs-vers-plusieurs) et une sémantique (clé étrangère, association, composition). La relation est un nœud À PART : l'ensemble des types scalaires reste clos, intact. Et l'honnêteté tient : une relation vers une entité que vous n'avez pas déclarée est REFUSÉE (UNKNOWN_RELATION_TARGET), jamais devinée. Le mur tient : décrire une relation ne fait que la valider et l'adresser, ça n'écrit aucune vérité."
+keywords: ["aidos", "krd", "S71", "relation", "entité", "référence", "clé étrangère", "FK", "association", "composition", "cardinalité", "un-vers-un", "un-vers-plusieurs", "plusieurs-vers-plusieurs", "1-1", "1-N", "N-N", "système de types", "ensemble scalaire", "ensemble clos", "AST", "content-adressé", "round-trip", "UNKNOWN_RELATION_TARGET", "cible inconnue", "jamais deviné", "honnêteté", "le mur", "read-only", "S35", "§23", "§26"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S71](/steps/internals/s71-entity-relation).</Note>
+
+## En une phrase
+
+S71 apprend à vos entités à **se référencer entre elles** : une Commande peut pointer vers son Client, un Article vers son Produit — avec le bon nombre (un seul, ou plusieurs) et le bon sens (simple lien, ou appartenance forte).
+
+## Le problème que S71 résout
+
+Jusqu'à S71, une de vos entités n'était qu'une **liste de champs simples** — un texte, un nombre, une date. Mais une vraie app n'est jamais une seule table isolée : une Commande **a un** Client, un Panier **contient des** Articles, un Article **référence un** Produit. Sans relation, vous ne pouviez modéliser que des entités solitaires — un plafond qui rend impossible toute app à plusieurs tables. S71 ajoute la pièce manquante : le **nœud de relation**.
+
+Le piège qu'AIDOS refuse : **deviner**. Si vous écrivez « cette Commande pointe vers un Customer » mais que vous n'avez jamais déclaré l'entité `Customer`, un outil naïf inventerait une cible ou retomberait silencieusement sur « du texte ». AIDOS, lui, **refuse honnêtement** : `UNKNOWN_RELATION_TARGET`. La cible d'une relation est toujours une entité que **vous** avez déclarée, jamais une supposition.
+
+## Ce que S71 apporte
+
+<CardGroup cols={2}>
+  <Card title="Un nœud de relation distinct" icon="diagram-project">
+    Une relation n'est <strong>pas un champ scalaire</strong> : c'est son propre type de nœud. L'ensemble des types simples (texte, entier, décimal, booléen, date) reste <strong>clos et intact</strong>.
+  </Card>
+  <Card title="Trois cardinalités" icon="arrows-left-right">
+    <strong>1-1</strong> (un-vers-un), <strong>1-N</strong> (un-vers-plusieurs), <strong>N-N</strong> (plusieurs-vers-plusieurs) — vous choisissez combien de l'un se relie à combien de l'autre.
+  </Card>
+  <Card title="Trois sémantiques" icon="link">
+    <strong>fk</strong> (simple clé étrangère), <strong>association</strong> (lien navigable entre deux entités indépendantes), <strong>composition</strong> (la cible appartient à la source — la supprimer cascade).
+  </Card>
+  <Card title="Une cible jamais devinée" icon="shield-check">
+    Une relation vers une entité non déclarée est <strong>refusée</strong> (UNKNOWN_RELATION_TARGET) avec un chemin de réparation clair — jamais un mapping inventé. L'honnêteté de l'ensemble clos est préservée.
+  </Card>
+</CardGroup>
+
+## Comment vous l'utilisez
+
+<Steps>
+  <Step title="Vous épinglez une relation">
+    Vous donnez un nom de champ (par exemple <code>customer</code>), une entité cible (<code>Customer</code>), une cardinalité (<code>1-N</code>) et une sémantique (<code>fk</code>).
+  </Step>
+  <Step title="Vous la résolvez">
+    AIDOS vérifie que la cible est une entité <strong>déclarée</strong>, que la cardinalité et la sémantique font partie des jeux fermés, puis calcule l'<strong>adresse de contenu</strong> de la relation (son identité = un hash de son contenu).
+  </Step>
+  <Step title="Vous obtenez un verdict honnête">
+    Cible déclarée → la relation est <strong>résolue</strong> et reçoit son adresse de contenu (le round-trip). Cible inconnue → <strong>refus</strong> UNKNOWN_RELATION_TARGET, avec quoi faire pour corriger.
+  </Step>
+</Steps>
+
+## Pourquoi c'est important
+
+Une relation est **content-adressée** comme tout le reste dans AIDOS : son identité est un hash de son contenu. Changez sa cible, sa cardinalité ou sa sémantique, et vous obtenez une **nouvelle version** — l'historique n'est jamais écrasé. Cette relation est une **source** (au-dessus de la ligne) : la décrire à l'écran ne l'écrit pas en vérité ; cela passerait, comme toujours, par une proposition approuvée. C'est S74 qui, plus tard, **émettra** le code à partir de ce nœud (clés étrangères, tables de jointure, navigation typée) — S71 ne fait que **définir et valider** le nœud, proprement.
+
+## Et après
+
+S71 débloque les apps **multi-entités**. Les émetteurs relation-aware (S74) traduiront ce nœud en vrai code base de données et SDK ; le modeleur entité/relation (S75) vous laissera **tracer** ces relations sur un canvas. La porte est ouverte.

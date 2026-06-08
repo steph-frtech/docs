@@ -1,0 +1,60 @@
+---
+title: "S71 · Nœud de relation de l'Entity AST (internals)"
+description: "Le détail d'implémentation de S71 : back/kernel/entities/ref (Go) — Relation (le nœud distinct {name, target, cardinality, semantic, required}), Cardinality (jeu clos 1-1/1-N/N-N) et Semantic (jeu clos fk/association/composition), ValidateShape, Resolve (résout la cible contre l'ensemble d'entités déclaré — UNKNOWN_RELATION_TARGET si absente, jamais devinée), Body/ID/Parse (le round-trip content-adressé réutilisant records.Hash verbatim), BlockUnknownTarget (BlockReason S13 réutilisée). Le jumeau TS lib/entity-relation (byte-équivalent à ref.Body/ref.ID), le MCP back/mcp/entity-relation (2 outils purs), la route /entity-relation action-capable, les miroirs (fixture + 6 property rapid + Vitest/fast-check + 4 Playwright). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "S71", "ref", "Relation", "Cardinality", "Semantic", "ValidateShape", "Resolve", "Body", "ID", "Parse", "BlockUnknownTarget", "1-1", "1-N", "N-N", "fk", "association", "composition", "ensemble clos", "scalaire", "content-adressé", "round-trip", "records.Hash", "Canonicalize", "UNKNOWN_RELATION_TARGET", "UNKNOWN_RELATION_KIND", "jamais deviné", "honnêteté", "BlockReason", "S13", "fonction pure", "déterminisme", "reproductibilité", "rapid", "fast-check", "Playwright", "MCP", "le mur", "n'écrit rien", "S35", "S74", "§23", "§26"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S71](/steps/concept/s71-entity-relation).</Note>
+
+## Implémentation
+
+S71 étend le système de types des entités (S35) avec un **nœud de relation distinct** — sans toucher à l'ensemble scalaire clos. Sur les deux plans (Go faisant autorité + jumeau TS) avec une surface action-capable.
+
+### Le moteur Go — `back/kernel/entities/ref`
+
+Tout est **pur, total, déterministe** (aucune horloge, aucun rng, aucune I/O) :
+
+- **`Relation{Name, Target, Cardinality, Semantic, Required}`** : le nœud AST de relation — un nœud **distinct** d'un `entities.Attribute` scalaire. Il porte le nom du champ sur la source, le **nom** de l'entité cible (résolu, jamais deviné), une cardinalité et une sémantique. Il ne porte **aucun** type scalaire — il est référentiel, pas scalaire.
+- **`Cardinality`** : jeu **clos** `{1-1, 1-N, N-N}` (`OneToOne`, `OneToMany`, `ManyToMany`), avec `Cardinalities()` (ordre canonique déclaré) et `IsKnownCardinality`.
+- **`Semantic`** : jeu **clos** `{fk, association, composition}` (`FK`, `Association`, `Composition`), avec `Semantics()` et `IsKnownSemantic`.
+- **`ValidateShape(r) → error`** : vérifie le nom, la cible et l'appartenance aux jeux clos — n'invente rien (`ErrNoName`, `ErrNoTarget`, `ErrUnknownCardinality`, `ErrUnknownSemantic`). Ne résout PAS la cible.
+- **`Resolve(r, known map[string]bool) → error`** : valide la forme **PUIS** résout la cible contre l'ensemble d'entités déclaré. Une cible absente est `ErrUnknownTarget` — le refus canonique `UNKNOWN_RELATION_TARGET`, l'honnêteté de l'ensemble clos (jamais un mapping deviné).
+- **`Body(r)` / `ID(r)` / `Parse(body)`** : le **round-trip content-adressé**. `Body` sérialise via `records.Canonicalize` (clés triées) ; `ID = records.Hash(Body)` — **S02 réutilisé verbatim**. `Parse(Body(r))` est l'identité, et `ID(Parse(Body(r))) == ID(r)`. Tout changement d'octet (rename, retarget, recardinality) ⇒ **nouvelle version**.
+- **`BlockUnknownTarget(cause) → blockreason.BlockReason`** : réutilise la forme S13 (jamais un code nouveau au-delà d'un rouge humain), avec un `how_to_fix` non vide (pas de prison, KRD §44.5). Le code rendu est `UNKNOWN_RELATION_TARGET` (cible absente) ou `UNKNOWN_RELATION_KIND` (cardinalité/sémantique hors jeu).
+
+### Le jumeau TS — `front/web/lib/entity-relation.ts`
+
+Réplique verbatim la logique Go (`resolve`, `relationId`, `relationBody`, `validateShape`, `blockUnknownTarget`) avec une `canonicalBody` qui **égale octet-pour-octet** `ref.Body` du Go (clés triées, `required` en omitempty). Le test de reproductibilité ancre le hash : `relationBody({customer→Customer, 1-N, fk, required})` ==
+`{"cardinality":"1-N","name":"customer","required":true,"semantic":"fk","target":"Customer"}` et `relationId` == le hash Go vérifié. Le Go est **autorité** ; le jumeau le reproduit pour l'écran.
+
+### Le MCP — `back/mcp/entity-relation` (ADR 0009)
+
+Deux outils de **pure computation**, aucun outil d'écriture : `relation_resolve` (résout contre l'ensemble déclaré → ok | UNKNOWN_RELATION_TARGET / UNKNOWN_RELATION_KIND), `relation_address` (adresse de contenu = round-trip). `main_test.go` vert.
+
+### La route action-capable — `/entity-relation`
+
+`page.tsx` + `EntityRelationPanel.tsx` (client) + `actions.ts` (Server Action `resolveAction`). On épingle une relation (nom/cible/cardinalité/sémantique/requis) et on la résout+adresse : cible déclarée → badge **RÉSOLU** + id + body (le round-trip) ; cible inconnue → badge **REFUSÉ** + code `UNKNOWN_RELATION_TARGET` + chemin de réparation. Entrée de nav dans le groupe Build après `/entity-map`. i18n FR/EN à parité, thème ADR 0010.
+
+### Les miroirs (écrits rouges d'abord)
+
+- **Property rapid** `ref_property_test.go` (6) : round-trip content-adressé, content-addressed, déterminisme, jeux clos, **UNKNOWN_RELATION_TARGET refusé**, ensemble scalaire intact.
+- **Fixture** `ref_fixture_test.go` : les done-criteria restatés exécutables (round-trip ; refus de la cible inexistante ; refus du kind hors jeu ; chaque kind adressable).
+- **Jumeau TS** `entity-relation.test.ts` (Vitest + fast-check, 6) : déterminisme, round-trip, jeux clos, refus, plus l'**ancre cross-langage** (body + hash byte-équivalents au Go).
+- **MCP** `main_test.go` : résout OK, refuse la cible inconnue + le kind inconnu, round-trip déterministe, refuse le malformé.
+- **Playwright** `tests/e2e/entity-relation.spec.ts` (4) : la route rend le contrôle ; une cible déclarée round-trip (id en hex 64) ; **fault-injection** une cible Ghost est refusée UNKNOWN_RELATION_TARGET (aucun id deviné) ; les 9 combinaisons cardinalité×sémantique sont distinctement adressées.
+
+## Méta
+
+**Pourquoi un nœud distinct, et pas un nouveau type scalaire ?** Parce que l'honnêteté de l'**ensemble clos** est un invariant d'AIDOS (§23). Le jeu scalaire `{string,int,decimal,bool,timestamptz}` est petit, déclaré, fermé : un attribut hors jeu est refusé (`UNKNOWN_ATTRIBUTE_TYPE`, S35). Si une relation était « juste un type scalaire de plus », on aurait soit élargi le jeu fermé (trahison de l'invariant), soit forcé une relation à se déguiser en `string` (le mapping deviné qu'on refuse). En faisant de la relation **son propre plan de nœud**, les deux planes restent disjoints : l'ensemble scalaire ne bouge pas (`TestProp_ScalarSetUntouched` le prouve), et la relation a sa propre honnêteté (la cible résolue, jamais devinée).
+
+**Pourquoi la résolution, et pas une simple validation de forme ?** Un nœud bien formé (`name + target + cardinality + semantic`) peut quand même mentir : pointer vers une entité que personne n'a déclarée. C'est exactement le `UNKNOWN_RELATION_TARGET`. La résolution prend l'**ensemble d'entités déclaré** (la coupe du projet, S70) comme paramètre — la relation n'existe honnêtement que **dans le contexte** d'un ensemble d'entités. C'est le même geste que `Resolve` d'un Expr contre son scope : la cible est nommée, jamais inventée.
+
+**Le round-trip comme preuve de l'AST.** `ID(Parse(Body(r))) == ID(r)` n'est pas un détail : c'est la garantie que le nœud est un **vrai AST content-adressé**, pas une structure ad-hoc. La même propriété tient pour les entités (S35), les expr (S08), les operations (S10). Une relation rejoint la famille des truths versionnées par hash.
+
+## Méta-méta
+
+**Déterminisme-first (CLAUDE.md §6).** Tout S71 est du **code pur** : valider une forme, résoudre une cible contre un ensemble, hasher un AST canonicalisé. Aucun LLM n'a sa place ici — c'est du parsing, de l'appartenance ensembliste, du hash, exactement la liste des gestes que le mandat déterministe exige en code faisant autorité. Les miroirs de reproductibilité (rapid + fast-check) épinglent « même entrée → même sortie » sur les deux plans, et l'ancre byte-équivalente Go↔TS prouve qu'il n'y a **qu'une** logique, projetée, jamais deux implémentations qui dériveraient.
+
+**Le mur (CLAUDE.md §2).** Une relation est une **source au-dessus de la ligne**. S71 ne fait que la **lire/valider/adresser** ; rien n'écrit le kernel. Le MCP n'a aucun outil d'écriture ; la route ne propose pas (encore) — elle calcule un verdict. Quand l'autorat arrivera (S77/S75), l'écriture passera par `propose → ChangeSet → approbation`, jamais une écriture directe depuis l'écran.
+
+**Anti-monstre, anti-Goodhart (CLAUDE.md §5/§8).** Le done est **calculé** : les property tests rouges d'abord, verts ensuite ; aucun nouveau truth-test que l'agent se donnerait pour le satisfaire. Le refus `UNKNOWN_RELATION_TARGET` est une **honnêteté mécanique** — l'agent ne peut pas « réussir » en devinant une cible, parce que la fonction le refuse. C'est la même posture que partout dans AIDOS : on ne contourne pas le mur en inventant un `targetId`.
