@@ -246,6 +246,8 @@
               "steps/internals/s88-doltgres-spike",
               "steps/concept/s89-provision-datastore",
               "steps/internals/s89-provision-datastore",
+              "steps/concept/s90-api-surface",
+              "steps/internals/s90-api-surface",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

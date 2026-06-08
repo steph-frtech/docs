@@ -1,0 +1,40 @@
+---
+title: "S90 · L'API complète de votre app, émise et vérifiée — sans une ligne écrite à la main"
+description: "S90 ÉMET la surface API complète de l'app qu'AIDOS construit pour vous : le routage CRUD + operation (synchrone), un document OpenAPI 3.1 par app, et UN contrat Pact par operation (au lieu d'un seul exemple), le tout VÉRIFIÉ endpoint par endpoint. Les handlers Hono/TS exécutent vos règles via un appel à l'interpréteur Go (le sidecar), et vos policies sont appliquées au runtime : une demande non autorisée reçoit un 403, jamais la donnée. L'émission est une fonction PURE : même app → même API, à l'octet près."
+keywords: ["aidos", "krd", "S90", "surface API", "OpenAPI", "Pact", "provider-verification", "CRUD", "operation", "Hono", "sidecar", "interpréteur Go", "policy", "403", "DENY", "ADR 0040", "EPIC 9", "déterminisme", "byte-stable"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S90](/steps/internals/s90-api-surface).</Note>
+
+## En une phrase
+
+S90 **émet toute l'API** de l'app qu'AIDOS construit pour vous : **une route par opération** (créer, lister…), un **document OpenAPI** qui décrit l'API entière, **un contrat Pact par opération** pour prouver que chaque endpoint tient sa promesse, et une **vérification automatique** de tous les endpoints — sans que vous écriviez le moindre routeur à la main.
+
+## Le problème que S90 résout
+
+Une fois que votre app a ses entités (S89 leur a donné une base) et ses opérations, il lui faut une **vraie API** : des URLs, des méthodes HTTP, un schéma de requête/réponse, et la garantie que chaque endpoint fait *exactement* ce qui est promis. Quatre pièges classiques :
+
+1. **N'exposer qu'une partie de l'app.** Les générateurs « démo » câblent un seul endpoint (un `createOrder` d'exemple). S90 câble **toutes** vos opérations — chaque opération synchrone obtient sa route.
+2. **Une doc d'API qui dérive du code.** Ici l'**OpenAPI est émis depuis la même source** que les routes : il ne peut pas mentir, et il est **byte-stable** (même app → même document, toujours).
+3. **Des contrats non tenus.** Chaque opération reçoit **son propre contrat Pact**, et S90 **vérifie** que le handler émis l'honore : le bon statut, le bon jeu de champs, ni en trop ni en moins.
+4. **Une policy oubliée au runtime.** Si une opération exige une autorisation, le handler **applique la policy** : une demande non autorisée reçoit **HTTP 403**, et la donnée n'est jamais écrite.
+
+## Comment S90 émet l'API (et pourquoi c'est sûr)
+
+1. **Une route par opération.** Une opération de création → `POST /<entités>` ; une opération de lecture → `GET /<entités>`. Les chemins ne sont jamais inventés : ils viennent de vos entités.
+2. **Le handler ne ré-implémente aucune règle.** Il transmet la commande à l'**interpréteur Go** (le « sidecar ») qui exécute votre opération — la même logique qu'AIDOS exécute en interne (décision ADR 0040). Votre app construite en TypeScript et le cœur d'AIDOS donnent **le même verdict**.
+3. **La policy est appliquée à la frontière.** Si l'opération autorise, un refus de l'interpréteur devient un **403** ; sinon la réponse porte la donnée (201 pour une création, 200 pour une lecture).
+4. **L'OpenAPI décrit tout.** Un chemin par route, un schéma par entité, un schéma d'entrée par opération, et la réponse 403 quand une policy s'applique.
+5. **Le Pact prouve chacun.** Un contrat par opération (la version « heureuse » + l'interaction de refus quand il y a une policy), et une **provider-verification** rejoue chaque interaction contre le handler émis.
+
+## La vérification, endpoint par endpoint
+
+Le critère de S90 est simple et non négociable : **tous les endpoints émis passent leur contrat**. Si un handler renvoyait un champ en trop, un statut faux, ou ignorait une policy, la vérification **échouerait** — c'est l'honnêteté du système, pas un avis.
+
+## Ce que vous voyez à l'écran
+
+Le panneau Workbench `/api-surface` est **action-capable** : vous basculez si l'opération `createOrder` exige une policy et si un endpoint de lecture rejoint la surface, puis vous **émettez + vérifiez**. L'écran montre l'OpenAPI per-app (avec son adresse de contenu), le routeur Hono/TS, la suite Pact (un contrat par opération), et le verdict de vérification sur **tous** les endpoints. Émettre **n'écrit aucune vérité** : l'API est une projection de votre app.
+
+## Ce que S90 ne fait pas
+
+S90 **n'invente** ni route, ni champ, ni statut, ni policy : il **lit** vos opérations et vos entités et les **projette**. Il n'écrit jamais dans le noyau (le mur). Et il ne met **jamais** un LLM dans la boucle : l'émission est une fonction pure, le vérificateur est un algorithme.

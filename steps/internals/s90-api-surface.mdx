@@ -1,0 +1,39 @@
+---
+title: "S90 · Pour moi — l'émetteur de surface API et la parité interpréteur Go"
+description: "Pour moi : l'implémentation de S90 — back/runtime/apisurface (EmitRouter : routeur Hono/TS, une route par operation, déléguant au callback de l'interpréteur Go sidecar ; EmitOpenAPI : OpenAPI 3.1 per-app byte-stable ; EmitPactSuite/EmitPactArtifacts : UN contrat Pact par operation ; VerifyOp/VerifySuite : provider-verification in-process sur TOUS les endpoints ; SidecarVerdict : operation.Interpret derrière le callback, avec une parité prouvée à l'interpréteur natif), le MCP apisurface (openapi/router/pact/verify), le twin TS lib/api-surface + sa route action-capable /api-surface, et les miroirs (rapid byte-stable + fast-check, fixtures Gherkin createOrder + DENY, parité). Plus les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S90", "apisurface", "EmitRouter", "EmitOpenAPI", "EmitPactSuite", "VerifySuite", "SidecarVerdict", "operation.Interpret", "Hono", "sidecar", "ADR 0040", "OpenAPI", "Pact", "provider-verification", "policy", "403", "rapid", "fast-check", "Playwright", "MCP", "EPIC 9", "déterminisme", "byte-stable", "parité"]
+---
+
+<Note>Côté « Pour moi » — le détail complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S90](/steps/concept/s90-api-surface).</Note>
+
+## Implémentation
+
+S90 ajoute l'**émetteur de surface API de l'app émise** : à partir d'une `ApiSpec` (le projet + l'ensemble complet des operations, chacune avec son entité, son verbe POST/GET, son flag `Authorize`, son schéma `Input`), il **projette** la surface API complète. Le package est `back/runtime/apisurface`.
+
+**Les trois émetteurs (purs, totaux, byte-stables).**
+
+- `EmitRouter(spec)` → le **routeur Hono/TS** (`gen/<projet>/api/router.ts`) : une route par operation synchrone (ordre canonique des noms), chaque handler déléguant au **callback de l'interpréteur Go sidecar** (`deps.interpret`, ADR 0040 Déc. 7) ; pour une operation qui autorise, un `if (verdict.denied) return c.json({ error: "forbidden" }, 403)` **applique la policy** ; FN02-pur (les deps arrivent en paramètre de `createRouter`, jamais en binding mutable de module).
+- `EmitOpenAPI(spec)` → le document **OpenAPI 3.1 per-app** (`gen/<projet>/api/openapi.json`) : un chemin par operation, un schéma par entité, un schéma `<Op>Input` pour l'entrée, la réponse 201/200 + 403 (si policy). Canonicalisé (`records.Canonicalize`) puis indenté → **byte-stable**.
+- `EmitPactSuite(spec)` / `EmitPactArtifacts(spec)` → **UN contrat Pact par operation** (généralisant le seul `createOrder.pact.json` de S36) : l'interaction « heureuse » + l'interaction de refus (403) quand l'operation autorise.
+
+**La provider-verification (le critère « sur tous les endpoints émis »).** `VerifyOp(op, contract)` monte le provider in-process (`net/http/httptest`, sans démon externe — comme ADR 0026) et rejoue chaque interaction ; `VerifySuite(spec)` boucle sur **toutes** les operations et échoue au premier endpoint non conforme. Le `referenceProvider` est le même adaptateur que `EmitRouter` rend (décode → `SidecarVerdict` → encode), donc vérifier le provider vérifie le comportement du handler émis.
+
+**Le callback interpréteur (la décision ADR 0040 Déc. 7).** `SidecarVerdict(op, input)` est `operation.Interpret` derrière la frontière JSON que le handler Hono traverse : il résout le corps de l'operation (`operationBodyFor` — le vrai corps S10 pour `createOrder`, un corps minimal bien typé sinon) et l'exécute avec un double de deps **déterministe et reproductible** (`denyOnMarkerDeps` : `Authorize` DENY ssi `$.input.__deny__`, un reader cart-with-items, un mutator qui somme). Un échec d'autorisation → `Denied=true`.
+
+**Le mur + l'honnêteté.** Une `ApiSpec` malformée → un `blockreason.BlockReason` typé (la forme S13) avec un `how_to_fix` non vide ; jamais un panic, jamais une route/policy/verbe inventés. L'émetteur ne lit que des sources et n'écrit que des projections sous la ligne.
+
+**Le MCP `aidos-apisurface`** (`back/mcp/apisurface`, ADR 0009) expose `openapi` · `router` · `pact` · `verify` — purs, n'écrivent rien. **Le twin TS** `front/web/lib/api-surface.ts` reflète les émetteurs (canonicalisation + hash FNV self-consistant) et alimente la route **action-capable** `/api-surface` (basculer policy + endpoint de lecture → émettre + vérifier).
+
+**Les miroirs.** rapid (`apisurface_property_test.go`) : OpenAPI/router/Pact **byte-stables** et indépendants de l'ordre d'entrée, `SourceHash` sensible à un attribut ajouté. Fixtures (`apisurface_fixture_test.go`) : `createOrder` persiste (201), le DENY est enforced (403), `VerifySuite` vert sur tous les endpoints, et la **PARITÉ** `SidecarVerdict == operation.Interpret` (allowed ∧ denied). fast-check (`api-surface.test.ts`, 8/8) côté twin ; Playwright (`api-surface.spec.ts`, 6/6) côté écran.
+
+## Méta
+
+S90 est un **émetteur de plus** dans la matrice kind × target d'AIDOS, mais sur le **plan de l'app émise** (Hono/TS, ADR 0040), pas sur le plan d'AIDOS lui-même (où S36 émet des handlers Go). Le pivot de décision tranché par ADR 0040 Déc. 7 — *l'interpréteur Operation-DSL reste Go, gouvernable, et les handlers TS l'appellent en sidecar* — résout l'open-question OQ-0040-interpréteur sans ré-émettre l'interpréteur en TS (ce qui aurait dupliqué une logique faisant autorité, un risque de reproductibilité interdit). La **parité** `SidecarVerdict == operation.Interpret` est le miroir qui ferme ce choix : si la frontière JSON divergeait du natif, le mirror passe rouge.
+
+La généralisation « un Pact par operation » est l'application directe de la loi de complétude au plan API : chaque endpoint émis a son contrat vivant ; un endpoint sans contrat (ou un contrat sans endpoint) serait un **monstre**. La provider-verification *sur tous* les endpoints est ce qui interdit ce monstre.
+
+## Méta-méta
+
+S90 illustre le **déterminisme-first** sur le plan de l'émetteur d'app : tout ce qui *peut* être une fonction pure l'**est** — le routage (une table verbe→méthode), l'OpenAPI (une projection canonicalisée), le Pact (un jeu de champs depuis l'AST), le vérificateur (des assertions statut + jeu-de-champs). Aucun LLM n'entre : le seul « jugement » (la policy) est délégué à l'interpréteur Go, lui-même déterministe. Le miroir de reproductibilité (même `ApiSpec` → octets identiques) est la garantie auto-vérifiante que rien d'opaque ne s'est glissé.
+
+Et S90 respecte le **mur** sans exception : un émetteur lit des sources du Kernel et écrit des projections sous la ligne — il n'invente aucune `targetId`, aucune route, aucune règle métier, et n'écrit jamais une vérité. La porte vers le noyau reste `idée → miroir → /goal → approbation humaine` ; S90 n'en franchit aucune.
