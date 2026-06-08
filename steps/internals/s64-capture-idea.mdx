@@ -1,0 +1,42 @@
+---
+title: "S64 · Capturez votre idée — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S64 : le MCP idea-intake gagne le scope projet (captureInput.project_id, Store.InsertScoped/ListScoped, ScopedIdea) — une idée humaine capturée scopée projet est persistée draft puis visible dans l'inbox de CE projet seulement. Le front /capture-idea ajoute la boîte texte-libre (Server Action captureIdeaAction écrivant ideas.idea below-the-line, provenance humain forcée, scope = projet actif S57) + l'inbox par projet (inboxSnapshot) qui remplace la fixture /ideas. Le jumeau pur lib/capture-idea.ts content-adresse l'esquisse {intent, proposes, provenance} BYTE-IDENTIQUE au Go ideas.Capture (id ancré : 46c9244f…). Miroirs : Godog+Testcontainers back (capture→draft persisté→inbox scopée, isolation inter-projets, mur), rapid back (scope≠identité, déterminisme, provenance préservée, jamais de gel), Vitest+fast-check front (id ancré, idempotence, draft, isolation), Playwright /capture-idea (5 tests). Réutilise S27 idea-intake, S54 project_id, S57 cookie, records.Hash. Det. : juge pur, zéro LLM ; project_id est un scope, jamais l'identité."
+keywords: ["aidos", "krd", "S64", "idea-intake", "captureInput", "project_id", "InsertScoped", "ListScoped", "ScopedIdea", "ideas.Capture", "ideas.idea", "captureIdeaAction", "inboxSnapshot", "lib/capture-idea", "canonicalSketch", "contentAddress", "captureIdea", "content-addressed", "records.Hash", "records.Canonicalize", "provenance", "humain", "draft", "brouillon", "no mirror", "HasMirror", "scope", "S54", "S57", "S27", "S58", "le mur", "staging", "above the line", "Godog", "Testcontainers", "rapid", "fast-check", "Playwright", "déterminisme", "BesoinGraph", "emit-ideas", "EL16"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Le concept est [ici](/steps/concept/s64-capture-idea).</Note>
+
+## En une phrase
+
+S64 **scope au projet** la porte de capture d'idée déjà construite (le MCP idea-intake, S27) et la **branche à un écran action-capable** : une boîte texte-libre du Workbench écrit un vrai record `ideas` — provenance humain, scopé au projet actif — qui réapparaît dans l'inbox de **ce** projet seulement, l'inbox qui remplace la fixture `/ideas`.
+
+## Implémentation
+
+### Le MCP idea-intake gagne le scope projet (`back/mcp/idea-intake`)
+
+- `captureInput.project_id` (nouveau champ, optionnel) — le projet auquel scoper l'idée. Vide ⇒ le projet seed `__system__` (le DEFAULT de la colonne, S54). L'id reste le hash de l'**esquisse** : `project_id` est un scope, **jamais** l'identité.
+- `ideaOutput.project_id` — re-surfacé pour que l'inbox prouve « cette idée appartient au projet actif ».
+- `Store.InsertScoped(ctx, idea, projectID)` — l'INSERT scopé : quand `projectID` est vide, retombe sur le DEFAULT (compat ascendante `Insert`) ; sinon écrit la colonne `project_id`. Append-only : `ON CONFLICT (id) DO NOTHING` (la même esquisse re-capturée est un no-op, jamais un doublon ni un écrasement).
+- `Store.ListScoped(ctx, status, projectID) []ScopedIdea` — l'inbox d'**un** projet (filtre `project_id`), ordonnée par id (déterministe). `projectID` vide = file de triage globale (compat). `ScopedIdea{Idea, ProjectID}` est ce que l'inbox liste.
+- `Insert`/`List` historiques délèguent désormais à `InsertScoped("")`/`ListScoped("")` — une seule voie, pas de fork.
+
+### Le front `/capture-idea`
+
+- `lib/capture-idea.ts` — le **jumeau pur** de `ideas.Capture` + `records.Hash`. `canonicalSketch(proposes, intent, provenance)` émet `{intent, proposes, provenance:{detail, source}}` **clés triées récursivement**, puis `contentAddress` hashe SHA-256 hex. Une idée capturée du Workbench atterrit à la **même adresse** que le moteur — l'id ancré `46c9244fc60ef3491e13bfcbcde264f7e6460fe80f1bef78bbcc47c2b87ea6fd` est figé dans le miroir pour interdire toute dérive. `captureIdea` retourne un `CapturedIdea` `status:"draft"` sans champ `version` ni `mirror` (le type rend ces deux absences inreprésentables).
+- `app/capture-idea/actions.ts` — `captureIdeaAction` (Server Action) : valide l'intention + la nature, lit le **projet actif** (cookie S57, jamais un champ), force la **provenance humain** (`humain: <qui> — « <intent> »`), content-adresse l'esquisse via le jumeau, et INSERT le vrai record `ideas.idea` (`id`, `body` JSONB, `version`, `project_id`) below-the-line. `inboxSnapshot` lit l'inbox du projet actif (`where project_id = …`), avec un fallback démo déterministe si Postgres est injoignable (`source: "live" | "demo"`).
+- `app/capture-idea/{page.tsx, CaptureIdeaPanel.tsx}` — la route action-capable : la boîte texte-libre (intent + nature + qui) bound à la capture, + l'inbox par projet (cartes avec marqueur « pas encore de miroir » + provenance). Thémé ADR 0010, bilingue next-intl ADR 0011 (namespace `captureIdea`, parité fr=en, 3560 clés). Entrée nav ajoutée entre `/ideas` et `/truth-typing`. Aucune route existante touchée.
+
+## Les miroirs
+
+- **Godog + Testcontainers back** (`capture_scoped_bdd_test.go` + `capture_scoped.feature`) — le critère de done verbatim : capture humaine scopée projet ⇒ idée draft persistée, provenance humain, **visible dans l'inbox live de ce projet** ; l'inbox par projet **n'expose pas** les idées d'un autre projet (isolation inter-projets) ; la capture écrit le schéma ideas, **jamais** le noyau (le rôle `aidos_agent` fencé est refusé un `INSERT kernel.truth` — permission denied).
+- **Property/rapid back** (`capture_scoped_property_test.go`) — `project_id` est un scope, **pas** l'identité (même esquisse ⇒ même id quel que soit le projet) ; content-addressing déterministe (100× sans dérive) ; provenance humain préservée verbatim ; une capture est **toujours** draft (jamais un gel).
+- **Vitest + fast-check front** (`lib/capture-idea.test.ts`) — l'id ancré du Go (anti-dérive), idempotence, forme draft sans version/mirror, provenance préservée, scope hors du hash.
+- **Playwright** (`tests/e2e/capture-idea.spec.ts`, 5 tests) — chaque contrôle s'exécute à l'écran : la route rend le panneau ; l'inbox liste des idées humaines par projet avec le marqueur « pas de miroir » ; le contrôle de capture s'exécute (ligne de résultat) ; l'intention vide est refusée (gate `required`) ; le scope projet actif est affiché.
+
+## Méta
+
+S64 **ne réinvente rien** : il **scope** une capacité déjà bâtie. La porte (`idea-intake`, S27), la persistance content-adressée (`records.Hash`/`Canonicalize`, S01/S02), la colonne de scope (`project_id`, S54) et l'épinglage du projet actif (cookie, S57) existaient. La seule nouveauté est l'**ancrage au projet** de la capture + l'écran texte-libre qui la rend action-capable. La porte canonique d'écriture below-the-line est le MCP idea-intake fronté par la passerelle (S58) ; le front écrit ici directement le schéma ideas via Server Action (la voie below-the-line, la **même forme** que la passerelle dispatche) — réconcilier par le dispatch live de la passerelle quand le cutover S59 câblera les outils d'écriture est une **OpenQuestion par design** (forward-dependency, ne bloque pas le pas). Le mur est ré-affirmé : l'agent peut écrire une idée (candidate) mais **jamais** le noyau.
+
+## Méta-méta
+
+C'est le pas où la **boucle KRD devient utilisable par l'humain final**. Le Tome interdit `prompt → code` : tout part d'une idée capturée avec provenance, qui devient un miroir, qui devient un `/goal`. Avant S64, cette première marche était une maquette ; après S64, c'est une vraie écriture, tracée, scopée, adressée par contenu. Le pattern est anti-Goodhart (§8) et déterministe (§6) jusqu'au bout : l'**adresse** d'une idée est calculée par une fonction pure (jamais un cast LLM), le **scope** est une colonne (jamais une re-numérotation), la **provenance** est forcée (jamais inventée), et le **gel** est interdit ici (une idée n'a, par construction de type, ni version ni miroir). L'utilisateur dit ce qu'il veut ; le code, lui, juge — et range proprement le souhait dans le bon projet, comme une candidate, en attendant son miroir.

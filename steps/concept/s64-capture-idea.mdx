@@ -1,0 +1,54 @@
+---
+title: "S64 · Capturez VOTRE idée (l'inbox d'idées par projet)"
+description: "S64 ouvre la première vraie porte vers le Kernel pour l'utilisateur : une boîte texte-libre où vous capturez VOTRE intention (provenance : humain), scopée à votre projet, écrite comme un vrai record `ideas` dans le truth-store via le MCP idea-intake. L'écran /ideas n'était qu'une fixture en lecture seule ; S64 le remplace par une inbox d'idées PAR PROJET, vivante. Une idée est une vérité-CANDIDATE : un corps esquissé (proposes + intent + provenance) SANS gel et SANS miroir — cette double absence est ce qui en fait une idée et pas une vérité. Sous le mur : le schéma ideas est du staging au-dessus de la ligne, jamais le noyau ; la promotion vers une vérité gelée passe par /goal."
+keywords: ["aidos", "krd", "S64", "idée", "idea", "capture", "capturez votre idée", "texte libre", "provenance", "humain", "inbox", "par projet", "project-scoped", "idea-intake", "MCP", "passerelle", "draft", "brouillon", "vérité-candidate", "pas de miroir", "no mirror", "le mur", "staging", "above the line", "ideas schema", "promotion", "goal", "BesoinGraph", "emit-ideas", "EL16", "S58", "S61", "S27", "déterminisme", "content-addressed"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S64](/steps/internals/s64-capture-idea).</Note>
+
+## En une phrase
+
+S64 est le moment où **vous** — l'utilisateur qui développe son app sur AIDOS — pouvez enfin **dire ce que vous voulez** : une boîte texte-libre capture votre intention, avec **votre** provenance, **scopée à votre projet**, comme un **vrai record d'idée** dans le truth-store. Plus une maquette : une inbox d'idées vivante, par projet.
+
+## Le problème que S64 résout
+
+L'écran `/ideas` (S27) montrait le **cycle de vie** d'une idée — mais sur une **fixture** : un tableau d'exemples statiques (« order-discount-idea » & co.). Rien de ce que vous y voyiez n'était à vous, et rien que vous y faisiez n'écrivait quoi que ce soit. Or la **seule porte légale vers le Kernel** commence par une idée : `idée → miroir → /goal → approbation`. Sans une vraie capture d'idée, vous ne pouviez pas démarrer cette chaîne. S64 ouvre cette porte.
+
+## Ce que S64 apporte
+
+<CardGroup cols={2}>
+  <Card title="Une boîte texte-libre" icon="pen">
+    Vous écrivez votre intention en clair (« je veux une remise au panier »), choisissez la <strong>nature</strong> qu'elle prendrait si elle était promue (opération, entité, policy…), et la capturez.
+  </Card>
+  <Card title="Provenance : humain (vous)" icon="fingerprint">
+    Chaque idée capturée porte <strong>votre provenance</strong> — la source <code>humain</code> et l'utterance verbatim. Toute vérité gelée plus tard pointera vers cette idée, et à travers elle, vers vous.
+  </Card>
+  <Card title="Scopée à votre projet" icon="diagram-project">
+    L'idée atterrit dans <strong>votre projet actif</strong> (épinglé par le cookie, S57) — jamais dans un champ libre. L'inbox plus bas ne liste QUE les idées de ce projet.
+  </Card>
+  <Card title="Un vrai record, pas une fixture" icon="database">
+    L'idée est écrite dans le schéma <code>ideas</code> du truth-store via le MCP idea-intake — adressée par contenu, append-only. Elle réapparaît immédiatement dans l'inbox.
+  </Card>
+</CardGroup>
+
+## Une idée n'est pas (encore) une vérité
+
+Une idée est une **vérité-CANDIDATE** : un corps esquissé — `proposes` + `intent` + `provenance` — **sans gel de version** et **sans miroir**. Cette **double absence** est exactement ce qui en fait une idée et pas une vérité. Chaque carte de l'inbox porte d'ailleurs le marqueur explicite **« pas encore de miroir »**. Promouvoir une idée n'est pas un statut : c'est l'**acte** d'écrire son miroir, qui **est** le `/goal`, qui **est** le gel dans le Kernel — et ça, ça vient plus tard (S65/S66), jamais depuis cet écran.
+
+## L'inbox par projet remplace la fixture
+
+Deux utilisateurs (ou deux apps) ne se télescopent jamais : l'inbox de votre projet ne montre **que vos idées**, jamais celles d'un autre projet. C'est le `project_id` (le scope ajouté à tout le truth-store en S54) qui isole — pas une re-numérotation, pas un filtre fragile. La **même esquisse** capturée dans deux projets reste **la même idée** (même adresse de contenu) ; seul le projet diffère.
+
+## D'où viennent aussi les idées : le BesoinGraph
+
+S64 consomme également les idées **émises** par le BesoinGraph (l'élicitation du besoin, EL16 `/emit-ideas`) : quand vous avez interviewé votre besoin niveau par niveau, l'émetteur déterministe projette chaque palier résolu en une idée brouillon — qui rejoint la même inbox. La capture libre et l'émission depuis le besoin alimentent **le même backlog**.
+
+## Le mur, intact
+
+Le schéma `ideas` est du **staging au-dessus de la ligne** : c'est une zone que vous pouvez écrire (une candidate, pas une vérité). Mais le **noyau** (kernel/mirrors/fitness) reste hors de portée — la capture ne l'effleure jamais. La promotion vers une vérité gelée reste la voie longue et gardée : `idée → miroir → /goal → approbation`.
+
+## Pour aller plus loin
+
+- [Pour moi → S64 (internals)](/steps/internals/s64-capture-idea) — le MCP idea-intake scopé projet, le jumeau déterministe, les miroirs.
+- [S27 · Cycle de vie des idées](/steps/concept/s27-ideas-lifecycle) — le cycle draft → grilled → harvested et la porte vers le Kernel.
+- [S58 · La passerelle](/steps/concept/s58-gateway) — la porte HTTP unique vers les MCP.
