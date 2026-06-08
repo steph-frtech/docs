@@ -1,0 +1,52 @@
+---
+title: "S67 · Attacher un behavior à la capture (internals)"
+description: "Internals de S67 : à la capture, surfacer la librairie de behaviours et attacher un dry-run-expand comme ChangeSet DRAFT proposé, en appelant l'UNIQUE Expand de S76 (jamais une 2ᵉ implémentation). Implémentation (le package runtime/behaviorcapture + son MCP + le twin TS), Méta (déterminisme : une seule fonction, byte-identique, miroir de reproductibilité contre les hash golden de Go) et Méta-méta (la loi de la fonction unique comme garde-fou contre la dérive de reproductibilité)."
+keywords: ["aidos", "krd", "S67", "behaviorcapture", "behavior", "Expand", "AttachBehaviorAtCapture", "byte-identique", "fonction unique", "déterminisme", "miroir de reproductibilité", "golden hash", "ChangeSet DRAFT", "le mur", "S76", "S20", "records.Hash", "Canonicalize", "MCP", "twin TS", "Playwright", "§24.6"]
+---
+
+<Note>Côté « Pour moi » — l'implémentation interne de S67. Pour la vue produit, voir [Pour les futurs utilisateurs → S67](/steps/concept/s67-behavior-capture).</Note>
+
+## Implémentation
+
+### Le contrat load-bearing : une seule fonction
+
+S67 **consomme** l'unique `Expand(Attachment) (Expansion, error)` construit en S76 (`back/kernel/behavior`). Il ne **ré-implémente jamais** le catalogue, l'idempotence ou l'adressage de contenu — une seconde implémentation serait un hasard de reproductibilité (ROADMAP note 3, interdit).
+
+### Le moteur (`back/runtime/behaviorcapture`)
+
+`AttachBehaviorAtCapture(ideaRef, Attachment, parentPhase) (Proposal, error)` :
+
+1. refuse un `ideaRef` vide (`ErrNoIdea`) ;
+2. appelle `behavior.Expand(a)` — **l'unique** expander (l'erreur behavior-inconnue / entité-absente est celle de S76) ;
+3. emballe l'`Expansion` VERBATIM comme `spec_delta` (le `Body` = l'expansion marshalée) d'un **ChangeSet DRAFT** ouvert via `changeset.Open` (S20) ;
+4. retourne une `Proposal{IdeaRef, Expansion, ChangeSet}` — une **valeur**, rien n'est persisté.
+
+`Library()` = `behavior.Catalogue()` (une seule source pour la librairie surfacée). `PieceCount`/`PreviewNames` délèguent à `behavior.PieceCount`/`SortedNames`. `ProposalID` content-adresse la proposition via `records.Canonicalize`/`Hash` (S02).
+
+### Le mur
+
+Le package n'importe **aucun** chemin d'écriture de vérité : pas de DB, pas de sink vers kernel/mirrors/fitness. `Expansion.WroteKernel` est **toujours** false ; le ChangeSet reste **DRAFT**. Le gel passe par /goal sous approbation.
+
+### Les miroirs (BDD-first)
+
+- **Fixture** (`behaviorcapture_fixture_test.go`) : `state → command → events` sur l'exemple canonique owner-scoping à la capture + les refus.
+- **Property / reproductibilité** (`behaviorcapture_property_test.go`, rapid) : l'expansion attachée est **byte-identique** à `behavior.Expand` (clause load-bearing) ; rendue comme ChangeSet DRAFT ; déterministe ; le mur tient.
+- **Acceptance** (`behaviorcapture_bdd_test.go` + `tests/runtime/behavior-capture.feature`, Godog).
+
+### Le MCP (ADR 0009)
+
+`back/mcp/behavior-capture` expose deux outils de **pure computation** : `behavior_library` (le catalogue surfacé) et `behavior_attach_at_capture` (l'attach → expansion + ChangeSet DRAFT). Aucun outil d'apply : appliquer est la porte S20 sous approbation.
+
+### Le twin TS + l'écran
+
+`front/web/lib/behavior.ts` est le twin TS de l'unique expander (catalogue déclaré + `expand` + adressage de contenu byte-identique à Go) ; `lib/behavior-capture.ts` le **consomme**. La route `/behavior-capture` est **action-capable** (un contrôle attach lié au moteur) ; Playwright (`tests/e2e/behavior-capture.spec.ts`) prouve l'exécution + l'adresse de contenu golden.
+
+## Méta
+
+**Déterminisme-first (CLAUDE.md §6/§8).** L'expansion est du **code** (le catalogue déclaré de S76), jamais un jugement LLM — un « LLM qui expanse une behavior » serait une faille de déterminisme. La loi est : **une seule fonction faisant autorité**. Le miroir de reproductibilité TS (`lib/behavior.test.ts`) épingle l'adresse de contenu contre des **hash golden produits par Go** : si le twin TS dérivait (une « seconde implémentation » qui rampe), les assertions golden rougiraient — la faille est attrapée.
+
+Pourquoi un twin TS plutôt qu'un appel réseau au Go ? Parce que l'écran doit calculer **localement** ce que le moteur calcule, byte-pour-byte (sorted-keys, slices nil → `null`, SHA-256), et le **miroir golden** garantit qu'il n'y a qu'**une** sémantique répartie sur deux plans (Go autoritaire + TS épinglé), jamais deux vérités.
+
+## Méta-méta
+
+S67 illustre un garde-fou que la méta-boucle ne peut qu'**ajouter** : la **loi de la fonction unique**. Quand une capacité déterministe (ici : l'expansion d'un behavior-macro) est réutilisée par plusieurs étapes (S67 à la capture, S79 dans la librairie, S80 pour `app-auth`), elle doit être **une seule** implémentation faisant autorité — toute duplication est, par construction, un risque de divergence silencieuse, donc une faille de déterminisme qui **bloque l'étape** au même titre qu'un monstre ou une capacité headless. Le miroir de reproductibilité (même entrée → même sortie, épinglé au golden) est l'instrument qui rend cette loi **non-contournable** : il transforme « ne dupliquez pas » d'un vœu en un test rouge.

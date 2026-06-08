@@ -1,0 +1,57 @@
+---
+title: "S67 · Attachez un behavior réutilisable à la capture"
+description: "S67 vous évite de réécrire le même boilerplate à chaque app : à la capture d'une idée, AIDOS surface une librairie de behaviours réutilisables (ownable, soft-deletable, auditable…). Attacher une behavior la DRY-RUN-EXPANSE — attributs, relations, opérations, policies, fixtures — comme un ChangeSet DRAFT proposé, en appelant l'UNIQUE fonction Expand de S76 (jamais une seconde implémentation : un seul code faisant autorité). L'expansion est byte-identique à celle de S76 — une seule fonction, un seul résultat — et c'est une FONCTION PURE, jamais un LLM. Le mur tient : l'écran PROPOSE, il n'écrit JAMAIS le Kernel."
+keywords: ["aidos", "krd", "S67", "behavior", "behavior-macro", "attacher un behavior", "à la capture", "librairie de behaviours", "ownable", "soft-deletable", "auditable", "owner-scoping", "boilerplate", "dry-run", "expand", "expansion", "byte-identique", "fonction pure", "déterminisme", "ChangeSet DRAFT", "proposition", "le mur", "propose", "S76", "S79", "S64", "§24.6", "attributs", "relations", "operations", "policies", "fixtures"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S67](/steps/internals/s67-behavior-capture).</Note>
+
+## En une phrase
+
+S67 est le moment où, **à la capture de votre idée**, AIDOS vous **propose** d'attacher un **behavior réutilisable** — et le **dry-run-expanse** pour vous en attributs, relations, opérations, policies et fixtures, comme un ChangeSet DRAFT : vous **ne réécrivez plus le boilerplate owner-scoping pour la 50ᵉ fois**.
+
+## Le problème que S67 résout
+
+À chaque nouvelle app, les mêmes motifs reviennent : « cette entité appartient à un propriétaire » (owner-scoping), « cette entité s'archive au lieu d'être supprimée » (soft-delete), « chaque changement est tracé » (audit). Les réécrire à la main, c'est répétitif **et** source d'erreurs. S67 surface ces motifs comme une **librairie de behaviours** au moment où vous capturez votre idée, et les **expanse** déterministiquement.
+
+## Ce que S67 apporte
+
+<CardGroup cols={2}>
+  <Card title="Une librairie surfacée à la capture" icon="layer-group">
+    Quand vous capturez une idée, AIDOS vous montre les <strong>behaviours réutilisables</strong> disponibles (le catalogue : <code>ownable</code>, <code>soft-deletable</code>, <code>auditable</code>).
+  </Card>
+  <Card title="Un dry-run-expand en un clic" icon="wand-magic-sparkles">
+    Attacher une behavior la <strong>déplie</strong> en attributs / relations / opérations / policies / fixtures — par exemple <code>ownable</code> sur <code>Order</code> propose <code>owner_id</code>, la relation <code>owner→User</code> et la policy <code>owner-scoping</code>.
+  </Card>
+  <Card title="Une seule fonction, un seul résultat" icon="fingerprint">
+    L'expansion est produite par l'<strong>UNIQUE</strong> fonction <code>Expand</code> de S76 — jamais une seconde implémentation. Le résultat est <strong>byte-identique</strong> : même behavior + même entité → même expansion, à l'octet près.
+  </Card>
+  <Card title="Une proposition, jamais une écriture" icon="lock">
+    L'attachement rend un <strong>ChangeSet DRAFT</strong> proposé — il n'écrit <strong>aucune</strong> vérité. Le gel passe par le mur : idée → miroir → /goal → approbation humaine.
+  </Card>
+</CardGroup>
+
+## L'exemple canonique (§24.6)
+
+Vous capturez « je veux des commandes qui appartiennent à un utilisateur ». Vous attachez **`ownable`** à l'entité **`Order`**. AIDOS vous propose, en DRAFT :
+
+- un **attribut** `owner_id` (requis) ;
+- une **relation** `owner → User` ;
+- une **policy** `owner-scoping` (seul le propriétaire mute) ;
+- deux **fixtures** de preuve (mutation par le propriétaire autorisée ; par un tiers refusée).
+
+Vous n'avez rien réécrit — et ce que vous voyez est **exactement** ce que S76 calcule.
+
+## Le déterminisme, en clair
+
+L'expansion est une **fonction pure**, jamais un LLM : la même behavior sur la même entité donne **toujours** le même résultat, identifié par une **adresse de contenu** stable. Si vous ré-attachez, vous obtenez la même proposition — aucune dérive, aucune surprise.
+
+## Ce que S67 ne fait pas
+
+- Il **n'écrit pas** le Kernel : l'attachement est une **proposition** (un ChangeSet DRAFT), gelée seulement via /goal sous approbation.
+- Il **n'invente pas** d'expansion : une behavior hors catalogue est **refusée** (jamais devinée).
+- Il **ne duplique pas** la logique : il **consomme** l'unique `Expand` de S76.
+
+## Et après
+
+L'idée capturée + sa behavior attachée descend la chaîne KRD habituelle : grilling (S65) → /goal piloté (S66) → miroir → vert. La librairie de behaviours elle-même se parcourt et s'enrichit en **S79**.
