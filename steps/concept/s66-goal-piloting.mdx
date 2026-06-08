@@ -1,0 +1,48 @@
+---
+title: "S66 · Ouvrez un /goal depuis l'écran (le /goal piloté)"
+description: "S66 ouvre la troisième marche de la chaîne KRD pour l'utilisateur : depuis une idée grilled, un user PORTEUR D'AUTORITÉ ouvre un goal directement à l'écran. AIDOS PROPOSE un ChangeSet DRAFT (la vérité + son miroir, atomiquement) et calcule le VRAI set rouge — la worklist live des miroirs à passer au vert. Le Stop reste NON-GAMEABLE : fermer un goal est refusé tant que les quatre conditions ne tiennent pas (set rouge → vert ∧ vert antérieur intact ∧ mutation ≥ seuil ∧ aucun monstre). « Done » est CALCULÉ, jamais déclaré. Le mur tient : l'écran PROPOSE un ChangeSet, il n'écrit JAMAIS le Kernel — la persistance passe par la porte changeset et l'approbation humaine."
+keywords: ["aidos", "krd", "S66", "goal", "/goal piloté", "ouvrir un goal", "ChangeSet DRAFT", "set rouge", "red set", "worklist", "Stop non-gameable", "fermeture", "GOAL_STILL_RED", "set rouge vert", "vert antérieur intact", "mutation", "seuil", "monstre", "done calculé", "autorité", "acteur réel", "placeholder", "PLACEHOLDER_ACTOR", "IDEA_WITHOUT_MIRROR", "le mur", "propose", "approbation", "S29", "S63", "S20", "S65", "idée grilled", "promotion", "vérité"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S66](/steps/internals/s66-goal-piloting).</Note>
+
+## En une phrase
+
+S66 est le moment où **vous** transformez une idée grillée en **goal** — directement à l'écran : AIDOS vous **propose** un ChangeSet DRAFT et vous montre le **set rouge live** (la todo-list), et la fermeture du goal reste **incorruptible**.
+
+## Le problème que S66 résout
+
+En S65 vous avez **grillé** votre intention : elle est `grilled`, prête pour un miroir. Mais comment passe-t-on d'une idée prête à un **vrai goal** — sans qu'un humain (ou un agent) ne **déclare** « c'est fait » ? Et qui a le droit d'ouvrir ce goal ? S66 répond aux deux : seul un **acteur réel porteur d'autorité** ouvre le goal, et la fermeture n'est **jamais** une déclaration — elle est **calculée**.
+
+## Ce que S66 apporte
+
+<CardGroup cols={2}>
+  <Card title="Un goal ouvert depuis l'écran" icon="bullseye">
+    Vous donnez votre identité d'acteur, l'idée source, et le set rouge — AIDOS <strong>propose</strong> un <strong>ChangeSet DRAFT</strong> portant la vérité <em>et</em> son miroir, atomiquement.
+  </Card>
+  <Card title="Le vrai set rouge, live" icon="list-check">
+    Le panel affiche la <strong>worklist red-set live</strong> : les miroirs qui échouent et <strong>QUI SONT</strong> le goal (§56 : « le set rouge EST la todo-list »). Pas une fixture — la vraie liste.
+  </Card>
+  <Card title="Un Stop non-gameable" icon="lock">
+    Fermer le goal est <strong>refusé</strong> tant que les quatre conditions ne tiennent pas : <strong>set rouge → vert</strong> ∧ <strong>vert antérieur intact</strong> ∧ <strong>mutation ≥ seuil</strong> ∧ <strong>aucun monstre</strong>. « Done » est <strong>calculé</strong>, jamais déclaré.
+  </Card>
+  <Card title="Un acteur réel, jamais personne" icon="user-shield">
+    Un goal n'est <strong>jamais</strong> ouvert par un placeholder ni par « agent » : l'acteur doit être un humain réel (refus <code>PLACEHOLDER_ACTOR</code>). C'est la porte d'autorité de S63.
+  </Card>
+</CardGroup>
+
+## « Done » est calculé, jamais déclaré
+
+C'est le cœur du Stop **non-gameable** (KRD §57 ①/§8) : le moteur ne lit **jamais** votre confiance, ni celle d'un agent. Il calcule quatre faits. Si **un seul** échoue — un miroir encore rouge, un vert antérieur cassé, un score de mutation sous le seuil, un monstre (orphelin / vérité sans miroir) — la fermeture est **refusée** avec `GOAL_STILL_RED`, et le goal **reste ouvert**. Aucun « je crois que c'est bon » ne ferme un goal.
+
+## L'écran propose, il n'écrit jamais le Kernel
+
+Ouvrir un goal et le marquer fermé sont des **écritures de vérité** — au-dessus du mur (CLAUDE.md §2). L'écran S66 n'a **pas** ce droit : il **propose** un ChangeSet DRAFT, qui attend une **approbation humaine** par la porte changeset (S20). Le rôle agent est en lecture seule sur ces tables. Le mur tient : *tout se fait par écran*, mais l'écran **propose**, il ne **grave** pas.
+
+## Une idée sans miroir n'est pas un goal
+
+Si l'idée ne porte pas de **miroir**, l'ouverture est **refusée** (`IDEA_WITHOUT_MIRROR`) : une vérité sans miroir est un **vœu** (un monstre). De même, un set rouge **vide** n'est pas un goal (`NO_RED_SET`) — un test déjà vert n'a rien à fermer. La seule porte légitime reste **idea → mirror → /goal**.
+
+## Où elle vit
+
+La route Workbench `/goal-piloting` (« /goal piloté »), thémée et bilingue, dans le groupe **Build** à côté de `/grilling-loop`. Vous y ouvrez un goal (boîte « proposer »), vous voyez le set rouge live, et la boîte « Stop » vous montre, condition par condition, **pourquoi** un goal peut — ou ne peut pas — être fermé.

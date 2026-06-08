@@ -1,0 +1,62 @@
+---
+title: "S66 · /goal piloté — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S66 : le package Runtime back/runtime/goalpiloting COMPOSE la porte d'autorité S63 (authoritybinding.RequireRealActor) et le moteur de goal S29 (goal.OpenGoal / goal.IsClosed) en un flux pilotable à l'écran — PilotOpenGoal(actor, OpenInput) → PilotResult{Actor, Goal} (ChangeSet DRAFT + set rouge live) ou PilotBlock ; PilotCloseGoal(goal, StopInput) → la porte de fermeture non-gameable ; CanClose / LiveRedSet. Chaque transition DÉLÈGUE à son propriétaire — aucune dérivation de set rouge, aucune condition de stop, aucune transition n'est réimplémentée. Tout est pur et total ; écrit RIEN (le mur). Le front /goal-piloting ajoute la surface action-capable (Server Actions proposeGoalAction + checkCloseAction) bound au jumeau pur lib/goal-piloting (réutilise lib/authority-binding S63 + lib/goal S29, byte-identique au Go). MCP back/mcp/goal-piloting (goal_pilot_open, goal_pilot_close, goal_live_red_set) — pure computation, écrit rien. Miroirs : Godog (fermer un goal refusé tant que ≠ quatre conditions ; l'écran propose un ChangeSet, n'écrit jamais le Kernel) + fixture + rapid (déterminisme, stop non-gameable ∀, porte placeholder) + Vitest/fast-check (front) + Playwright (5). Det. : tout est fonction pure faisant autorité ; aucun LLM sur le chemin."
+keywords: ["aidos", "krd", "S66", "goalpiloting", "goal-piloting", "PilotOpenGoal", "PilotCloseGoal", "PilotResult", "PilotBlock", "CanClose", "LiveRedSet", "Actor", "RealActor", "RequireRealActor", "authoritybinding", "goal.OpenGoal", "goal.IsClosed", "goal.CloseBlockReason", "StopInput", "SensorState", "PriorGreenState", "GOAL_STILL_RED", "PLACEHOLDER_ACTOR", "IDEA_WITHOUT_MIRROR", "NO_RED_SET", "ChangeSet DRAFT", "set rouge", "red set", "non-gameable", "mutation", "monstre", "proposeGoalAction", "checkCloseAction", "lib/goal-piloting", "lib/authority-binding", "lib/goal", "goal_pilot_open", "goal_pilot_close", "goal_live_red_set", "MCP", "ADR 0009", "le mur", "S29", "S63", "S20", "Godog", "rapid", "fast-check", "Playwright", "déterminisme"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Le concept est [ici](/steps/concept/s66-goal-piloting).</Note>
+
+## En une phrase
+
+S66 **surface en produit** le moteur de goal déjà construit (S29) en le **composant** avec la porte d'autorité (S63) : un package Runtime borné (`goalpiloting`) ajoute le flux **piloté par un acteur réel** — ouvrir un goal (ChangeSet DRAFT + set rouge live) et vérifier sa fermeture (le Stop non-gameable) — et le **branche à un écran action-capable** qui **propose** un ChangeSet, n'écrit jamais le Kernel.
+
+## Implémentation
+
+### Le package Runtime `back/runtime/goalpiloting`
+
+La nouveauté est **bornée** : tout ce qui était déjà `goal` (S29) et `authoritybinding` (S63) est **réutilisé**, jamais redéclaré. Le package est une **composition de deux portes** déléguant chaque transition à son propriétaire.
+
+- `PilotOpenGoal(actor Actor, in OpenInput) (PilotResult, *PilotBlock)` — deux portes en ordre :
+  1. **la porte d'acteur (S63)** — `authoritybinding.RequireRealActor(actor)` : un humain réel, jamais un placeholder ni « agent » ⇒ refus `PLACEHOLDER_ACTOR` (un goal n'est jamais ouvert par personne, le mur) ;
+  2. **l'ouverture (S29)** — `goal.OpenGoal(in)` : ouvre un ChangeSet DRAFT enveloppant le `spec_delta` + le `mirror_delta` atomiquement, DÉRIVE le set rouge via l'Impact S22, refuse une idée sans miroir (`IDEA_WITHOUT_MIRROR`) et un set rouge vide (`NO_RED_SET`).
+  Retourne un `PilotResult{Actor, Goal}` — l'acteur porté pour la provenance + le goal OUVERT (ChangeSet DRAFT proposé + set rouge live). Écrit **rien**.
+- `PilotCloseGoal(g Goal, in StopInput) *PilotBlock` — DÉLÈGUE entièrement au Stop non-gameable de S29 (`goal.CloseBlockReason` → `goal.IsClosed`) : le refus `GOAL_STILL_RED` tant qu'une des quatre conditions échoue, `nil` quand le goal est fermable. Ne marque **jamais** `CLOSED` (ça reste le rôle CLI `aidos`). **Aucun champ de confiance d'agent** en entrée.
+- `CanClose(g, in)` / `LiveRedSet(g)` — commodités pour l'indicateur live + la worklist triée (délèguent à `goal.IsClosed` / `goal.RedSetSorted`).
+- `PilotBlock` — le refus unifié porté à l'écran : le **code verbatim** (stringifié) de la porte qui a refusé — `PLACEHOLDER_ACTOR`/`INSUFFICIENT_AUTHORITY` (S63, un `BlockCode` local) ou `IDEA_WITHOUT_MIRROR`/`NO_RED_SET`/`GOAL_STILL_RED` (S29, un `blockreason.Code`). Porter la chaîne **évite d'inventer un membre** dans l'un ou l'autre des enums **clos** (CLAUDE.md §9) : le code est **copié**, jamais forgé.
+- Tout est **pur et total** : pas d'horloge, pas de rng, pas d'I/O, ne panique pas. Écrit **rien** (le mur).
+
+### Le front `/goal-piloting`
+
+- `lib/goal-piloting.ts` — le **jumeau pur** byte-identique au Go : `pilotOpenGoal` compose `requireRealActor` (jumeau S63, `lib/authority-binding`) + le set rouge live, et `pilotCloseGoal`/`canClose` DÉLÈGUENT à `isClosed` (jumeau S29, `lib/goal`). Même sémantique, aucune dérive — le verdict à l'écran égale celui du moteur Go.
+- `app/goal-piloting/actions.ts` — `proposeGoalAction` (la porte d'acteur + l'ouverture, retourne le ChangeSet DRAFT proposé + le set rouge live ; **écrit rien** — le rôle agent est SELECT-only sur `ideas.goal` + `changesets`) et `checkCloseAction` (le Stop non-gameable live, retourne le verdict + les quatre conditions calculées). Lit le **projet actif** (cookie S57).
+- `app/goal-piloting/{page.tsx, GoalPilotingPanel.tsx}` — la route action-capable : la boîte « proposer » (acteur + idée + set rouge → ChangeSet DRAFT + worklist red-set live) et la boîte « Stop » (les quatre verdicts live → fermable ou refusé, condition par condition). Thémé ADR 0010, bilingue next-intl ADR 0011 (namespace `goalPiloting`, parité fr=en 3658/3658). Entrée nav ajoutée dans le groupe Build à côté de `/grilling-loop`. Aucune route existante touchée.
+
+### Le MCP `back/mcp/goal-piloting` (ADR 0009)
+
+Trois outils, **pure computation**, écrivent **rien** (le mur) — la persistance ride la porte changeset sous approbation :
+- `goal_pilot_open` — acteur + input → ChangeSet DRAFT proposé + set rouge live (ou un refus tracé) ;
+- `goal_pilot_close` — la porte de fermeture non-gameable (`closeable` + le refus `GOAL_STILL_RED`) ;
+- `goal_live_red_set` — la worklist red-set en ordre stable trié.
+Pas d'outil apply/close-stamp : appliquer est le commit-gate de S20, fermer est le rôle `aidos`.
+
+## Les miroirs
+
+- **Godog (le critère de done verbatim)** — `tests/runtime/goal-piloting.feature` + `goalpiloting_bdd_test.go` : fermer un goal est **refusé** tant que ≠ (set rouge → vert ∧ vert antérieur intact ∧ mutation ≥ seuil ∧ aucun monstre) ; l'écran **propose** un ChangeSet DRAFT (spec + miroir), **n'écrit jamais** le Kernel ; un acteur placeholder est refusé `PLACEHOLDER_ACTOR` ; une idée sans miroir `IDEA_WITHOUT_MIRROR`.
+- **Fixture (Go)** — `goalpiloting_fixture_test.go` : un acteur porteur d'autorité ouvre un ChangeSet DRAFT + un set rouge live non vide ; la porte placeholder ; l'idée sans miroir ; le set rouge vide ; le Stop non-gameable (les quatre conditions, chaque faute garde le goal ouvert).
+- **rapid (∀, reproductibilité)** — `goalpiloting_property_test.go` : `PilotOpenGoal` déterministe (même (acteur, input) → même id de goal) ; tout acteur placeholder refusé ; le Stop fermable **IFF** les quatre conditions tiennent (∀ sur red/green × prior × mutation × seuil × monstre) ; même input → même verdict ; ne panique jamais ; aucune confiance d'agent en entrée.
+- **Vitest + fast-check (front)** — `lib/goal-piloting.test.ts` : les mêmes propriétés côté jumeau (déterminisme, porte placeholder, Stop non-gameable ∀), id ancré à l'idée pour s'accorder avec l'autorité Go.
+- **Playwright (journey)** — `tests/e2e/goal-piloting.spec.ts` (5 tests) : la route rend les deux contrôles ; un acteur porteur d'autorité propose un ChangeSet DRAFT + set rouge live ; un acteur placeholder est refusé (`data-code=PLACEHOLDER_ACTOR`) ; la fermeture refusée tant qu'une condition échoue (`GOAL_STILL_RED`) ; admise seulement quand les quatre tiennent.
+
+## Méta
+
+**Pourquoi composer plutôt que réimplémenter.** S66 ne réécrit **aucune** des deux machines qu'il pilote. Le set rouge est **dérivé** par l'Impact S22 (via `goal.OpenGoal`) ; le Stop est **calculé** par `goal.IsClosed` ; l'acteur est gardé par `authoritybinding.RequireRealActor`. `goalpiloting` n'est qu'un **enchaînement de portes** — chaque porte DÉLÈGUE à son propriétaire. C'est la règle anti-réinvention (CLAUDE.md §6, ADR 0007) : la nouveauté d'un step est **bornée** à ce que le step ajoute vraiment (le pilotage par un acteur réel), le reste est **importé via son contrat**.
+
+**Le mur, sans dérogation.** Le critère de done exige explicitement « l'écran propose un ChangeSet, n'écrit jamais le Kernel ». La preuve est **structurelle** : le rôle agent n'a **aucun GRANT d'écriture** sur `ideas.goal` ni `changesets` (migrations S29/S20) — l'action **ne peut pas** écrire la vérité même si elle le voulait. L'écran retourne donc une **proposition** (un `PilotResult` portant un ChangeSet DRAFT), pour une approbation humaine par la porte changeset. Le `grep` du mur sur la source S66 ne trouve **aucune** écriture de schéma de vérité.
+
+**Le code juge, jamais l'agent.** `IsClosed` n'a **délibérément aucun** champ de confiance d'agent (§57 : l'agent ne note jamais sa propre copie). « Done » est l'`AND` de quatre faits calculés. C'est l'anti-Goodhart : on ne peut pas **déclarer** un goal fermé, on ne peut que le **rendre** fermable.
+
+## Méta-méta
+
+**Le déterminisme comme propriété de la composition.** S66 illustre que la **composition de fonctions pures déterministes est elle-même déterministe** — et que c'est **prouvable**. Le miroir rapid `TestPilotOpenGoalIsDeterministic` ne teste pas une fonction isolée mais l'**enchaînement** porte d'acteur → ouverture → set rouge : même entrée, même id de goal. Le jumeau front porte la **même** propriété (fast-check), avec l'id **ancré à l'idée** pour garantir l'accord byte-à-byte avec l'autorité Go. Le déterminisme-first (CLAUDE.md §6/§8) n'est pas un attribut local d'une fonction : c'est une **propriété conservée par la composition**, vérifiée à chaque maillon.
+
+**Forward-dependency assumée, jamais simulée.** La note 3 de la ROADMAP annonçait un *actor placeholder jusqu'à S63*. S63 étant **construit**, S66 utilise un **acteur réel** (la porte `RequireRealActor` est **vivante**) ; ce qui reste différé — l'admission par `AuthorityGraph` de **domaine** (le floor de rôle sur un scope) — est l'objet de la porte d'approbation **S85**. C'est une **OpenQuestion documentée**, pas un `residual_issue` : une dépendance-avant **par design** ne bloque pas le step, et rien n'est **inventé** (on ne fabrique pas une fausse admission de domaine — on enforce la première porte, l'acteur réel, et on **propose** le ChangeSet).
