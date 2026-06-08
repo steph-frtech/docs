@@ -1,0 +1,43 @@
+---
+title: "S95 · Faire évoluer le schéma de votre app déployée sans perdre une seule ligne"
+description: "S95 migre les données de l'app qu'AIDOS a déployée pour vous — celle qui tourne déjà avec de VRAIES lignes — quand son schéma change de façon cassante : renommer une colonne, scinder une entité en deux, élargir une relation de 1-N vers N-N. Chaque cas dur passe par la même discipline : ÉTENDRE (ajouter la nouvelle forme sans rien casser), RECOPIER (déplacer les données existantes — c'est le backfill), puis RÉTRÉCIR (supprimer l'ancienne forme, dans un pas séparé, après la recopie). Et la règle d'or : un changement cassant SANS recopie déclarée est REFUSÉ — jamais un effacement silencieux."
+keywords: ["aidos", "krd", "S95", "migration", "donnée", "app déployée", "vraies lignes", "rename", "backfill", "split", "entité", "cardinalité", "1-N", "N-N", "expand-contract", "DataTruthScope", "sans perte", "breaking", "EPIC 10", "DP15", "DP26"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S95](/steps/internals/s95-data-migrate).</Note>
+
+## En une phrase
+
+S95 **fait évoluer le schéma de votre app déployée** — celle qui tourne déjà avec de vraies lignes — quand le changement est **cassant** (renommer une colonne, scinder une entité, élargir une relation), **sans perdre une seule ligne** ; et il **refuse** tout changement cassant qui ne déclare pas comment recopier les données.
+
+## Le problème que S95 résout
+
+Votre app est déployée. Elle a des **vraies lignes** : des commandes, des clients, des fichiers. Un jour, vous changez le modèle — vous renommez `ref` en `reference`, vous sortez l'adresse de la commande dans une entité `Livraison`, vous transformez « une commande a un tag » en « une commande a plusieurs tags ». Chacun de ces changements est **cassant** : il fait disparaître une colonne dont les lignes existantes dépendent. Trois pièges :
+
+1. **L'effacement silencieux.** « C'est juste un rename, on fait un `ALTER` et voilà. » Sauf que supprimer l'ancienne colonne **détruit la valeur de chaque ligne**. S95 **interdit** ce raccourci : changer la vérité du code ne change pas automatiquement la vérité des données déjà produites.
+2. **La perte au milieu du gué.** On ajoute la nouvelle colonne, on supprime l'ancienne — mais on a oublié de **recopier** les valeurs entre les deux. S95 impose l'ordre : on **recopie d'abord** (le *backfill*), on supprime **ensuite**, dans un pas séparé.
+3. **Le changement non déclaré.** Personne n'a dit ce que devenaient les anciennes lignes. S95 **refuse** un changement cassant tant qu'une **règle de recopie** n'est pas déclarée — il ne devine jamais.
+
+## Les trois cas durs que S95 prouve
+
+S95 prend trois changements cassants — les plus fréquents et les plus risqués — et prouve que chacun migre **sans perte** :
+
+- **Renommer une colonne avec recopie.** `ref` devient `reference`. ÉTENDRE : on ajoute `reference` (vide au départ). RECOPIER : on copie chaque valeur de `ref` dans `reference`. RÉTRÉCIR : on supprime `ref`, mais seulement **après** la recopie. Aucune ligne ne perd sa valeur.
+- **Scinder une entité.** L'adresse quitte `Commande` pour une nouvelle entité `Livraison`. ÉTENDRE : on crée la table `Livraison`. RECOPIER : on **ventile** chaque ligne de commande vers la nouvelle table. RÉTRÉCIR : on enlève l'adresse de `Commande`. Chaque ligne est préservée.
+- **Élargir une relation 1-N → N-N.** « Une commande a un tag » devient « une commande a plusieurs tags ». ÉTENDRE : on crée la table de jointure. RECOPIER : on la **remplit** depuis les liens existants. RÉTRÉCIR : on enlève l'ancienne colonne de lien. Aucune relation perdue.
+
+## La règle d'or : pas de recopie, pas de migration
+
+C'est le cœur de S95. Un changement cassant **doit** déclarer sa recopie — une *DataTruthScope* qui dit « oui, ce changement touche les lignes existantes, et voici comment je préserve leur vérité ». Sans cette déclaration, S95 **refuse** la migration avec un message clair (`BREAKING_MIGRATION_NO_BACKFILL`) **avant** la moindre suppression. Le caractère cassant est **calculé** — par comparaison des formes, pas par un avis : si une colonne dont les lignes dépendent disparaît sans recopie déclarée, c'est non.
+
+## Forward-only, jamais en place
+
+S95 ne **réécrit jamais** une colonne sur place. Il **ajoute**, **recopie**, puis **supprime** — chaque pas en avant, non destructif jusqu'au dernier. C'est la discipline *expand-contract* : on ne fait reculer rien, on n'efface qu'en toute dernière étape, et seulement après avoir prouvé que les données sont à l'abri. Distinct de la migration du moteur d'AIDOS lui-même : ici, ce sont **vos** données d'app qu'on déplace.
+
+## Ce que vous voyez à l'écran
+
+Le panneau Workbench `/data-migrate` est **action-capable** : choisissez le projet déployé, le type de changement cassant (rename / split / cardinalité), remplissez son corps, puis **planifiez la migration**. L'écran montre les trois étapes **ÉTENDRE → RECOPIER → RÉTRÉCIR** (avec le SQL de chacune), et un badge **« préserve toute la donnée »** — calculé, jamais déclaré. Décochez « backfill déclaré » pour voir la migration **refusée** : pas de recopie, pas de migration. Planifier **n'écrit aucune vérité** : c'est un plan, pas une exécution.
+
+## Ce que S95 ne fait pas
+
+S95 **n'invente** ni colonne, ni règle de recopie : un changement cassant sans recopie déclarée est **refusé**, jamais deviné, jamais « réparé » en silence. Il ne supprime jamais avant d'avoir recopié. Le jugement « ce changement est-il cassant ? » est fait par du **code**, jamais par un LLM. Et S95 n'écrit jamais dans le noyau (le mur) : il **planifie** la migration de vos données ; le plan est neutre vis-à-vis du pilote (un SQL émis + une empreinte). S95 ouvre la porte à S96 (le déploiement qui exécute cette migration).

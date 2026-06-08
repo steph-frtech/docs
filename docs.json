@@ -256,6 +256,8 @@
               "steps/internals/s93-front-emitter",
               "steps/concept/s94-preview",
               "steps/internals/s94-preview",
+              "steps/concept/s95-data-migrate",
+              "steps/internals/s95-data-migrate",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",
