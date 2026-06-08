@@ -1,0 +1,46 @@
+---
+title: "S88 · Pour moi — le spike gatant Doltgres et le verdict déterministe"
+description: "Pour moi : l'implémentation de S88 — back/runtime/doltgresspike (Evaluate/Decide : Measurement × Thresholds → Decision content-adressée, verdict go/no-go, défaut TOUJOURS plain-postgres, doltgres opt-in ssi go), le probe Testcontainers (N connexions pgx concurrentes contre un conteneur Doltgres + plain-Postgres baseline, mesure stabilité + ratio de perf, re-run pour la reproductibilité), l'ADR 0047 (addendum d'ADR 0006), le MCP doltgres-spike, le twin TS lib/doltgres-spike + sa route action-capable, et les miroirs (rapid + fast-check de reproductibilité, e2e Playwright). Plus les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S88", "doltgresspike", "Evaluate", "Decide", "Measurement", "Thresholds", "Decision", "Testcontainers", "pgx", "Doltgres", "dolthub/doltgresql", "go/no-go", "verdict", "déterminisme", "reproductibilité", "rapid", "fast-check", "Playwright", "ADR 0006", "ADR 0047", "MCP", "content-addressed", "records.Hash", "EPIC 9"]
+---
+
+<Note>Côté « Pour moi » — le détail complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S88](/steps/concept/s88-doltgres-spike).</Note>
+
+## Implémentation
+
+**Paquet :** `back/runtime/doltgresspike` (sous-système Archive/Runtime, EPIC 9). C'est un **spike** au sens KRD (rigueur du verdict, mais throwaway côté probe) qui répond à **une** question de gouvernance : le datastore de l'app émise par défaut sur **plain-Postgres** ou **Doltgres** ?
+
+Le cœur est une **fonction pure, autoritaire** (determinism-first, §8 « le juge est déterministe ») :
+
+- **`Evaluate(m Measurement, th Thresholds) (Verdict, []string)`** — totale, déterministe, sans effet de bord. Un **no-go** ssi une instabilité **reproductible** dépasse `MaxFailedConns` (défaut 0), OU le ratio de perf dépasse `MaxPerfRatio` (défaut 6.0, marge au-dessus du 5,2× cité par ADR 0006). Un *blip* non reproductible **ne flippe pas** (les done-criteria exigent un échec reproductible) ; un ratio non mesuré (0) est traité comme pire cas. Le verdict, c'est **un comptage + deux comparaisons** — aucun LLM.
+- **`Decide(m, th) Decision`** — enveloppe `Evaluate` : `DefaultTarget` est **toujours** `plain-postgres` (l'escape hatch par construction) ; `OptInTargets` ajoute `doltgres` ssi `Go`. L'`ID = records.Hash(payload canonique)` (verdict + cible + opt-in + measurement + thresholds), donc la `Decision` est **content-adressée** et inviolable — un seuil changé ⇒ un hash différent (le verdict ne peut être silencieusement re-noté).
+- **`DefaultThresholds`** — les critères **déclarés** (au-dessus de la ligne, jamais appris), embarqués dans le content-address.
+
+**Le probe (Testcontainers)** — `doltgresspike_concurrency_test.go` boote `dolthub/doltgresql` + un `postgres:16-alpine` baseline, soumet **N = 64** connexions **pgx** concurrentes à chacun (chaque connexion fait un round-trip `SELECT $1::int` et vérifie le résultat — la re-formulation **driver-neutre** du mode #2581/#2600 : panic / connexion coupée / résultat corrompu), mesure la latence max, **rejoue** pour établir la reproductibilité, puis appelle `Decide`. Le test **asserte** l'outcome des done-criteria : stabilité (go) OU échec reproductible flippant vers plain-postgres (no-go) ; l'unique invariant illégitime est que `doltgres` devienne le défaut. Skip propre quand Docker / l'image Doltgres est indisponible (forward-dependency by design, OpenQuestion non bloquante) et opt-in via `AIDOS_RUN_DOLTGRES_SPIKE=1`.
+
+**Run mesuré (2026-06-08, decision `7395fa69c2d7`) :** N=64, `failed=0/64`, `reproducible=true`, ratio dans le plafond → **verdict=go**, `default=plain-postgres`, `optIn=[doltgres plain-postgres]`. Honnêtement : le probe exerce un round-trip **trivial**, donc il valide **décisivement la concurrence** mais **ne stresse pas** la charge write-heavy où le 5,2× se manifeste — d'où plain-Postgres reste le défaut, Doltgres l'opt-in (voir ADR 0047 pour la portée).
+
+**La décision = un record :** ADR **0047** (addendum d'ADR 0006) documente défaut/opt-in + le re-cadrage driver-TS (préambule EPIC 9 : l'app émise utilise un client Postgres **TS**, pas pgx ; le mode #2581 pgx-spécifique est re-formulé en stabilité générique ; le 5,2× et l'absence de pgvector sont dialecte-level et survivent), résout la 1re open-question d'ADR 0006.
+
+**Miroirs (BDD-first, written red) :**
+- `doltgresspike_property_test.go` (**rapid**) — reproductibilité : même Measurement → `Decision` byte-identique (même ID) ; défaut toujours plain-postgres ; doltgres opt-in ssi go ; échec reproductible flippe / blip non ; plafond de perf ; le 5,2× stable reste un go.
+- `front/web/lib/doltgres-spike.test.ts` (**fast-check**) — le twin TS, mêmes invariants.
+- `tests/e2e/doltgres-spike.spec.ts` (**Playwright**) — la route action-capable exécute le verdict depuis l'écran (go → opt-in doltgres ; échec reproductible → no-go retire doltgres ; blip → reste go).
+
+**MCP (ADR 0009) :** `back/mcp/doltgres-spike` expose `decide` (Measurement × Thresholds → Decision) et `defaults` (les seuils déclarés). Pur, déterministe, n'écrit rien (le mur).
+
+**Twin front + route :** `front/web/lib/doltgres-spike.ts` (twin TS pur, hash via `node:crypto` importé paresseusement pour rester client-bundle-safe) ; `app/doltgres-spike/` (`page.tsx`, `actions.ts` — Server Action, `view.ts` — types/initial hors du module « use server », `DoltgresSpikePanel.tsx` — contrôle lié au moteur), thème ccup (ADR 0010) + i18n bilingue (ADR 0011), entrée nav ajoutée.
+
+## Méta
+
+S88 est un **spike gatant** : il applique la zone `/spike` de KRD (rigueur T0 côté code jetable du probe) **mais** la rigueur maximale côté **verdict**. C'est l'illustration nette du mandat **determinism-first** appliqué à une **décision de gouvernance** : là où la tentation serait « demande à un agent si Doltgres est prêt », S88 répond « **mesure-le** ». Le juge est une fonction pure (`Evaluate`), la mesure est une observation pure (`Measurement`), et la décision est un **record content-adressé** — exactement la généralisation de §8 (« le juge est déterministe », « les poids sont déclarés, jamais appris ») à un choix d'architecture.
+
+L'**escape-hatch-as-default** est une discipline anti-fragilité : en faisant de plain-Postgres le défaut *par construction*, S88 garantit que **la chaîne reste viable quel que soit le verdict** (E10 ne se réordonne pas si le spike est no-go). Le no-go ne **casse** rien — il **durcit** une base déjà sûre. C'est le cliquet appliqué à un choix optionnel : on ne peut que confirmer ou retirer une option, jamais déstabiliser le socle.
+
+Le re-cadrage driver-TS (préambule EPIC 9) montre la **traçabilité d'un caveat à travers un pivot** : le mode d'échec #2581 était pgx-spécifique ; le pivot vers un client TS (S74) aurait pu l'effacer silencieusement. S88 le **re-formule explicitement** en stabilité générique au lieu de le perdre — un caveat n'est jamais abandonné sans décision tracée.
+
+## Méta-méta
+
+S88 démontre qu'AIDOS sait **gouverner ses propres choix de stack par la preuve**, pas par décret. Un OS de développement qui adopte une dépendance bêta sans la mesurer serait un OS qui **déclare** au lieu de **vérifier** — précisément le Goodhart que KRD interdit. Ici la machine produit un **verdict reproductible et auditable** sur sa propre infrastructure-cible, content-adressé comme n'importe quelle vérité projetée, et le rejoue à volonté.
+
+Au niveau le plus haut, S88 incarne l'**honnêteté computationnelle** : le run mesuré dit `go`, mais la documentation (ADR 0047) **borne explicitement** ce que le probe a et n'a pas testé (concurrence : oui ; write-heavy 5,2× : non), et garde plain-Postgres par défaut *malgré* le go. Le système ne sur-vend pas sa propre mesure — il sait jusqu'où va sa preuve et s'arrête là. C'est la même posture que le Stop déterministe : « done » est calculé et **borné**, jamais étendu par optimisme.

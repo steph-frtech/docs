@@ -1,0 +1,48 @@
+---
+title: "S88 · Doltgres, oui ou non ? Un verdict mesuré, jamais déclaré"
+description: "S88 est le SPIKE GATANT qui tranche, pour le datastore de votre app émise, entre plain-Postgres (le défaut) et Doltgres (l'opt-in git-for-data). Un probe Testcontainers soumet N connexions concurrentes à Doltgres, MESURE stabilité + ratio de perf, et une fonction PURE en déduit un verdict go/no-go contre des seuils DÉCLARÉS — verdict = mesure, jamais un avis. plain-Postgres reste le défaut PAR CONSTRUCTION ; Doltgres est offert en opt-in seulement si go. Résout la 1re open-question d'ADR 0006 (addendum ADR 0047)."
+keywords: ["aidos", "krd", "S88", "Doltgres", "plain-Postgres", "spike", "go/no-go", "gate", "Testcontainers", "concurrence", "perf ratio", "5.2x", "#2581", "#2600", "ADR 0006", "ADR 0047", "opt-in", "défaut", "datastore émis", "verdict", "déterminisme", "content-addressed", "EPIC 9"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S88](/steps/internals/s88-doltgres-spike).</Note>
+
+## En une phrase
+
+S88 **tranche, par la mesure**, la base de données de votre app : **plain-Postgres est le défaut**, et **Doltgres** (la base « git-for-data » : branch / merge / diff / `as of` time-travel sur vos données) n'est **offert en option** que si un spike prouve qu'il tient la charge concurrente. Le verdict n'est jamais un avis : c'est un comptage et deux comparaisons contre des seuils écrits à l'avance.
+
+## Le problème que S88 résout
+
+ADR 0006 a décidé qu'AIDOS pourrait émettre des apps sur **Doltgres** — une base qui parle le dialecte Postgres mais ajoute le versionnage de données façon git. Séduisant pour les gros jeux de données opérationnels : on branche, on revient en arrière, on audite « l'état au 3 mars ». Mais Doltgres est **en bêta** : documenté comme ~5,2× plus lent, sans pgvector, avec un parser fragile sous accès concurrent (#2581) et des primitives de lock manquantes (#2600).
+
+La question laissée ouverte par ADR 0006 était simple : **Doltgres est-il le défaut, ou une option ?** S88 y répond — non par une opinion, mais par un **spike gatant** qui mesure, et un **verdict déterministe** qui en découle.
+
+## Comment S88 décide (et pourquoi c'est fiable)
+
+1. **Le probe mesure.** Un conteneur Doltgres et un conteneur plain-Postgres sont démarrés (Testcontainers). On leur soumet **N connexions concurrentes** ; on compte les connexions qui échouent (panic / connexion coupée / résultat corrompu) et on mesure le **ratio de perf** Doltgres / plain-Postgres. On **rejoue** la mesure pour savoir si un échec est *reproductible*.
+2. **La fonction juge.** Une fonction **pure** lit cette mesure et la compare aux **seuils déclarés** (`maxPerfRatio`, `maxFailedConns`). Pas de LLM, pas d'avis : un comptage, deux comparaisons.
+3. **Le verdict tombe.**
+   - **go** : Doltgres a tenu → il est **offert en opt-in** (en plus de plain-Postgres).
+   - **no-go** : un échec **reproductible**, ou une perf au-delà du plafond → Doltgres est **retiré**, même de l'opt-in, jusqu'à ce que la bêta se stabilise.
+
+Deux garde-fous comptent :
+
+- **Le défaut est plain-Postgres PAR CONSTRUCTION.** Quel que soit le verdict, votre app par défaut tourne sur plain-Postgres. Doltgres ne devient *jamais* le défaut — c'est l'« escape hatch » qui était déjà là.
+- **Un *blip* ne suffit pas.** Un échec non reproductible ne fait **pas** basculer le défaut : les critères exigent un échec **reproductible**. On ne condamne pas Doltgres sur un hoquet.
+
+## Pourquoi le défaut reste plain-Postgres même quand le spike dit « go »
+
+Parce que le ~5,2× et l'absence de pgvector sont des limites **du moteur**, pas du driver : elles survivent. S88 valide **décisivement la stabilité sous concurrence** ; il ne supprime pas le surcoût de perf. Donc Doltgres est **proposé** quand son versionnage de données (branch/merge/`as of`) vaut son surcoût — et **jamais imposé**. Votre app à embeddings ajoutera plutôt un sidecar Postgres+pgvector.
+
+## Le verdict est un *record*, pas une déclaration
+
+Chaque décision est **adressée par son contenu** : le même jeu de mesures produit toujours le même identifiant. On peut donc rejouer, auditer, comparer : « pourquoi a-t-on dit go le 8 juin ? » se répond par le record, pas par un souvenir. Et si une app stresse un jour la charge write-heavy et mesure un ratio trop haut, le même calcul rend **no-go** et retire l'opt-in — sans réordonner quoi que ce soit, puisque le défaut était déjà plain-Postgres.
+
+## Ce que vous faites à l'écran
+
+Le panneau **Spike go/no-go Doltgres** du Workbench est *action-capable* : vous saisissez une mesure (driver, N connexions, connexions échouées, ratio de perf, reproductible), vous cliquez **Décider**, et l'écran affiche le **verdict**, la **cible par défaut** (toujours plain-postgres), l'**ensemble opt-in**, l'**adresse de contenu** de la décision et les raisons déterministes. Juger n'écrit **aucune vérité** : la décision est un record, pas une écriture au Kernel (le mur).
+
+## Ce que S88 garantit
+
+- Votre app a **toujours** une base qui marche : plain-Postgres, par défaut.
+- Doltgres n'est offert que **prouvé stable sous concurrence**.
+- La décision est **mesurée, reproductible, auditable** — jamais un pari d'agent.

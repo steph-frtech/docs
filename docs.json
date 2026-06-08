@@ -242,6 +242,8 @@
               "steps/internals/s86-build-console",
               "steps/concept/s87-hono-emitter",
               "steps/internals/s87-hono-emitter",
+              "steps/concept/s88-doltgres-spike",
+              "steps/internals/s88-doltgres-spike",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",
