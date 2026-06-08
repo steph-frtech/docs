@@ -1,0 +1,55 @@
+---
+title: "S82 · Chaque app vit dans son propre bac à sable isolé"
+description: "S82 provisionne un workspace isolé (conteneur + dépôt git/jj + worktree + limites CPU/mém/disque/temps) par projet, où le code généré de votre app vit, compile et exécute ses miroirs. Les zones de projet (/ideas /spike /src /kernel/spec) deviennent des workspaces runtime RÉELS, jamais des répertoires partagés. Le bac à sable du projet A ne peut pas lire l'arbre/build du projet B ni le truth-store (SANDBOX_ESCAPE) ; un projet runaway (boucle CPU, fork-bomb, disque plein) est tué par sa limite de ressources (SANDBOX_RESOURCE_LIMIT) — un projet ne peut jamais en affamer un autre."
+keywords: ["aidos", "krd", "S82", "workspace", "bac à sable", "sandbox", "isolation", "isolé", "conteneur", "container", "git", "jj", "worktree", "limites", "ressources", "CPU", "mémoire", "disque", "temps", "cgroup", "ulimit", "SANDBOX_ESCAPE", "SANDBOX_RESOURCE_LIMIT", "inter-projets", "cross-project", "noisy-neighbor", "runaway", "fork-bomb", "truth-store", "ADR 0001", "zones", "ideas", "spike", "src", "kernel/spec", "hello-world", "EPIC 8", "mur"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S82](/steps/internals/s82-workspace).</Note>
+
+## En une phrase
+
+S82 donne à **chaque projet son propre bac à sable isolé** — un workspace dédié (conteneur + dépôt git/jj + worktree + limites de ressources) où le code de votre app vit, compile et prouve ses miroirs, **sans jamais voir** un autre projet ni le truth-store.
+
+## Le problème que S82 résout
+
+Quand AIDOS construit votre application, le code généré doit **vivre quelque part** : un endroit pour s'écrire, compiler et exécuter ses tests. Si tous les projets partageaient le même répertoire, deux risques apparaîtraient :
+
+- **La fuite (escape)** : le projet A pourrait lire l'arbre, le build ou les secrets du projet B — ou pire, le truth-store d'AIDOS lui-même.
+- **Le voisin bruyant (noisy-neighbor)** : un projet parti en boucle infinie (CPU à 100 %), une fork-bomb ou un remplissage de disque pourrait **affamer** tous les autres.
+
+S82 supprime ces deux risques par construction : chaque projet reçoit un **workspace isolé**, raciné sous son propre arbre, avec des **limites de ressources** que le système d'exploitation fait respecter.
+
+## Ce que S82 apporte
+
+<CardGroup cols={2}>
+  <Card title="Un workspace par projet" icon="box">
+    Un <strong>conteneur + un dépôt git/jj + un worktree</strong> dédiés. Les zones de projet d'AIDOS (<code>/ideas</code>, <code>/spike</code>, <code>/src</code>, <code>/kernel/spec</code>) deviennent des dossiers <strong>réels</strong> à l'intérieur de ce workspace — jamais des répertoires partagés.
+  </Card>
+  <Card title="Isolation inter-projets" icon="shield-halved">
+    Le bac à sable du projet A <strong>ne peut pas lire</strong> l'arbre ni le build du projet B, ni le truth-store. Toute tentative est refusée avec <code>SANDBOX_ESCAPE</code> — c'est le mur, par défaut-refus.
+  </Card>
+  <Card title="Des limites de ressources" icon="gauge-high">
+    Chaque workspace est provisionné avec des plafonds <strong>CPU / mémoire / disque / temps</strong>. Un projet runaway (boucle, fork-bomb, disque plein) est <strong>tué</strong> par sa limite (<code>SANDBOX_RESOURCE_LIMIT</code>) — un projet ne peut jamais en affamer un autre.
+  </Card>
+  <Card title="Un hello-world vert dedans" icon="circle-check">
+    Le workspace fraîchement provisionné <strong>compile et teste vert</strong> un code confiné à sa propre racine : la preuve qu'il sait construire, sans rien laisser fuir.
+  </Card>
+</CardGroup>
+
+## Comment vous l'utilisez
+
+Depuis le panneau **« Bac à sable par projet »** du Workbench :
+
+1. **Provisionner** : nommez un projet, et son workspace isolé est créé — racine dédiée, zones ADR 0001, worktree git/jj privé, plafonds de ressources déclarés.
+2. **Vérifier l'isolation** : demandez si un chemin est lisible. Un chemin sous un autre projet (ou sous le truth-store) revient `SANDBOX_ESCAPE`.
+3. **Vérifier les ressources** : simulez une charge. Un dépassement d'un plafond positif (CPU/mém/disque/temps) revient `SANDBOX_RESOURCE_LIMIT` — le runaway serait tué.
+
+## Le mur tient toujours
+
+Un workspace **n'écrit aucune vérité**. Sa racine est *sous la ligne* (le code, les essais du projet). Le truth-store d'AIDOS (kernel, miroirs, fitness) est **hors** de tout workspace : l'atteindre, c'est précisément un `SANDBOX_ESCAPE`. La capitalisation d'un artefact d'un projet vers un autre passe par la **porte légale** (idée → miroir → /goal), jamais par une lecture directe de son arbre.
+
+## En lien
+
+- [S53 · Isolation des projets](/steps/concept/s53-projects) — le truth-store scopé par projet ; S82 isole l'**exécution**, S53 isole la **vérité**.
+- [S42 · Bac à sable d'évolution](/steps/concept/s42-evolution-sandbox) — le hook `sandbox-confinement` que S82 réutilise.
+- [S80 · Auth de l'app émise](/steps/concept/s80-app-auth) et [S81 · Catalogue de templates](/steps/concept/s81-templates) — ce qui peuple le workspace.

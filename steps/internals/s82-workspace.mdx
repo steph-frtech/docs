@@ -1,0 +1,53 @@
+---
+title: "S82 · Bac à sable par projet — internals"
+description: "Pour moi : l'implémentation de S82 — le provisioning de workspace isolé par projet (back/runtime/workspace), l'isolation inter-projets (SANDBOX_ESCAPE) comme test de préfixe pur, la limite de ressources anti noisy-neighbor (SANDBOX_RESOURCE_LIMIT) tuant un runaway, la réutilisation du sandbox BA17 + du hook sandbox-confinement, le MCP workspace, le twin front byte-identique, la route Workbench et les miroirs. Plus les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S82", "workspace", "bac à sable", "sandbox", "internals", "isolation", "SANDBOX_ESCAPE", "SANDBOX_RESOURCE_LIMIT", "Provision", "CanAccess", "ExceedsLimits", "underRoot", "records.Hash", "content-addressed", "BA17", "BindSandbox", "agentimpl", "sandbox-confinement", "blockreason", "MCP", "twin", "byte-identical", "ADR 0001", "EPIC 8", "determinism"]
+---
+
+<Note>Page « Pour moi » — le journal de construction complet. Côté usage produit, voir [Pour les futurs utilisateurs → S82](/steps/concept/s82-workspace).</Note>
+
+## Implémentation
+
+### Objectif (une capacité vérifiable)
+
+Provisionner un **workspace isolé par projet** (conteneur + dépôt git/jj + worktree + limites CPU/mém/disque/temps) où le code généré vit, compile et exécute ses miroirs ; réaliser les **zones ADR 0001** (`/ideas`, `/spike`, `/src`, `/kernel/spec`) comme workspaces runtime réels, jamais des répertoires de ce repo. Réutiliser le hook `sandbox-confinement`.
+
+### Le paquet — `back/runtime/workspace`
+
+Tout est **pur et déterministe** (CLAUDE.md §6/§8) : le verdict est du code ; monter le conteneur/cgroup est une affaire de déploiement.
+
+- **`Provision(ProvisionRequest) Workspace`** — racine le projet sous `WorkspacesRoot/<slug>`, réalise les `Zones` ADR 0001 sous cette racine, provisionne le dépôt git/jj privé + worktree, **lie un sandbox BA17** (`agentimpl.BindSandbox`) dont la SEULE racine inscriptible est l'arbre du workspace (avec les `Limits` déclarés comme caps cgroup/ulimit), et **content-adresse** tout le descripteur via `records.Hash` (jamais un hashing forké). Même requête ⇒ même `Workspace` (idempotent).
+- **`Workspace.CanAccess(target) AccessDecision`** — le verdict d'**isolation inter-projets** : autorisé seulement si `target` est confiné à la racine du workspace. Un chemin sous un autre projet, ou sous le `TruthStoreRoot`, est refusé avec `SANDBOX_ESCAPE`. Le cœur est `underRoot(root, target)` — un test de **préfixe pur** (`path.Clean` des deux côtés, `target == root` ou sous `root + "/"`), donc les racines sœurs (`WorkspacesRoot/<slug>`) ont des préfixes disjoints.
+- **`Limits.ExceedsLimits(ResourceUsage) ResourceVerdict`** — le prédicat **anti noisy-neighbor** : `Killed` dès qu'un axe à cap positif est dépassé, dans un ordre déclaré stable (mémoire, cpu, wall, disque), portant `SANDBOX_RESOURCE_LIMIT`. Un cap zéro = « pas de cap » sur cet axe.
+- **`CanObserve` / `CanReachTruthStore` / `CanBuildPath` / `HelloWorldSource`** — la preuve structurelle de la non-observabilité par paires, du mur (truth-store hors de tout workspace) et du hello-world confiné vert dedans.
+
+### Les deux nouveaux BlockReason
+
+Ajoutés à l'énum CLOS de `back/runtime/blockreason` (extension additive, `change_type: refine`) : **`SANDBOX_ESCAPE`** (fuite inter-projets / vers le truth-store) et **`SANDBOX_RESOURCE_LIMIT`** (runaway tué). Chacun porte un `how_to_fix` non vide — le property test du paquet (le mur ne devient pas une prison) le pin.
+
+### Réutilisation — BA17 + le hook
+
+S82 **ne réinvente pas** le sandbox d'un agent : il réutilise `agentimpl.Sandbox` (les quatre axes FS/egress/exec/caps + le rôle Postgres `aidos_agent` SELECT-only). S82 ajoute la dimension **par PROJET** : plusieurs workspaces isolés, chacun raciné sur son propre arbre, non-observables par paires. Le hook `sandbox-confinement` (S42) reste la barrière runtime réutilisée.
+
+### Les miroirs (écrits rouges d'abord)
+
+- **`workspace_fixture_test.go`** — la fixture : A ne lit pas l'arbre/build de B (`SANDBOX_ESCAPE`), ni le truth-store ; un hello-world confiné build+test vert ; **fault-injection** : un runaway CPU/fork-bomb/disque/loop est tué (`SANDBOX_RESOURCE_LIMIT`).
+- **`workspace_property_test.go`** (rapid) — `Provision` déterministe ; projets distincts ⇒ IDs distincts + racines disjointes non-observables ; le kill est monotone et déterministe (tué ⟺ un cap positif est dépassé).
+
+### MCP, twin front, route Workbench
+
+- **`back/mcp/workspace`** (ADR 0009) — quatre outils purs : `workspace_provision`, `workspace_can_access`, `workspace_check_resources`, `workspace_build_hello`. `WroteKernel` toujours false (le mur).
+- **`front/web/lib/workspace.ts`** — le twin front, **byte-identique** au Go (mêmes IDs content-adressés `9143e3c8…` pour `proj-a`, `86922632…` pour `proj-b`) ; `workspace.test.ts` (Vitest) pin la byte-identité.
+- **`front/web/app/workspace`** — la route **action-capable** (PROVISION + ACCESS-CHECK + RESOURCE-CHECK), thème ADR 0010, bilingue ADR 0011, câblée dans `WorkbenchHeader`. `tests/e2e/workspace.spec.ts` (Playwright) prouve chaque contrôle exécutable.
+
+## Méta
+
+S82 illustre la **détermination-first** poussée à l'isolation : « le projet A peut-il lire B ? » et « ce runaway est-il tué ? » sont des **fonctions pures totales** (un test de préfixe, une comparaison d'entiers), jamais le jugement d'un agent. Le conteneur/cgroup *applique* ; le verdict *est* du code, rejouable. C'est aussi un cas d'école du principe **« le sandbox ne fait que rétrécir »** : un workspace n'ajoute aucun chemin, hôte ou commande au-delà des allow-lists déclarées — il les **miroite** au niveau OS et ajoute le backstop GRANT. Élargir un axe est un changement au-dessus de la ligne (idée → miroir → /goal), jamais un bouton du workspace.
+
+La réutilisation de BA17 montre la **loi de la fonction unique** : il n'existe qu'UNE liaison de sandbox (`BindSandbox`) ; S82 la compose par projet plutôt que d'en forker une seconde. De même, l'ID content-adressé réutilise `records.Hash` — jamais un schéma de hashing parallèle.
+
+## Méta-méta
+
+Pourquoi ce niveau d'isolation existe-t-il *avant* la boucle-build (S83) ? Parce que l'EPIC 8 fait tourner un agent LLM exécutant qui écrit et compile du code réel : sans le bac à sable fault-injecté de S82, un agent runaway ou une app malveillante pourrait corrompre le truth-store ou un projet voisin. S82 est la **condition de sûreté** qui rend S83 *possible* — l'isolation et la limite de ressources sont le filet sous le funambule.
+
+Au méta-méta, S82 réaffirme une invariance du harnais : les **garanties de sûreté sont prouvées en rouge d'abord** (la fault-injection tue le runaway, l'escape est refusé) puis tenues par du code déterministe, jamais déclarées. Un bac à sable dont la limite ne se déclenche jamais serait un sensor mort (CLAUDE.md §5) ; ici la fixture casse ce qu'elle surveille et assure que ça vire au rouge.
