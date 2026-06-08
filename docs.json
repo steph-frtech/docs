@@ -270,6 +270,8 @@
               "steps/internals/s101-context-map",
               "steps/concept/s102-arch-fitness",
               "steps/internals/s102-arch-fitness",
+              "steps/concept/s103-federation",
+              "steps/internals/s103-federation",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",
