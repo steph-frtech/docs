@@ -1,0 +1,61 @@
+---
+title: "S100 · Pour moi — la cellule (bounded context) comme partition de premier rang, le ContextPack par cellule, le mur cross-cell, le ratchet fractal"
+description: "Pour moi : l'implémentation de S100 — back/kernel/cell (Partition : split par bounded_context, nœud non assigné refusé ; CellPack : Kernel propre + contrats PUBLICS des voisins CONTRACTÉS seulement, internals exclus + tracés ; CheckCrossCellAccess : sans contrat honoré → CROSS_CELL_NO_CONTRACT ; Ships : ratchet vert, fractal), le code BlockReason local, le MCP cell (partition/cell_pack/check_access/shippable), le twin TS lib/cell-federation + la route action-capable /cell-federation, et les miroirs (rapid 4 propriétés, fixture 6, fast-check 6/6, Playwright 5/5). Plus les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S100", "cell", "Partition", "CellPack", "CellContextPack", "CheckCrossCellAccess", "Ships", "ShippableCells", "CROSS_CELL_NO_CONTRACT", "bounded_context", "contracts_with", "GlobalInvariant", "records.Hash", "rapid", "fast-check", "Playwright", "MCP", "EPIC 11", "déterminisme", "fractal"]
+---
+
+<Note>Côté « Pour moi » — le détail complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S100](/steps/concept/s100-cell-federation).</Note>
+
+## Implémentation
+
+S100 ajoute le **primitif cellule (bounded context)** : `back/kernel/cell` (sous-système Kernel — la cellule est une partition du Kernel, KRD §43-§51). Tout est **pur, total, content-adressé** via S02, et **n'écrit aucune vérité** (le mur) : la Context-Map (quelles cellules, quel contrat) persiste via un ChangeSet (S101), jamais une écriture directe.
+
+**La question ouverte E11, tranchée.** La cellule N'EST PAS une 6e dimension du `TruthScope` (S15). Le TruthScope (§13.7) qualifie *où/quand/pour-qui* **une** vérité tient ; une cellule est la **partition où la vérité vit** — un autre axe. C'est un **concept de premier rang** qui **réutilise** le `bounded_context` déjà porté par chaque nœud du `ContextGraph` (S33/S55 `runtime/context.Layer.BoundedContext`) et par `globalinvariant.CellRef` (S48). Pas de nouvel espace d'identité : `cell.Ref` ≡ le `bounded_context` promu premier rang.
+
+**Le modèle.** `Node{ID, Cell Ref, Kind, Public}` — un nœud du Kernel taggé par sa cellule ; `Kind ∈ {layer, mirror, contract}` (clos) ; seul un `contract` `Public` traverse une frontière de cellule, les `layer`/`mirror` sont toujours **internes**. `Project{ID, Nodes, Ratchets}` est la vue lecture-seule ; `Federation{Contracts}` est la Context-Map (un set de `contracts_with` S17, chacun `Honored` ou non).
+
+**`Partition(p Project) → ([]Cell, error)`** — découpe le Kernel en sous-Kernels :
+1. un nœud sans cellule (`Cell == ""`) → **`ErrUnassignedNode`** (aucun nœud ne vit hors d'une cellule — pas de masse par défaut) ;
+2. un nœud de kind inconnu → `ErrUnknownKind` ;
+3. groupe par cellule, trie les cellules par ref et les nœuds par id (déterministe) ;
+4. le ratchet d'une cellule absent de `Ratchets` → **`RatchetRed`** (fail-closed : une cellule sans ratchet enregistré n'est PAS présumée verte).
+
+**`CellPack(p Project, target Ref, fed Federation) → CellContextPack`** — la frontière de contexte par cellule (§145, premier rang). Pour chaque nœud du projet :
+- s'il est dans `target` → ses `OwnLayers`/`OwnMirrors`/`OwnContracts` (le Kernel propre) ;
+- sinon, si c'est un **contrat PUBLIC** d'un voisin **contracté** (`contracted(target, n.Cell, fed)`) → `NeighborContracts` (la SEULE chose qui traverse) ;
+- sinon, si c'est un contrat public d'un voisin **non contracté** → `Excluded{reason: no-contract}` ;
+- tout autre nœud voisin (layer, mirror, contrat non public) → `Excluded{reason: neighbor-internal}`.
+
+Toutes les listes triées ; `Hash = records.Hash(records.Canonicalize(body))` (S02, reproductible). `PackHasNeighborInternal(pack, p)` re-vérifie qu'aucun `NeighborContract` n'est en fait un nœud de `target` ou un non-public — l'assertion que le pack ne fuit jamais un internal (la 1ère done-criterion, codée comme propriété).
+
+**`CheckCrossCellAccess(from, to Ref, fed) → *BlockReason`** — le mur de la fédération (§46). `contracted(from, to, fed)` est vrai si `from == to` (cellule propre) OU s'il existe un `contracts_with` **honoré** reliant les deux. Sinon → **`CROSS_CELL_NO_CONTRACT`** (code S100-local) nommant le chemin de correction (« concevez un contrat dans la Context-Map S101 »). Un contrat **non honoré** n'autorise PAS le passage (une porte fermée).
+
+**`Ships(c Cell) → bool`** — `c.Ratchet == RatchetGreen` : une cellule livre ssi son **propre** ratchet est vert, indépendamment de la fédération (§43 fractal). `ShippableCells(cells)` rend les refs triées des cellules vertes — un set **indépendant par cellule**.
+
+**Le mur.** `cell.BlockReason{Code, Message, HowToFix}` reprend la **forme** de `runtime/blockreason.BlockReason` (§44.5) **sans importer** la couche runtime (le paquet kernel reste pur) ; le MCP la mappe si nécessaire. Aucune fonction n'écrit la base : `SerializeCellBody` rend juste le corps content-adressé que le ChangeSet S101 porterait.
+
+**Le MCP `cell`** (`back/mcp/cell`, ADR 0009 : un outil = une op) expose `partition`, `cell_pack`, `check_access`, `shippable` — porte de capacité au-dessus du paquet pur, stdio, n'écrit rien.
+
+**Le twin TS + l'UI.** `front/web/lib/cell-federation.ts` est le jumeau déterministe de `back/kernel/cell` (mêmes `partition`/`cellPack`/`checkCrossCellAccess`/`ships`, Go autoritatif). La route **/cell-federation** est *action-capable* (ui-completeness) : trois Server Actions sur le twin pur — partitionner + livrer, compiler le pack (avec `data-leaked="false"`), vérifier l'accès (refus `CROSS_CELL_NO_CONTRACT` rendu). Thème ADR 0010, bilingue ADR 0011. N'écrit aucune vérité.
+
+**Les miroirs (red → vert).**
+- **rapid** (`cell_property_test.go`) — 4 propriétés : (1) `CellPack` exclut les internals voisins (`PackHasNeighborInternal` toujours faux + chaque neighbor-contract est un contrat public d'un voisin contracté) ; (2) accès cross-cell sans contrat refusé / avec contrat (ou cellule propre) autorisé ; (3) reproductibilité (même input → pack + hash identiques) ; (4) shipping fractal (shippability = ratchet propre, indépendant des frères).
+- **fixture** (`cell_fixture_test.go`) — la fédération canonique checkout/billing/catalog (§145) : le pack du checkout porte `bl-pact` mais exclut `bl-op`/`bl-mir`/`cat-pact` ; checkout→catalog refusé, checkout→billing autorisé ; contrat non honoré ne traverse pas ; nœud non assigné refusé ; checkout vert livre malgré billing rouge.
+- **fast-check** (`lib/cell-federation.test.ts`) — 6/6, le miroir de reproductibilité TS : les deux done-criteria + déterminisme + fractal.
+- **Playwright** (`tests/e2e/cell-federation.spec.ts`) — 5/5, chaque contrôle exécutable depuis l'écran.
+
+## Méta
+
+**Pourquoi un primitif de partition et pas une dimension de scope ?** Parce que la nature des deux est différente. Le TruthScope **qualifie** une vérité (cette vérité tient en FR, sur web, pour les premium) ; il vit *à l'intérieur* du corps de la vérité. La cellule **range** la vérité dans un compartiment ; c'est une relation d'appartenance (`bounded_context`), pas un qualificateur. Les confondre aurait gonflé le TruthScope d'une 6e dimension hétérogène et brouillé la sémantique de réutilisation (« une décision réutilisée hors scope est une hallucination » s'applique aux qualificateurs, pas à l'appartenance). En réutilisant le `bounded_context` déjà partout, S100 ajoute **zéro nouvel espace d'identité** : la cellule est un *point de vue* sur des nœuds qui portaient déjà leur cellule.
+
+**Le ratchet fractal est le second cliquet structurel.** Le premier ratchet (S00-S52) clique au niveau d'une vérité (red → vert). S100 introduit un ratchet **par cellule** : une cellule a sa propre coupe stable. C'est ce qui rend la grandeur *gérable* — on ne resynchronise jamais toute la fédération pour livrer une cellule. La fédération est en flux permanent ; chaque cellule clique à son rythme. C'est la condition de scalabilité de KRD §43 : « une cellule ship si localement stable même si la fédération est en flux ».
+
+**Le ContextPack par cellule est la généralisation du ContextRouter.** Le routeur S33/S55 excluait déjà les internals cross-BC et cross-project. S100 **promeut** cette frontière au premier rang : ce n'est plus une règle *parmi d'autres* dans le compileur de pack, c'est **la** structure. Le bounded context devient l'unité atomique de contexte de l'agent — exactement la frontière que le DDD a inventée pour borner la charge cognitive humaine, ici appliquée à la charge de contexte d'un agent.
+
+## Méta-méta
+
+**Le déterminisme.** `Partition`, `CellPack`, `CheckCrossCellAccess`, `Ships` sont totales, pures (aucune base, horloge, rng, I/O, LLM), et le tri canonique rend la sortie invariante à l'ordre d'entrée. La frontière de contexte d'une cellule et le refus cross-cell sont donc **rejouables** — le même graphe de projet → le même pack byte-identique, le même verdict de refus. C'est un choix de §6/§8 : décider *qui voit quoi* et *qui peut accéder à qui* est exactement le genre de fonction pure qui ne doit JAMAIS être un agent. Un « routeur de contexte LLM » ou un « juge d'accès LLM » serait un *determinism gap* qui bloquerait l'étape. Le code juge ; l'agent code l'algorithme au build-time, il ne siège pas dans la boucle d'accès.
+
+**Le mur, encore.** S100 n'écrit aucune vérité. Décider *quelles cellules existent* et *quels contrats les relient* est le seul vrai travail humain de l'architecture (§46) — il passe par la Context-Map (S101) → ChangeSet → approbation. S100 fournit le **primitif** (partitionner, compiler un pack, vérifier un accès, calculer la livrabilité) ; il **propose** des refus, il ne **gouverne** pas. Le `BlockReason` nomme la porte (« concevez un contrat »), jamais une prison.
+
+**La complétude.** Chaque fonction porte son miroir vivant (rapid + fixture + fast-check + Playwright) ; aucun monstre. La cellule, en tant que nouvelle vérité de structure, naît avec ses preuves — la loi de complétude (§5) tient : une vérité sans miroir est un vœu, un miroir orphelin est un monstre.

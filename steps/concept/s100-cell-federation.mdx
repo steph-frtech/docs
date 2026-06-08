@@ -1,0 +1,61 @@
+---
+title: "S100 · Cellules — une grosse app est une fédération de bounded contexts, jamais un seul Kernel"
+description: "S100 vous donne la cellule : un bounded context avec son PROPRE Kernel et son PROPRE ratchet. Une grosse app n'est jamais un seul Kernel indivis — c'est une fédération délibérée de petites cellules, liées UNIQUEMENT par contrats. L'agent qui travaille dans une cellule charge son propre Kernel + seulement les CONTRATS publics de ses voisins — jamais leurs internals. Une cellule livre dès qu'elle est localement stable, même si la fédération est en flux."
+keywords: ["aidos", "krd", "S100", "cellule", "cell", "bounded context", "fédération", "ratchet", "contrats_with", "ContextPack", "Context-Map", "CROSS_CELL_NO_CONTRACT", "fractal", "EPIC 11", "scale", "grosse app"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S100](/steps/internals/s100-cell-federation).</Note>
+
+## En une phrase
+
+S100 vous donne la **cellule** : un *bounded context* avec son **propre Kernel** et son **propre ratchet** — pour qu'une grosse app soit une **fédération** de petites cellules liées par contrats, jamais un seul Kernel monstrueux.
+
+## Le problème que S100 résout
+
+Jusqu'ici, chaque projet AIDOS était **un seul Kernel indivis**. Ça marche pour une petite app. Mais une grande app — un e-commerce avec son checkout, sa facturation, son catalogue, sa logistique — devient ingérable si tout vit dans le même Kernel : l'agent qui travaille le checkout doit charger tout le reste, le moindre changement de facturation peut faire rougir le catalogue, et il n'y a aucune frontière claire.
+
+La leçon du *Domain-Driven Design* (KRD §43-§51) : **la grandeur vit dans le NOMBRE de cellules, jamais dans la taille d'une.** Une grosse app est une **fédération délibérée** de bounded contexts, chacun petit, chacun autonome, reliés **uniquement** par des contrats.
+
+## La cellule : un petit Kernel à elle seule
+
+Une **cellule** est un bounded context (checkout, facturation, catalogue…) qui porte :
+
+- son **propre Kernel** — ses entités, ses opérations, ses politiques, ses miroirs — ses *internals* ;
+- son **propre ratchet** — sa propre stabilité locale (red → vert ∧ vert antérieur ∧ aucun monstre) ;
+- ses **contrats publics** — la seule surface par laquelle les autres cellules peuvent lui parler.
+
+**Partitionner**, c'est découper le Kernel de votre projet en ces sous-Kernels, un par cellule. Un nœud qui n'appartient à aucune cellule est **refusé** : dans une fédération, il n'y a pas de « masse par défaut » — tout vit dans une cellule.
+
+## La frontière de contexte de l'agent
+
+C'est le cœur de S100 : **l'agent qui travaille dans la cellule X charge son propre Kernel + SEULEMENT les CONTRATS publics de ses voisins contractés — jamais leurs internals.**
+
+Quand l'agent ouvre un objectif dans le checkout, son **ContextPack** contient :
+- tout le Kernel du checkout (ses layers, ses miroirs, ses contrats) ;
+- les **contrats publics** des cellules avec qui le checkout a un contrat (par ex. la facturation) ;
+- **rien d'autre** — pas les opérations internes de la facturation, pas ses miroirs, pas son catalogue.
+
+Le bounded context **EST** la frontière de contexte de l'agent. Cela répond à la loi « trop de contexte détruit le contexte » : on ne donne jamais toute la fédération à l'agent, on lui donne sa cellule + les contrats qu'elle croise.
+
+## Le mur de la fédération : pas de contrat, pas d'accès
+
+Deux cellules ne se parlent que par un **contrat** (`contracts_with`, S17) — versionné et vérifié par Pact (S101). Un accès cross-cell **sans contrat honoré est refusé** (`CROSS_CELL_NO_CONTRACT`), avec un chemin de correction : « concevez un contrat entre ces deux cellules dans la Context-Map ». Le checkout ne peut pas plonger ses mains dans le catalogue parce que ça l'arrange : l'architecture est **conçue, jamais générée** (KRD §46).
+
+## Livrer une cellule, même si la fédération bouge
+
+Une cellule **livre** dès qu'elle est **localement stable** — son propre ratchet est vert — **indépendamment** du reste (KRD §43, fractal). Si votre facturation est en chantier (rouge) mais que votre checkout et votre catalogue sont verts, **le checkout et le catalogue livrent**. La fédération peut être en flux : chaque cellule a son propre cliquet, et un cliquet vert clique tout seul.
+
+## La question tranchée
+
+Une cellule est-elle une nouvelle dimension du **TruthScope** (S15, qui porte déjà région/cible/segment/env/fenêtre-temps) ou un **concept de premier rang** ? S100 tranche : **un concept de partition de premier rang** qui réutilise le `bounded_context` déjà porté par chaque nœud. Le TruthScope qualifie *où/quand/pour-qui* **une** vérité tient ; une cellule est la **partition où la vérité vit** — un autre axe.
+
+## Ce que vous voyez à l'écran
+
+Le panneau **/cell-federation** du Workbench est *action-capable* :
+1. **Partitionner** votre Kernel en cellules et voir lesquelles **livrent** (le checkout et le catalogue verts livrent ; la facturation rouge non) ;
+2. **Compiler le ContextPack** d'une cellule — son Kernel propre + les contrats publics des voisins contractés, les internals des voisins **exclus** (la frontière rendue visible) ;
+3. **Vérifier un accès cross-cell** — checkout → catalogue (sans contrat) est **refusé** ; checkout → facturation (contrat honoré) est **autorisé**.
+
+## La suite
+
+S101 vous donnera la **Context-Map** : l'UI pour *concevoir* quelles cellules existent et comment elles se parlent (event storming, agrégats, paires de contrats) — le seul vrai travail humain de l'architecture.

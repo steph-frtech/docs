@@ -264,6 +264,8 @@
               "steps/internals/s97-domain-bind",
               "steps/concept/s98-env-rollback",
               "steps/internals/s98-env-rollback",
+              "steps/concept/s100-cell-federation",
+              "steps/internals/s100-cell-federation",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",
