@@ -1,0 +1,58 @@
+---
+title: "S101 · Context-Map & contrats inter-cellules — implémentation"
+description: "Pour moi : l'implémentation de S101 — back/kernel/contextmap (VerifyPair : pact-verifier sur une paire consumer/provider, HONORED ssi le provider publie un sur-ensemble ; Federation : projection vers la cell.Federation S100, Honored = VerifyPair ; CheckCrossCellCall : sans paire honorée → CROSS_CELL_NO_CONTRACT, réutilise le mur S100 ; Propose : ChangeSet DRAFT spec+mirror, le seul moyen légal), le MCP context-map (verify_pair/verify_all/check_call/propose), le twin TS lib/context-map + la route action-capable /context-map, et les miroirs (rapid 4 props, fixture 9, fast-check 9/9, Playwright 7/7). Plus les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S101", "Context-Map", "contextmap", "VerifyPair", "Pact", "pact-verifier", "Federation", "CheckCrossCellCall", "CROSS_CELL_NO_CONTRACT", "Propose", "ChangeSet", "MCP", "déterminisme", "EPIC 11"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Pour la vue concept, voir [Pour les futurs utilisateurs → S101](/steps/concept/s101-context-map).</Note>
+
+## Implémentation
+
+S101 ajoute le paquet pur **`back/kernel/contextmap`** par-dessus le substrat S100 (`back/kernel/cell`). Là où S100 donnait la **partition** (quelles cellules existent, la frontière de contexte de l'agent, le mur structurel), S101 donne la **conception des arêtes** — les **paires de contrats** consumer/provider, chacune **vérifiée par Pact** avant de pouvoir porter un appel cross-cell.
+
+### Le modèle
+
+- `Interaction{Method, Path, Fields, Status}` — l'unité échangée, comparée comme un **ensemble** (champs triés/dédupliqués).
+- `CellSurface{Cell, Published}` — ce qu'un provider publie.
+- `ContractPair{Consumer, Provider, Expected}` — l'arête conçue par l'humain (§46), jamais générée.
+- `ContextMap{Project, Cells, Surfaces, Pairs}` — le design complet, content-addressé.
+
+### Les quatre fonctions pures, totales
+
+- **`VerifyPair(map, pair) → PairVerdict`** — la sémantique pact-verifier sur **une** paire : HONORED ssi, pour **chaque** attente du consumer, le provider publie une `(method, path)` correspondante, un statut compatible **et** chaque champ requis. La **première** violation fixe `(Reason, Detail)` dans l'ensemble fermé `{NO_INTERACTION, UNKNOWN_CELL, PATH_MISMATCH, CONSUMER_FIELD_UNPUBLISHED, STATUS_MISMATCH}`. C'est l'assertion *field-set + status* de `runtime/generators.VerifyContract`, soulevée d'une opération à une paire cellule↔cellule.
+- **`Federation(map) → cell.Federation`** — projette le design vers la fédération S100, marquant chaque lien `Honored` **exactement** quand `VerifyPair` dit HONORED. **Un seul mur** : S100 et S101 partagent `cell.CheckCrossCellAccess`.
+- **`CheckCrossCellCall(from, to, map) → *cell.BlockReason`** — le mur de fédération : refusé `CROSS_CELL_NO_CONTRACT` sauf `from == to` ou une paire **honorée** relie. Une paire qui **existe mais n'est pas honorée** n'autorise rien (porte fermée). Délègue à `cell.CheckCrossCellAccess` sur `Federation(map)`.
+- **`Propose(map, label, parentPhase) → changeset.ChangeSet`** — persiste le design **le seul moyen légal** : un **ChangeSet DRAFT** (propose → ChangeSet → approbation), portant un `SpecDelta` (le design canonique) **et** un `MirrorDelta` (les verdicts Pact), donc qui passe la porte de complétude `changeset.SpecHasMirror`. **N'écrit rien** — il rend l'enveloppe (le mur, CLAUDE.md §2).
+
+`Canonicalize` + `Hash` (réutilisant `records.Hash`/`Canonicalize`, **non forké**) rendent l'id **content-addressé** et la ré-émission **idempotente**.
+
+### Le MCP (ADR 0009)
+
+`back/mcp/context-map` expose chaque op : `verify_pair`, `verify_all`, `check_call`, `propose` — stdio, pur, **n'écrit aucune vérité**.
+
+### Le twin + l'écran
+
+`front/web/lib/context-map.ts` est le jumeau déclaré (mêmes fonctions pures). La route **action-capable** `/context-map` (ui-completeness, §7) lie **quatre** contrôles au twin : vérifier une paire, vérifier toute la Context-Map, vérifier un appel cross-cell, **proposer** le ChangeSet DRAFT. Thème ADR 0010, bilingue ADR 0011 (bloc i18n `contextMap` fr/en + entrée de nav).
+
+### Les miroirs (red → green)
+
+- **rapid** `contextmap_property_test.go` — 4 propriétés : reproductibilité (même map → même hash + mêmes verdicts), mur *honor-gated* (l'appel passe ssi une paire honorée relie), HONORED ⇒ satisfait, Propose ⇒ DRAFT bien formé.
+- **fixture** `contextmap_fixture_test.go` — 9 scénarios checkout/billing/catalog (paire honorée, champ manquant, appel autorisé/refusé, cellule propre, cellule non déclarée, ChangeSet DRAFT).
+- **fast-check** `lib/context-map.test.ts` — 9/9 (les deux done-criteria + déterminisme).
+- **Playwright** `tests/e2e/context-map.spec.ts` — 7/7 (les 4 contrôles exécutables ; les deux done-criteria atteintes à l'écran).
+
+Les deux *done-criteria* : (1) une paire consumer/provider **honore** son contrat (checkout → billing) ; (2) une fixture **refuse** un appel cross-cell qui **viole** le contrat (checkout → catalog, `price` non publié).
+
+## Méta
+
+**Pourquoi un nouveau paquet et pas une extension de `cell` ?** S100 modélise la **partition** (la structure : quelles cellules, quelle frontière). S101 modélise la **conception des arêtes** (les contrats, leur vérification Pact, leur promotion en vérité). Ce sont deux axes : on **réutilise** `cell.Contract`/`cell.Federation`/`cell.CheckCrossCellAccess` (le mur reste unique) mais on ajoute la sémantique pact-verifier (`VerifyPair`) et la porte ChangeSet (`Propose`) que S100 laissait en *forward-dependency* (les commentaires S100 disaient déjà « la Context-Map persiste via ChangeSet — S101 »). C'est l'**anti-overwrite** §9 : additif, jamais une réécriture.
+
+**Pourquoi `VerifyPair` n'est-il pas un appel au pact-verifier MCP existant ?** Le pact-verifier S36 vérifie le handler **émis** d'une **opération** in-process (consumer = workbench, provider = un handler HTTP réel). S101 vérifie une paire **cellule↔cellule** au niveau du **design** (avant toute émission) — c'est la **même assertion** (le contrat consumer ⊆ surface provider) mais sur des *interactions déclarées*, pas sur un handler levé. Le verifier reste un **algorithme** (set de champs + statut), jamais un LLM — c'est le déterminisme-first §6/§8, et `VerifyContract` partage cette forme.
+
+**Pourquoi `Propose` porte un `MirrorDelta` ?** Une Context-Map sans sa preuve Pact serait un **monstre** (vérité sans miroir). Le ChangeSet porte design **et** verdicts ensemble pour qu'ils ne dérivent pas et que la porte de complétude (`SpecHasMirror`) passe — la Context-Map ne peut pas devenir vérité sans sa preuve.
+
+## Méta-méta
+
+S101 illustre **le seul vrai travail humain** (§46) projeté dans l'architecture d'AIDOS lui-même : la machine **vérifie** (Pact, déterministe) et **refuse** (le mur) et **propose** (ChangeSet), mais ne **conçoit** jamais la frontière. Le code juge ; l'humain décide *où passent les lignes*. C'est la frontière entre ce qu'une fonction pure peut faire (juger un contrat) et ce qu'elle ne doit **jamais** faire (inventer un contrat) — la même ligne que tout AIDOS trace entre l'implémentation (l'agent) et la vérité (l'humain).
+
+Et la **réutilisation du mur** (`CheckCrossCellCall` délègue à `cell.CheckCrossCellAccess`) est le principe « un seul juge » du §8 : il n'y a pas deux portes divergentes pour le cross-cell, il y en a **une**, que S100 a posée et que S101 alimente avec des contrats *vérifiés*. Deux étapes, un mur.

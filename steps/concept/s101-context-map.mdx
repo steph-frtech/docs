@@ -1,0 +1,60 @@
+---
+title: "S101 · Context-Map — le seul vrai travail humain : concevoir les cellules et leurs contrats"
+description: "S101 vous donne la Context-Map : l'écran où VOUS concevez quelles cellules existent et comment elles parlent. Les cellules se connectent UNIQUEMENT via des paires de contrats consumer/provider versionnées, vérifiées par Pact. Une paire est honorée seulement si le provider publie un sur-ensemble de ce que le consumer attend ; un appel cross-cell qui viole le contrat est refusé. L'architecture est conçue, jamais générée. La Context-Map devient vérité Kernel via un ChangeSet."
+keywords: ["aidos", "krd", "S101", "Context-Map", "contrat", "contract pair", "consumer", "provider", "Pact", "pact-verifier", "contracts_with", "bounded context", "CROSS_CELL_NO_CONTRACT", "ChangeSet", "EPIC 11", "architecture", "event storming"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S101](/steps/internals/s101-context-map).</Note>
+
+## En une phrase
+
+S101 vous donne la **Context-Map** : l'écran où **vous** concevez quelles cellules existent et comment elles parlent — par des **paires de contrats** consumer/provider vérifiées par **Pact**. C'est **le seul vrai travail humain** (KRD §46) : l'architecture est **conçue, jamais générée**.
+
+## Le problème que S101 résout
+
+S100 vous a donné la **cellule** : un bounded context avec son propre Kernel, son propre ratchet, lié aux autres **uniquement par contrats**. Mais S100 ne dit pas *quelles* cellules existent, ni *quels* contrats les relient — il vérifie seulement la frontière une fois qu'elle est posée.
+
+Or **poser cette frontière, c'est le travail humain irréductible.** Aucun algorithme ne décide à votre place que « checkout » dépend de « facturation » mais pas de « catalogue », ni que la facturation expose `POST /charges {amount, orderId, status}`. Ce découpage — l'*event storming*, les *aggregates*, les *anti-corruption layers*, les *paires de contrats* — c'est la **Context-Map**, et c'est vous qui la dessinez.
+
+> **L'architecture est conçue, jamais générée (§46).** AIDOS code à votre place une fois la frontière posée ; il ne pose **jamais** la frontière à votre place.
+
+## La paire de contrats : la seule façon dont deux cellules parlent
+
+Une cellule ne peut appeler une voisine que si une **paire de contrats** les relie. Une paire a deux côtés :
+
+- le **consumer** déclare ce qu'il **attend** (une méthode, une route, des champs, un statut) ;
+- le **provider** déclare ce qu'il **publie** (sa surface publique).
+
+La paire est **honorée** seulement si le provider publie un **sur-ensemble** de ce que le consumer attend : même méthode et même route, **chaque champ requis** présent, statut compatible. C'est exactement la sémantique d'un **pact-verifier** : le contrat consumer doit être satisfait par le provider.
+
+<Note>Exemple. checkout attend `POST /charges {amount, orderId}`. billing publie `POST /charges {amount, orderId, status}` — un sur-ensemble. La paire est **HONORÉE**. Mais si checkout attend `GET /items {sku, price}` et que catalog ne publie que `{sku}`, le champ `price` manque : la paire est **NON HONORÉE**.</Note>
+
+## Le mur de fédération : un appel qui viole le contrat est refusé
+
+Une paire qui **existe mais n'est pas honorée** n'autorise **rien**. Si vous tracez le contrat checkout → catalog mais que catalog ne publie pas tout ce que checkout requiert, l'appel checkout → catalog est **refusé** avec un `CROSS_CELL_NO_CONTRACT` qui nomme la correction (« faites publier le champ manquant au provider »). Un contrat violé est une **porte fermée** — pas une porte qu'on franchit « parce qu'on l'a dessinée ».
+
+C'est la seconde *done-criterion* de S101 : *une fixture refuse un appel cross-cell qui viole le contrat.*
+
+## Le mur : la Context-Map devient vérité par ChangeSet
+
+La Context-Map est une **vérité Kernel** — qui peut redessiner les frontières d'une app ne le fait pas en cliquant. Quand vous proposez votre Context-Map, l'écran produit un **ChangeSet DRAFT** : un brouillon qui porte le design **et** sa preuve Pact, qu'un humain doit **approuver** avant qu'il ne devienne vérité. L'écran n'écrit **jamais** la vérité directement (c'est le mur, CLAUDE.md §2).
+
+## Ce que vous faites à l'écran (`/context-map`)
+
+<Steps>
+  <Step title="Vérifier une paire">Choisissez un provider, lancez la vérification Pact : la paire est HONORÉE ou non, avec la raison précise.</Step>
+  <Step title="Vérifier toute la Context-Map">D'un coup, voir l'état Pact de **toutes** les paires conçues.</Step>
+  <Step title="Vérifier un appel cross-cell">De cellule X vers cellule Y : autorisé si une paire honorée les relie, refusé sinon (`CROSS_CELL_NO_CONTRACT`).</Step>
+  <Step title="Proposer la Context-Map">Émettre le ChangeSet DRAFT — le seul moyen légal de persister le design comme vérité Kernel.</Step>
+</Steps>
+
+## Ce que S101 vous garantit
+
+- **Vous** concevez l'architecture ; AIDOS ne la devine jamais (§46).
+- Deux cellules ne parlent que par une **paire de contrats honorée** — vérifiée par Pact, jamais supposée.
+- Un appel qui **viole** un contrat est **refusé**, même si le contrat a été dessiné.
+- Le design ne devient vérité qu'après **approbation** d'un ChangeSet — l'écran ne franchit pas le mur.
+
+## La suite
+
+S102 ajoute le **second ratchet** — l'*arch-fitness* structurel sur le graphe de dépendances inter-cellules : une nouvelle violation de frontière ou un cycle inter-cell **bloque la coupe**, même si tous les miroirs comportementaux sont verts (« tests verts, système pourri » est interdit).
