@@ -1,0 +1,52 @@
+---
+title: "S83 · Boucle de build + disjoncteur déterministe — internals"
+description: "Pour moi : l'implémentation de S83 — la boucle de build (back/runtime/buildloop) ; le détecteur de non-progrès NoProgress comme fonction pure de l'historique (diff répété / oscillation / zéro vert nouveau / cap) ; la terminaison Terminate (vert via goal.IsClosed, sinon disjoncteur, sinon continue) câblée au HarnessCostBudget (economics) ; l'orchestration Drive qui stampe le mur sur chaque AgentAction (S52) et n'applique jamais une écriture above-the-waterline ; le BlockReason BUILD_LOOP_NO_PROGRESS ; le MCP, le twin front byte-identique, la route Workbench et les miroirs. Plus les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S83", "buildloop", "boucle de build", "internals", "NoProgress", "Terminate", "Drive", "goal.IsClosed", "Stop non-gameable", "HarnessCostBudget", "economics", "AgentRun", "AgentAction", "ApplyWall", "AGENT_WRITE_ABOVE_WATERLINE", "BUILD_LOOP_NO_PROGRESS", "ContextRouter", "S33", "S82", "S52", "S51", "S66", "records.Hash", "MCP", "twin", "byte-identical", "déterminisme", "EPIC 8", "mur"]
+---
+
+<Note>Page « Pour moi » — le journal de construction complet. Côté usage produit, voir [Pour les futurs utilisateurs → S83](/steps/concept/s83-build-loop).</Note>
+
+## Implémentation
+
+### Objectif (une capacité vérifiable)
+
+Le **service boucle-build** (l'agent exécutant) + son **disjoncteur déterministe**. Prendre le red set → le ContextRouter compile un ContextPack (algorithme S33, pas un prompt) → appeler le LLM → écrire le code dans le bac à sable (S82) → exécuter les miroirs/senseurs affectés → itérer red→green → enregistrer l'AgentRun/AgentAction (S52). Une boucle qui ne peut atteindre le vert **s'arrête honnêtement** (BlockReason). Un détecteur de non-progrès / max-itérations **déterministe** stoppe une boucle qui dépense sans avancer (`BUILD_LOOP_NO_PROGRESS`), câblé au `HarnessCostBudget` (S51) — distinct de la facturation.
+
+### Le paquet — `back/runtime/buildloop`
+
+Tout est **pur et déterministe** (CLAUDE.md §6/§8). Le LLM est l'**unique** surface non déterministe, isolée derrière un port et **vérifiée par le miroir**.
+
+- **`NoProgress(history, policy) bool`** — le détecteur de non-progrès, **fonction pure de l'historique** : true ssi le build dépense sans avancer, sur N'IMPORTE quel signal — (a) plafond max-itérations atteint, (b) zéro miroir nouvellement vert sur la fenêtre de stagnation, (c) les deux derniers diffs sont byte-identiques (churn), (d) un miroir vert au tour précédent n'est plus vert (oscillation rouge↔vert). Totale : un historique vide est « pas encore coincé ».
+- **`Terminate(TerminationInput) Decision`** — le verdict de terminaison **non-gameable**, précédence honnête : (1) **VERT d'abord** si le Stop non-gameable passe (réutilise `goal.IsClosed` verbatim — red set→vert ∧ vert antérieur intact ∧ mutation ≥ plancher ∧ aucun monstre) ; (2) **sinon DISJONCTEUR** si pas-vert ET (`NoProgress` OU `economics.Evaluate` flagge over-budget) ⇒ `no_progress` + `BUILD_LOOP_NO_PROGRESS` ; (3) **sinon CONTINUE**. Aucun champ de confiance d'agent n'entre.
+- **`Drive(TurnInput, Compiler, Generator, Sandbox, Sensors) (TurnOutput, error)`** — l'**orchestration** d'UN tour : compile le ContextPack (un `read`, toujours autorisé) → génère un diff (le LLM, exception génération-only) → **stampe l'écriture avec le mur** (`agentrun.ApplyWall`) et ne l'applique au sandbox **que si autorisée** (sous la ligne) → exécute les miroirs affectés (le juge déterministe) → append l'itération → calcule `Terminate` sur le NOUVEL historique → enregistre l'`AgentRun` content-adressé (S52). Avec des ports scriptés, `Drive` rejoue byte-identique.
+
+### Le nouveau BlockReason
+
+Ajouté à l'énum CLOS de `back/runtime/blockreason` (extension additive, `change_type: refine`) : **`BUILD_LOOP_NO_PROGRESS`** — la boucle a stoppé un build qui dépensait sans avancer (détecteur pur OU HarnessCostBudget flaggé). Son `how_to_fix` non vide pointe vers l'historique AgentRun, le raffinement du red set/ContextPack, et le relèvement du cap via un ValueCase justifié (jamais une édition en passant). Le property test du paquet (le mur ne devient pas une prison) le pin.
+
+### Réutilisation — la loi de la fonction unique
+
+S83 **ne réinvente rien** : le Stop non-gameable est `goal.IsClosed` (S57, jamais ré-implémenté) ; le budget est `economics.Evaluate` + `HarnessCostBudget` (S51) ; le mur est `agentrun.ApplyWall` (le prédicat de ligne d'eau S04 via `agentlayer.MayWrite`) ; l'AgentRun content-adressé est `agentrun.Record` (S52, réutilisant `records.Hash`). Le ContextRouter (S33), le bac à sable (S82) et le mirror-runner sont des **ports injectés**, jamais forkés.
+
+### Les miroirs (écrits rouges d'abord)
+
+- **`buildloop_fixture_test.go`** — la fixture (forme Godog) : la boucle ne termine vert QUE quand chacune des quatre conditions du Stop tient ; un build qui dépense sans avancer s'arrête avec `BUILD_LOOP_NO_PROGRESS` ; un build over-budget s'arrête (câblé au HarnessCostBudget) ; un ValueCase justifié lève le flag budget ; le plafond max-itérations stoppe une boucle non convergente.
+- **`buildloop_property_test.go`** (rapid) — les trois lois non-négociables : **la terminaison est une fonction pure de l'historique** (même input ⇒ même Decision) ; **l'agent n'écrit RIEN above-the-waterline** (∀ spec, ∀ cible LLM : une écriture au-dessus de la ligne ⇒ `AGENT_WRITE_ABOVE_WATERLINE`, jamais appliquée au sandbox) ; **VERT ⇒ `goal.IsClosed`** (la boucle ne peut pas fabriquer un pass). Plus la totalité (jamais de panic) et la byte-identité du rejeu de `Drive`.
+
+### MCP, twin front, route Workbench
+
+- **`back/mcp/build-loop`** (ADR 0009) — trois outils purs : `buildloop_terminate`, `buildloop_no_progress`, `buildloop_verdicts`. Aucune écriture de vérité (le mur).
+- **`front/web/lib/build-loop.ts`** — le twin front, **byte-identique** au Go (mêmes signaux de non-progrès, même précédence de terminaison, même énum de verdict, mêmes noms d'axes over-budget `ci_minutes`/`llm_tokens`) ; `build-loop.test.ts` (Vitest + fast-check) pin les trois lois + la byte-identité.
+- **`front/web/app/build-loop`** — la route **action-capable** (la console de terminaison exécute le verdict déterministe), thème ADR 0010, bilingue ADR 0011, câblée dans `WorkbenchHeader`. `tests/e2e/build-loop.spec.ts` (Playwright) prouve : un red set plein-vert termine VERT ; un build stagnant s'arrête `BUILD_LOOP_NO_PROGRESS` ; un run over-budget s'arrête en nommant l'axe.
+
+## Méta
+
+S83 est l'incarnation directe du **déterminisme-d'abord** appliqué à l'arrêt d'une boucle agentique : « cette boucle dépense-t-elle sans avancer ? » est une **fonction pure totale de l'historique** (un test de churn, une comparaison d'ensembles de miroirs verts, un compteur), jamais le jugement d'un LLM. Le LLM est barricadé à l'**unique** surface de génération de diff, et son output est immédiatement **re-jugé par le miroir déterministe** — la boucle ne lit jamais sa parole pour conclure « vert ». C'est aussi le lieu où la maxime **« done is computed, never declared »** devient exécutable : `Terminate` n'a délibérément aucun champ de confiance ; le seul chemin vers un arrêt VERT est `goal.IsClosed`.
+
+La précédence de `Terminate` (vert d'abord, sinon disjoncteur) encode une honnêteté : une boucle qui a stagné puis a fini par converger termine VERT — atteindre le vert est la sortie légitime ; mais une boucle qui ne peut atteindre le vert s'arrête sur un BlockReason actionnable, jamais sur un « fini » non gagné.
+
+## Méta-méta
+
+Pourquoi S83 est-il *la plus grosse étape* de l'EPIC 8 et pourquoi vient-il **après** S82 ? Parce qu'il fait tourner l'agent LLM exécutant qui écrit et compile du code réel : sans l'isolation fault-injectée de S82 (le filet sous le funambule) et sans le disjoncteur déterministe de S83 (le frein), une boucle agentique pourrait dépenser sans fin ou corrompre un voisin. Le disjoncteur câblé au HarnessCostBudget ferme la boucle économique du harnais : l'agent **écrit le code au moment du build, il ne siège pas dans la boucle d'exécution à faire ce qu'une fonction ferait** — le détecteur de stagnation, le verdict de terminaison et le mur sont tous du code rejouable.
+
+Au méta-méta, S83 réaffirme deux invariances du harnais que le self-test surveille : la **ligne d'eau tient pour tout rôle** (une écriture agent au-dessus de la ligne est refusée, prouvée par fault-injection dans le property test), et la **terminaison est rejouable** (même historique → même verdict). Un disjoncteur qui ne se déclencherait jamais serait un sensor mort (CLAUDE.md §5) ; ici les fixtures cassent ce qu'elles surveillent (diff répété, oscillation, over-budget) et assurent que ça vire au rouge.

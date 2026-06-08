@@ -1,0 +1,55 @@
+---
+title: "S83 · L'agent qui construit votre app — et s'arrête honnêtement"
+description: "S83 est la boucle de build : l'agent exécutant prend un red set, compile un ContextPack (algorithme), appelle le LLM, écrit le code dans le bac à sable (S82), exécute les miroirs affectés et itère red→green — en enregistrant chaque AgentRun (S52). Elle ne termine VERT que quand le Stop non-gameable passe ; un build qui DÉPENSE SANS AVANCER s'arrête honnêtement (BUILD_LOOP_NO_PROGRESS), câblé au HarnessCostBudget (S51). La terminaison est une fonction pure de l'historique — jamais un jugement LLM."
+keywords: ["aidos", "krd", "S83", "boucle de build", "build loop", "agent exécutant", "ContextPack", "ContextRouter", "S33", "LLM", "bac à sable", "sandbox", "S82", "miroir", "red set", "red→green", "AgentRun", "AgentAction", "S52", "Stop non-gameable", "disjoncteur", "circuit breaker", "non-progrès", "no progress", "BUILD_LOOP_NO_PROGRESS", "HarnessCostBudget", "S51", "budget", "déterminisme", "EPIC 8", "mur"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S83](/steps/internals/s83-build-loop).</Note>
+
+## En une phrase
+
+S83 est **l'agent qui construit réellement votre app** : il prend la liste des tests rouges, écrit le code pour les faire passer au vert, **vérifie avec les miroirs** (jamais sur sa propre parole), et **s'arrête honnêtement** — soit parce que tout est vert, soit parce qu'il dépense sans avancer.
+
+## Le problème que S83 résout
+
+Une fois votre besoin transformé en **red set** (des tests rouges qui *sont* le but, S66), il faut quelqu'un pour écrire le code qui les rend verts. C'est le travail de l'agent exécutant. Mais un agent LLM laissé seul a deux failles dangereuses :
+
+- **Il peut tourner en rond sans fin** — réécrire le même diff, faire passer un test au vert puis le casser au tour suivant, brûler des tokens sans jamais converger.
+- **Il pourrait se déclarer « fini » sans l'être** — c'est exactement ce que le KRD interdit (« done is computed, never declared »).
+
+S83 ferme ces deux failles : le **juge est le miroir déterministe** (pas le LLM), et un **disjoncteur** arrête honnêtement une boucle qui dépense sans avancer.
+
+## Ce que S83 apporte
+
+<CardGroup cols={2}>
+  <Card title="L'agent exécutant" icon="robot">
+    Il prend le <strong>red set</strong>, compile un <strong>ContextPack</strong> (un algorithme, S33, pas un prompt), appelle le LLM, écrit le code dans <strong>votre bac à sable</strong> (S82), exécute les miroirs affectés et itère <strong>red→green</strong>.
+  </Card>
+  <Card title="Vert seulement quand c'est vrai" icon="circle-check">
+    La boucle ne termine <strong>VERT</strong> que quand le <strong>Stop non-gameable</strong> passe : red set→vert ∧ vert antérieur intact ∧ mutation ≥ plancher ∧ aucun monstre. Le LLM ne décide jamais « fini ».
+  </Card>
+  <Card title="Le disjoncteur déterministe" icon="gauge-high">
+    Un détecteur de <strong>non-progrès</strong> (diff répété, oscillation rouge↔vert, zéro miroir nouvellement vert, plafond d'itérations) arrête une boucle qui dépense sans avancer — <code>BUILD_LOOP_NO_PROGRESS</code>.
+  </Card>
+  <Card title="Câblé au budget" icon="coins">
+    Le disjoncteur est aussi câblé au <strong>HarnessCostBudget</strong> (S51) : un build au-delà d'un cap déclaré (tokens LLM, minutes CI) s'arrête honnêtement — distinct de la facturation.
+  </Card>
+</CardGroup>
+
+## Comment vous l'utilisez
+
+Depuis le panneau **« Boucle de build »** du Workbench :
+
+1. **Donnez le red set** : les miroirs rouges qui sont le but (un par ligne).
+2. **Donnez l'état vivant** : quels senseurs sont déjà verts, les conditions du Stop (mutation / plancher / vert antérieur / monstres), l'historique d'itérations, et le budget déclaré.
+3. **Évaluez la terminaison** : AIDOS calcule le verdict — **VERT** (le Stop non-gameable passe), **NO_PROGRESS** (le disjoncteur a tripé ou over-budget), ou **CONTINUE** (on itère encore).
+
+Le verdict est une **fonction pure de l'historique** : le même historique donne toujours le même verdict d'arrêt. Aucun jugement « je pense qu'on est coincé » d'un LLM n'entre dans la décision.
+
+## Pourquoi « le disjoncteur est déterministe » compte
+
+La stagnation est une **propriété structurelle de l'historique** : deux diffs identiques d'affilée, c'est de la pure répétition ; un miroir qui passe vert puis redevient rouge, c'est du thrashing ; aucun miroir nouvellement vert sur la fenêtre déclarée, c'est l'absence d'avancée. Ces signaux se **calculent** — ils ne se devinent pas. C'est la garantie qu'une boucle ne dépensera jamais à l'infini, et que deux exécutions sur le même historique s'arrêteront exactement de la même façon.
+
+## Le mur tient toujours
+
+L'agent de la boucle **n'écrit aucune vérité**. Il écrit du code dans **votre bac à sable** (sous la ligne, S82). Toute tentative d'écriture *au-dessus de la ligne* (kernel, miroirs, fitness) est refusée avec `AGENT_WRITE_ABOVE_WATERLINE` — pour tout rôle. Quand le travail implique une vérité, la boucle **propose** un ChangeSet (S85) qu'un humain approuve ; elle n'écrit jamais la vérité directement. Et la décision de terminaison elle-même est un **calcul sous la ligne** — elle n'écrit rien.
