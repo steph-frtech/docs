@@ -262,6 +262,8 @@
               "steps/internals/s96-deploy",
               "steps/concept/s97-domain-bind",
               "steps/internals/s97-domain-bind",
+              "steps/concept/s98-env-rollback",
+              "steps/internals/s98-env-rollback",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

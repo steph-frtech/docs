@@ -1,0 +1,61 @@
+---
+title: "S98 · Pour moi — environnements + rollback par ré-projection, le Stop-gate hérité, la décision provenancée append-only (DP28)"
+description: "Pour moi : l'implémentation de S98 — back/archive/envrollback (Promote : Stop-gate hérité de deploy.IsDeployable → ré-projection via preview.EmittedAppHash → content-address ; Rollback : distinct ∧ antérieur (lineage) ∧ stable → ré-projection de N-1 → réconciliation datamigrate inverse → décision provenancée append-only ; RollbackProducesReProjection ; LadderInOrder), les deux nouveaux codes BlockReason ENV_PROMOTE_NOT_STABLE + ROLLBACK_NOT_EARLIER, le MCP env-rollback (promote/rollback/check_served/ladder), le twin TS lib/env-rollback réutilisant lib/deploy + la route action-capable /env-rollback, et les miroirs (Godog 5 scénarios, rapid 5 propriétés, fixture, fast-check 5/5, Playwright 6/6). Plus les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S98", "envrollback", "Promote", "Rollback", "RollbackDecision", "RollbackProducesReProjection", "IsDeployable", "EmittedAppHash", "ENV_PROMOTE_NOT_STABLE", "ROLLBACK_NOT_EARLIER", "lineage", "provenance", "append-only", "datamigrate", "records.Hash", "rapid", "fast-check", "Playwright", "Godog", "MCP", "EPIC 10", "DP28", "ADR 0043", "déterminisme"]
+---
+
+<Note>Côté « Pour moi » — le détail complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S98](/steps/concept/s98-env-rollback).</Note>
+
+## Implémentation
+
+S98 ajoute le plan **environnements + rollback-par-ré-projection** : `back/archive/envrollback` (sous-système Archive — le rollback est un geste sur le DAG des phases stables, S24). Tout est **pur, total, content-adressé** via S02, et **n'écrit aucune vérité** (le mur).
+
+**L'échelle d'environnements.** `Environment` est un enum clos (`preview` < `staging` < `prod`), l'ordre **déclaré** (`envRank`, jamais appris). `LadderInOrder()` rend l'échelle en ordre de promotion. Chaque pile Pulumi est par-environnement (DP28) : `stackName(env, project, phaseHash)` = `"<env>-<project>-d-<hash court>"`.
+
+**`Promote(in PromoteInput) → (Promotion, *BlockReason)`** — lie une phase stable à un environnement. L'ordre :
+1. validation projet + env clos (`OUT_OF_SCOPE` sinon) ;
+2. **STOP-GATE HÉRITÉ** — `deploy.IsDeployable(phase, gate)` (S96, la **même** décision « done is computed » : coupe cohérente ∧ mutation ≥ seuil ∧ aucun monstre), jamais un check forké. Une phase non-stable → **`ENV_PROMOTE_NOT_STABLE`** nommant les raisons, avant toute ré-émission ;
+3. **ré-projection** — `preview.EmittedAppHash(PhaseRef{phaseHash}, surface)` (S94, réutilisé) : l'env sert l'app de la phase, jamais un artefact stale ;
+4. `contentAddress` (S02). Même input → `Promotion` byte-identique.
+
+**`Rollback(in RollbackInput) → (RollbackDecision, *BlockReason)`** — revient à une phase antérieure. L'ordre (fail-closed) :
+1. validation projet + env ;
+2. content-address des deux phases (`Phase.Version()`) ;
+3. **(a) DISTINCT** — la cible ≠ la phase servie (sinon `ROLLBACK_NOT_EARLIER`, cause « no-op ») ;
+4. **(b) ANTÉRIEUR** — la cible ∈ `Lineage` (un set-membership pur sur les ancêtres DAG fournis, S24 ; sinon `ROLLBACK_NOT_EARLIER`, cause « not ancestor ») ;
+5. **(c) STABLE** — `deploy.IsDeployable(target, gate)` ; une cible rouge → `ENV_PROMOTE_NOT_STABLE` nommant les miroirs rouges. La phase **servie** n'a PAS besoin d'être stable (elle a incidenté — c'est pour ça qu'on recule) ;
+6. **ré-projection de N-1** — `preview.EmittedAppHash` sur la phase cible : l'env sert une ré-émission **fraîche** de N-1 ;
+7. **réconciliation datastore** — `datamigrate.Build(reconcile)` (S95, la migration inverse étendre→recopier→rétrécir) quand un changement de schéma est porté ; un breaking-no-backfill **refuse** le rollback (délégué à S95) ;
+8. **provenance** — `Provenance{Actor, Reason, From, To}` (§9 — qui/quoi/pourquoi ; pas d'horloge → déterminisme, le timestamp est posé par le rôle writer à l'apply du ChangeSet) ;
+9. `contentAddress` (S02) sur le corps **incluant la provenance** : deux rollbacks de raisons/acteurs différents sont des décisions distinctes. La décision est **append-only** (un fait content-adressé, pas une édition).
+
+**`RollbackProducesReProjection(dec, target, servedAppHash) → (bool, *BlockReason)`** — la propriété done-criteria rendue déterministe : l'app servie après rollback doit égaler à la fois `dec.ReProjectedAppHash` **et** une ré-émission fraîche de la cible. Une comparaison pure — le **code** juge ; un artefact stale (le hash servi de N) est **rejeté**. C'est la garantie mécanique de « l'artefact post-rollback = ré-projection de N-1 (hash égal), jamais un artefact sandbox ».
+
+**Les deux nouveaux `BlockReason`.** `CodeEnvPromoteNotStable = "ENV_PROMOTE_NOT_STABLE"` et `CodeRollbackNotEarlier = "ROLLBACK_NOT_EARLIER"` — extensions additives de l'enum close (change_type: refine, jamais une suppression), avec leurs rangées canoniques dans la registry (severity `blocking`, explications FR §8/§9, `how_to_fix` non vide) et leurs entrées dans `codeOrder`. La property mirror de `blockreason` couvre **automatiquement** les nouveaux codes (elle échantillonne `Codes()`).
+
+**Le MCP (ADR 0009).** `back/mcp/env-rollback` expose le plan en quatre outils, tous purs (le mur) : `promote`, `rollback`, `check_served` (la propriété de ré-projection), `ladder`. `main_test.go` GREEN.
+
+**Le twin TS + l'écran.** `front/web/lib/env-rollback.ts` **réutilise** `lib/deploy` (`isDeployable`, `emittedAppHash`, `subdomainOf`) — aucune duplication de la logique de gate/ré-projection — et ajoute `promote`, `rollback`, `rollbackProducesReProjection`, `LADDER`. La route **action-capable** `/env-rollback` (thème ADR 0010, bilingue ADR 0011) a deux formulaires : PROMOUVOIR (toggle « phase non-stable » → `ENV_PROMOTE_NOT_STABLE`) et ROLLBACK (toggles « cibler la phase servie » / « cibler une non-antérieure » → `ROLLBACK_NOT_EARLIER`), avec la décision, la provenance, et les deux badges de ré-projection (sert fraîche / rejette stale). Enregistrée dans la nav `WorkbenchHeader` + i18n fr/en (namespace `envRollback`).
+
+**Les miroirs (le rouge d'abord, puis le vert).**
+- **Godog (N0, acceptance)** — `back/tests/archive/envrollback.feature`, 5 scénarios : promouvoir une phase stable en prod ; promouvoir une non-stable refusé `ENV_PROMOTE_NOT_STABLE` ; **incident en prod → rollback à N-1 → prod sert l'app ré-émise depuis N-1, l'artefact de N rejeté, la décision provenancée, rien supprimé/append-only** (le done-criterion) ; rollback vers la phase servie refusé `ROLLBACK_NOT_EARLIER` ; rollback vers une non-antérieure refusé `ROLLBACK_NOT_EARLIER`.
+- **rapid (N1, invariants)** — 5 propriétés : reproductibilité de Promote ; promotion non-stable toujours refusée ; reproductibilité de Rollback **et** ré-projection (servi = ré-émission fraîche de N-1, stale rejeté) ; rollback non-antérieur toujours refusé ; sensibilité content-address (acteur/raison/env/cible différents → id différent).
+- **fixture (N2, workflow)** — tables Promote + Rollback (succès + chaque refus + « pas de changement de schéma ⇒ réconciliation vide ») + le test dédié « sert la ré-projection, pas le stale ».
+- **fast-check (front)** — `lib/env-rollback.test.ts`, 5/5 : reproductibilité, refus non-stable, rollback+ré-projection, refus non-antérieur, sensibilité provenance.
+- **Playwright (e2e)** — `tests/e2e/env-rollback.spec.ts`, 6/6 : rendu des deux contrôles, promotion → pile prod, promotion non-stable refusée, **incident → rollback sert le ré-émis + rejette le stale + provenancé**, les deux refus `ROLLBACK_NOT_EARLIER`.
+
+## Méta
+
+**Pourquoi un nouveau plan plutôt qu'étendre `runtime/deploy` (S96) ?** Le rollback est un geste sur le **DAG des phases** (Archive), pas sur le pipeline de déploiement d'une seule phase. Mais S98 ne **réimplémente** pas le gate ni la ré-projection : il les **importe** (`deploy.IsDeployable`, `preview.EmittedAppHash`) — la règle anti-réinvention (ne jamais réécrire un artefact antérieur). La route `/env-rollback` est **sibling** de `/deploy` (S96) et `/domain-bind` (S97), aucune route existante touchée (anti-overwrite §9). DP29 finalisera le cockpit `/deploy` combiné.
+
+**Le rollback est une décision, pas une gomme (le mur, §9).** Un rollback **n'écrit pas le noyau** : il **ré-projette une phase antérieure** et **enregistre une décision** content-adressée, append-only, avec provenance. L'écran la **propose comme ChangeSet** ; il n'écrit jamais directement. C'est exactement « an override is not an edit, it is a recorded decision » (CLAUDE.md §8) — appliqué au rollback.
+
+**Le Stop-gate est hérité, pas redéfini.** Promouvoir/revenir vers une phase est gardé par la **même** décision « done is computed » que le déploiement — `deploy.IsDeployable`. Il n'y a **qu'une** définition de « phase stable » dans tout AIDOS ; S98 la consomme. Un fork du gate serait un monstre (deux vérités divergentes du même fait).
+
+**Déterminisme-first (§6/§8).** Tout ce que S98 fait est une **fonction pure** : le gate (une comparaison), la ré-projection (une empreinte), l'ordre DAG (un set-membership), la provenance (un corps), le content-address (S02). **Aucun LLM** n'entre — il n'y a rien d'irréductiblement génératif ici. « Revenir à N-1 » est de l'arithmétique sur des empreintes, pas un jugement. Les miroirs de reproductibilité (rapid + fast-check) épinglent « même input → même décision ».
+
+## Méta-méta
+
+**Ce que S98 prouve sur la méthode KRD.** Le rollback — l'instant le plus dangereux d'un système (revenir en arrière sous pression d'incident) — devient, sous KRD, **non destructif par construction**. Il ne **peut pas** restaurer un artefact stale, parce que la seule façon de produire l'app est de la **ré-émettre depuis une phase** (la vérité est le truth-store/la phase, jamais le code du bac à sable). Il ne **peut pas** perdre la trace, parce qu'une décision est un **fait content-adressé append-only**. Il ne **peut pas** revenir vers du rouge, parce que la cible passe le **même** Stop-gate calculé que tout déploiement. Les trois garanties ne reposent sur aucune discipline humaine : elles sont **mécaniques** — le code refuse, nomme, et ré-projette. C'est la propriété « nothing, ever, silently breaks what came before » poussée jusqu'au rollback : même reculer ne casse rien et n'efface rien.
+
+**La production devient une cible de senseur.** Une fois prod servie par S98, un incident n'est pas une fin — c'est un signal qui peut nourrir une **idée** (la boucle de réalité, E12 / la skill `learn`). Le rollback recouvre l'incident *immédiatement* (ré-émission de N-1), pendant que l'incident *lui-même* remonte, provenancé, vers le noyau par la seule porte légale (idée → miroir → /goal). S98 est ainsi le point de jonction entre le **déploiement** (le code descend) et la **réalité** (le signal remonte) — sans jamais franchir le mur dans le mauvais sens.
