@@ -220,6 +220,8 @@
               "steps/internals/s75-entity-modeler",
               "steps/concept/s76-behavior-expander",
               "steps/internals/s76-behavior-expander",
+              "steps/concept/s77-dsl-editor",
+              "steps/internals/s77-dsl-editor",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

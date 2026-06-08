@@ -1,0 +1,65 @@
+---
+title: "S77 · Éditer le comportement de votre app — par des formulaires typés, jamais du code"
+description: "S77 vous donne des ÉDITEURS TYPÉS sur les quatre langages de comportement d'AIDOS : Operation (la suite d'étapes valider / autoriser / lire / muter / retourner, y compris les tâches de fond), Policy (l'arbre d'autorisations ALLOW/DENY), et la verticale Control + Action (un bouton — quand il est visible, quand il est actif, ce qu'il déclenche → quelle opération il invoque). Vous ne tapez jamais de code libre : vous remplissez une FORME structurée que AIDOS transforme — par une fonction pure — en comportement vérifiable, puis vous le PROPOSE comme brouillon de vérité (un ChangeSet DRAFT), jamais écrit en passant."
+keywords: ["aidos", "krd", "S77", "DSL", "éditeur typé", "typed editor", "pas de code libre", "no free code", "Operation", "Policy", "Control", "Action", "verticale", "validate", "authorize", "read", "mutate", "return", "ALLOW", "DENY", "visible_when", "enabled_when", "triggers", "invoke", "bouton", "button", "autorisation", "policy", "async", "scheduled", "fonction pure", "pure function", "déterministe", "deterministic", "propose", "ChangeSet", "DRAFT", "brouillon", "le mur", "wall", "§24", "EPIC 6", "S09", "S10", "S11", "S73"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S77](/steps/internals/s77-dsl-editor).</Note>
+
+## En une phrase
+
+S77 vous laisse **éditer le comportement de votre app** — ses opérations, ses règles d'autorisation, ses boutons et leurs actions — par des **formulaires typés** (jamais du code libre), que AIDOS transforme par une **fonction pure** en comportement vérifiable, puis vous **propose** comme brouillon de vérité.
+
+## Le problème que S77 résout
+
+Le comportement d'une app, c'est : *que fait cette opération ?* (valider l'entrée, vérifier l'autorisation, lire, écrire, répondre), *qui a le droit ?* (la règle d'autorisation), et *ce bouton, quand est-il visible, quand est-il actif, que déclenche-t-il ?*.
+
+La tentation, partout ailleurs, est de laisser écrire ça en **code libre** — du JavaScript, un script, une expression évaluée à la volée. Mais du code libre n'est ni vérifiable ni reproductible : on ne peut pas prouver à l'avance qu'un bouton désactivé bloque bien son action, ni qu'une opération non autorisée ne s'exécute pas.
+
+La règle d'AIDOS est donc stricte : **le comportement se dit en DSL** (un langage fermé de verbes connus), **jamais en code libre**. S77 vous donne l'**écran** pour le faire — un éditeur par forme de comportement.
+
+## Ce que S77 apporte
+
+<CardGroup cols={2}>
+  <Card title="L'éditeur d'Operation" icon="diagram-project">
+    Une opération est une suite d'étapes typées : <code>validate</code> → <code>authorize</code> → <code>read</code> → <code>mutate</code> → <code>return</code> (et les tâches de fond <em>async/scheduled</em> de S73). Vous composez ces verbes ; vous n'écrivez pas de code.
+  </Card>
+  <Card title="L'éditeur de Policy" icon="shield-halved">
+    Une règle d'autorisation est un arbre <code>ALLOW</code>/<code>DENY</code> de conditions (tout / au moins un / non, comparaisons, existence). Tout ALLOW passe ; n'importe quel DENY bloque.
+  </Card>
+  <Card title="La verticale Control + Action" icon="hand-pointer">
+    Un bouton (Control) dit <code>visible_when</code> / <code>enabled_when</code> / <code>triggers</code> ; son Action lie le clic à une opération (<code>invoke</code>). Un bouton autorisé déclenche son opération ; <code>enabled_when</code> faux la bloque.
+  </Card>
+  <Card title="Proposer, pas écrire" icon="file-signature">
+    Chaque édition est un ChangeSet <code>proposed</code> (DRAFT). Un humain l'approuve (elle rejoint le Kernel) ou la rejette (rien n'a bougé). L'écran ne franchit jamais le mur.
+  </Card>
+</CardGroup>
+
+## La verticale, en clair
+
+C'est le fil qui relie un **bouton** à une **opération**, de bout en bout :
+
+1. Un **Control** (le bouton) déclare quand il est **visible** et quand il est **actif**, et **ce qu'il déclenche**.
+2. Une **Action** lie ce déclenchement à une **opération** précise (`invoke`).
+3. L'**opération** vérifie d'abord l'**autorisation** (sa Policy) avant de muter quoi que ce soit.
+
+S77 prouve deux choses sur cette verticale :
+
+- **Un bouton autorisé déclenche son opération autorisée.** Visible ∧ actif → le clic invoque l'opération, qui (autorisation ALLOW) s'exécute jusqu'à ses événements.
+- **`enabled_when` faux bloque l'action.** Si le bouton est désactivé, l'action ne part pas — aucune opération, aucun événement.
+
+## Pas de code libre — pourquoi ça compte pour vous
+
+Parce que chaque morceau de comportement reste **vérifiable** et **reproductible** :
+
+- Le **parsing est une fonction pure** : la même forme typée donne toujours le même résultat, à l'octet près.
+- Un **verbe inconnu** ou un champ `code`/`script`/`eval` est **refusé** — la grammaire est fermée, on ne peut pas y glisser du code arbitraire.
+- Un **lien orphelin** (un bouton qui déclenche une action qui n'existe pas, une action qui invoque une opération inconnue) est refusé — c'est un *monstre* que la loi de complétude interdit.
+
+## Ce que S77 ne fait pas
+
+S77 **n'applique rien**. Éditer, c'est **proposer** : le ChangeSet reste **DRAFT**. Seul le CLI `aidos`, après **approbation humaine**, l'applique au Kernel. L'écran ne franchit jamais le mur (le comportement est une vérité ; le humain seul l'écrit).
+
+## Où le voir
+
+Le panneau **Workbench → Éditeurs typés des DSL** (`/dsl-editor`) : choisissez un DSL (operation / policy / control / action), remplissez la forme typée pré-remplie, puis « Proposer ». Vous obtenez un ChangeSet DRAFT portant l'AST canonique, content-adressé. Tout est bilingue (français par défaut).

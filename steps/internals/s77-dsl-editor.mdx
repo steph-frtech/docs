@@ -1,0 +1,52 @@
+---
+title: "S77 · Éditeurs typés des DSL — internals"
+description: "Le détail d'implémentation de S77 : back/kernel/dsleditor — les éditeurs TYPÉS (pas de code libre) sur les quatre DSL (Operation/Policy/Control/Action), avec ParseDoc(DslDoc) → Parsed (fonction pure, totale, qui décode la forme typée en AST existant via les contrats S09/S10/S11/S73, jamais un fork) et ProposeEdit(DslDoc, parentPhase) → Proposal enveloppant l'AST canonique dans un changeset.ChangeSet DRAFT (jamais APPLIED — le mur, WroteKernel=false). Le jumeau TS lib/dsl-editor, le MCP back/mcp/dsl-editor (3 outils purs : dsl_kinds/dsl_parse/dsl_propose, pas d'outil apply), la route /dsl-editor action-capable, et les miroirs (fixture verticale + property rapid + Vitest/fast-check + 6 Playwright). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "S77", "dsleditor", "DSL", "éditeur typé", "no free code", "ParseDoc", "ProposeEdit", "Operation", "Policy", "Control", "Action", "verticale", "ChangeSet", "DRAFT", "fonction pure", "déterministe", "MCP", "Playwright", "rapid", "fast-check", "le mur", "S09", "S10", "S11", "S73"]
+---
+
+<Note>Côté implémentation — le journal de construction. Pour la vue produit, voir [Pour les futurs utilisateurs → S77](/steps/concept/s77-dsl-editor).</Note>
+
+## Implémentation
+
+S77 ajoute la **surface d'autorat typée** au-dessus des quatre DSL de comportement déjà construits (Policy S09, Operation S10/S73, Control+Action S11). Il n'invente **aucun** nouvel interpréteur : il **réutilise** les contrats existants et n'ajoute que le geste *éditer par forme typée → proposer un ChangeSet*.
+
+### Le moteur Go — `back/kernel/dsleditor`
+
+- `dsleditor.go` — le cœur. `DslDoc{Kind, Name, Body, Known*}` est une **forme typée** (le `Body` est la forme JSON structurée du DSL — il n'y a **pas** de champ `code`). `ParseDoc(DslDoc) → Parsed` est une fonction **pure, totale** : elle refuse un kind inconnu (`ErrUnknownKind`), un échappatoire de code libre (`ErrFreeCode` — un champ `code`/`script`/`eval`), un nom vide, et un corps malformé (`ErrBadBody`, qui enveloppe l'erreur typée du DSL). `ProposeEdit(DslDoc, parentPhase) → Proposal` enveloppe l'AST canonique dans un `changeset.Open` — un `ChangeSet` **DRAFT** (spec_delta + mirror_delta, cible `dsl-edit@<kind>:<name>`), **jamais APPLIED**.
+- `parse_operation.go` — décode la forme typée d'opération (liste ordonnée des six verbes `validate/authorize/read/mutate/branch/return` + bloc async S73) en `[]operation.Step` + `operation.Async`, via les types **du paquet operation** (jamais un fork). Un verbe inconnu = erreur typée.
+- `parse_policy.go` — appelle le **gelé** `policy.Parse` (source unique de l'arbre ALLOW/DENY) ; l'éditeur ne fait que fixer le `name` du doc + recanonicaliser.
+- `parse_control_action.go` — appelle les **gelés** `control.Parse` / `action.Parse`, puis **valide** contre les refs que le doc porte (`KnownActions` pour le trigger d'un control, `KnownControls`/`KnownOperations` pour les liens d'une action) — un trigger / bind orphelin est un monstre refusé.
+
+### Le jumeau TS — `front/web/lib/dsl-editor.ts`
+
+Le jumeau front : `parseDoc` + `proposeEdit`, mêmes refus (`ERR_FREE_CODE`, `ERR_UNKNOWN_KIND`, `ERR_BAD_BODY`), même cible `dsl-edit@<kind>:<name>`, même `wrote_kernel: false`. Il n'écrit rien — il renvoie une `Proposal` valeur. L'adresse de contenu faisant autorité est la Go ; le front porte un handle stable (`canonicalEncode` + sha256).
+
+### Le MCP — `back/mcp/dsl-editor` (ADR 0009)
+
+Trois outils **purs** (une op = un outil) : `dsl_kinds` (les quatre kinds éditables), `dsl_parse` (forme typée → AST preview, n'écrit rien), `dsl_propose` (parse + ChangeSet DRAFT). **Pas d'outil `apply`** : appliquer le DRAFT est le commit-gate de S20, le gel reste le flux `/goal` (le mur).
+
+### La route Workbench — `/dsl-editor`
+
+Action-capable (`ui-completeness`, §7) : un contrôle **PROPOSE** lié au moteur pur (jumeau `lib/dsl-editor`), exécutable depuis l'écran — choisir un DSL, remplir la forme typée pré-remplie, produire un ChangeSet DRAFT portant l'AST canonique content-adressé + `WroteKernel=false`. Thème ADR 0010, bilingue ADR 0011 (clé `dslEditor` + lien de nav).
+
+### Les miroirs (BDD-first, rouge avant le code)
+
+- `dsleditor_fixture_test.go` — la **verticale** `state→cmd→events` : un control AUTORISÉ (visible ∧ enabled) déclenche son action (`action.Plan` → `invoke createOrder`), et l'opération bornée (autorisation ALLOW) tourne jusqu'à `OrderCreated` — les quatre AST viennent de `ProposeEdit`. `enabled_when` faux → `control.EvalState` rend `enabled=false`, l'action ne part pas. Un corps à code libre refusé (`ErrFreeCode`). Toute proposition DRAFT, jamais APPLIED.
+- `dsleditor_property_test.go` (rapid) — la **reproductibilité** : même doc → `Canonical` et id de ChangeSet byte-identiques ; toute proposition DRAFT, jamais d'`applied_at`. *Parsing DSL = fonction pure.*
+- `lib/dsl-editor.test.ts` (Vitest + fast-check) — le jumeau front : no-free-code, propose=DRAFT, reproductibilité.
+- `tests/e2e/dsl-editor.spec.ts` (Playwright) — 6 e2e : panneau action-capable, policy DRAFT (`wrote_kernel false`), la verticale control+action, `enabled_when` false, refus du code libre, reproductibilité du hash.
+
+## Méta
+
+S77 incarne deux invariants du KRD à la lettre :
+
+- **Le comportement se dit en DSL, jamais en code libre (§24).** L'éditeur n'expose **aucune** porte de code arbitraire : la `DslDoc` n'a pas de champ `code`, et `hasFreeCode` refuse explicitement `code`/`script`/`eval`. La grammaire est **fermée** (les six verbes, les quatre scopes, les nœuds de policy) — un kind/verbe hors-ensemble est une erreur typée, jamais une supposition.
+- **Le mur (§2).** Éditer ne franchit jamais la ligne : `ProposeEdit` ouvre un `ChangeSet` DRAFT et n'écrit rien (`changeset.Open` est pur). Le gel reste `idée → miroir → /goal → approbation humaine`. Un truth-write depuis l'écran est **impossible par construction**.
+
+Le **déterminisme-first (§6/§8)** est tenu : *parsing DSL = fonction pure* est la done-criterion même de S77. `ParseDoc`/`ProposeEdit` n'ont ni horloge, ni RNG, ni I/O — même doc+parent ⇒ DRAFT byte-identique. Aucun LLM n'entre : décoder une forme typée en AST est un travail de **code**, pas de jugement.
+
+**Réutiliser, ne pas réinventer (ADR 0007).** S77 ne duplique aucun interpréteur : `policy.Parse`, `control.Parse`, `action.Parse`, les types `operation.*` sont **appelés**, jamais réécrits. L'éditeur n'ajoute que la couche *forme typée → proposition*, dans son propre paquet (il n'édite le code d'aucun autre step).
+
+## Méta-méta
+
+S77 est une **brique d'autorat** de l'app-builder : c'est l'écran par lequel le *user* d'AIDOS façonne le comportement de **son** app sans jamais écrire de code — l'incarnation directe du « never go prompt → code directly » au niveau du domaine de l'utilisateur. Le geste *éditer par forme typée → proposer un ChangeSet* est le même que celui de S76 (`Propose`) et de S68 (shape-editor `proposeMirror`) : **toute écriture de vérité est une proposition**, jamais une écriture en passant. Cette uniformité — *un éditeur, une proposition, un mur* — est ce qui rend l'OS gouvernable : peu importe ce qu'on édite (un comportement, un miroir, une entité), le chemin vers la vérité est unique et humain.
