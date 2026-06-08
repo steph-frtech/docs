@@ -1,0 +1,70 @@
+---
+title: "S75 · Dessiner votre modèle de données — et le proposer sans rien casser"
+description: "S75 vous donne un CANVAS pour modéliser le cœur de votre app : des entités (avec leurs attributs et leur identifiant) et les RELATIONS entre elles (Customer ◀──1-N── Order). Mais dessiner n'est pas figer : quand votre schéma vous convient, vous le PROPOSEZ — AIDOS produit un ChangeSet `proposed` (un brouillon de vérité), jamais une écriture directe. Un humain l'approuve (le schéma rejoint le Kernel et apparaît dans l'entity-map vivante) ou le rejette (le Kernel reste intact, rien n'a bougé). Et parce qu'on modélise souvent à plusieurs, deux éditeurs sur le même canvas ne s'écrasent JAMAIS : leurs ajouts fusionnent (CRDT), un conflit est signalé, jamais avalé. Le mur tient : l'écran propose, il n'écrit pas la vérité."
+keywords: ["aidos", "krd", "S75", "modeleur", "modeler", "canvas", "entité", "entity", "relation", "schéma", "schema", "Customer", "Order", "propose", "ChangeSet", "proposed", "DRAFT", "brouillon", "approbation", "approval", "reject", "rejet", "entity-map", "concurrence", "concurrency", "draft-level", "présence", "presence", "lock", "verrou", "CRDT", "merge", "fusion", "anti-écrasement", "no overwrite", "le mur", "wall", "project-scopé", "S71", "S74", "S110", "EPIC 6"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S75](/steps/internals/s75-entity-modeler).</Note>
+
+## En une phrase
+
+S75 vous donne un **canvas** pour dessiner les entités de votre app et leurs **relations**, puis pour **proposer** ce modèle — AIDOS en fait un **brouillon de vérité** (un ChangeSet `proposed`) qu'un humain approuve ou rejette, sans jamais écraser le travail d'un autre éditeur.
+
+## Le problème que S75 résout
+
+Les étapes précédentes ont posé les **pièces** du système de types : l'entité (S35), le nœud de **relation** 1-1 / 1-N / N-N (S71), le type **blob** (S72). Mais ces pièces vivaient dans des formulaires isolés, une à la fois. Pour modéliser une vraie app, vous avez besoin de les voir **ensemble** : un **canvas** où `Customer` et `Order` cohabitent, reliés par une flèche `1-N`.
+
+Et surtout : modéliser un schéma, c'est toucher au **cœur** de l'app — sa vérité. AIDOS interdit d'écrire la vérité directement depuis un écran (c'est **le mur**). Le canvas doit donc faire deux choses sans jamais les confondre :
+
+- **dessiner librement** un brouillon (zéro risque, rien n'est figé) ;
+- **proposer** ce brouillon par la seule porte légale — `propose → ChangeSet → approbation`.
+
+Enfin, on modélise rarement seul. Si Alice et Bob éditent le même canvas en même temps, le dernier qui sauve ne doit **pas** écraser l'autre. S75 traite ce conflit **au niveau brouillon**, bien avant qu'une vérité ne soit en jeu.
+
+## Ce que S75 apporte
+
+<CardGroup cols={2}>
+  <Card title="Un canvas entité/relation" icon="diagram-project">
+    Vous posez des entités (attributs scalaires + identifiant) et tracez des relations entre elles : <code>Customer ◀──1-N── Order</code>. Le schéma est validé à la volée — une relation doit cibler une entité <strong>déclarée</strong>, jamais devinée.
+  </Card>
+  <Card title="Proposer, pas écrire" icon="file-signature">
+    Quand le modèle vous convient, vous le <strong>proposez</strong> : AIDOS produit un <strong>ChangeSet <code>proposed</code></strong> (un brouillon de vérité, jamais appliqué). L'écran n'écrit aucune vérité — c'est le mur.
+  </Card>
+  <Card title="Approuver ou rejeter" icon="circle-check">
+    Un humain <strong>approuve</strong> (le schéma rejoint le Kernel et s'affiche dans l'entity-map vivante) ou <strong>rejette</strong> (le Kernel reste <strong>intact</strong> — la proposition n'a jamais rien touché).
+  </Card>
+  <Card title="À plusieurs, sans écrasement" icon="users">
+    Deux éditeurs sur le même canvas se <strong>voient</strong> (présence), peuvent signaler le nœud qu'ils éditent (verrou indicatif), et leurs modifications <strong>fusionnent</strong> : aucun ajout n'est perdu, un conflit réel est <strong>signalé</strong>, jamais avalé.
+  </Card>
+</CardGroup>
+
+## Comment vous l'utilisez
+
+<Steps>
+  <Step title="Vous modélisez Customer ↔ Order">
+    Sur le canvas, deux entités : `Customer` (avec un identifiant `id`) et `Order` (avec un `id` et un `total`). Vous tracez la relation `Order.customer ──1-N──▶ Customer`.
+  </Step>
+  <Step title="Vous proposez le schéma">
+    Un clic sur **Proposer**. AIDOS valide le brouillon (chaque relation résout sa cible ; une clé étrangère exige un identifiant sur la cible), lui calcule une **adresse de contenu** (un hash stable, **indépendant de l'ordre** dans lequel vous avez ajouté les nœuds), et produit un **ChangeSet `proposed`** (statut DRAFT).
+  </Step>
+  <Step title="Un humain approuve — ou rejette">
+    À l'**approbation**, le schéma rejoint le Kernel et apparaît dans l'**entity-map** vivante. Au **rejet**, rien ne bouge : le ChangeSet est un brouillon, le Kernel n'a **jamais** été touché.
+  </Step>
+  <Step title="À plusieurs, vos ajouts cohabitent">
+    Si pendant ce temps un collègue ajoute une entité `Invoice`, le **merge** garde **votre** `Order` ET **son** `Invoice` : personne n'écrase personne.
+  </Step>
+</Steps>
+
+## Le détail qui compte : l'ordre n'a pas d'importance
+
+Deux éditeurs qui modélisent **les mêmes** entités et relations, mais **dans un ordre différent**, obtiennent **exactement le même** schéma — la même adresse de contenu. AIDOS **trie** le modèle avant de le hasher (l'ordre des entités et des relations ne « fuit » pas dans l'identité), tout en **préservant** l'ordre des attributs d'une entité (qui, lui, est porteur de sens). Concrètement : la même intention produit toujours la même vérité, peu importe le chemin pour y arriver.
+
+## Ce que S75 NE fait pas (et pourquoi)
+
+- **Il n'écrit pas la vérité.** Proposer ne fige rien : le ChangeSet reste un **brouillon**. Seul un humain, via l'approbation, l'applique. C'est le mur (§2), non négociable.
+- **Il ne gère pas le conflit d'écriture-vérité.** Ça, c'est une autre étape (S110 : deux approbations concurrentes). S75 traite le conflit **avant** la proposition — au niveau du **brouillon** sur le canvas.
+- **Il ne devine aucune relation.** Une relation vers une entité que vous n'avez pas déclarée est **refusée**, avec un message qui dit comment la corriger — jamais une cible inventée.
+
+## Pourquoi c'est sûr
+
+Modéliser dans AIDOS, c'est **dessiner sans danger** : tant que vous n'avez pas proposé, rien n'existe ; une fois proposé, rien n'est appliqué tant qu'un humain n'a pas approuvé ; et même à plusieurs, le travail de chacun est **conservé**. Le canvas est expressif, la vérité reste protégée.

@@ -1,0 +1,59 @@
+---
+title: "S75 · Modeleur entité/relation (canvas) + concurrence draft-level (internals)"
+description: "Le détail d'implémentation de S75 : back/kernel/entities/modeler (Go) — Draft (Project + []EntityNode, le canvas pré-proposal), Validate (schéma proposable : entités S35, relations résolues S71, FK avec une cible à identifier, noms uniques), Body/SchemaHash (adresse de contenu canonique INVARIANTE À L'ORDRE D'ENTRÉE — nœuds et relations triés par nom, attributs préservés), Propose (ouvre un changeset.ChangeSet DRAFT portant le brouillon canonique — JAMAIS APPLIED, le mur), et la concurrence draft-level — Presence/PresenceSet (Join/Leave/LockHolder, présence + verrou indicatif) et MergeDrafts (merge CRDT trois-voies par nom de nœud, anti-écrasement, conflits surfacés). Le jumeau TS lib/entity-modeler (byte-équivalent, hash a91081e1…), le MCP back/mcp/entity-modeler (5 outils purs : schema_validate/schema_hash/schema_propose/canvas_merge/canvas_presence), la route /entity-modeler action-capable (propose + merge), les miroirs (fixture + property rapid + Vitest 7 + 5 Playwright). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "S75", "modeler", "modeleur", "Draft", "EntityNode", "Validate", "SchemaHash", "Body", "Propose", "Proposal", "ChangeSet", "DRAFT", "proposed", "changeset.Open", "Presence", "PresenceSet", "MergeDrafts", "MergeOutcome", "CRDT", "merge", "conflict", "conflit", "anti-overwrite", "anti-écrasement", "input-order-invariant", "canonicalize", "records.Hash", "UNKNOWN_RELATION_TARGET", "MODELER_INVALID_DRAFT", "blockreason", "MCP", "schema_propose", "canvas_merge", "canvas_presence", "rapid", "Vitest", "fast-check", "Playwright", "le mur", "wall", "project-scopé", "S35", "S71", "S74", "S110", "EPIC 6"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord complet. Pour la vue produit sans code, voir [Pour les futurs utilisateurs → S75](/steps/concept/s75-entity-modeler).</Note>
+
+## Implémentation
+
+S75 ajoute le **modeleur entité/relation** — `back/kernel/entities/modeler` — le moteur **côté canvas** qui façonne un **brouillon** de schéma (entités S35 + relations S71) et le **propose** comme source Kernel project-scopée via `propose → ChangeSet → approbation`. Tout est **pur, total, déterministe** : aucune horloge, aucun RNG, aucun LLM, aucune fuite d'ordre d'itération. Rien n'écrit la vérité (**le mur**) ; `Propose` rend un `changeset.ChangeSet` **DRAFT**.
+
+### Le moteur Go — `back/kernel/entities/modeler`
+
+- **`Draft{ Project string, Nodes []EntityNode }`** — l'état du canvas. `EntityNode{ Entity entities.Entity, Relations []ref.Relation }` apparie une entité (S35, réutilisée verbatim) avec les relations **déclarées sur elle** (S71). C'est un artefact **pré-proposal** : aucune vérité, aucun changeset encore.
+- **`Validate(d)`** — vérifie que **tout** le brouillon est un schéma **proposable et résoluble** : un projet épinglé + ≥ 1 nœud, des noms d'entité **uniques** (pas de doublon), chaque entité valide (`entities.Validate`), chaque relation **résolue** contre l'ensemble déclaré (`ref.Resolve` — une cible non déclarée est `UNKNOWN_RELATION_TARGET`, jamais devinée), et chaque relation 1-1/1-N/N-N dont la cible **porte un identifier** (la FK a besoin d'une colonne à référencer — le même garde-fou que l'`EmitDDL` de S74). N'invente **rien**.
+- **`Body(d)` / `SchemaHash(d)`** — re-sérialise le brouillon en un corps JSON **canonique** via `canonicalize` : entités triées par nom, relations de chaque entité triées par nom, **ordre des attributs préservé** (il est sémantique en S35). L'ordre d'**entrée** ne fuit donc **jamais** dans l'adresse. `SchemaHash = records.Hash(Body)` (S02 réutilisé verbatim). C'est l'**invariance à l'ordre d'entrée** : deux éditeurs qui posent les mêmes nœuds dans un ordre différent obtiennent le **même** hash. (Hash de référence du draft de démo Customer↔Order : `a91081e1…`.)
+- **`Propose(d, parentPhase) → Proposal`** — valide, puis **ouvre** un `changeset.ChangeSet` DRAFT (`changeset.Open`, pur) dont le `spec_delta` porte le **corps canonique** du brouillon, ciblé `entity-schema@<project>` (project-scopé, S55), et le `mirror_delta` déclare le miroir du schéma (la **loi de complétude** : un changement de spec exige un miroir). `Propose` n'**applique jamais** (statut DRAFT, `applied_at` nil) — c'est la done-criterion « le modeleur produit un ChangeSet `proposed` » et « reject laisse le Kernel intact » (un rejet = discard du DRAFT ; le Kernel n'a jamais été touché).
+- **`BlockInvalid(cause)`** — le `blockreason.BlockReason` canonique pour un brouillon malformé (`MODELER_INVALID_DRAFT`), toujours avec un `how_to_fix` non vide (pas de prison, KRD §44.5).
+
+### La concurrence draft-level — `concurrency.go`
+
+Distincte de la concurrence d'**écriture-vérité** de S110 (optimistic-lock sur la tête du Kernel). Le canvas est **pré-proposal** : deux éditeurs conflictent sur un **brouillon**, pas sur la vérité. Trois primitives **pures** :
+
+- **`Presence{ Editor, LockedNode }` / `PresenceSet`** — qui est sur le canvas. `Join` (idempotent par éditeur, trié par nom → ordre indépendant), `Leave`, `LockHolder` (le verrou est **indicatif** : il prévient l'UI qu'un éditeur édite ce nœud, mais il **ne bloque jamais** le merge — le merge reste l'autorité, jamais last-write-wins).
+- **`MergeDrafts(base, a, b) → MergeOutcome`** — le merge **CRDT trois-voies** au grain du nœud (clé = nom d'entité). La règle anti-écrasement, par nœud : un **ajout** d'un seul éditeur est **gardé** (`AddedByA`/`AddedByB`) ; une **édition** d'un seul côté gagne (l'autre n'y a pas touché) ; une **édition divergente des deux côtés** est un **conflit surfacé** (`Conflicts` — la version de `a` est gardée sur le canvas, le nom est **enregistré** pour que les humains réconcilient ; la version de `b` n'est **jamais** silencieusement jetée). Un keep/remove en désaccord favorise le **keep** (aucune perte silencieuse). Déterministe et **ordre-indépendant** (résultat trié par nom) ; `MergeDrafts(d, d, d)` est `d` (idempotent).
+- **`nodeHash`** — l'adresse de contenu d'un nœud seul (entité + ses relations), pour détecter si deux éditeurs ont changé un nœud vers le **même** ou un **autre** contenu — invariante à l'ordre des relations.
+
+### Le jumeau TS — `front/web/lib/entity-modeler.ts`
+
+La projection **déclarée** du moteur Go pour l'écran : `Draft`, `validate`, `schemaBody`, `schemaHash` (canon JSON à clés triées, **byte-équivalent** au Go — vérifié : hash `a91081e1…` identique), `propose` (rend un `ChangeSetView` DRAFT), `mergeDrafts` (le même merge CRDT), `join`/`leave`/`lockHolder`. La sortie Go est **autoritaire** ; le jumeau la reproduit. Le miroir de reproductibilité `lib/entity-modeler.test.ts` (Vitest + fast-check, **7 tests verts**) épingle le hash cross-langage, l'invariance à l'ordre, le `proposed`/DRAFT, le refus, et l'anti-écrasement.
+
+### Le MCP — `back/mcp/entity-modeler`
+
+La porte de capacité (ADR 0009 : chaque op backend = un outil MCP). **5 outils purs** : `schema_validate`, `schema_hash`, `schema_propose` (rend un ChangeSet DRAFT, n'applique jamais), `canvas_merge`, `canvas_presence`. Aucun LLM n'entre dans le serveur — **le code juge**. `main_test.go` vert.
+
+### La route Workbench — `/entity-modeler`
+
+Action-capable (loi d'ui-completeness, §7) : **deux contrôles** liés au moteur réel, exécutables depuis l'écran — (1) **modéliser Customer↔Order + proposer** (ChangeSet DRAFT + adresse de contenu + entity-map du schéma proposé), (2) **deux éditeurs simultanés** (Alice ajoute Order, Bob ajoute Invoice → le merge garde les deux). Thème ADR 0010, bilingue fr/en (ADR 0011). **5 Playwright e2e verts** : rendu du canvas, propose→DRAFT visible dans l'entity-map, reject (cible inconnue) qui laisse le Kernel intact, deux éditeurs sans écrasement, hash stable et déterministe.
+
+### Les miroirs (BDD-first, rouge avant le code)
+
+- `modeler_fixture_test.go` — Customer↔Order propose un ChangeSet `proposed` (DRAFT, jamais APPLIED) ; reject laisse le Kernel intact ; cible inconnue refusée ; FK-target sans identifier refusée ; deux éditeurs ne s'écrasent pas ; édition divergente = conflit surfacé ; présence.
+- `modeler_property_test.go` (rapid) — SchemaHash **invariant à l'ordre d'entrée** et déterministe ; Propose pur & DRAFT ; merge idempotent ; **merge sans perte** (tout ajout d'un éditeur survit).
+- `lib/entity-modeler.test.ts` (Vitest + fast-check) — les **7** mêmes invariants côté TS, + le hash byte-équivalent au Go.
+
+## Méta
+
+**Pourquoi un moteur de canvas séparé, et pas une simple écriture ?** Parce que le **mur** (CLAUDE.md §2) interdit qu'un écran écrive la vérité. Le canvas est donc un **artefact pré-proposal** : on y dessine sans danger, et la seule porte vers la vérité est `propose → ChangeSet → approbation`. `Propose` matérialise cette porte : il rend un **brouillon** content-adressé, jamais un apply. Le rejet est gratuit (discard d'un DRAFT) et le Kernel reste **intact** — ce qui rend l'exploration de schémas **réversible par construction**.
+
+**Pourquoi l'invariance à l'ordre d'entrée ?** Parce que deux humains modélisent le **même** schéma par des chemins différents. Si l'identité du schéma dépendait de l'ordre d'ajout, la **même** intention produirait **deux** vérités — un faux conflit. En triant nœuds et relations avant le hash (mais en **préservant** l'ordre sémantique des attributs), AIDOS fait coïncider « même modèle logique » et « même adresse de contenu ». C'est aussi ce qui rend le **merge** sain : `nodeHash` compare des contenus, pas des ordres.
+
+**Pourquoi un merge CRDT au niveau brouillon, distinct de S110 ?** Parce qu'il y a **deux** natures de conflit : avant la proposition (sur le canvas, draft-level — **ici**) et à l'approbation (deux écritures-vérité concurrentes — **S110**, optimistic-lock content-adressé). Les confondre serait une erreur de couche. S75 garantit qu'**aucun ajout** d'un éditeur n'est perdu et qu'un **désaccord réel** est **surfacé** (jamais avalé par un last-write-wins) — l'esprit de l'anti-overwrite (§9) appliqué au brouillon. Le verrou est **indicatif**, pas autoritaire : le merge décide.
+
+**Déterminisme-first (§6/§8).** Tout ce que S75 fait est une **fonction pure** : valider, résoudre, hasher, merger, proposer. Aucun LLM n'entre — ni dans le moteur, ni dans le MCP, ni dans les Server Actions. Le hash byte-équivalent Go↔TS (`a91081e1…`) et les miroirs de reproductibilité (rapid + fast-check) **prouvent** que la même entrée rend la même sortie. Un agent qui ferait à la main ce que `MergeDrafts` ou `SchemaHash` calcule serait un **écart de déterminisme** bloquant.
+
+## Méta-méta
+
+S75 illustre la **stratification des conflits** d'AIDOS comme une propriété de NIVEAU 3 : le système ne possède pas « un » mécanisme de concurrence mais une **échelle** — draft-level sur le canvas (S75/S68), truth-write à l'approbation (S110), présence temps-réel transversale (S113) — chacune à sa **couche**, aucune n'empiétant sur l'autre. Le **mur** est le pivot : il sépare le monde où l'on peut tout casser sans conséquence (le brouillon) du monde où rien ne change sans une décision humaine **enregistrée** (le ChangeSet + l'approbation + la provenance). Le modeleur n'est pas « un éditeur de schéma » ; c'est la **démonstration**, à l'échelle d'un canvas, que toute capacité d'AIDOS — même la plus visuelle, la plus collaborative — reste **gouvernée par la même invariante** : on **propose** la vérité, on ne l'**écrit** jamais en passant, et on ne perd **jamais** silencieusement le travail d'autrui. La complétude (un miroir vivant par couche : fixture, property, twin, e2e) et le déterminisme (le hash décide, pas l'agent) font que cette garantie est **mesurée**, pas affirmée.
