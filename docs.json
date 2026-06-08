@@ -260,6 +260,8 @@
               "steps/internals/s95-data-migrate",
               "steps/concept/s96-deploy",
               "steps/internals/s96-deploy",
+              "steps/concept/s97-domain-bind",
+              "steps/internals/s97-domain-bind",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

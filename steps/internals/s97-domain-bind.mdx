@@ -1,0 +1,47 @@
+---
+title: "S97 · Pour moi — le binding de domaine custom + TLS, injectivité, labels Traefik émis (DP27)"
+description: "Pour moi : l'implémentation de S97 — back/runtime/domainbind (Bind : validation du domaine → injectivité d'abord (DOMAIN_ALREADY_BOUND si pris par un autre projet) → rendu des labels Traefik websecure+TLS+certresolver ACME (DP27) + CNAME → content-address S02 ; pur, total ; ServesHTTPS, IsInjective), le nouveau code BlockReason CodeDomainAlreadyBound, le MCP domainbind (bind/serves_https/injective), le twin TS lib/domainbind + sa route action-capable /domain-bind, et les miroirs (Godog 5 scénarios, rapid 5 propriétés, fixture 12 cas, fast-check 6/6, Playwright 6/6). Plus les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S97", "domainbind", "Bind", "BindPlan", "IsInjective", "ServesHTTPS", "DOMAIN_ALREADY_BOUND", "Traefik", "ACME", "certresolver", "CNAME", "Registry", "Binding", "records.Hash", "rapid", "fast-check", "Playwright", "Godog", "MCP", "EPIC 10", "DP27", "ADR 0043", "déterminisme"]
+---
+
+<Note>Côté « Pour moi » — le détail complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S97](/steps/concept/s97-domain-bind).</Note>
+
+## Implémentation
+
+S97 ajoute le **binding de domaine custom** : `back/runtime/domainbind`. Une fois une phase déployée (S96, sous-domaine `d-…`), S97 lie un **domaine custom** par-dessus, servi en HTTPS via Traefik + un certresolver ACME — exactement comme le Workbench derrière Traefik, mais pour les apps émises (DP27). Tout est **pur, total, content-adressé** via S02.
+
+**Le plan (pur, injectivité d'abord).**
+
+- `Bind(reg Registry, req Request) → (BindPlan, *BlockReason)`. L'ordre :
+  1. **validation** — `normalizeDomain` (lower-case, schéma/dot-trailing/port retirés) puis `validDomain` (au moins un point, labels DNS-safe) ; un domaine malformé / projet vide / host de déploiement manquant / service serveur manquant → `OUT_OF_SCOPE` (réutilisé comme deploy/preview).
+  2. **INJECTIVITÉ D'ABORD** — `reg.index()` construit la map domaine-normalisé→projet et **détecte une registry déjà non-injective** (un domaine sur deux projets différents = un fait incohérent, refusé). Si le domaine est déjà détenu par un **autre** projet → **`DOMAIN_ALREADY_BOUND`** nommant le propriétaire. Re-lier au **même** projet est idempotent (autorisé).
+  3. **rendu** — `routerNameOf(domain)` (nom de routeur déterministe, DNS-safe), `renderLabels` (les étiquettes Traefik canoniques), `DNSRecord{CNAME, domain → deployHost}`.
+  4. `contentAddress` (S02) sur le corps canonique (chaque champ sauf l'ID). Même `reg`+`req` → `BindPlan` byte-identique (même `ID`, mêmes labels, même DNS).
+- **`ServesHTTPS(plan)`** — la garantie Godog rendue déterministe : les labels portent bien un routeur `websecure` + `tls=true` + un `certresolver` non vide + la règle Host sur le domaine, et l'URL est `https://`. Une vérification pure — le **code** juge, jamais un agent.
+- **`IsInjective(bindings)`** — la propriété done-criteria : l'ensemble des bindings mappe chaque domaine (normalisé) à **au plus un** projet. Le code juge, ordre-indépendant.
+
+**Les labels Traefik émis (DP27).** `renderLabels` rend, en ordre canonique, exactement la convention `/data/dockers` : `traefik.enable`, le routeur `websecure` (une règle Host, `.entrypoints = websecure`, `.tls = true`, `.tls.certresolver = letsencrypt`, `.service`), plus le routeur HTTP compagnon qui redirige http→https (`-http` + un middleware `redirectscheme`). La même structure que `honoemit/pulumi.go` (S87), pour que l'app émise hérite du routage d'AIDOS lui-même.
+
+**Le nouveau `BlockReason`.** `blockreason.CodeDomainAlreadyBound = "DOMAIN_ALREADY_BOUND"` — extension additive de l'enum close (change_type: refine, jamais une suppression), avec sa rangée canonique dans la registry (severity `blocking`, explication FR §8/§9 anti-overwrite, `how_to_fix` non vide : choose_a_free_domain / release_the_existing_binding / use_the_default_deploy_subdomain) et son entrée dans `codeOrder`. La property mirror de `blockreason` couvre **automatiquement** le nouveau code (elle échantillonne `Codes()`).
+
+**Le MCP (ADR 0009).** `back/mcp/domainbind` expose le plan en trois outils, tous purs (le mur) : `bind` (registry+request → BindPlan ou BlockReason), `serves_https` (la garantie HTTPS sur les labels), `injective` (la propriété done-criteria). `main_test.go` GREEN (6 tests).
+
+**Le twin TS + l'écran.** `front/web/lib/domainbind.ts` reproduit la structure pour l'écran (FNV-1a d'affichage ; le `records.Hash` Go reste autoritatif) : `bind`, `servesHTTPS`, `isInjective`, `normalizeDomain`, `routerNameOf`. La route **action-capable** `/domain-bind` (thème ADR 0010, bilingue ADR 0011) a le contrôle BIND, un toggle « domaine déjà lié à un autre projet » (prouve `DOMAIN_ALREADY_BOUND`), le badge « sert en HTTPS », le badge « injectif », le CNAME et la liste des labels Traefik. Enregistrée dans la nav `WorkbenchHeader` + i18n fr/en.
+
+**Les miroirs (tous GREEN).** Godog `tests/runtime/domainbind.feature` (5 scénarios : un domaine custom sert l'app en HTTPS, un domaine déjà lié à un autre projet refusé, re-bind même projet idempotent, domaine malformé refusé, plan reproductible) ; rapid (5 propriétés : reproductibilité, injectivité — un domaine d'un autre projet toujours refusé, service HTTPS, idempotence même-projet, sensibilité de l'adresse de contenu) ; fixture (12 cas : trois binds OK + neuf refus/garanties) ; fast-check 6/6 ; Playwright `domain-bind.spec.ts` 6/6. `go test ./runtime/domainbind/ ./mcp/domainbind/ ./runtime/blockreason/` ok.
+
+**OpenQuestion OQ-S97-apply** (forward-dependency, exception bootstrap §6). S97 **planifie** le binding (le CNAME + les labels content-adressés) ; l'application réelle (poser le CNAME, le `pulumi up` qui pose les labels, l'émission ACME par Traefik) est l'effet en aval, et le **registre persistant** des bindings (la source de vérité d'injectivité côté truth-store) est porté par le cockpit S99. Le plan est déterministe et content-adressé exprès. OpenQuestion documentée, pas un résidu rouge.
+
+## Méta
+
+**Pourquoi c'est la bonne forme.** Le binding domaine→projet **est** une fonction injective — exactement le genre de capacité déterministe que le mandat §6 exige en **code** : un name-match sur un registre, jamais un jugement LLM. La règle « un domaine, un projet » est l'analogue, au niveau infrastructure, de l'anti-overwrite §9 : on ne déplace jamais un domaine en écrasant silencieusement son binding. Le refus `DOMAIN_ALREADY_BOUND` nomme le propriétaire (actionnable, jamais une prison §44.5). Et le pattern « **planifier**, pas agir » est le même que S96/S94 : S97 calcule les labels et le CNAME, le monde est touché par l'infrastructure émise — le mur tient.
+
+**Réutilisation, jamais réinvention (ADR 0007).** Le content-address réutilise `records.Canonicalize`+`Hash` (S02). Les labels Traefik réutilisent la convention `honoemit/pulumi.go` (S87 / DP03). Le refus typé réutilise `blockreason.For` (S13). Le sous-domaine de déploiement vient de S96. Aucun schéma forké.
+
+**Le déterminisme comme propriété de premier ordre.** Les deux miroirs de reproductibilité (rapid + fast-check) pinnent : même registre + requête → plan byte-identique. L'injectivité et le service HTTPS sont des propriétés vérifiées par échantillonnage, pas des assertions ponctuelles. La sensibilité de l'adresse de contenu garantit qu'un domaine différent ou un host différent → un ID différent (pas de collision).
+
+## Méta-méta
+
+**Ce que S97 enseigne à la méthode.** Une capacité « infrastructure » (DNS, TLS, routage) n'échappe pas au contrat KRD : elle a ses trois formes de miroir (Godog pour « sert en HTTPS », rapid/fast-check pour l'injectivité, fixture pour les douze issues), son `BlockReason` actionnable, son MCP, son écran action-capable, et son déterminisme prouvé. Le fait que l'effet réel (un certificat ACME, un enregistrement DNS) soit **en aval** ne dispense pas de **planifier déterministiquement** au-dessus du mur — c'est l'exception bootstrap §6 (forward-dependency), documentée en OpenQuestion, jamais un résidu rouge.
+
+**La généralisation.** S94 (preview), S96 (deploy), S97 (domaine/TLS) forment une même famille : chacun **planifie** une projection déterministe content-adressée au-dessus du mur, et délègue l'effet réel à l'infrastructure émise (Pulumi + Traefik). La constance du pattern — un plan pur, un Stop-gate / une règle d'injectivité, une garantie jugée par le code, un MCP, un écran, des miroirs de reproductibilité — est ce qui rend la chaîne de déploiement entière **auditable** sans jamais qu'un agent ne s'assoie dans la boucle d'exécution.

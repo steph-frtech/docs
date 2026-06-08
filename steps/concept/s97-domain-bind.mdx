@@ -1,0 +1,35 @@
+---
+title: "S97 · Votre domaine custom + HTTPS automatique — un domaine, un projet"
+description: "S97 met votre app déployée sur VOTRE domaine (shop.acme.com) avec un certificat TLS automatique, exactement comme le Workbench derrière Traefik. AIDOS calcule un plan de binding déterministe : l'URL HTTPS, les labels Traefik (router sécurisé + TLS + certificat ACME) et le CNAME à poser chez votre registrar. Un domaine appartient à EXACTEMENT UN projet — lier un domaine déjà pris par une autre app est REFUSÉ. Le binding domaine→projet est injectif."
+keywords: ["aidos", "krd", "S97", "domaine custom", "custom domain", "TLS", "HTTPS", "Traefik", "ACME", "Let's Encrypt", "certresolver", "DNS", "CNAME", "DOMAIN_ALREADY_BOUND", "injectif", "DP27", "ADR 0043", "EPIC 10"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S97](/steps/internals/s97-domain-bind).</Note>
+
+## En une phrase
+
+S97 met votre app déployée sur **votre propre domaine** (par exemple `shop.acme.com`) avec un **certificat HTTPS automatique** — et garantit qu'un domaine ne sert **qu'une seule** app.
+
+## Le problème que S97 résout
+
+Une fois votre app déployée (S96), elle vit sur un sous-domaine technique généré par AIDOS (`d-ab12cd34ef56.deploy.aidos.app`). Personne ne tape ça dans un navigateur. Vous voulez **votre** domaine. S97 le branche par-dessus, exactement comme le Workbench d'AIDOS lui-même tourne derrière Traefik :
+
+1. **HTTPS automatique.** Vous ne générez aucun certificat à la main, vous n'en renouvelez aucun. AIDOS pose les bonnes étiquettes pour que Traefik obtienne et renouvelle un certificat **ACME** (Let's Encrypt) tout seul. Votre domaine est servi en `https://` dès qu'il pointe vers le déploiement.
+2. **Un domaine, un projet.** Un domaine custom ne peut servir qu'**une seule** app. Si vous tentez de lier un domaine déjà détenu par un autre projet, S97 **refuse** en nommant le propriétaire actuel — jamais il ne « re-pointe » silencieusement le domaine, ce qui détournerait l'HTTPS d'un autre tenant. C'est la règle d'**injectivité** : le lien domaine→projet est sans collision.
+3. **Le DNS, dit clairement.** S97 vous donne l'**enregistrement DNS** exact à poser chez votre registrar : un `CNAME` de votre domaine vers l'host de déploiement. Pas de devinette.
+
+## Comme le Workbench derrière Traefik
+
+C'est le principe DP27. AIDOS ne réinvente pas le routage : il réutilise **exactement** la même convention que ses propres déploiements (le routeur `websecure`, le TLS, le `certresolver` ACME). Les apps qu'AIDOS construit pour vous **héritent** de l'infrastructure d'AIDOS lui-même. Les étiquettes Traefik sont **posées par le programme d'infrastructure émis** (le provider Docker de Pulumi) — pas un script à part.
+
+## Le portail : le domaine est-il libre ?
+
+Avant de calculer quoi que ce soit, S97 vérifie le **portail** : ce domaine appartient-il déjà à un autre projet ? Si oui, c'est **refusé** (`DOMAIN_ALREADY_BOUND`), en nommant le projet propriétaire. Re-lier le **même** domaine au **même** projet est en revanche sans effet de bord (idempotent) — pas un conflit. La comparaison se fait sur le domaine **normalisé** : `Shop.Acme.com.` et `shop.acme.com` sont le même domaine.
+
+## Ce que vous voyez à l'écran
+
+Le panneau Workbench `/domain-bind` est **action-capable** : donnez le projet et votre domaine custom, puis **binder le domaine**. L'écran montre l'**URL HTTPS** sur votre domaine, le badge **« sert l'app en HTTPS »** (jugé par le code sur les étiquettes émises), le badge **« binding injectif »**, le **CNAME** à poser, et la liste des **étiquettes Traefik** émises (routeur sécurisé + TLS + certificat ACME). Cochez « domaine déjà lié à un autre projet » pour voir le refus **`DOMAIN_ALREADY_BOUND`**.
+
+## Ce que S97 ne fait pas
+
+S97 **n'invente** pas un propriétaire : si le domaine est pris, il nomme le vrai projet et refuse, jamais ne re-pointe en douce. Il ne fait **aucun** appel DNS ou ACME en direct depuis l'écran — il **planifie** (le CNAME + les étiquettes) ; c'est l'infrastructure émise et Traefik qui agissent sur le monde. Le jugement « ce domaine est-il libre ? » et « ces étiquettes servent-elles en HTTPS ? » est fait par du **code** (un name-match déterministe), jamais par un avis. Et S97 n'écrit jamais dans le noyau (le mur). S97 ouvre la porte à S98 (environnements + rollback par ré-projection) et S99 (le cockpit de déploiement qui montre phases, environnements, domaines/TLS).
