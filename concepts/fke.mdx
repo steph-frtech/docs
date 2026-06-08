@@ -106,7 +106,7 @@ La sécurité n'est pas la seule facette. Le **même squelette de six paires** s
 | **Performance / Budgets** | assez rapide, pas trop cher (charge normale) ? | benchmark, load test, métrage |
 | **Fiabilité / Résilience** | survit-il aux **pannes** (dégradation, reprise) ? | chaos / fault-injection, failover, restore |
 | **Évolutivité / Migration** | la vérité tient-elle dans le temps, sur de vraies données ? | migration, backfill, restore, `as-of` |
-| **Maintenabilité / Structure** | reste-t-il sain — pas « vert dehors, pourri dedans » ? | arch-fitness, le second cliquet structurel |
+| **Maintenabilité & Architecture** | la structure est-elle saine (design déclaré ↔ structure réalisée) ? | arch-fitness, le second cliquet structurel |
 | **Expérience / Utilisabilité** | est-il **bon à utiliser** ? (vérité molle, falsifiable) | ExperienceClaim : usabilité, A/B, télémétrie |
 
 Chaque lentille a les six mêmes paires (Spec → Comportement → Scénarios → Modèle/Domaine → Contrat → Evidence ↔ leurs reflets), lues sous son angle. La **maintenabilité** est le **second cliquet** de KRD (« tests verts, système pourri »). La **fiabilité** demande « survit-il à une dépendance morte / un crash ? » — orthogonale à la performance (rapide ≠ résilient) et à l'évolutivité (durable au changement ≠ tolérant à la panne). L'**expérience** est une **vérité molle** (§13.6) : prouvée expérientiellement (usabilité, A/B, télémétrie), falsifiable par la réalité — elle **informe** la décision sans la **bloquer** comme un invariant dur (sous-contraindre l'UX serait l'erreur symétrique).
@@ -130,6 +130,12 @@ Les facettes ne sont qu'**un** axe : la **nature** de la vérité. Une vérité 
 La différence est profonde : les **facettes sont orthogonales** (régler la sécurité ne touche pas la performance — elles n'interagissent pas, elles **séparent**). La **verticale, elle, n'est pas orthogonale : elle COUPLE.** Une vérité posée bas (sur l'entité) **contraint tous les niveaux qui la composent au-dessus** (l'opération, l'action, le contrôle, la vue) ; et quand elle change, le **red wave remonte cette ligne** et rougit ses consommateurs. **Les facettes isolent ; la verticale relie et propage.** C'était la ligne « non-orthogonale » qu'il manquait.
 
 Le système de coordonnées complet d'une vérité : **niveau** (verticale, latérale/couplante) × **facette** (nature, orthogonale/séparante) × **côté du mur** (déclaré / prouvé) × **échelle** (projet ⊃ feature ⊃ fonction). La conscience compare dans une cellule ; le red wave propage le long de la verticale ; le mur traverse les quatre.
+
+## Nœud et arête — l'anatomie et la pile OSI
+
+Le graphe a deux objets, chacun avec sa structure. Un **nœud** (un kernel) a l'**anatomie** ci-dessus (6 paires × facettes × verticale × mur). Une **arête** — un contrat entre kernels, un connecteur, une API, un outil MCP — a une **pile**, et c'est le **modèle OSI** qui en est le gabarit : **L7 application** (le schéma, le protocole) · **L6 présentation** (sérialisation, encodage, redaction) · **L5 session** (auth, OAuth) · **L4 transport** (HTTP/gRPC ; les transports MCP). Une fonction pure n'a aucune couche OSI ; une API/MCP/connecteur a la pile complète. **L'OSI est à l'arête ce que l'anatomie est au nœud.**
+
+Et le clivage **fonctionnel/technique** n'ajoute aucune rangée : il est déjà porté par la **ligne de flottaison** (métier en haut, technique en bas) et par les **facettes** (F = fonctionnel ; S/B/R/V/M = technique). La « **spécification technique** » et la « **suite de tests techniques** » sont donc des **projections générées** par kernel (assemblant Contrat + Modèle + la pile OSI si réseau + les specs des facettes + les ADR), jamais de nouvelles rangées — comme `CLAUDE.md` est généré, jamais écrit à la main.
 
 ## La causalité dans les deux sens (le WhyTree)
 
