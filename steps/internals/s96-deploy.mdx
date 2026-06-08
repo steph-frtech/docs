@@ -1,0 +1,45 @@
+---
+title: "S96 · Pour moi — le pipeline de déploiement keyé sur les phases stables, Stop-gate hérité, ré-projection depuis la phase"
+description: "Pour moi : l'implémentation de S96 — back/runtime/deploy (BuildPlan : Stop-gate d'abord — phases.IsStable (S23) ∧ Gate{mutation ≥ seuil, 0 monstre} sinon PHASE_NOT_STABLE → ré-émission depuis la phase via preview.EmittedAppHash (S94) → migration forward-only datamigrate.Build (S95) → URL keyée sur la phase + `pulumi up` ; pur, total, content-adressé via S02 ; IsDeployable, DeployedMatchesPhase, MigrationIsForwardOnly), le nouveau code BlockReason CodePhaseNotStable, le MCP deploy (plan/gate/check_served/forward_only), le twin TS lib/deploy + sa route action-capable /deploy, et les miroirs (Godog 5 scénarios, rapid 5 propriétés, fixture 12 cas, fast-check 6/6, Playwright 6/6). Plus les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S96", "deploy", "BuildPlan", "IsDeployable", "Gate", "phases.IsStable", "StablePhase", "PHASE_NOT_STABLE", "EmittedAppHash", "ré-projection", "DeployedMatchesPhase", "MigrationIsForwardOnly", "datamigrate", "pulumi", "records.Hash", "rapid", "fast-check", "Playwright", "Godog", "MCP", "EPIC 10", "DP26", "ADR 0043", "déterminisme"]
+---
+
+<Note>Côté « Pour moi » — le détail complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S96](/steps/concept/s96-deploy).</Note>
+
+## Implémentation
+
+S96 ajoute le **pipeline de déploiement keyé sur les phases stables** : `back/runtime/deploy`. Il compose trois dents antérieures — la **décision de coupe** (`phases.IsStable`, S23), la **ré-projection** (`preview.EmittedAppHash`, S94) et la **migration forward-only** (`datamigrate.Build`, S95) — derrière un **Stop-gate hérité**. Tout est **pur, total, content-adressé** via S02.
+
+**Le pipeline (pur, Stop-gate d'abord).**
+
+- `BuildPlan(in Input) → (DeployPlan, *BlockReason)`. L'ordre est crucial (fail-closed) :
+  1. **STOP-GATE D'ABORD** — `IsDeployable(phase, gate)` : la phase doit être **déployable** AVANT toute ré-émission. Une phase non-déployable est refusée **`PHASE_NOT_STABLE`** sans rien émettre.
+  2. `validateSurface` — une surface complète (server/front/infra) du **même projet** (sinon `OUT_OF_SCOPE`, réutilisé comme preview).
+  3. **RÉ-ÉMISSION DEPUIS LA PHASE** — `preview.EmittedAppHash(PhaseRef{phaseHash}, surface)` : le hash de l'app déployée **EST** le hash émis de la phase (jamais un artefact bac-à-sable périmé).
+  4. **MIGRATION FORWARD-ONLY** — si `in.Change.Kind != ""`, `datamigrate.Build(change)` (S95) ; un breaking-no-backfill est refusé **`BREAKING_MIGRATION_NO_BACKFILL`** (délégué à S95, jamais reforké).
+  5. URL keyée sur la phase (`d-` + 12 hex), stack Pulumi déterministe, `pulumi up`/`pulumi destroy`, puis `contentAddress` (S02). Même `Input` → `DeployPlan` byte-identique (même `ID`, même URL, même migration).
+- **`IsDeployable(phase, gate)` — le « done is computed »** : `phase.Stable` (la coupe cohérente S23, tous miroirs verts ∧ liens résolus) **∧** `gate.Stable()` (`MutationScore ≥ MutationThreshold` ∧ `MonsterCount == 0`). Les **raisons** sont l'union ordonnée des miroirs rouges de la phase et des faits du gate (`mutation_below_threshold(…)`, `monster_present(…)`) — elles **nomment** le refus, jamais un vague « non stable ». Le seuil de mutation est **déclaré** (§8 — déclaré, jamais appris).
+- **`DeployedMatchesPhase(plan, servedHash)`** — la **propriété de ré-projection** rendue déterministe : le hash servi par le déploiement (la sonde `/__aidos_hash` cuite dans les bytes émis) doit **égaler** `plan.EmittedAppHash`. Une comparaison pure — le **code** juge, jamais un agent ; un écart est un `BlockReason` (un artefact périmé).
+- **`MigrationIsForwardOnly(plan)`** — les stages apparaissent dans l'ordre canonique `expand → backfill → contract` (rang croissant, aucun stage inconnu, jamais un contract avant un backfill). Le code juge l'ordre.
+
+**Le nouveau `BlockReason`.** `blockreason.CodePhaseNotStable = "PHASE_NOT_STABLE"` — extension additive de l'enum close (change_type: refine, jamais une suppression), avec sa rangée canonique dans la registry (severity `blocking`, explication FR §43/§44/§8, `how_to_fix` non vide : make_the_phase_stable / recompute_the_phase / never_deploy_a_stale_artifact) et son entrée dans `codeOrder`. La property mirror de `blockreason` (chaque code a un `how_to_fix` non vide, `Render` round-trip, `For` déterministe) couvre **automatiquement** le nouveau code (elle échantillonne `Codes()`).
+
+**Le MCP (ADR 0009).** `back/mcp/deploy` expose le pipeline en quatre outils, tous purs (le mur) : `plan` (Input → DeployPlan ou BlockReason), `gate` (le verdict déployable + raisons), `check_served` (la ré-projection), `forward_only` (l'ordre de migration). `main_test.go` GREEN (6 tests).
+
+**Le twin TS + l'écran.** `front/web/lib/deploy.ts` reproduit la structure pour l'écran (FNV-1a d'affichage ; le `records.Hash` Go reste autoritatif) : `buildPlan`, `isDeployable`, `emittedAppHash` (`d-`), `migrationIsForwardOnly`, `deployedMatchesPhase`. La route **action-capable** `/deploy` (thème ADR 0010, bilingue ADR 0011) a un toggle « phase non-stable » (prouve `PHASE_NOT_STABLE`), un toggle « migration » (étale expand→backfill→contract), le badge PROBE (servi ≟ émis) et le badge FORWARD-ONLY. Enregistrée dans la nav `WorkbenchHeader` + i18n fr/en.
+
+**Les miroirs (tous GREEN).** Godog `tests/runtime/deploy.feature` (5 scénarios : phase stable déploie + ré-projetée, migration forward-only, phase rouge refusée, sous-seuil de mutation refusé, déploiement reproductible) ; rapid (5 propriétés : reproductibilité, ré-projection, Stop-gate refuse toujours le non-stable, sensibilité de l'adresse de contenu, forward-only tient) ; fixture (12 cas : trois déploiements OK + neuf refus/garanties) ; fast-check 6/6 ; Playwright `deploy.spec.ts` 6/6. `go test ./runtime/deploy/ ./mcp/deploy/` ok.
+
+**OpenQuestion OQ-S96-apply** (forward-dependency, exception bootstrap §6). S96 **planifie** le déploiement (l'URL + le `pulumi up` content-adressé) ; l'exécution réelle (`pulumi up` contre une vraie cible + l'apply Atlas) est l'effet en aval, et le **rollback par ré-projection** est la dent **S98**. Le plan est déterministe et content-adressé exprès. OpenQuestion documentée, pas un résidu rouge.
+
+## Méta
+
+S96 est la dent qui **compose**, jamais ne reconstruit. Sa décision structurante est de poser le **Stop-gate en premier** dans `BuildPlan` : la stabilité est vérifiée **avant** toute ré-émission, donc un déploiement de phase rouge est impossible par construction (fail-closed), pas par convention. La seconde décision est la **ré-projection** : `EmittedAppHash` est réutilisé tel quel de S94 — l'app déployée **est** l'app de la phase, ce qui clôt mécaniquement « déployer un artefact périmé » (DP26 : deploy = ré-émission, le code bac-à-sable est régénérable, jamais restauré tel quel).
+
+La **réutilisation** est délibérée et totale : `phases.IsStable` (S23) pour la coupe, `preview.EmittedAppHash` (S94) pour l'adresse, `datamigrate.Build` (S95) pour la migration, `records.Hash` (S02) pour le content-address. S96 n'**ajoute** que le **gate de mutation/monstre** (le côté déclaré du « done is computed », §8) et le **tissage** des trois en un plan. Le nouveau `BlockReason` est l'expression, au plan du déploiement, de l'invariant §43 « stable = calculé, jamais déclaré » : `PHASE_NOT_STABLE` nomme exactement la coupe rouge, le score sous le seuil ou le monstre.
+
+## Méta-méta
+
+S96 illustre le **déterminisme-first** sur le plan du déploiement : tout ce qui *peut* être une fonction pure l'**est** — la décision de déployabilité (un `∧` de prédicats sur la coupe et le gate), la ré-émission (un hash de la surface), la propriété de ré-projection (une égalité de hash), le verdict forward-only (une comparaison d'ordre des stages), l'URL/stack/commandes (des dérivations du hash de phase), l'adresse de contenu (un hash). Aucun LLM n'entre — ni dans la planification, ni dans le jugement « cette phase est-elle déployable ? ». Un agent qui « jugerait » si une phase est prête serait une **brèche de déterminisme** (comme un miroir rouge déployé ou un monstre) ; ici c'est du code, autoritaire. Le « done is computed » de CLAUDE.md §8 est appliqué **à la lettre** : le déploiement ne lit jamais la confiance d'un agent — il calcule la stabilité.
+
+Et S96 respecte le **mur** sans exception : il lit un verdict de coupe, un gate, une surface et un changement (sous la ligne) et planifie un déploiement ; il n'écrit jamais une vérité, n'invente jamais une phase stable ni une URL, ne déploie jamais un artefact bac-à-sable. Le `BlockReason` `PHASE_NOT_STABLE` est la forme honnête du refus : **avant** toute ré-émission, en nommant la raison, avec un chemin de réparation actionnable. Enregistrer le déploiement comme décision DAG passe par `propose → ChangeSet → approbation` ; S96 n'en franchit aucune — il rend simplement **calculable** « cette phase peut-elle aller en production ? », et la réponse est une ré-projection déterministe, jamais un script rejoué.

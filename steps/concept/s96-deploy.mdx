@@ -1,0 +1,35 @@
+---
+title: "S96 · Déployer votre app — uniquement depuis une phase stable, ré-projetée, jamais un artefact périmé"
+description: "S96 met en ligne l'app qu'AIDOS a construite pour vous — mais SEULEMENT depuis une phase STABLE (tous les tests verts, l'ancien vert intact, le score de mutation au-dessus du seuil, aucun monstre). Le déploiement RÉ-ÉMET l'app depuis la phase (déterministe), exécute la migration de donnée forward-only (S95), puis provisionne une URL via `pulumi up`. Déployer = ré-projeter, jamais rejouer un script. Une phase pas-encore-stable est REFUSÉE — on ne met jamais un miroir rouge en production."
+keywords: ["aidos", "krd", "S96", "déploiement", "deploy", "phase stable", "done is computed", "ré-projection", "re-emit", "PHASE_NOT_STABLE", "mutation", "monstre", "forward-only", "pulumi", "URL", "DP26", "ADR 0043", "EPIC 10"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S96](/steps/internals/s96-deploy).</Note>
+
+## En une phrase
+
+S96 **déploie votre app** — la met en ligne à une vraie URL — mais **uniquement depuis une phase stable**, en **ré-émettant** l'app depuis cette phase (jamais un artefact périmé), puis en migrant vos données vers l'avant ; une phase pas-encore-stable est **refusée**.
+
+## Le problème que S96 résout
+
+Mettre une app en production est l'instant où tout peut casser. Trois pièges que S96 ferme :
+
+1. **Déployer du rouge.** « Ça marche presque, on déploie quand même. » Non. S96 n'accepte de déployer que depuis une **phase stable** : tous les miroirs au vert, l'ancien vert toujours intact, le score de mutation au-dessus du seuil déclaré, et **aucun monstre** (aucune vérité sans miroir, aucun miroir orphelin). « C'est prêt » n'est pas une opinion — c'est **calculé**. Si la phase n'est pas stable, le déploiement est **refusé** en nommant exactement pourquoi (le miroir rouge, le score trop bas, le monstre présent).
+2. **Déployer un artefact périmé.** Sur beaucoup d'outils, on déploie « le dernier build du bac à sable » — qui ne correspond peut-être plus à la vérité. S96 ne fait jamais ça : il **ré-émet** l'app **depuis la phase** elle-même, de façon déterministe. L'artefact déployé **est** l'app de la phase, prouvé par une empreinte. Le code du bac à sable est jetable et régénérable ; la phase est la vérité.
+3. **Casser les données existantes.** Si le schéma a changé, S96 exécute la migration **forward-only** de S95 : étendre → recopier → rétrécir, jamais un effacement brutal.
+
+## Déployer = ré-projeter, jamais rejouer un script
+
+C'est le cœur de S96 (et le principe DP26). Un déploiement n'est **pas** une suite de commandes manuelles qu'on espère reproduire. C'est une **ré-projection** : depuis la phase stable, AIDOS **régénère** l'app entière (serveur, front, infra) de façon déterministe, et la met en ligne via le programme d'infrastructure **émis** (`pulumi up`). Même phase → même app → même URL. Rien n'est rejoué « à la main ».
+
+## Le portail : une phase stable, ou rien
+
+Avant de toucher quoi que ce soit, S96 vérifie le **portail** : la phase est-elle déployable ? La réponse est le **et** de quatre conditions — la coupe est cohérente (tous les miroirs verts, tous les liens résolus), le score de mutation atteint le seuil, et il n'y a aucun monstre. Si une seule condition manque, c'est **refusé**, avant la moindre ré-émission. On ne met **jamais** un miroir rouge en ligne.
+
+## Ce que vous voyez à l'écran
+
+Le panneau Workbench `/deploy` est **action-capable** : donnez le projet et le hash de la phase, puis **déployez cette phase**. L'écran montre l'**URL de déploiement** keyée sur la phase, le **hash de l'app ré-émise** depuis la phase, les commandes `pulumi up` (démarrage) et `pulumi destroy` (démontage), le badge **PROBE** (le hash servi == le hash émis — la preuve que l'app en ligne est bien celle de la phase, pas un artefact périmé), et la **migration forward-only** étalée en étendre → recopier → rétrécir. Basculez « phase non-stable » pour voir le refus **`PHASE_NOT_STABLE`** : le déploiement est keyé sur les phases stables, **uniquement**.
+
+## Ce que S96 ne fait pas
+
+S96 **n'invente** pas une phase stable : si la coupe est rouge, le score trop bas, ou un monstre présent, il **refuse**, jamais ne contourne. Il ne déploie **jamais** un artefact du bac à sable tel quel — il ré-émet depuis la phase. Le jugement « cette phase est-elle stable ? » est fait par du **code** (la même décision de coupe cohérente que partout dans AIDOS), jamais par un avis. Et S96 n'écrit jamais dans le noyau (le mur) : il **planifie** le déploiement ; enregistrer le déploiement comme décision passe par une proposition approuvée. S96 ouvre la porte à S97 (domaines custom + TLS) et S98 (environnements + rollback par ré-projection).
