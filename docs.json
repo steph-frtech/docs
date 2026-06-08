@@ -244,6 +244,8 @@
               "steps/internals/s87-hono-emitter",
               "steps/concept/s88-doltgres-spike",
               "steps/internals/s88-doltgres-spike",
+              "steps/concept/s89-provision-datastore",
+              "steps/internals/s89-provision-datastore",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

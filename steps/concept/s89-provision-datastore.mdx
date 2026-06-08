@@ -1,0 +1,46 @@
+---
+title: "S89 · La base de votre app, provisionnée et isolée — par défaut, sans piège"
+description: "S89 PROVISIONNE le datastore de l'app qu'AIDOS construit pour vous : plain-Postgres par DÉFAUT (+ un sidecar pgvector si l'app cherche par vecteurs), Doltgres en OPT-IN (branch/merge/diff/`as of`) seulement si le spike S88 a dit go, le MÊME émetteur Atlas pour le DDL, une ISOLATION par projet (votre base ne croise jamais celle d'un autre), et une migration expand-contract HUMAN-GATED via DataTruthScope. Le datastore est émis comme resource Pulumi (DP15). Le plan est une fonction PURE de la spec : même demande → même plan."
+keywords: ["aidos", "krd", "S89", "provisioning", "datastore", "plain-Postgres", "Doltgres", "pgvector", "sidecar", "opt-in", "défaut", "Atlas", "DDL", "isolation projet", "DataTruthScope", "expand-contract", "migration", "human-gated", "as of", "Pulumi", "DP15", "ADR 0006", "ADR 0043", "ADR 0047", "EPIC 9", "déterminisme"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S89](/steps/internals/s89-provision-datastore).</Note>
+
+## En une phrase
+
+S89 **met en place la base de données** de l'app qu'AIDOS construit pour vous : **plain-Postgres par défaut**, **Doltgres** (la base « git-for-data ») en **option** quand le spike S88 l'a validée, un **DDL émis** qui s'applique tel quel, et une **isolation par projet** stricte — chaque app a sa propre base, qui ne voit jamais celle d'une autre.
+
+## Le problème que S89 résout
+
+Une fois que votre app est conçue (ses entités, ses opérations), il lui faut une **vraie base** où poser ses données. Trois pièges classiques :
+
+1. **Choisir la mauvaise base par défaut.** Doltgres est séduisant (versionnage de données), mais en bêta. S89 ne vous y enferme jamais : **plain-Postgres est le défaut, par construction**. Doltgres n'est offert que si le spike S88 a dit *go*.
+2. **Mélanger les données de deux apps.** S89 dérive, pour chaque projet, une **base + un namespace isolés** — deux projets différents obtiennent deux bases différentes, et l'app B ne peut jamais lire une ligne de l'app A.
+3. **Casser les données historiques en changeant le schéma.** Un changement qui touche des données **déjà produites** est **bloqué** tant qu'une migration n'a pas été **déclarée et approuvée** (DataTruthScope) — « changer la vérité du code ne change pas la vérité des données déjà là ».
+
+## Comment S89 provisionne (et pourquoi c'est sûr)
+
+1. **La cible est résolue.** Par défaut : plain-Postgres. Si vous demandez Doltgres, S89 vérifie d'abord la **décision S88** : sans un *go*, l'opt-in Doltgres est **refusé** (jamais rétrogradé en silence).
+2. **Les extras suivent le besoin.** Si l'app a besoin de **recherche vectorielle**, un **sidecar pgvector** est ajouté (sur plain-Postgres). Sur Doltgres, qui supporte `as of`, vous gagnez le **time-travel** sur vos données.
+3. **Le DDL est émis par le MÊME outil** que le reste d'AIDOS (Atlas) — le schéma de vos tables s'applique directement sur la cible, qui parle le même dialecte Postgres.
+4. **L'isolation est garantie** : base + namespace dérivés du projet, de façon déterministe.
+5. **Le tout devient une resource Pulumi** (le langage d'infra d'AIDOS) que la phase de déploiement consomme : DDL → Atlas → démarrage.
+
+## La migration est human-gated
+
+Si votre changement touche des données déjà produites, S89 **ne l'applique pas tout seul**. Il **exige une déclaration** (un *DataTruthScope* : stratégie expand-contract, préservation de l'ancienne vérité) et **refuse** sinon — en affichant précisément pourquoi et comment lever le blocage. La porte refuse ; elle ne contourne jamais.
+
+## Le plan est un *record*, pas un pari
+
+Chaque plan est **adressé par son contenu** : la même demande produit toujours le même plan (même identifiant, même DDL, même base). On peut rejouer, auditer, comparer. Rien n'est tiré au hasard, aucun agent ne « décide » la base — c'est une fonction.
+
+## Ce que vous faites à l'écran
+
+Le panneau **Provisioning datastore par app** du Workbench est *action-capable* : vous saisissez l'identifiant projet, choisissez la cible (plain-Postgres par défaut / Doltgres opt-in), cochez la recherche vectorielle et/ou une migration à impact historique, puis cliquez **Provisionner**. L'écran affiche la cible résolue, l'image, la **base + le namespace isolés**, les sidecars, le support `as of`, le **DDL émis**, la **resource Pulumi**, et l'adresse de contenu — ou le **refus** de la porte. Planifier n'écrit **aucune vérité** (le mur).
+
+## Ce que S89 garantit
+
+- Votre app a **toujours** une base par défaut qui marche : plain-Postgres.
+- Doltgres n'est branché que **prouvé stable** (S88), et **jamais** comme défaut.
+- Chaque projet est **isolé** — pas de fuite de données entre apps.
+- Un changement à impact historique est **bloqué** sans migration déclarée et approuvée.

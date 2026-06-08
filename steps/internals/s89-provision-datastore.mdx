@@ -1,0 +1,55 @@
+---
+title: "S89 · Pour moi — le provisioner de datastore par app et son plan déterministe"
+description: "Pour moi : l'implémentation de S89 — back/runtime/provision (BuildPlan : Spec → Plan content-adressé ; cible plain-postgres par défaut, doltgres opt-in ssi la Decision S88 est go, sidecar pgvector iff NeedsVector, DDL via le MÊME gen/db.EmitMigration, isolation par projet dérivée d'un hash, migration human-gated via db.RequireMigration, resource Pulumi DP15), le MCP provision (plan/images), le twin TS lib/provision + sa route action-capable, et les miroirs (rapid + fast-check de reproductibilité/gate/isolation, Testcontainers apply pour DDL/CRUD/`as of`, e2e Playwright). Plus les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S89", "provision", "BuildPlan", "Spec", "Plan", "plain-postgres", "doltgres", "pgvector", "Atlas", "EmitMigration", "gen/db", "DataTruthScope", "RequireMigration", "isolation", "records.Hash", "Pulumi", "DP15", "Testcontainers", "as of", "DOLT_COMMIT", "rapid", "fast-check", "Playwright", "MCP", "ADR 0006", "ADR 0043", "ADR 0047", "EPIC 9", "déterminisme"]
+---
+
+<Note>Côté « Pour moi » — le détail complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S89](/steps/concept/s89-provision-datastore).</Note>
+
+## Implémentation
+
+S89 ajoute le **provisioner de datastore par app** : à partir d'une `Spec` (le projet, la cible choisie, la `Decision` S88, les entités à projeter, le besoin vectoriel, un changement §44.3 optionnel), il **planifie** le datastore de l'app émise.
+
+### Le cœur — `back/runtime/provision/provision.go`
+
+- `BuildPlan(s Spec) (Plan, *blockreason.BlockReason)` — fonction **PURE, TOTALE, DÉTERMINISTE** :
+  - **Résolution de cible.** Cible vide ⇒ `plain-postgres` (le défaut par construction). Une cible `doltgres` n'est honorée que si `s.Decision.OptInAllowed(Doltgres)` (la `Decision` S88 est *go*) ; sinon **refus** `OUT_OF_SCOPE` — jamais une rétrogradation silencieuse. Une cible inconnue est refusée.
+  - **Isolation par projet.** `isolation(projectID)` = `records.Hash("provision/v1:" + projectID)[:12]` → `database = "app_<hash>"`, `namespace = "proj_<hash>"`. Deux projets distincts ne collisionnent jamais ; le même projet est stable.
+  - **Image + sidecars.** Sur plain-postgres, `NeedsVector` ajoute un sidecar **pgvector** (`pgvector/pgvector:pg16`). Sur doltgres : image `dolthub/doltgresql:latest`, `SupportsAsOf = true` (et une note honnête : pas de pgvector sur doltgres aujourd'hui).
+  - **Human-gate de la migration.** Si `s.Change != nil`, on appelle `db.RequireMigration` (S95/§44.3) **avant** de rendre le DDL : un changement à impact historique sans `DataTruthScope` déclaré renvoie le `BlockReason` **verbatim** (jamais contourné).
+  - **DDL via le MÊME émetteur.** `renderDDL` réutilise `gen/db.EmitMigration(e, nil)` (la forme *create*, le corps `EmitDDL` de S35) sur les entités triées par nom → DDL byte-stable.
+  - **Resource Pulumi (DP15).** `PulumiResource{Type:"aidos:datastore:<target>", Name, Image, Database, Env}` avec un `Env` trié (reproductible).
+  - **Content-address.** `Plan.ID = records.Hash(canonicalPayload())` — la charge utile exclut l'`ID` et les `Reasons` dérivés, donc l'adresse ne porte que sur la résolution.
+
+### La capacité — `back/mcp/provision/main.go`
+
+MCP `aidos-provision` (Go MCP SDK, ADR 0009) : `plan` (Spec → Plan ou BlockReason) et `images` (les images déclarées par cible). **Pur**, n'écrit rien (le mur).
+
+### Le twin écran — `front/web/lib/provision.ts` + `app/provision/`
+
+`buildPlan` est le **jumeau TS** (résolution de cible, isolation via `node:crypto`, sidecar, human-gate, DDL miroir). La route `/provision` est **action-capable** : un `<form>` → Server Action `planAction` → l'écran rend la cible, l'image, la base/namespace isolés, les sidecars, le badge `as of`, le DDL, la resource Pulumi, l'adresse de contenu, ou le `block-code` du refus.
+
+### Les miroirs
+
+- **`provision_property_test.go` (rapid)** : reproductibilité (même Spec → même id+DDL), défaut plain-postgres, la **porte** doltgres (no-go/absente ⇒ refus), l'**isolation** (projets distincts ⇒ bases distinctes), le **human-gate**.
+- **`provision_apply_test.go` (Testcontainers)** — les **done-criteria** : le DDL émis **s'applique** sur plain-postgres, **CRUD round-trip**, isolation prouvée contre deux conteneurs, et sur doltgres une requête **`AS OF`** (après `DOLT_COMMIT`) renvoie la **ligne antérieure**. Skip si Docker/l'image bêta sont absents (forward-dependency, OpenQuestion).
+- **`lib/provision.test.ts` (fast-check)** : le miroir de reproductibilité/gate/isolation/human-gate côté TS.
+- **`tests/e2e/provision.spec.ts` (Playwright)** : 6 e2e prouvant que chaque contrôle s'exécute depuis l'écran.
+
+## Méta
+
+**Pourquoi un *planner* pur plutôt qu'un provisioner impératif ?** Parce que provisionner est, par nature, une **fonction** : (projet, cible, décision, entités, besoin) → (base, image, DDL, resource). Le rendre pur et content-adressé en fait un **artefact rejouable et auditable** — la part « apply » (toucher un vrai conteneur) est isolée dans le miroir Testcontainers, hors du chemin de décision. C'est la **détermination-first** (CLAUDE.md §6) appliquée à l'infra : aucun agent ne « choisit » la base.
+
+**Pourquoi réutiliser `gen/db.EmitMigration` et `db.RequireMigration` au lieu de réécrire ?** Le pivot EPIC 9 (préambule roadmap) reformule « même sqlc/pgx » en « **même Atlas + même dialecte Postgres, client TS** ». L'émetteur Atlas et le garde §44.3 **survivent au pivot** — S89 les **réutilise** (ne les forke pas). Le DDL et le human-gate sont donc partagés entre l'OS et l'app émise : une seule vérité d'émission.
+
+**Pourquoi le défaut reste plain-postgres même sous une Decision go ?** Parce que S88 a prouvé la **stabilité sous concurrence**, pas l'absence de surcoût (~5,2×, pas de pgvector — limites moteur). L'escape hatch (plain-postgres) reste donc le défaut **par construction** : `BuildPlan` ne le quitte que sur un opt-in **explicite ET légal**. La chaîne de déploiement EPIC 10 reste viable même si un jour S88 rebascule en no-go.
+
+**Pourquoi l'isolation est un hash et non un compteur ?** Un hash du projet est **sans état, sans collision, reproductible** : pas de séquence partagée à coordonner entre projets, pas de fuite d'ordre. Le même projet retombe toujours sur sa base ; deux projets ne se croisent jamais. C'est le mur §2 (isolation inter-projets S55/S82) ramené au datastore.
+
+## Méta-méta
+
+**Le datastore est une *projection*, pas une vérité.** S89 vit **sous la ligne d'eau** : il lit les entités (vérité Kernel, jamais écrite ici) et la `Decision` S88, et il **émet** un plan/descriptor (une projection). Il n'écrit ni `kernel`, ni `mirrors`, ni `fitness` — le `Plan` est un record. Cohérent avec §2 : l'agent code librement les projections, jamais la vérité.
+
+**Le human-gate EST le mur, ramené aux données.** « Changer la vérité du code ne change pas la vérité des données déjà produites » (§44.3). S89 ne contourne pas ce garde : un changement à impact historique sans `DataTruthScope` déclaré est **refusé** par la même fonction pure que l'OS (`db.RequireMigration`), avec le même `BlockReason`. La gouvernance des données reste humaine ; l'agent **planifie**, il ne **force** pas.
+
+**Le verdict S88 gouverne, le plan S89 obéit.** S89 ne **re-juge** jamais Doltgres : il **lit** la `Decision` (le record content-adressé de S88) et s'y conforme. La séparation est nette — S88 **mesure et tranche**, S89 **provisionne sous contrainte**. Une couche ne ré-implémente pas la décision d'une autre ; elle la **consomme**. C'est la loi de complétude vue d'en haut : une vérité (le défaut/opt-in datastore) a **un** lieu de décision, et tout le reste s'y réfère.
