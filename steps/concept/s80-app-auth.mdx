@@ -1,0 +1,69 @@
+---
+title: "S80 · L'auth & les rôles de VOTRE app — sans réécrire login, sessions et permissions"
+description: "S80 vous donne le behavior-macro app-auth : l'authentification et l'autorisation par rôle de l'application que VOUS construisez (ses propres utilisateurs, ses login/logout, ses permissions par rôle) — distinct des comptes AIDOS. Vous l'attachez à votre app et il s'expanse déterministiquement en entités User/Role/Session, operations login/logout et policies authz par rôle, mappant l'AuthorityGraph DU RUNTIME de votre app émise. Une operation protégée refuse un rôle insuffisant au runtime. Le mur tient : attacher prévisualise puis atterrit via un ChangeSet approuvé."
+keywords: ["aidos", "krd", "S80", "app-auth", "auth", "authentification", "authentication", "rôles", "roles", "autorisation", "authorization", "login", "logout", "session", "User", "Role", "Session", "permissions", "viewer", "editor", "admin", "rôle insuffisant", "insufficient role", "runtime", "app émise", "emitted app", "AuthorityGraph", "behavior-macro", "expansion déterministe", "policies", "ChangeSet approuvé", "le mur", "S76", "EPIC 7"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S80](/steps/internals/s80-app-auth).</Note>
+
+## En une phrase
+
+S80 vous donne **`app-auth`** : le behavior-macro qui dote l'application que **vous** construisez de SES propres utilisateurs — **login, sessions, rôles et permissions au runtime** — sans que vous écriviez une ligne de boilerplate d'auth.
+
+## Le problème que S80 résout
+
+Presque toute vraie application a besoin de comptes : des utilisateurs qui se connectent, des rôles (un viewer ne fait pas ce qu'un admin fait), des sessions, et des operations protégées qui refusent un rôle trop faible. Réécrire ce socle à la main, app après app, est répétitif et dangereux (une permission oubliée est une faille).
+
+Et il y a un piège conceptuel : **les utilisateurs de VOTRE app ne sont pas les utilisateurs d'AIDOS.** AIDOS a ses propres comptes (ceux qui approuvent les vérités du Kernel — c'est l'EPIC 3). Mais l'app que vous construisez a une population d'utilisateurs **complètement séparée**, avec sa propre grille de rôles. S80 fait exactement cette distinction : `app-auth` mappe l'**AuthorityGraph du runtime de votre app émise**, jamais les approbateurs AIDOS.
+
+## Ce que S80 apporte
+
+<CardGroup cols={2}>
+  <Card title="Un socle d'auth complet" icon="key">
+    Attachez <code>app-auth</code> à votre app : il s'expanse en trois entités — <strong>User</strong> (email, mot de passe, rôle), <strong>Role</strong> (le jeton d'autorité) et <strong>Session</strong> (le jeton de connexion qui expire) — plus les operations <strong>login</strong> et <strong>logout</strong>.
+  </Card>
+  <Card title="Des permissions par rôle" icon="shield-halved">
+    Trois rôles, du plus faible au plus fort : <strong>viewer · editor · admin</strong>. Chaque operation protégée déclare le rôle minimum requis. Une operation refuse au runtime tout rôle plus faible que son minimum.
+  </Card>
+  <Card title="Déterministe, byte-identique" icon="cubes">
+    La même app produit toujours <strong>exactement la même expansion</strong> (même entités, mêmes operations, mêmes policies, même empreinte). Rien n'est deviné par une IA : l'expansion est une fonction de code.
+  </Card>
+  <Card title="Le mur tient" icon="lock">
+    Attacher <strong>prévisualise</strong> le sous-système (vous voyez tout ce qu'il implique) puis l'<strong>atterrit via un ChangeSet APPROUVÉ</strong> — jamais une écriture directe. La porte légale : proposer → approuver.
+  </Card>
+</CardGroup>
+
+## La porte d'accès au runtime, en clair
+
+Le cœur de S80, c'est la **porte d'autorisation de votre app émise**. Posez-lui une question : « est-ce qu'un *viewer* peut faire *logout* ? »
+
+- **viewer → logout** : `logout` exige au moins *editor*. Un viewer est plus faible → **REFUSÉ**. La réponse vous dit même le rôle requis (editor).
+- **editor → logout** : editor ≥ editor → **AUTORISÉ**.
+- **editor → manageRoles** : `manageRoles` exige *admin*. Un editor est plus faible → **REFUSÉ**.
+- **admin → manageRoles** : admin ≥ admin → **AUTORISÉ**.
+
+C'est une règle simple et **monotone** : un rôle est autorisé si et seulement si son rang est ≥ au minimum requis. Et un rôle ou une operation inconnus ne donnent **jamais** un « oui » deviné — c'est une erreur honnête.
+
+## Comment vous l'utilisez
+
+<Steps>
+  <Step title="Ouvrez le panneau /app-auth">
+    Dans le Workbench, allez sur la route <strong>Auth & rôles de l'app émise</strong>.
+  </Step>
+  <Step title="Testez la porte d'accès">
+    Choisissez un rôle (viewer / editor / admin) et une operation protégée (login / logout / manageRoles), puis cliquez <strong>Vérifier l'accès</strong>. L'écran vous dit AUTORISÉ ou REFUSÉ, et le rôle requis.
+  </Step>
+  <Step title="Attachez app-auth à votre app">
+    Indiquez votre app cible et cliquez <strong>Prévisualiser & atterrir</strong>. Vous voyez le sous-système complet (entités, operations, policies) et son atterrissage via un ChangeSet approuvé.
+  </Step>
+</Steps>
+
+## Ce que S80 N'est PAS
+
+<Warning>
+`app-auth` est l'auth des utilisateurs de **votre app émise**, pas celle d'AIDOS. Les approbateurs qui gardent le mur du Kernel (qui valide les vérités) sont un autre monde — c'est l'EPIC 3 (S61–S63). S80 ne touche jamais à eux : il mappe uniquement l'AuthorityGraph **du runtime de l'app que vous construisez**.
+</Warning>
+
+## La place de S80 dans votre parcours
+
+S80 prolonge la **librairie behaviors** ([S79](/steps/concept/s79-behaviors)) : là où S79 vous a donné l'étagère des comportements réutilisables, S80 y ajoute le plus universel d'entre eux — l'auth & les rôles de l'app émise. Comme S79, il consomme l'unique mécanique d'expansion déterministe ; il ne réinvente rien. Plus tard, les **templates** (S81) instancieront des squelettes d'app entiers qui embarquent déjà `app-auth`.

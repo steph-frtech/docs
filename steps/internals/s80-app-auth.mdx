@@ -1,0 +1,68 @@
+---
+title: "S80 · Behavior-macro app-auth (auth & rôles de l'app émise) — internals"
+description: "Le détail d'implémentation de S80 : le package back/kernel/appauth (ExpandAppAuth pure → sous-système User/Role/Session + login/logout + bande authz par rôle ; CheckAccess, la porte runtime de l'app émise), le MCP back/mcp/app-auth (3 outils purs : expand, check_access, attach), la route Workbench /app-auth action-capable, et les miroirs GREEN (property byte-identité rapid+fast-check, fixture rôle-insuffisant-refusé, MCP, Playwright). Trois couches : Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "S80", "app-auth", "appauth", "ExpandAppAuth", "CheckAccess", "Subsystem", "User", "Role", "Session", "login", "logout", "manageRoles", "viewer", "editor", "admin", "authzBand", "Decision", "Propose", "changeset", "ChangeSet approuvé", "APPLIED", "le mur", "AuthorityGraph", "runtime app émise", "MCP", "app_auth_expand", "app_auth_check_access", "app_auth_attach", "rapid", "fast-check", "Playwright", "déterminisme", "byte-identique", "S76", "EPIC 7"]
+---
+
+<Note>Côté « Pour moi » — l'implémentation complète. La vue produit est dans [Pour les futurs utilisateurs → S80](/steps/concept/s80-app-auth).</Note>
+
+## Implémentation
+
+### Le périmètre exact
+
+S80 ajoute le behavior-macro **`app-auth`** : l'auth & les rôles de l'app que l'utilisateur **construit** (E10), distincte de l'auth des users d'AIDOS (E3). C'est une expansion **multi-entités** — trois entités (User/Role/Session), deux operations (login/logout), et la bande de policies authz par rôle.
+
+### Pourquoi un package dédié, et pas une `behavior.Kind` de plus
+
+Le `behavior.Expand` de [S76](/steps/internals/s76-behavior-expander) attache un **jeu de pièces unique** à **UNE** entité (un `owner_id` sur `Order`). `app-auth` est un **sous-système** : il crée trois nouvelles entités et toute une bande authz — une forme que `Expand` (mono-entité) ne sait pas porter. S80 expose donc **sa propre** fonction faisant autorité `ExpandAppAuth`. Ce n'est **pas** un fork : la loi de la fonction unique (§24.6) interdit deux expansions du **même** macro, pas une expansion par macro. `app-auth` a la sienne, `ownable` a la sienne.
+
+### Le package `back/kernel/appauth`
+
+| Symbole | Rôle |
+|---|---|
+| `ExpandAppAuth(target) (Subsystem, error)` | l'expansion PURE, TOTALE, DRY-RUN, IDEMPOTENTE — l'unique fonction faisant autorité du macro |
+| `Subsystem` | le résultat dry-run : `Entities` (User/Role/Session) + `Operations` (login/logout) + `Policies` (la bande authz) + `ExpansionID` (adresse-contenu) + `WroteKernel` (toujours `false`) |
+| `CheckAccess(role, operation) (Decision, error)` | la porte d'autorisation **du runtime de l'app émise** : `role` peut-il invoquer `operation` ? |
+| `Propose(target, parentPhase) (Proposal, error)` | enveloppe `ExpandAppAuth` dans un ChangeSet DRAFT — la seule porte légale vers la vérité |
+
+La bande authz `authzBand` est la table **autoritative** operation → rôle minimum : `login`→viewer, `logout`→editor, `manageRoles`→admin. `CheckAccess` est un **lookup pur monotone** : `allowed = roleRank[role] ≥ roleRank[min]`. Un rôle/operation hors de l'ensemble clos est une **erreur typée**, jamais un « oui » deviné (la règle d'honnêteté).
+
+`ExpansionID = records.Hash(records.Canonicalize(body))` réutilise S02 verbatim — même target ⇒ même empreinte, byte-identique côté Go et côté TS.
+
+### Le MCP `back/mcp/app-auth` (ADR 0009)
+
+Trois outils purs :
+
+- `app_auth_expand` — dry-run de l'expansion du sous-système. N'écrit rien.
+- `app_auth_check_access` — la porte runtime de l'app émise (rôle × operation → AUTORISÉ/REFUSÉ + rôle requis). Lookup déterministe, **jamais un LLM**.
+- `app_auth_attach` — preview OU atterrissage via un ChangeSet APPROUVÉ (le mur : propose → approve). Selon `land`.
+
+Le serveur est **sans état** : chaque outil est une fonction pure de son entrée ; `attach` atterrit via `changeset.Apply` (un calcul de valeur), jamais une écriture DB.
+
+### La route Workbench `/app-auth`
+
+Action-capable (ui-completeness, §7) : deux contrôles liés au moteur réel et exécutables depuis l'écran — **CHECK ACCESS** (la porte runtime : refuse un rôle insuffisant) et **ATTACH** (preview du sous-système + atterrissage). Server Actions sur le twin TS pur `lib/app-auth.ts` (byte-twin du Go : la même `expansionId` `2a2bcf91…`). Thème ADR 0010, bilingue ADR 0011. Câblée dans la nav `WorkbenchHeader`.
+
+### Les miroirs (tous GREEN)
+
+- **`appauth_property_test.go`** (rapid) — sur des targets arbitraires : déterminisme (même target ⇒ `Subsystem` + `ExpansionID` byte-identiques), forme d'auth complète (toujours User/Role/Session + login/logout + les 3 policies authz OPERATION/DENY), le mur (`WroteKernel=false`), et la porte runtime comme **gate pur monotone** (autorisé ssi rang ≥ minimum).
+- **`appauth_fixture_test.go`** (fixture `state→command→events`) — la **done-criterion** : une operation protégée de l'app émise **refuse un rôle insuffisant** au runtime (viewer→logout REFUSÉ, required=editor ; editor→logout AUTORISÉ ; editor→manageRoles REFUSÉ ; admin→manageRoles AUTORISÉ) ; et attacher prévisualise (writes nothing) puis atterrit via un ChangeSet APPLIED scopé `app-auth@shop-app`.
+- **`lib/app-auth.test.ts`** (Vitest + fast-check) — le twin TS reproduit byte-identiquement (assertion sur l'empreinte Go) ; la porte refuse le rôle insuffisant ; gate monotone en propriété.
+- **`mcp/app-auth/main_test.go`** — les trois outils retournent déterministiquement, le mur tient, l'attach atterrit APPLIED.
+- **`tests/e2e/app-auth.spec.ts`** (Playwright) — la route rend les contrôles, la porte runtime REFUSE viewer→logout (data-allowed=false, required=editor) et AUTORISE editor→logout, l'attach prévisualise + atterrit APPLIED.
+
+## Méta
+
+S80 illustre trois disciplines KRD d'un seul tenant :
+
+- **Determinism-first jusqu'au bout (§6/§8).** L'expansion ET la porte d'autorisation sont du **code faisant autorité**, jamais un LLM. « Une IA qui décide si un rôle a le droit » serait un trou de déterminisme : la règle est une table de code, vérifiée par un miroir de reproductibilité (même entrée → même verdict). C'est le même principe que « le juge est le miroir, jamais le LLM ».
+- **La loi de la fonction unique, bien comprise (§24.6).** S80 montre qu'« une seule expansion » ne veut pas dire « une seule fonction pour tous les macros » : ça veut dire **pas deux expansions du même macro**. `app-auth` a une forme multi-entités que le `Expand` mono-entité de S76 ne porte pas, donc S80 a sa propre fonction — mais une seule, et c'est elle que le MCP, l'UI et le twin TS consomment.
+- **Le mur, encore et toujours (§2).** Même un sous-système entier d'auth ne descend dans le Kernel que par `propose → ChangeSet → approbation`. `WroteKernel` est toujours `false` ; l'écran atterrit une **valeur** de ChangeSet APPLIED, jamais une écriture.
+
+La distinction **auth de l'app émise ≠ approbateurs AIDOS** est elle-même méta : elle reflète la double nature d'AIDOS, qui est à la fois un produit gouverné (ses users approuvent les vérités) et un constructeur d'apps (chaque app a sa propre population d'utilisateurs). `app-auth` mappe l'AuthorityGraph **du runtime construit**, pas celui du constructeur.
+
+## Méta-méta
+
+Pourquoi est-ce que l'auth de l'app émise est un **behavior-macro** et pas un module en dur ? Parce que le pari d'AIDOS est que **tout comportement réutilisable est une donnée déclarative expansible**, pas du code spécial. L'auth — le plus universel et le plus sensible des comportements — passe par exactement la même mécanique que owner-scoping : un macro, une expansion pure déterministe, une preview, un atterrissage gardé par le mur. Si l'auth n'avait PAS pu entrer dans ce moule, le moule serait suspect. Qu'elle y entre proprement (avec sa propre fonction, mais la même discipline) **valide la généralité** du concept de behavior-macro.
+
+Et l'expansion déterministe est ce qui rend l'auth **auditable** : il n'y a pas d'IA qui « génère du code d'auth » avec ses angles morts. La même app produit toujours le même socle d'auth, byte pour byte, prouvé par un miroir de reproductibilité Go ET TS qui partagent la même empreinte. Une faille de permission ne peut pas se glisser par non-déterminisme — elle serait un changement d'empreinte, donc visible, donc gardée par le mur.
