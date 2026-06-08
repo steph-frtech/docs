@@ -1,0 +1,68 @@
+---
+title: "S84 · Auto-certification computationnelle dans la boucle — internals"
+description: "Pour moi : l'implémentation de S84 — la batterie de senseurs déterministe (back/runtime/buildloop/selfcert) qui gate chaque diff ; les sept SensorKind clos (types/lint/unit/fixture/property/pact/archfit) ; GateGreen comme conjonction pure anti-passthrough ; Certify qui matérialise un senseur manquant en rouge et attache BUILD_LOOP_SENSOR_RED ; le port Runner impur + l'adaptateur CertifiedSensors qui branche la batterie sur le Sensors de S83 (fail-closed) ; ToStopSensors vers le Stop non-gameable ; le MCP self-cert ; le twin front byte-identique ; la route Workbench action-capable et les miroirs fixture+property. Plus les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S84", "selfcert", "auto-certification", "self-certification", "internals", "SensorKind", "SensorVerdict", "Battery", "GateGreen", "Certify", "RunBattery", "Runner", "CertifiedSensors", "ToStopSensors", "anti-passthrough", "fail-closed", "BUILD_LOOP_SENSOR_RED", "dependency-cruiser", "Pact", "arch-fitness", "frontière", "buildloop", "S83", "Sensors", "goal.IsClosed", "Stop non-gameable", "MCP", "twin", "byte-identical", "déterminisme", "EPIC 8", "mur"]
+---
+
+<Note>Page « Pour moi » — le journal de construction complet. Côté usage produit, voir [Pour les futurs utilisateurs → S84](/steps/concept/s84-self-cert).</Note>
+
+## Implémentation
+
+### Objectif (une capacité vérifiable)
+
+À chaque diff, la boucle de build s'**auto-certifie** sur les senseurs **réels** (types / lint / unit / fixtures / propriétés / contrat Pact / arch-fitness de l'arbre émis TS via **dependency-cruiser**), **gatant chaque itération**. La done-criterion : un diff qui casse une **frontière arch** ou un **contrat** rougit le senseur concerné et **bloque l'itération avant** que le vert soit revendiqué.
+
+### Le paquet — `back/runtime/buildloop/selfcert`
+
+Tout est **pur et déterministe** (CLAUDE.md §6/§8) ; le juge est la **batterie de miroirs**, jamais le LLM. La seule surface impure (les `tsc`/`vitest`/`go test`/`dependency-cruiser` réels) est isolée derrière un port injecté.
+
+- **Les sept `SensorKind` clos** — `types`, `lint`, `unit`, `fixture`, `property`, `pact`, `archfit`, dans un `sensorOrder` **déclaré** (jamais une itération de map). L'ensemble est CLOS : un nouveau senseur est un changement de vérité (idée → miroir → /goal).
+- **`GateGreen(verdicts) bool`** — la **conjonction pure** : true ssi CHACUN des sept senseurs canoniques est présent ET vert. **Anti-passthrough** : un senseur manquant ou rouge ⇒ pas vert. C'est le cœur determinism-first — le vert de l'itération est une fonction des miroirs de senseurs, jamais de la parole du LLM.
+- **`Certify(verdicts) Battery`** — l'assemblage pur du rapport complet : il normalise en ordre canonique (un senseur **manquant** est matérialisé **rouge**, anti-passthrough), calcule le gate, et attache le `BlockReason` quand rouge. Mêmes verdicts ⇒ même `Battery`.
+- **`Battery`** — les sept `SensorVerdict` en ordre canonique + `Green` **calculé** + le `BlockReason` actionnable (nil quand vert).
+- **`ToStopSensors(redSet, battery) map[string]goal.SensorState`** — le **pont vers le Stop non-gameable** (S83 réutilise `goal.IsClosed` verbatim). **Fail-closed** : chaque miroir du red set est vert UNIQUEMENT quand la batterie est entièrement verte ; sinon tous rouges. La boucle ne peut donc déclarer VERT que quand toute la batterie computationnelle est passée.
+- **`Report` / `RedSensors`** — projections stables et triées pour la console.
+
+### Le port impur et le branchement sur S83 — `runner.go`
+
+- **`Runner` (port)** — `RunSensor(kind, sandboxDir, goal) SensorVerdict` : l'unique surface impure, qui *shell out* vers l'outil réel par senseur. Un outil qui erreure ⇒ `SensorRed` (anti-passthrough). Injecté → rejeu déterministe sous test.
+- **`RunBattery(runner, sandboxDir, goal) Battery`** — exécute les sept senseurs dans l'ordre canonique et **plie** les résultats avec le `Certify` pur. Il **force** le `Kind` retourné au `Kind` demandé (un Runner ne peut pas faire passer un vert sous un autre kind).
+- **`CertifiedSensors`** — l'**adaptateur** qui branche la batterie S84 sur le port `buildloop.Sensors` de S83. Quand la boucle appelle `Sensors.Run(goal)`, l'adaptateur **exécute la vraie batterie** : il ne renvoie le red set comme vert **que** si la batterie est verte ; un diff qui casse une frontière arch ou un contrat Pact donne une batterie rouge ⇒ **aucun** miroir vert ⇒ la boucle **ne peut pas** déclarer le vert (l'itération est bloquée avant le vert). Il expose `Last` (le rapport par itération) pour la console (S86) et l'AgentRun.
+
+### Le nouveau BlockReason
+
+**`BUILD_LOOP_SENSOR_RED`** — déclaré avec sa règle (la batterie d'auto-cert en est propriétaire), sévérité bloquante, explication française qui **nomme les senseurs rouges** (avec leur détail), `how_to_fix` non vide (jamais une prison, KRD §44.5) : corriger le diff, lire le détail du senseur rouge, et le rappel qu'**aucune itération ne peut être déclarée verte tant qu'un senseur est rouge** (anti-passthrough — le mur §8).
+
+### Les miroirs (BDD, écrits rouges d'abord)
+
+- **Fixture / fault-injection** (`selfcert_fixture_test.go`) — la **done-criterion** : injecter un défaut dans un senseur (la frontière arch, le contrat Pact, chacun des sept) fait passer le gate rouge, lève `BUILD_LOOP_SENSOR_RED`, et — à travers `buildloop.Drive` câblé avec `CertifiedSensors` — la boucle **ne déclare pas vert** ; une batterie propre, elle, laisse la boucle atteindre le vert pour tout le red set.
+- **Property / reproductibilité** (`selfcert_property_test.go`, rapid) — déterminisme (mêmes verdicts → même batterie), totalité (jamais de panic), la conjonction des sept senseurs, rouge ⇒ BlockReason actionnable, fault-injection ∀ (tout senseur rouge bloque), `ToStopSensors` fail-closed.
+
+### Le MCP — `back/mcp/self-cert`
+
+ADR 0009 : chaque op backend est un outil MCP. Trois outils **purs** : `selfcert_certify` (plie les verdicts → batterie gatée + projection Stop), `selfcert_gate` (la conjonction des sept), `selfcert_kinds` (l'ensemble clos). Le serveur ne *shell out* pas — il juge des verdicts ; le mur tient (aucune écriture de vérité).
+
+### Le twin front + la route Workbench
+
+- **`front/web/lib/self-cert.ts`** — le twin TS **byte-identique** : mêmes sept kinds, même conjonction anti-passthrough, même `BUILD_LOOP_SENSOR_RED`, même `toStopSensors` fail-closed. Le miroir de reproductibilité `lib/self-cert.test.ts` (fast-check) pin la parité (6 propriétés).
+- **`front/web/app/self-cert`** — la route **action-capable** (ui-completeness, §7) : un contrôle par senseur (coché = passe), une Server Action `certifyDiffAction` liée au gate qui **calcule** la batterie ; le résultat affiche le verdict du gate, le code de blocage et les senseurs rouges. Thème ADR 0010, bilingue next-intl (ADR 0011). L'e2e Playwright (`tests/e2e/self-cert.spec.ts`) prouve les deux cas de la done-criterion : casser une frontière arch et casser un contrat Pact bloquent l'itération avant le vert.
+
+## Méta
+
+**Pourquoi cette étape existe, au-delà de son code.**
+
+S84 est la traduction opérationnelle du **« le juge est le miroir déterministe »** (KRD §8) à l'intérieur de la boucle de build. S83 a posé le squelette : un port `Sensors` abstrait. S84 le **remplit** de la vraie batterie et en fait un **gate non contournable**. Le déplacement conceptuel : « la boucle vérifie son code » cesse d'être une intention prose pour devenir une **conjonction calculée sur sept verdicts d'outils réels**, dont **chacun peut bloquer**.
+
+Le choix determinism-first est total ici : il n'y a **aucune** place pour un LLM dans le gate. Le LLM de S83 *propose* un diff (l'exception génération-only) ; S84 le **juge** avec des fonctions pures (le compilateur, le linter, les runners de tests, dependency-cruiser). L'**anti-passthrough** (senseur manquant ⇒ rouge) et le **fail-closed** (`ToStopSensors` ne verdit le red set que sur une batterie pleinement verte) sont les deux garde-fous qui empêchent le gate de devenir une passoire. Le routage arch-fitness flippe ici comme prévu (ROADMAP §292) : pour l'arbre **émis**, c'est **dependency-cruiser** (et la famille des règles fonctionnelles émises) qui fait foi, pas `go-arch-lint`/`depguard`.
+
+La **frontière de la cellule** est respectée : S84 vit dans son propre paquet `selfcert`, importe le contrat publié de S83 (`buildloop.Sensors`, `goal.IsClosed`, `economics`, `blockreason`), et n'édite **aucun** code d'une autre étape. Il **ajoute** un garde-fou (la batterie), il n'en retire aucun — la règle du méta-loop (§5).
+
+## Méta-méta
+
+**Ce que S84 enseigne sur la méthode KRD elle-même.**
+
+S84 illustre la **récursivité du « done is computed »** : la boucle qui *construit* l'app applique à son propre travail la même loi que le harnais applique à la boucle. Le gate d'auto-certification est, pour chaque itération de build, l'analogue du **Stop non-gameable** — sept conditions qui doivent toutes tenir, calculées, jamais déclarées. C'est le KRD qui se replie sur lui-même : *le même principe gouverne le niveau N (le harnais juge la boucle) et le niveau N−1 (la boucle juge son diff)*.
+
+C'est aussi une démonstration de la **séparation génération / jugement** comme invariant d'architecture, pas comme discipline. Le LLM est confiné à une seule fonction (générer un diff) ; tout le reste — la décision de ce qui est vert — est du **code déterministe et reproductible**. Une property d'arch-fitness (S78/BA14, `CheckLLMIsolation`) garde même *cette* règle : un second appel LLM ailleurs ferait rougir le build. S84 s'appuie sur cette garantie et l'étend au niveau du diff : la **batterie elle-même est arch-fittée** (le senseur `archfit` vérifie l'arbre émis avec dependency-cruiser).
+
+Enfin, S84 matérialise la **complétude par fault-injection** : la done-criterion n'est pas « la batterie existe » mais « casser une frontière la fait rougir ». Le miroir prouve que chacun des sept senseurs **fire** quand on le casse — un senseur qui ne rougirait jamais serait un monstre (un garde-fou mort, §5). C'est la garantie que la batterie n'est pas un décor : elle **mord**.

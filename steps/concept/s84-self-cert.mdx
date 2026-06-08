@@ -1,0 +1,56 @@
+---
+title: "S84 · La boucle se contrôle elle-même à chaque diff"
+description: "S84 est l'auto-certification computationnelle de la boucle de build : à chaque diff, la boucle se vérifie sur les senseurs RÉELS — types, lint, tests unitaires, fixtures, propriétés ∀, contrat Pact entre cellules, et arch-fitness de l'arbre émis (dependency-cruiser). L'itération n'est verte que quand TOUS passent ; un diff qui casse une frontière d'architecture ou un contrat Pact rougit son senseur et bloque l'itération AVANT le vert. Le juge est le miroir déterministe, jamais le LLM."
+keywords: ["aidos", "krd", "S84", "auto-certification", "self-certification", "senseurs", "sensors", "types", "lint", "unit", "fixtures", "propriétés", "Pact", "contrat", "arch-fitness", "dependency-cruiser", "frontière arch", "boundary", "gate", "itération", "BUILD_LOOP_SENSOR_RED", "boucle de build", "build loop", "S83", "déterminisme", "miroir", "EPIC 8", "mur"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S84](/steps/internals/s84-self-cert).</Note>
+
+## En une phrase
+
+S84 fait que **la boucle qui construit votre app se contrôle elle-même à chaque modification** : avant de déclarer un pas « vert », elle fait passer le code par une **batterie de senseurs réels** (types, lint, tests, contrats), et **un seul senseur rouge bloque le pas** — la boucle ne peut pas avancer sur du code cassé.
+
+## Le problème que S84 résout
+
+À l'étape précédente (S83), la boucle de build écrit du code pour rendre vos tests rouges verts, et **vérifie avec les miroirs plutôt que sur sa propre parole**. Mais « vérifier avec les miroirs » doit vouloir dire quelque chose de précis et de **non contournable**. Sinon une boucle pressée pourrait :
+
+- déclarer un pas vert alors que le code **ne compile même pas** (erreur de types) ;
+- faire passer un test mais **casser le contrat** qu'une autre cellule attend (Pact) ;
+- franchir une **frontière d'architecture** — par exemple un écran émis qui appelle directement l'infrastructure — sans que personne ne s'en aperçoive.
+
+S84 ferme la porte : **chaque diff** est auto-certifié sur les **vrais** outils (le compilateur, le linter, les tests, le vérificateur de contrats, l'analyseur d'architecture), et **le vert se calcule** à partir de leurs verdicts — il ne se déclare jamais.
+
+## Les sept senseurs de la batterie
+
+À chaque diff, la boucle exécute sept senseurs computationnels. Ils correspondent aux **niveaux de preuve du KRD**, appliqués au code que la boucle vient d'écrire :
+
+| Senseur | Ce qu'il prouve |
+|---|---|
+| **types** | Le code compile (le typage tient). |
+| **lint** | Le code respecte le style et les règles. |
+| **unit** | Les tests unitaires passent. |
+| **fixture** | Les workflows (état → commande → événements) passent. |
+| **property** | Les invariants ∀ (« vrai sur tous les chemins ») passent. |
+| **pact** | Le **contrat** entre cellules est respecté (consommateur ↔ fournisseur). |
+| **archfit** | L'**architecture de l'arbre émis** tient — aucune frontière franchie (dependency-cruiser). |
+
+L'itération est **verte uniquement quand les sept passent**. Il n'y a pas de « presque vert » : un senseur manquant ou non lisible compte comme **rouge** (on ne peut pas conclure sur une preuve absente).
+
+## Le cœur de S84 : casser une frontière bloque AVANT le vert
+
+C'est la garantie défendue par cette étape. Si un diff **casse une frontière d'architecture** (dependency-cruiser détecte une dépendance interdite dans le code émis) ou **rompt un contrat Pact** (le fournisseur ne renvoie plus la forme que le consommateur attend), le senseur concerné devient **rouge**, et la boucle **ne peut pas déclarer le pas vert** : elle s'arrête sur un refus actionnable, **`BUILD_LOOP_SENSOR_RED`**, qui nomme le senseur fautif et explique comment le corriger.
+
+Autrement dit : **le code cassé n'avance jamais d'un cran**. La boucle ne triche pas sur sa propre note.
+
+## Ce que vous voyez dans le Workbench
+
+L'écran **« Auto-certification »** vous laisse piloter ce gate directement. Pour chaque senseur, vous indiquez s'il passe sur le diff candidat (et, s'il est rouge, le détail — la frontière franchie, le contrat rompu, l'erreur de type). Vous lancez la certification, et AIDOS **calcule** la batterie :
+
+- **VERT** quand les sept senseurs passent ;
+- **ROUGE** dès qu'un senseur échoue — avec le code `BUILD_LOOP_SENSOR_RED` et la liste des senseurs fautifs.
+
+Le résultat est **déterministe** : les mêmes verdicts donnent toujours la même batterie. Le **mur** (la règle qui protège la vérité d'AIDOS) reste respecté : ce gate **n'écrit aucune vérité** — il lit le code dans le bac à sable et juge. Quand un build atteint enfin le vert, la vérité qu'il propose passe par une autre porte (propose → ChangeSet, S85), jamais par cet écran.
+
+## En quoi cela vous protège
+
+Vous obtenez la certitude qu'**aucun pas de la construction de votre app n'est validé sur du code qui ne compile pas, casse un contrat, ou franchit une frontière d'architecture**. Le juge n'est pas l'IA qui a écrit le code — c'est l'ensemble des outils déterministes (compilateur, linter, tests, Pact, dependency-cruiser) qui ne savent pas mentir. C'est la traduction littérale de la règle KRD : *« done is computed, never declared »*.

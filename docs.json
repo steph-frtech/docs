@@ -234,6 +234,8 @@
               "steps/internals/s82-workspace",
               "steps/concept/s83-build-loop",
               "steps/internals/s83-build-loop",
+              "steps/concept/s84-self-cert",
+              "steps/internals/s84-self-cert",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",
