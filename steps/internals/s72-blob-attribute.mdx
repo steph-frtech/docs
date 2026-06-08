@@ -1,0 +1,55 @@
+---
+title: "S72 · Type blob/fichier + stockage objet (internals)"
+description: "Le détail d'implémentation de S72 : back/kernel/entities/blob (Go) — BlobAttribute (le nœud distinct {name, allowed_mime, max_bytes, required}), ValidateShape, AllowsMIME, ValidateUpload (refus BLOB_MIME_REFUSED / BLOB_SIZE_REFUSED, jamais coercé), StorageKey + ProjectOf + CrossProjectAccess (clé scopée project_id, refus BLOB_CROSS_PROJECT), Body/ID/Parse (round-trip content-adressé réutilisant records.Hash verbatim), Canonical, BlockUpload (BlockReason S13 réutilisée) ; emit.go — EmitHandler (handler upload/download déterministe, URLs signées, validation bakée). Le jumeau TS lib/blob-attribute (byte-équivalent à blob.Body/blob.ID, ancre b532622b…), le MCP back/mcp/blob-attribute (5 outils purs), la route /blob-attribute action-capable, les miroirs (fixture + property rapid + Vitest/fast-check + 4 Playwright), l'ADR 0046. Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "S72", "blob", "fichier", "BlobAttribute", "EmitHandler", "ValidateUpload", "StorageKey", "CrossProjectAccess", "BLOB_MIME_REFUSED", "BLOB_SIZE_REFUSED", "BLOB_CROSS_PROJECT", "URL signée", "stockage objet", "MinIO", "S3", "project_id", "content-adressé", "round-trip", "records.Hash", "blockreason", "MCP", "rapid", "fast-check", "Playwright", "ADR 0046", "ensemble clos", "S35", "S71", "ADR 0040"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord complet. Pour la vue produit sans code, voir [Pour les futurs utilisateurs → S72](/steps/concept/s72-blob-attribute).</Note>
+
+## Implémentation
+
+S72 ajoute le **troisième plan de nœud** du système de types des entités — un blob/fichier — sans toucher à l'ensemble scalaire clos (S35) ni au nœud de relation (S71). Tout est **pur, déterministe, content-adressé** ; rien n'écrit la vérité (le mur). Les octets vivent **hors** du truth-store et de git.
+
+### Le moteur Go — `back/kernel/entities/blob`
+
+- **`BlobAttribute{Name, AllowedMIME []string, MaxBytes int64, Required}`** — le nœud source DISTINCT. Il ne porte **ni** type scalaire **ni** cible de relation : il est référentiel au **stockage objet**, pas au truth-store. `TestProp_ScalarSetUntouched` prouve que `entities.ScalarTypes()` n'est **jamais élargi** par l'existence du blob (l'honnêteté de l'ensemble clos).
+- **`ValidateShape`** — name non vide, ≥1 MIME non blanc, `max_bytes > 0` ; sinon une cause (`ErrNoName` / `ErrNoMIME` / `ErrBadMaxBytes`), jamais un défaut silencieux.
+- **`AllowsMIME` / `ValidateUpload`** — appartenance EXACTE à la liste fermée. Un upload hors-MIME → `ErrMimeRefused` (`BLOB_MIME_REFUSED`) ; au-dessus du plafond → `ErrSizeRefused` (`BLOB_SIZE_REFUSED`). **Refus, jamais troncature ni coercition.**
+- **`StorageKey(projectID, entity, b, contentHash)`** → `"<projectID>/<entity>/<attr>/<contentHash>"` — la clé **scopée project_id**. `ProjectOf(key)` est l'inverse (premier segment) ; **`CrossProjectAccess(key, projectID)`** refuse `BLOB_CROSS_PROJECT` quand le projet propriétaire ≠ projet accédant — un fichier de A est inaccessible depuis B. Le `contentHash` est le SHA-256 des octets (calculé par le handler), **pas** un hash de nœud : le kernel ne voit jamais les octets.
+- **`Body` / `ID` / `Parse`** — le round-trip content-adressé : `ID = records.Hash(records.Canonicalize(Body))`, S02 réutilisé **verbatim**. Tout changement d'octet (rename, MIME ajouté/retiré/réordonné, taille, requiredness) → nouvelle version. `Canonical` trie optionnellement la liste MIME (l'ordre est par défaut sémantique). Ancre byte-équale partagée avec le jumeau TS : `b532622b6bd65a7595f2a4377e03fc1b11e374d201757f8b6ccbd4e05bb57f03`.
+- **`BlockUpload(cause)`** — réutilise `blockreason.BlockReason` (S13) verbatim, code précis (`BLOB_MIME_REFUSED` / `BLOB_SIZE_REFUSED` / `BLOB_CROSS_PROJECT` / `BLOB_INVALID`), `how_to_fix` non vide (no prison, KRD §44.5).
+
+### L'émetteur — `back/kernel/entities/blob/emit.go`
+
+- **`EmitHandler(projectID, entity, b)`** → un handler **TS** (ADR 0040) byte-stable : il bake la liste MIME + le plafond comme constantes, mint la clé scopée, mint une **URL d'upload signée** (`provider.signPut`) et une **URL de download signée** (`provider.signGet`), refuse un download cross-projet (`BLOB_CROSS_PROJECT`), et valide MIME+taille (`validateUpload`). Le **signing** est délégué au provider au runtime ; l'émetteur ne signe pas — il rend l'appel déterministe. Marqueur `AIDOS-GENERATED` (garde de régénération, S78).
+
+### Le jumeau TS — `front/web/lib/blob-attribute.ts`
+
+Projection DÉCLARÉE du package Go : `canonicalBody` reproduit `records.Canonicalize(json.Marshal)` (clés triées, ordre de tableau préservé, `required,omitempty`) → `blobId` byte-égal à `blob.ID` (vérifié sur l'ancre). `validateUpload`, `storageKey`, `crossProjectAccess`, `emitHandler`, `blockUpload` : le **même** jugement, côté écran. Le Go est AUTORITAIRE ; le jumeau reproduit.
+
+### Le MCP — `back/mcp/blob-attribute` (ADR 0009)
+
+5 outils PURS, écrivant **rien** (le mur) : `blob_address`, `blob_validate_upload`, `blob_storage_key`, `blob_cross_project`, `blob_emit_handler`.
+
+### La route action-capable — `/blob-attribute`
+
+Page + `BlobAttributePanel` + `actions.ts` (Server Action `checkUploadAction`). On épingle un upload (MIME + taille) contre le nœud `avatar` déclaré ; conforme → clé scopée mintée, sonde cross-projet (A accède / B refusé), handler émis affiché ; non conforme → BlockReason avec `how_to_fix`. Thème ccup (ADR 0010), bilingue FR-default (ADR 0011), entrée nav `WorkbenchHeader`. Écrit **rien** (le mur).
+
+### Les miroirs (écrits rouges d'abord)
+
+- **Property (Go, rapid)** `blob_property_test.go` : round-trip, content-addressed, déterminisme, `HandlerDeterministic` (byte-stable), `ScalarSetUntouched`, `ProjectScoped`, `BadUploadRefused`.
+- **Fixture (Go)** `blob_fixture_test.go` : round-trip + handler déterministe, blob de A inaccessible de B, out-of-MIME refusé, over-size refusé, nœud malformé refusé.
+- **Reproductibilité (TS, Vitest + fast-check)** `blob-attribute.test.ts` : ancre byte-équale, déterminisme, refus MIME/taille, scoping projet, handler byte-stable. 6/6.
+- **Playwright e2e** `tests/e2e/blob-attribute.spec.ts` : route action-capable + round-trip/handler/scope + fault-injection MIME + fault-injection taille. 4/4.
+
+## Méta
+
+Pourquoi un **troisième nœud** plutôt qu'élargir l'ensemble scalaire ? Parce que l'honnêteté de l'ensemble clos est le cœur de S35/S71 : un blob n'est pas une valeur scalaire (il n'a pas de représentation colonne directe — il a une **clé** vers des octets ailleurs). Le fusionner dans les scalaires aurait dilué la propriété « le jeu fermé est intact », prouvée par property. Trois plans **disjoints** (scalaires / relations / blobs) est la modélisation honnête.
+
+Pourquoi les octets **hors** du truth-store et de git ? Le kernel Postgres est content-adressé/append-only pour des **ASTs** (JSONB) ; git versionne du **code** régénérable. Y mettre des blobs binaires casserait le content-addressing et gonflerait l'histoire. Le stockage objet par projet (clé scopée `project_id`) donne l'isolation multi-tenant by-construction — alignée sur le RLS de S55. Le refus cross-projet est une **fonction pure** (`ProjectOf(key) == projectID`), jamais un LLM.
+
+Pourquoi le **signing délégué** ? L'émetteur reste pur et byte-stable : il rend l'**appel** à `provider.sign()` mais ne calcule pas la signature (qui dépend d'un secret + d'une expiry, un concern runtime). C'est l'application stricte du déterminisme-first : ce qui peut être pur l'est ; ce qui est irréductiblement runtime (HMAC sur secret) est délégué, derrière un port replaceable (ADR 0046).
+
+## Méta-méta
+
+S72 illustre que la **complétude** s'étend uniformément à un nouveau plan de type : un nouveau nœud arrive avec ses miroirs (fixture + property + reproductibilité TS + e2e) **avant** le code, et son émetteur arrive avec son miroir de reproductibilité — l'upload n'échappe ni au mur, ni au déterminisme-first, ni à la loi « tout est miroir ». Le ratchet ne recule pas : `ScalarSetUntouched` prouve que l'ajout n'a **rien retiré** à l'invariant de S35. Et la verticale tient : le même nœud sera consommé par les émetteurs (S74), le serveur/API/front émis (S87/S90/S93) — défini une fois, honnêtement, content-adressé, il se propage déterministiquement vers le bas.

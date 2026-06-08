@@ -1,0 +1,59 @@
+---
+title: "S72 · Des fichiers dans vos entités"
+description: "S72 ajoute au système de types de vos entités un TROISIÈME type de nœud : le BLOB / FICHIER. Jusqu'ici une entité portait des attributs scalaires (texte, entier, décimal, booléen, date) et, depuis S71, des relations. Désormais une entité peut porter un UPLOAD — un avatar, un document, une image. Le nœud blob déclare une liste FERMÉE de types MIME autorisés (par exemple image/png, image/jpeg) et un plafond de taille ; un upload hors-MIME est refusé (BLOB_MIME_REFUSED), un upload trop gros est refusé (BLOB_SIZE_REFUSED) — jamais tronqué, jamais coercé. Les octets ne touchent JAMAIS le truth-store ni git : ils vivent dans un stockage objet PAR PROJET, adressés par une clé scopée project_id — un fichier du projet A est inaccessible depuis le projet B (BLOB_CROSS_PROJECT). Le blob est un nœud À PART : l'ensemble des types scalaires reste clos, intact. Le mur tient : décrire un blob ne fait que le valider, le scoper et émettre son handler — ça n'écrit aucune vérité."
+keywords: ["aidos", "krd", "S72", "blob", "fichier", "file", "upload", "download", "image", "document", "avatar", "MIME", "taille", "max_bytes", "URL signée", "stockage objet", "object storage", "MinIO", "S3", "par projet", "project_id", "scopé", "isolation", "multi-tenant", "BLOB_MIME_REFUSED", "BLOB_SIZE_REFUSED", "BLOB_CROSS_PROJECT", "système de types", "ensemble scalaire", "ensemble clos", "AST", "content-adressé", "round-trip", "handler déterministe", "le mur", "read-only", "S35", "S71", "ADR 0046", "EPIC 6"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S72](/steps/internals/s72-blob-attribute).</Note>
+
+## En une phrase
+
+S72 apprend à vos entités à **porter des fichiers** : un Utilisateur a un avatar, un Document a un PDF — avec les bons types de fichier autorisés, une taille maximale, et une isolation stricte entre projets.
+
+## Le problème que S72 résout
+
+Avec S35 vos entités portaient des champs simples, avec S71 elles se référençaient entre elles. Mais une vraie app manipule des **fichiers** : une photo de profil, une pièce jointe, une facture scannée. Sans un type dédié, vous ne pourriez pas modéliser un upload — un plafond qui rend impossible toute app avec des images ou des documents. S72 ajoute la pièce manquante : le **nœud blob / fichier**.
+
+Deux pièges qu'AIDOS refuse :
+
+- **Accepter n'importe quoi.** Un upload dont le type ne fait pas partie de la liste autorisée, ou dont la taille dépasse le plafond, est **refusé honnêtement** — jamais tronqué, jamais converti en silence.
+- **Mélanger les projets.** Les octets d'un fichier ne vivent **jamais** dans le coffre de vérité ni dans git : ils vivent dans un stockage objet **par projet**. Un fichier du projet A est **inaccessible** depuis le projet B — jamais servi, jamais deviné.
+
+## Ce que S72 apporte
+
+<CardGroup cols={2}>
+  <Card title="Un nœud blob distinct" icon="file">
+    Un blob n'est <strong>ni un champ scalaire ni une relation</strong> : c'est un troisième type de nœud. L'ensemble des types simples reste <strong>clos et intact</strong> — un fichier ne devient jamais « du texte ».
+  </Card>
+  <Card title="Liste MIME fermée + plafond" icon="shield-check">
+    Le nœud déclare les types autorisés (<code>image/png</code>, <code>image/jpeg</code>…) et une taille maximale. Hors-liste → <strong>BLOB_MIME_REFUSED</strong> ; trop gros → <strong>BLOB_SIZE_REFUSED</strong>. Rien n'est coercé.
+  </Card>
+  <Card title="Stockage objet par projet" icon="box">
+    Les octets vivent hors du coffre de vérité et de git, dans un stockage objet scopé <code>project_id</code>. Un fichier du projet A est <strong>inaccessible</strong> depuis le projet B (<strong>BLOB_CROSS_PROJECT</strong>).
+  </Card>
+  <Card title="Un handler d'upload déterministe" icon="link">
+    AIDOS émet un handler d'upload / download avec des <strong>URLs signées</strong>, la validation MIME + taille bakée dedans, et la clé scopée — <strong>byte-identique</strong> à chaque génération pour le même nœud.
+  </Card>
+</CardGroup>
+
+## Comment vous l'utilisez
+
+<Steps>
+  <Step title="Vous déclarez un attribut blob">
+    Vous donnez un nom (par exemple <code>avatar</code>), une liste fermée de types MIME (<code>image/png</code>, <code>image/jpeg</code>) et un plafond de taille (par exemple 1 Mo).
+  </Step>
+  <Step title="Vous validez un upload">
+    AIDOS vérifie que le type de l'upload fait partie de la liste autorisée et que sa taille ne dépasse pas le plafond. Conforme → il mint une <strong>clé de stockage scopée</strong> au projet et émet le handler ; non conforme → un refus clair avec quoi corriger.
+  </Step>
+  <Step title="Vous obtenez un verdict honnête">
+    Upload accepté → clé scopée mintée (<code>projA/User/avatar/…</code>), isolation cross-projet prouvée (A y accède, B est refusé), handler déterministe émis. Upload refusé → <strong>BLOB_MIME_REFUSED</strong> ou <strong>BLOB_SIZE_REFUSED</strong>.
+  </Step>
+</Steps>
+
+## Pourquoi c'est important
+
+Comme tout dans AIDOS, le nœud blob est **content-adressé** : son identité est un hash de son contenu. Ajoutez un type MIME, changez le plafond — vous obtenez une **nouvelle version**, l'historique n'est jamais écrasé. Et le **mur** tient : décrire un blob à l'écran ne l'écrit pas en vérité (c'est une **source** au-dessus de la ligne) ; les octets eux-mêmes restent **dehors**, dans le stockage objet par projet. Le provider de stockage est un slot **remplaçable** (MinIO par défaut, tout S3-compatible demain — voir l'ADR 0046).
+
+## Et après
+
+S72 débloque les apps avec **fichiers**. Les émetteurs de S74 traduiront ce nœud (et les relations de S71) en vrai code base de données, API et SDK ; le serveur et le front émis (S87, S90, S93) câbleront de vrais formulaires d'upload contre le datastore du projet. La porte des fichiers est ouverte.
