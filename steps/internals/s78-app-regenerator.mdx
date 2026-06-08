@@ -1,0 +1,67 @@
+---
+title: "S78 · Régénération project-scopée « Régénérer mon app » (internals)"
+description: "Le détail d'implémentation de S78 : back/runtime/regen (Go) — Regenerate(schema, ledger, disk) → (Plan, *BlockReason) : (1) la porte hand-edit fail-closed AVANT toute émission (firstHandEdit en ordre de chemin trié, generators-grade Drifted = Hash(onDisk) ≠ output_hash enregistré → CodeGenFileHandEdited), (2) l'émission déterministe en COMPOSANT relemit.EmitAll de S74 (jamais un second émetteur), (3) la classification de staleness par source-hash (Stale / Fresh / Unchanged). Le code de refus additif GEN_FILE_HAND_EDITED dans back/runtime/blockreason. Le MCP back/mcp/app-regenerator (regenerate / check_drift / plan_only), le jumeau TS lib/app-regenerator (composant le jumeau S74), la route /app-regenerator action-capable, les miroirs (property rapid : byte-stable + order-invariant + refuse-hand-edit + stale-by-source-hash ; fixture ; Vitest + fast-check ; 3 Playwright). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "S78", "regen", "Regenerate", "Plan", "LedgerEntry", "DiskFile", "Drifted", "firstHandEdit", "hand-edit", "GEN_FILE_HAND_EDITED", "CodeGenFileHandEdited", "source-hash", "stale", "fresh", "unchanged", "byte-stable", "byte-identique", "déterministe", "relemit.EmitAll", "records.Hash", "blockreason", "MCP", "app-regenerator", "rapid", "Vitest", "fast-check", "Playwright", "le mur", "projection", "non-destruction", "preview", "deploy", "E10", "S74", "EPIC 6"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord complet. Pour la vue produit sans code, voir [Pour les futurs utilisateurs → S78](/steps/concept/s78-app-regenerator).</Note>
+
+## Implémentation
+
+S78 ajoute la **régénération project-scopée** — `back/runtime/regen` — l'action Runtime « Régénérer mon app » qui, liée au Kernel d'un projet, ré-émet **toutes** ses sources (entités + relations + operations sync+async + controls + blobs) vers la cible d'émission en **une passe**, classe ce qui change (périmé par source-hash / nouveau / inchangé), et **refuse** si un fichier émis a été édité à la main. Tout est **pur, total, déterministe** : même projet → octets byte-identiques. Rien n'écrit la vérité (le mur) — le code émis est une **projection régénérable**.
+
+### Le moteur Go — `back/runtime/regen`
+
+La fonction unique est `Regenerate(schema relemit.Schema, ledger []LedgerEntry, disk []DiskFile) (Plan, *blockreason.BlockReason)`, en **trois temps** :
+
+1. **La porte hand-edit, fail-closed, AVANT toute émission.** `firstHandEdit` indexe le ledger par chemin, puis parcourt les fichiers sur disque en **ordre de chemin trié** (déterminisme : le même ensemble drifté refuse toujours sur le **même premier** chemin). Pour chaque fichier **tracé** par le ledger, il teste `Drifted(entry.OutputHash, f.Bytes)` — une **inégalité de hash pure** : `records.Hash(onDisk) ≠ output_hash enregistré`. Le **premier** drift refuse **toute** la régénération avec `CodeGenFileHandEdited` — aucune passe partielle qui écraserait en silence l'édition humaine (§9 non-destruction). Un fichier présent sur disque mais **absent** du ledger est *untracked*, pas un drift (l'émetteur ne l'a jamais enregistré).
+
+2. **L'émission déterministe — en COMPOSANT S74.** `Regenerate` n'écrit **pas** un second émetteur : il appelle `relemit.EmitAll(schema)` (l'émetteur faisant autorité de S74, qui fan déjà la coupe multi-entités sur DDL / TS / Worker — handlers sync, workers+outbox async, handling blob). Un schéma malformé court-circuite sur le `BlockReason` de relemit, **verbatim** (honnêteté : jamais un arbre partiel, jamais un fallback deviné). Réutiliser, jamais réinventer (CLAUDE.md §3, ADR 0007).
+
+3. **La classification de staleness par source-hash.** Pour chaque artefact fraîchement émis, on compare au ledger de son chemin : **pas de ligne** ⇒ `Fresh` ; **source bougée** (`entry.SourceHash ≠ a.SourceHash`) ⇒ `Stale` ; **source identique mais output enregistré différent** ⇒ `Stale` aussi (l'émetteur a changé de forme) ; **les deux concordent** ⇒ `Unchanged`. Les trois listes **partitionnent** les artefacts et sont **triées** (déterminisme).
+
+### Les types
+
+- **`LedgerEntry{ Path, SourceHash, OutputHash }`** — une ligne de la mémoire d'émission, les adresses de contenu que l'émetteur a enregistrées la **dernière** fois. `regen` la **lit**, ne l'écrit jamais (en-dessous de la ligne). Un ledger vide ⇒ « jamais émis » (première régénération : rien ne peut être drifté, tout est `Fresh`, rien `Stale`).
+- **`DiskFile{ Path, Bytes }`** — l'état **courant** sur disque. `regen` prend le disque en **entrée explicite** (il ne fait **aucune** I/O — ce qui le garde pur et testable ; la couture MCP/CLI lit les fichiers et les passe).
+- **`Plan{ Artifacts, Stale, Fresh, Unchanged }`** — le résultat déterministe : les artefacts à (ré)écrire + la classification.
+
+### `Drifted` — une seule définition de drift
+
+`Drifted(recordedOutputHash, onDisk) bool` **réutilise** `records.Hash` (l'unique adresse de contenu du truth-store, S01) — le **même** hash que les émetteurs S74 estampillent dans `Artifact.OutputHash`. Donc `regen` et les émetteurs partagent **une** définition de drift (pas un second algorithme de hash ; un drift est **une** inégalité de hash, la même partout). L'`OutputHash` qu'un `relemit.Artifact` porte est directement comparable à `Hash(onDisk)`.
+
+### Le code de refus — `back/runtime/blockreason`
+
+`GEN_FILE_HAND_EDITED` (`CodeGenFileHandEdited`) est ajouté **additivement** à l'enum **fermé** des `BlockReason` (const + entrée `reasons` + `codeOrder`), avec son explication française et son `how_to_fix` non vide (jamais une prison) : *revert l'édition*, *porte la modif dans la source via idée → miroir → /goal*, *relance « Régénérer mon app »*. Extension `change_type: refine`, jamais une suppression.
+
+### Le MCP — `back/mcp/app-regenerator` (ADR 0009)
+
+Trois outils purs, transport stdio :
+
+- **`regenerate`** — l'action complète : schema + ledger + disk → `Plan`, ou le `BlockReason` si un fichier a drifté.
+- **`check_drift`** — la porte hand-edit **seule** : retourne le `BlockReason` du premier fichier drifté, ou ok.
+- **`plan_only`** — la classification (stale/fresh/unchanged) **sans** les octets : la prévisualisation « ce que Régénérer va réécrire » (refuse toujours un hand-edit).
+
+### Le jumeau TS, la route, les miroirs
+
+- **`front/web/lib/app-regenerator.ts`** — le jumeau déclaré, qui **compose** le jumeau S74 (`lib/relation-emitter`) — jamais un second émetteur — pour que la prévisualisation à l'écran soit byte-équivalente au régénérateur Go.
+- **Route `/app-regenerator`** — **action-capable** (ui-completeness, §7) : un contrôle lié au moteur, exécutable depuis l'écran (lancer la régénération sur un arbre **fidèle** → un Plan ; ou sur un arbre **hand-edité** → refus `GEN_FILE_HAND_EDITED`). Thème ADR 0010, bilingue ADR 0011.
+- **Miroirs** — la **property `rapid`** (`regen_property_test.go`) épingle byte-stable, **order-invariant** (permuter entités/async → octets identiques), **refuse-hand-edit** (muter un fichier → `GEN_FILE_HAND_EDITED` + plan vide), **no-false-positive** (arbre fidèle → tout `Unchanged`), **stale-by-source-hash** ; une **fixture** (`regen_fixture_test.go`) joue un projet Customer+Order+async ; **Vitest + fast-check** côté TS ; **3 Playwright** prouvent les contrôles à l'écran.
+
+## Méta
+
+**Pourquoi cette forme ?** La régénération est le point où **plusieurs émetteurs** d'un projet se composent en **un** geste utilisateur. La tentation serait d'écrire un « super-émetteur » qui refait tout — ce serait une **duplication** (deux endroits qui rendent le même DDL → risque de divergence). S78 refuse : il **orchestre** `relemit.EmitAll`, qui reste la **seule autorité** d'émission. S78 n'apporte que ce qui lui est propre : la **porte hand-edit**, la **classification de staleness**, et le **Plan**.
+
+**Périmé vs hand-edité — deux calculs orthogonaux sur le même ledger.** Un fichier *périmé* (source bougée) et un fichier *hand-edité* (contenu falsifié) sont détectés par **deux comparaisons distinctes** : `SourceHash` pour la staleness, `OutputHash` pour le drift. Les confondre serait une erreur de modèle : un fichier peut être à jour ET hand-edité (refus), ou périmé ET fidèle (à régénérer normalement). Les garder séparés rend chaque verdict **honnête**.
+
+**Fail-closed, avant la première écriture.** La porte hand-edit tourne **en tête**, avant `EmitAll`, pour qu'aucune régénération ne puisse détruire une édition humaine — même partiellement. Le **premier** drift (en ordre trié, donc déterministe) bloque tout. C'est la non-destruction (§9) appliquée au plan d'émission.
+
+**Pas d'I/O dans le cœur.** `Regenerate` prend le disque en argument et ne lit aucun fichier : le cœur reste une **fonction pure**, testable par property sans système de fichiers ; la couture MCP/CLI fait l'I/O. C'est la séparation déterminisme/effet qui rend le miroir de reproductibilité possible.
+
+## Méta-méta
+
+**Le déterminisme-first comme garde, pas comme slogan.** S78 incarne le mandat (CLAUDE.md §6/§8) sur trois points : (a) l'émission est **du code** (composition d'émetteurs purs), jamais une IA ; (b) le verdict de drift est une **inégalité de hash**, jamais un jugement ; (c) un **miroir de reproductibilité** (`rapid` : même projet → mêmes octets, ordre-invariant) **prouve** la pureté à chaque run. Un agent qui « régénérerait » à la main serait un **gap de déterminisme** qui bloque l'étape — au même titre qu'un monstre.
+
+**La régénération comme contrat de la verticale deploy.** En posant « régénérer = ré-projeter depuis la vérité » dès S78, on grave le principe que **E10** (preview/deploy/rollback) consomme : un artefact déployé est **toujours** ré-émis depuis sa phase, **jamais** restauré tel quel depuis une archive. Le truth-store/phase est autoritatif ; le code sandbox est régénérable et **jetable**. S78 est le moteur qui rend ce principe **exécutable** — la dent sur laquelle S94/S96/S98 s'appuieront.
+
+**Réutiliser plutôt que réinventer, jusque dans le hash.** S78 ne forke ni l'émetteur (il compose `relemit.EmitAll`) ni le hash (il réutilise `records.Hash`) ni la forme de refus (il étend l'enum `blockreason` fermé). Chaque réutilisation **élimine une source de divergence** : un seul émetteur, un seul hash, un seul vocabulaire de refus. C'est l'anti-overwrite (§9) au niveau de l'architecture — additif, jamais une seconde implémentation concurrente.

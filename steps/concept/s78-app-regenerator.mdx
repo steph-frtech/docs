@@ -1,0 +1,60 @@
+---
+title: "S78 · « Régénérer mon app » — tout le code de votre app, ré-émis en un clic, byte-stable"
+description: "S78 vous donne le bouton « Régénérer mon app » : une action liée au Kernel de votre projet qui exécute les émetteurs déterministes pour TOUTES les sources de votre app — entités, relations, operations (synchrones ET asynchrones), controls, blobs — vers la cible d'émission, en UNE passe. Elle vous dit ce qui change (un fichier PÉRIMÉ parce que sa source a bougé, un fichier NOUVEAU, un fichier INCHANGÉ) en comparant les empreintes de source. Et surtout : elle est byte-stable (le même projet rend toujours les MÊMES octets) et elle REFUSE de régénérer si un fichier généré a été édité à la main — pour ne jamais écraser silencieusement votre modification. C'est l'action que la prévisualisation et le déploiement (E10) réutilisent pour ré-projeter votre app depuis une phase stable. Le mur tient : régénérer n'écrit aucune vérité — le code émis est une projection régénérable."
+keywords: ["aidos", "krd", "S78", "régénérer", "regenerate", "régénération", "regeneration", "Régénérer mon app", "Regenerate my app", "project-scopé", "project-scoped", "émetteur", "emitter", "déterministe", "byte-stable", "byte-identique", "byte-identical", "source-hash", "empreinte de source", "projection périmée", "stale", "hand-edit", "édité à la main", "GEN_FILE_HAND_EDITED", "drift", "preview", "deploy", "E10", "phase stable", "le mur", "projection", "non-destruction", "S74", "EPIC 6"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S78](/steps/internals/s78-app-regenerator).</Note>
+
+## En une phrase
+
+S78 vous donne le bouton **« Régénérer mon app »** : il ré-émet **tout** le code de votre projet — entités, relations, operations synchrones et asynchrones, controls, blobs — de façon **déterministe**, vous dit **ce qui change**, et **refuse** d'écraser un fichier que vous auriez édité à la main.
+
+## Le problème que S78 résout
+
+Aux étapes précédentes, AIDOS a appris à **émettre** le code de votre app : des FK et des tables de liaison (S74), des workers asynchrones, du TypeScript typé. Mais ces émissions se faisaient **une à la fois**, pièce par pièce. Quand votre app grandit — dix entités, des relations entre elles, des tâches de fond — vous avez besoin d'un seul geste qui **régénère le tout d'un coup**, à partir de la vérité de votre projet.
+
+Deux dangers guettent une régénération naïve :
+
+- **Régénérer du code qui n'est plus le bon.** Si la source d'un fichier a changé, le fichier sur disque est **périmé** — il ment sur sa source. S78 le détecte en comparant l'**empreinte de la source** (source-hash) : il sait exactement quels fichiers sont à jour et lesquels doivent être réécrits.
+- **Écraser votre travail.** Le code émis n'est **jamais** à éditer à la main — c'est une projection régénérable. Mais si quelqu'un l'a tout de même modifié, une régénération brutale **détruirait** sa modification en silence. S78 **refuse** : il s'arrête avant la première écriture et vous explique quoi faire.
+
+## Ce que S78 apporte
+
+<CardGroup cols={2}>
+  <Card title="Tout votre projet, en un geste" icon="wand-magic-sparkles">
+    Une seule action exécute les émetteurs pour <strong>toutes</strong> les sources : entités, relations, operations <strong>sync ET async</strong>, controls, blobs — vers la cible d'émission de votre projet.
+  </Card>
+  <Card title="Byte-stable" icon="equals">
+    Le <strong>même projet</strong> rend toujours les <strong>mêmes octets</strong>. Régénérer deux fois ne change rien — c'est un calcul pur, pas une génération par IA.
+  </Card>
+  <Card title="Ce qui change, en clair" icon="list-check">
+    Chaque fichier est classé <strong>nouveau</strong> (jamais émis), <strong>périmé</strong> (sa source a bougé) ou <strong>inchangé</strong> — détecté par l'empreinte de source. Vous voyez ce que « Régénérer » va réécrire <em>avant</em> qu'il le fasse.
+  </Card>
+  <Card title="Refuse un fichier édité à la main" icon="shield-halved">
+    Si un fichier généré a été modifié à la main, la régénération est <strong>refusée</strong> (<code>GEN_FILE_HAND_EDITED</code>) — votre modification n'est <strong>jamais</strong> écrasée en silence.
+  </Card>
+</CardGroup>
+
+## Périmé ≠ édité à la main
+
+Ce sont **deux choses différentes**, et S78 les distingue :
+
+- Un fichier **périmé** est une projection **out-of-date** : sa **source** a changé (vous avez ajouté un champ, une relation), donc le code émis ne correspond plus. C'est **normal** — il suffit de le régénérer, et c'est exactement ce que « Régénérer mon app » fait.
+- Un fichier **édité à la main** est une projection **falsifiée** : son **contenu** a été modifié sans passer par la source. C'est **interdit** — régénérer l'écraserait, donc S78 **refuse** et vous renvoie vers la bonne porte : changez la **source** (idée → miroir → /goal), pas le fichier émis.
+
+## Pourquoi c'est du code, jamais une IA
+
+Régénérer une app à partir de sa vérité est un **calcul reproductible** : lire les sources, lancer les émetteurs, comparer des empreintes. Confier cela à une IA serait à la fois **inutile** (une fonction le fait parfaitement) et **dangereux** (une IA ne garantit pas le même résultat deux fois). S78 est donc **du code pur** : le même projet rend toujours les mêmes octets, et le verdict « ce fichier a-t-il été édité à la main ? » est une simple **comparaison d'empreinte**, jamais un jugement.
+
+## Là où S78 vous sert ensuite
+
+« Régénérer mon app » n'est pas qu'un bouton de confort : c'est la **brique** que la **prévisualisation** et le **déploiement** (EPIC 10) réutilisent. Déployer une version de votre app, c'est la **ré-projeter depuis une phase stable** — exactement le geste de S78. Le code n'est jamais « restauré » tel quel depuis une archive : il est **régénéré** depuis la vérité, qui seule fait foi.
+
+## Le mur tient
+
+Régénérer **n'écrit aucune vérité**. Le code émis (`gen/`) est une **projection régénérable**, pas le noyau de votre projet. La seule façon de changer ce que S78 émet est de changer la **source** — vos entités, vos relations, vos operations — par le chemin gouverné `idée → miroir → /goal → approbation`. Le bouton ne touche jamais au noyau.
+
+## En résumé
+
+<Check>S78 vous donne **« Régénérer mon app »** : tout le code de votre projet ré-émis en un geste, **byte-stable**, avec le détail de ce qui change — et un **refus net** si un fichier généré a été touché à la main. C'est la régénération sur laquelle s'appuient la preview et le déploiement.</Check>
