@@ -1,0 +1,59 @@
+---
+title: "S70 · Librairie de miroirs par projet (internals)"
+description: "Le détail d'implémentation de S70 : back/kernel/mirror/library (Go) — ProjectLayer/ProjectMirror (couche/miroir tagués du projet propriétaire), Library (la librairie multi-projets), ListByApp (groupe les miroirs par app + tally vivant/mort), ScopeTo (projette la librairie globale vers la coupe d'UN projet, sans fuite), ScopedCompleteness (réutilise records.ComputeCompleteness sur cette coupe seule — un reflet inter-projet devient orphelin), HasMonster. Le jumeau TS lib/mirror-library, le MCP back/mcp/mirror-library (2 outils purs), la route /mirror-library action-capable, les miroirs (fixture + 2 property rapid + Vitest/fast-check + 4 Playwright). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "S70", "library", "ProjectLayer", "ProjectMirror", "Library", "ListByApp", "ScopeTo", "ScopedCompleteness", "HasMonster", "ScopedCut", "AppMirrors", "projet", "scope", "portée", "isolation", "RLS", "S55", "monstre", "no_truth_without_mirror", "no_orphan_mirror", "inter-projet", "orphelin", "liveness", "vivant", "mort", "ComputeCompleteness", "réutilisation", "fonction pure", "déterminisme", "reproductibilité", "rapid", "fast-check", "Playwright", "MCP", "le mur", "n'écrit rien", "S06", "S12", "§29", "§33", "§34"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S70](/steps/concept/s70-mirror-library).</Note>
+
+## Implémentation
+
+S70 livre la **librairie de miroirs scopée au projet** : les miroirs de l'utilisateur listés **par app** avec leur liveness, et la **détection de monstre restreinte à un seul projet**. Sur les deux plans (Go faisant autorité + jumeau TS) avec une surface action-capable.
+
+### Le moteur Go — `back/kernel/mirror/library`
+
+Tout est **pur, total, déterministe** (aucune horloge, aucun rng, aucune I/O) :
+
+- **`ProjectLayer{Project, Layer}` / `ProjectMirror{Project, Mirror}`** : une `records.Layer` / `records.Mirror` (S06, verbatim) **taguée** du `ProjectID` propriétaire. C'est le read-model que la librairie groupe et scope.
+- **`Library{Layers, Mirrors}`** : la librairie **multi-projets** complète — la valeur globale que S70 scope **vers** un projet, jamais la coupe sur laquelle la loi tourne directement.
+- **`ListByApp(lib) → []AppMirrors`** : groupe les miroirs **par app**, chacun trié déterministiquement, avec son **tally** `Alive`/`Dead` (vivant = `m.IsLiving()` : alive ∧ cert_language exécutable, KRD §805). Les apps sont triées par `ProjectID`.
+- **`ScopeTo(lib, project) → ScopedCut`** : projette la librairie globale vers la coupe d'**UN** projet — exactement les couches qu'il possède ∧ les miroirs qu'il possède, **jamais** les lignes d'un autre projet (l'isolation RLS de S55 rendue valeur déterministe). Les slices sont triés ⇒ coupe stable.
+- **`ScopedCompleteness(lib, project) → records.Completeness`** : la loi bicéphale (KRD §29) sur **la coupe d'un projet seul**. Elle **réutilise `records.ComputeCompleteness` verbatim** — elle ne réimplémente pas la loi ; la seule nouveauté est la **portée**. Parce que les couches du projet B sont absentes de la coupe du projet A, **un miroir de A qui reflète une couche de B est rapporté orphelin** (`no_orphan_mirror`) — un monstre que la coupe globale aurait caché.
+- **`HasMonster(lib, project) → bool`** : `Verdict == RED_MONSTER`, le point rouge/vert de santé d'une app — dérivé du verdict, jamais un flag auto-satisfait.
+
+### Le jumeau TS — `front/web/lib/mirror-library.ts`
+
+Réplique verbatim la logique Go (`listByApp`, `scopeTo`, `scopedCompleteness`, `hasMonster`) en **réutilisant** la loi de complétude de `lib/mirror-health` (le jumeau de S06). Pur, mêmes verdicts, même tri. La librairie démo (`DEMO_LIBRARY`) porte deux apps : `app-shop` (complète) et `app-blog` (les deux monstres injectés — une entité sans miroir + un reflet inter-projet orphelin).
+
+### Le MCP — `back/mcp/mirror-library` (ADR 0009)
+
+Deux outils de **pure computation**, aucun outil d'écriture : `library_list_by_app` (groupe les miroirs par app + liveness), `library_scoped_health` (loi scopée → monster set + verdict). `main_test.go` vert (le détecteur scopé FIRE pour `app-B`, pas pour `app-A`).
+
+### La route — `front/web/app/mirror-library`
+
+Action-capable (`ui-completeness`, §7) : **un contrôle** lié au moteur — choisir un projet → exécuter la loi scopée. Le verdict se rend en `<section data-testid="library-result" data-monster data-verdict>` ; les monstres en `<ul data-testid="monster-list">` (un `data-reason` par monstre) ; les miroirs par app en cartes `<div data-testid="app-card" data-project>` (un `data-liveness` par miroir). Thème ADR 0010, bilingue ADR 0011 (parité i18n 3778/3778). Entrée de nav dans le groupe **Build** à côté de `/mirror-watch`.
+
+### Les miroirs (rouge → vert)
+
+- **Go** : `library_test.go` — la **fixture canonique** (`TestProjectScopedMonster_FaultInjection` : `app-B` rouge, `app-A` reste vert), la **fault-injection inter-projet** (`TestCrossProjectReflectIsOrphanWithinScope` : le reflet inter-projet est orphelin dans le scope alors que la coupe globale ne le voit pas), `TestListByApp`, et **deux property tests rapid** (`ScopedCompleteness` reproductible + le scope ne fuit jamais une app voisine).
+- **TS** : `lib/mirror-library.test.ts` (Vitest + fast-check — les mêmes invariants : la fault-injection FIRE, le scope change le verdict, reproductibilité, non-fuite).
+- **MCP** : `back/mcp/mirror-library/main_test.go`.
+- **e2e** : `tests/e2e/mirror-library.spec.ts` (4/4 — rend le contrôle, le détecteur scopé FIRE pour `app-blog` (no_truth + no_orphan), l'app voisine reste verte, les miroirs sont listés par app avec leur liveness).
+
+## Méta
+
+**Pourquoi ce découpage ?** S70 sépare nettement **trois préoccupations** : le **groupement** (`ListByApp`, projection pure de la liveness par app), le **scope** (`ScopeTo`, restriction pure à un projet), et la **loi** (`ScopedCompleteness`, qui **réutilise** S06 sans le retoucher). Le scope est rendu *valeur* (`ScopedCut`), pas effet de bord : il se teste sans DB, sans RLS.
+
+**Le scope change le verdict — c'est le cœur.** L'idée non triviale : restreindre la coupe n'est pas un filtre cosmétique. Un miroir inter-projet **valide en apparence dans le tas global** devient **orphelin** dans le bon scope, parce que sa couche cible n'y est pas visible. Le `no_orphan_mirror` de S06 fait le travail — sans une ligne de logique nouvelle — dès qu'on lui donne la **bonne coupe**. La fault-injection (`TestCrossProjectReflectIsOrphanWithinScope`) épingle exactement ce delta : le global ne voit pas le monstre, le scopé le voit.
+
+**Réutilisation, jamais de fork (determinism-first).** `records.ComputeCompleteness` est réutilisé verbatim — S70 n'a **pas** réécrit la loi de complétude. La détection scopée est une **fonction** (même librairie ⇒ même verdict, épinglé par les property rapid + fast-check), jamais un agent. L'LLM n'entre nulle part : grouper, scoper, compter, comparer **sont** des fonctions.
+
+**Le mur, structurellement.** `library` ne possède aucun chemin d'écriture : il **lit** la librairie taguée + **calcule** un verdict. Aucune fonction n'écrit le schéma `mirrors`/`kernel` ; l'isolation par projet est le mur RLS (S55), rendue explicite ici comme une portée. Exécuter la chasse au monstre ne touche jamais la vérité.
+
+## Méta-méta
+
+**S70 boucle la complétude sur le multi-projets.** S06 a rendu la loi bicéphale *mécanique* (la coupe globale) ; S12 l'a rendue *bloquante* (le Stop gate) ; S55 a rendu l'OS *multi-projets* (l'isolation RLS) ; S68/S69 ont rendu l'autorat + l'exécution d'un miroir *un geste produit*. S70 est le point où ces axes se croisent : la **même loi**, appliquée à la **bonne coupe**, pour le **bon utilisateur**. La complétude n'est plus une propriété de tout AIDOS, mais une propriété de **votre app** — calculable, isolée, et visible.
+
+**La portée comme primitive.** En faisant de `ScopedCut` une *valeur*, S70 rend le scope **composable** : un futur Stop gate par projet, un futur tableau de bord de santé multi-app, un futur ratchet scopé — tous peuvent réutiliser `ScopeTo` puis n'importe quel détecteur pur sur la coupe résultante. Le scope n'est pas codé en dur dans la loi ; il est *appliqué* à elle. C'est la leçon KRD que S70 instancie : *la même vérité, des portées différentes*, jamais une loi dupliquée par portée.
+
+**Le monstre que le global cache.** Le résultat méta-méta de S70 est anti-Goodhart : un système qui ne mesure la complétude que globalement **récompense** un reflet inter-projet (il a l'air sain). Scoper révèle ce qu'agréger masquait. C'est la même intuition que « la moyenne ment » poussée à la complétude : un agrégat vert peut cacher une app rouge. S70 refuse l'agrégat trompeur — il regarde chaque app dans sa propre coupe.

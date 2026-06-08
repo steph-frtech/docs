@@ -1,0 +1,57 @@
+---
+title: "S70 · Votre librairie de miroirs, par app"
+description: "S70 vous donne la vue de tous vos miroirs RANGÉS PAR APP, chacun avec sa liveness (vivant/mort), et la chasse au monstre SCOPÉE à un seul projet. Un monstre — une vérité sans miroir vivant, ou un miroir orphelin — est traqué DANS le projet choisi, pas dans le tas global. La portée n'est pas cosmétique : elle change le verdict. Un miroir de votre app A qui reflète une couche de l'app B est un ORPHELIN dans A (un monstre que la coupe globale aurait caché). La détection est une fonction PURE, jamais un LLM ; l'isolation par projet est le mur RLS (S55). Le mur tient : S70 ne fait que LIRE une projection et calculer un verdict, il n'écrit aucune vérité."
+keywords: ["aidos", "krd", "S70", "miroir", "librairie", "par projet", "par app", "liveness", "vivant", "mort", "complétude", "monstre", "vérité sans miroir vivant", "miroir orphelin", "scopé", "portée", "isolation", "RLS", "S55", "inter-projet", "fonction pure", "déterminisme", "verdict", "complet", "monstre détecté", "le mur", "read-only", "S06", "S12", "§29", "§33", "§34"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S70](/steps/internals/s70-mirror-library).</Note>
+
+## En une phrase
+
+S70 est l'écran où vous voyez **tous vos miroirs rangés par app** — chacun marqué vivant ou mort — et où vous **chassez les monstres d'un projet à la fois** : une vérité sans preuve vivante, ou une preuve qui ne reflète plus rien, **dans cette app seule**.
+
+## Le problème que S70 résout
+
+Dans AIDOS, chaque utilisateur construit **sa propre app**. La loi de complétude (S06/S12) sait dire « cette coupe a-t-elle un monstre ? » — mais sur le **tas global**. Or vous ne voulez pas savoir si *l'ensemble de tous les projets* est sain : vous voulez savoir si **VOTRE app** est saine. S70 **scope** la librairie et la chasse au monstre à un projet. Sans ce scope, un monstre se cache (un miroir qui reflète une couche d'une AUTRE app a l'air valide dans le tas global) ; avec lui, il apparaît.
+
+## Ce que S70 apporte
+
+<CardGroup cols={2}>
+  <Card title="Vos miroirs, rangés par app" icon="folder-tree">
+    Tous vos miroirs <strong>groupés par projet</strong>, chacun avec sa <strong>liveness</strong> — vivant (vert) ou mort (rouge) — et le compte des deux d'un coup d'œil.
+  </Card>
+  <Card title="La chasse au monstre, scopée" icon="crosshairs">
+    La loi de complétude tourne sur <strong>la coupe d'un projet seul</strong> : une couche sans miroir vivant (<em>no_truth_without_mirror</em>), un miroir orphelin (<em>no_orphan_mirror</em>) — DANS votre app.
+  </Card>
+  <Card title="La portée change le verdict" icon="shield-halved">
+    Un miroir de votre app qui reflète une couche d'une AUTRE app est un <strong>orphelin</strong> chez vous : la couche cible est invisible dans votre coupe. C'est un monstre que le tas global aurait masqué.
+  </Card>
+  <Card title="Une app malade ne contamine pas sa voisine" icon="circle-check">
+    Injectez un monstre dans une app : son verdict passe au rouge, mais l'app voisine reste <strong>verte</strong>. L'isolation est mécanique (le mur RLS, S55).
+  </Card>
+</CardGroup>
+
+## Comment vous l'utilisez
+
+<Steps>
+  <Step title="Vous choisissez un projet">
+    Sélectionnez l'app à inspecter dans la liste de vos projets.
+  </Step>
+  <Step title="Vous lancez la complétude scopée">
+    Le détecteur ne voit que la coupe de ce projet : il rend le <strong>verdict</strong> (COMPLET / MONSTRE) et la liste des monstres trouvés.
+  </Step>
+  <Step title="Vous lisez vos miroirs par app">
+    Sous le verdict, vos miroirs s'affichent <strong>rangés par app</strong>, chacun avec sa liveness et le compte vivants/morts.
+  </Step>
+</Steps>
+
+## Ce que ça garantit
+
+- **Un monstre est local.** Le verdict d'une app ne dépend que de SA coupe — jamais d'un autre projet (l'isolation RLS, S55).
+- **Rien n'est caché.** Un reflet inter-projet, valide en apparence dans le tas global, est révélé comme orphelin dans le bon scope.
+- **Le verdict est mécanique.** La détection est une **fonction pure** (même librairie ⇒ même verdict), jamais un jugement flou, jamais un LLM.
+- **Le mur tient.** S70 **lit** une projection et **calcule** un verdict — il n'écrit aucune vérité.
+
+## Et après
+
+S70 vous donne la vue par app. La suite de la piste app-builder continue de descendre la verticale de votre besoin vers le code émis ; consultez l'index des étapes pour la prochaine capacité.
