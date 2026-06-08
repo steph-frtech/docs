@@ -1,0 +1,64 @@
+---
+title: "S68 · Écrivez un miroir par sa forme — sans choisir la forme"
+description: "S68 vous donne l'éditeur des trois formes de miroir : journey/acceptation N0 → Gherkin, invariant ∀ N1 → propriété, workflow N2 → fixture state→cmd→events. Vous ne choisissez PAS la forme : AIDOS la DÉRIVE de la nature de la vérité (une table close, jamais devinée). Vous tapez la source, AIDOS la PARSE par une fonction pure (jamais un LLM), et le miroir naît ROUGE et project-scopé, proposé comme un ChangeSet DRAFT (le mur). À deux sur le même brouillon, vos éditions FUSIONNENT ou se VERROUILLENT — jamais de last-write-wins silencieux."
+keywords: ["aidos", "krd", "S68", "miroir", "éditeur par forme", "trois formes", "Gherkin", "propriété", "fixture", "state command events", "dériver la forme", "derive-mirror", "nature de la vérité", "acceptation", "invariant", "workflow", "miroir rouge", "watch it fail", "parsing", "fonction pure", "déterminisme", "ChangeSet DRAFT", "project-scopé", "concurrence", "draft-level", "lock", "CRDT", "last-write-wins", "le mur", "propose", "S110", "S06", "§34", "§90"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S68](/steps/internals/s68-shape-editor).</Note>
+
+## En une phrase
+
+S68 est l'écran où vous **autorez un miroir** — la preuve d'un comportement — en tapant sa **source** ; AIDOS **dérive la forme** (Gherkin / propriété / fixture) de la **nature** de la vérité, **parse** votre source par une fonction pure, et propose le miroir **rouge** comme un ChangeSet DRAFT : vous **regardez la preuve échouer** avant d'écrire le code.
+
+## Le problème que S68 résout
+
+Un miroir n'a pas une forme libre : un parcours utilisateur s'écrit en **Gherkin** (`Given/When/Then`), un invariant `∀` s'écrit en **propriété** (« vrai sur toutes les entrées »), un workflow s'écrit en **fixture** (`state → command → events`). Se tromper de forme, c'est écrire un faux miroir. S68 supprime ce risque : **vous ne choisissez pas la forme**, elle est **dérivée** de la nature de la vérité que vous reflétez — une table close, jamais devinée.
+
+## Ce que S68 apporte
+
+<CardGroup cols={2}>
+  <Card title="La forme dérivée de la nature" icon="shapes">
+    Vous indiquez la <strong>nature</strong> (acceptation, invariant, workflow) ; AIDOS dérive la <strong>forme</strong> : acceptation → Gherkin, invariant → propriété, workflow → fixture. Une nature inconnue n'a <strong>aucune</strong> forme — rien n'est deviné.
+  </Card>
+  <Card title="Un parsing pur, jamais un LLM" icon="code">
+    Votre source est <strong>parsée par une fonction pure</strong> : un Gherkin sans <code>When</code>/<code>Then</code>, une propriété sans <code>forall</code>, une fixture sans <code>event</code> sont refusés — déterministiquement, jamais par un jugement flou.
+  </Card>
+  <Card title="Un miroir né rouge" icon="circle-xmark">
+    Le miroir autorisé naît <strong>ROUGE</strong> (« watch it fail ») — il reflète une couche mais ne passe pas encore, parce que le code n'existe pas. C'est le cœur du KRD : la preuve d'abord, le code ensuite.
+  </Card>
+  <Card title="Une proposition, jamais une écriture" icon="lock">
+    Le miroir est <strong>project-scopé</strong> et rendu comme un <strong>ChangeSet DRAFT</strong> — il n'écrit aucune vérité. Le gel passe par le mur : propose → ChangeSet → approbation.
+  </Card>
+</CardGroup>
+
+## Les trois formes
+
+<Steps>
+  <Step title="Acceptation N0 → Gherkin">
+    Un parcours : `Scenario: …` puis `Given …`, `When …`, `Then …`. La forme des journeys.
+  </Step>
+  <Step title="Invariant ∀ N1 → propriété">
+    Une vérité sur toutes les entrées : `property: …`, `forall: x, y`, `holds: …`. Un seul exemple (`∃`) est refusé — un exemple n'est pas un `∀`.
+  </Step>
+  <Step title="Workflow N2 → fixture">
+    Un comportement pas-à-pas : `fixture: …`, `state: …`, `command: …`, `event: …`. La forme des opérations.
+  </Step>
+</Steps>
+
+## À deux sur le même brouillon
+
+Avant que le miroir devienne un ChangeSet, c'est un **brouillon** que deux auteurs peuvent éditer en même temps. S68 garantit qu'**aucune édition n'en écrase silencieusement une autre** :
+
+- vous éditez des **champs différents** (l'un le titre, l'autre la source) → les deux éditions **fusionnent** ;
+- vous éditez le **même champ** avec des valeurs différentes → **verrouillage** : les deux candidats sont affichés, vous tranchez ;
+- jamais un **last-write-wins** silencieux.
+
+<Note>C'est un conflit **au niveau brouillon** (présence/lock), distinct du conflit d'**écriture-vérité** (deux approbations concurrentes) géré plus tard par S110.</Note>
+
+## Ce que S68 ne fait pas
+
+S68 **propose** ; il **n'écrit jamais** le miroir dans la base. Le gel d'un miroir dans le schéma `mirrors` passe toujours par le mur (propose → ChangeSet → approbation). L'écran ne peut structurellement pas écrire la vérité.
+
+## Et après
+
+Le miroir rouge proposé par S68 est matérialisé vers son runner (Godog / rapid / fixture) et regardé rougir en direct par **S69**, puis listé dans la librairie de miroirs de votre projet par **S70**.

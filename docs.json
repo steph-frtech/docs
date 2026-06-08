@@ -202,6 +202,8 @@
               "steps/internals/s66-goal-piloting",
               "steps/concept/s67-behavior-capture",
               "steps/internals/s67-behavior-capture",
+              "steps/concept/s68-shape-editor",
+              "steps/internals/s68-shape-editor",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

@@ -1,0 +1,59 @@
+---
+title: "S68 · Éditeur par forme + concurrence draft-level (internals)"
+description: "Le détail d'implémentation de S68 : back/runtime/shapeeditor (Go) — DeriveShape (table close nature→forme), les trois parseurs purs (ParseGherkin/ParseProperty/ParseFixture), MergeEdits (CRDT draft-level : fusion | lock, jamais last-write-wins) et ProposeMirror (miroir rouge project-scopé → ChangeSet DRAFT, n'écrit rien). Le jumeau TS lib/shape-editor, le MCP back/mcp/shape-editor (4 outils purs), la route /shape-editor action-capable, les miroirs (rapid + fixture + Godog + Vitest/fast-check + Playwright). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "S68", "shapeeditor", "DeriveShape", "ParseGherkin", "ParseProperty", "ParseFixture", "MergeEdits", "ProposeMirror", "CRDT", "lock", "draft-level", "last-write-wins", "miroir rouge", "liveness dead", "ChangeSet DRAFT", "project-scopé", "le mur", "fonction pure", "déterminisme", "reproductibilité", "rapid", "Godog", "fast-check", "Playwright", "MCP", "S06", "S20", "S55", "S110", "§34", "§90"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S68](/steps/concept/s68-shape-editor).</Note>
+
+## Implémentation
+
+S68 livre l'**éditeur des trois formes de miroir** avec **concurrence au niveau brouillon**, sur les deux plans (Go faisant autorité + jumeau TS) et une surface action-capable.
+
+### Le moteur Go — `back/runtime/shapeeditor`
+
+Tout est **pur, total, déterministe** (aucune horloge, aucun rng, aucune I/O) :
+
+- **`DeriveShape(nature) → Derivation`** : la **table close** `natureToDerivation` mappe `acceptance → {gherkin, acceptance}`, `invariant → {property, rapid}`, `workflow → {fixture, fixture}`. Une nature absente renvoie `ErrUnknownNature` — **jamais** une forme devinée (l'honnêteté de l'ensemble clos). C'est le geste `/derive-mirror` rendu code, jamais un LLM.
+- **Les trois parseurs purs** : `ParseGherkin` (exige un `Scenario:` + au moins un `When` et un `Then`), `ParseProperty` (exige `property:` + `forall:` + `holds:` — un `∃` sans `forall` est refusé, la borne de circularité §8), `ParseFixture` (exige `fixture:` + `state:` + `command:` + ≥ 1 `event:`). Chacun renvoie une `ParsedSpec` typée ou un `ErrParse` nommant la porte.
+- **`MergeEdits(draft, a, b) → (draft, []EditConflict, error)`** : le merge **CRDT draft-level**. Champs disjoints → fusion ; même champ, même valeur → fusion idempotente ; même champ, valeurs différentes → **lock** (`ErrDraftConflict` + les deux candidats surfacés, la version **n'avance pas**) ; base périmée → `ErrStaleBase`. **Jamais** un last-write-wins. `ApplyEdit` est le chemin mono-auteur.
+- **`ProposeMirror(draft, parentPhase) → Proposal`** : parse la source pour la forme dérivée, construit le `records.Mirror` **rouge** (`Liveness=dead`, `Authority=above`), content-adressé via `records.Hash(records.Canonicalize(...))`, et l'emballe comme le **`mirror_delta`** d'un `changeset.Open` DRAFT (aucun `spec_delta` — un autorat de miroir ne touche que le plan Mirror). `WroteMirror` est **toujours `false`**.
+
+### Le jumeau TS — `front/web/lib/shape-editor.ts`
+
+Réplique verbatim la logique Go (`deriveShape`, `parseGherkin/Property/Fixture`, `mergeEdits`, `proposeMirror`) — pur, même verdicts. L'adresse de contenu faisant autorité reste celle de Go ; le front porte un handle stable pour la prévisualisation.
+
+### Le MCP — `back/mcp/shape-editor` (ADR 0009)
+
+Quatre outils de **pure computation**, sans outil d'`apply` : `shape_derive`, `shape_parse`, `shape_merge` (le lock est un verdict, pas une erreur serveur — il surface les conflits), `shape_propose`. `main_test.go` vert.
+
+### La route — `front/web/app/shape-editor`
+
+Action-capable (`ui-completeness`, §7) : **trois contrôles** liés au moteur — dériver la forme, autorer un miroir rouge, fusionner/verrouiller deux éditions. Thème ADR 0010, bilingue ADR 0011 (parité i18n 3728/3728). Entrée de nav dans le groupe **Build** à côté de `/behavior-capture`.
+
+### Les miroirs (rouge → vert)
+
+- **Go** : `shapeeditor_property_test.go` (rapid — sélection de forme déterministe + table close, parsing pur, `ProposeMirror` déterministe/rouge/sans-écriture), `shapeeditor_fixture_test.go` (concurrence draft-level : fusion | lock | base périmée), `shapeeditor_bdd_test.go` + `tests/runtime/shape-editor.feature` (Godog acceptance).
+- **TS** : `lib/shape-editor.test.ts` (Vitest + fast-check — les mêmes invariants que le property Go).
+- **MCP** : `back/mcp/shape-editor/main_test.go`.
+- **e2e** : `tests/e2e/shape-editor.spec.ts` (5/5 — rend les trois contrôles, dérive déterministe, autorat rouge DRAFT, source non parsable refusée, lock avec les deux candidats).
+
+## Méta
+
+**Pourquoi ce découpage ?** S68 sépare nettement trois capacités déterministes — **dériver**, **parser**, **fusionner** — de l'unique acte de **proposer**. Chaque capacité est une fonction pure isolée avec son propre miroir de reproductibilité, ce qui satisfait le mandat *determinism-first* : une forme dérivée, un parse, un merge sont tous des fonctions, **jamais** un agent. L'LLM n'entre nulle part — il n'y a pas de surface de génération irréductible ici (un parseur **est** un parseur).
+
+**Le mur, structurellement.** `ProposeMirror` ne possède aucun chemin d'écriture : elle retourne une `Proposal` valeur, `WroteMirror` constant à `false`, le `ChangeSet` figé en `DRAFT`. L'écran **ne peut pas** écrire la vérité — il propose. Le gel dans le schéma `mirrors` (S06) passe par la porte changeset (S20) sous approbation ; le rôle DB de l'agent n'a aucun GRANT.
+
+**Concurrence draft-level vs truth-level.** S68 traite explicitement le conflit **pré-ChangeSet** (deux auteurs sur un brouillon, lock/CRDT). Le conflit d'**écriture-vérité** (deux applies concurrents sur la head, optimistic-lock) est le domaine de **S110** — la frontière est tracée dans la doc du package et dans le miroir.
+
+**Réutilisation, jamais de fork.** Les types de record sont `records.*` (S06) verbatim ; le ChangeSet est `changeset.Open` (S20) verbatim ; l'adresse de contenu réutilise `records.Canonicalize/Hash` (S02). Aucun nouvel ADR — S68 fige un artefact (l'éditeur), il ne déplace aucun contrat antérieur.
+
+## Méta-méta
+
+**Le miroir naît rouge — par construction.** Le critère le plus profond de S68 est que l'autorat produit toujours un miroir `Liveness=dead`. Ce n'est pas un bug, c'est **la loi du KRD** : « watch it fail ». Un éditeur qui produirait un miroir vert serait un *monster* (une preuve qui ne prouve rien). `IsRed(proposal)` est l'invariant que le property test épingle.
+
+**La forme dérivée est l'anti-Goodhart de la forme.** En interdisant à l'humain de *choisir* la forme — en la dérivant d'une table close — S68 rend impossible le faux miroir « un parcours testé comme un invariant ». La forme suit la nature, mécaniquement. Une nature inconnue n'est jamais castée silencieusement (l'honnêteté de l'ensemble clos, comme `requiredTestKinds` de S06).
+
+**Le lock est une création d'information.** Un last-write-wins **détruit** une intention. Le lock de S68 la **préserve** : les deux candidats remontent, l'humain tranche. C'est l'application au niveau brouillon du principe append-only du truth-store — rien n'est jamais écrasé en silence, ni une vérité, ni même un brouillon.
+
+**La reproductibilité comme garde-fou de méta-niveau.** Les deux plans (Go + TS) portent des miroirs de reproductibilité indépendants qui épinglent le **même** comportement déterministe. Si un jour un agent était tenté de « parser intelligemment » une source, ces property tests le détecteraient comme une dérive de déterminisme — un *determinism gap* qui bloque l'étape, au même titre qu'un monster ou une capacité headless.
