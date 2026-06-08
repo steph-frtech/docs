@@ -1,0 +1,76 @@
+---
+title: "S74 · Émetteurs relation-aware (+ async + blob) (internals)"
+description: "Le détail d'implémentation de S74 : back/kernel/entities/relemit (Go) — Schema (Project + []EntityRelations + []AsyncOp, la coupe multi-entités), Validate (tout le schéma projetable : entités S35, relations résolues S71, FK avec une vraie cible à identifier, async bien formé S73), SchemaBody/SchemaHash (adresse de contenu canonique, invariante à l'ordre d'entrée via canonicalEntities/canonicalAsync), EmitDDL (FK 1-1/1-N → colonne relname_id REFERENCES vraie table, N-N → table de liaison composite, outbox quand async), EmitTS (associations typées + SDK de navigation loadXY, cible Hono/TS ADR 0040), EmitWorker (drainer d'outbox TS, échéance cron baked-in), EmitAll (fan déterministe). Le jumeau TS lib/relation-emitter (byte-équivalent), le MCP back/mcp/relation-emitter (5 outils purs), la route /relation-emitter action-capable, les miroirs (fixture + property rapid + Vitest + 5 Playwright). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "S74", "relemit", "EmitDDL", "EmitTS", "EmitWorker", "EmitAll", "Schema", "EntityRelations", "AsyncOp", "Validate", "SchemaHash", "SchemaBody", "canonicalEntities", "FK", "foreign key", "join table", "table de liaison", "N-N", "1-N", "1-1", "association typée", "navigation SDK", "loadBookAuthor", "outbox", "worker", "async", "byte-identique", "déterministe", "content-adressé", "records.Hash", "UNKNOWN_RELATION_TARGET", "blockreason", "MCP", "rapid", "Vitest", "Playwright", "Hono", "TS", "ADR 0040", "le mur", "projection", "S35", "S71", "S72", "S73", "EPIC 6"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord complet. Pour la vue produit sans code, voir [Pour les futurs utilisateurs → S74](/steps/concept/s74-relation-emitter).</Note>
+
+## Implémentation
+
+S74 ajoute l'**émetteur relation-aware, multi-entités** — `back/kernel/entities/relemit` — qui projette une **coupe de schéma complète** (entités + relations S71 + operations async S73) vers les cibles de l'app émise (ADR 0040, TS/Hono). Là où les émetteurs S35 projettent **une** entité vers ses trois projections, `relemit` projette **tout le graphe**. Tout est **pur, total, déterministe** : même schéma → octets byte-identiques. Rien n'écrit la vérité (le mur) ; le code émis est une **projection**.
+
+### Le moteur Go — `back/kernel/entities/relemit`
+
+- **`Schema{ Project, Entities []EntityRelations, AsyncOps []AsyncOp }`** — l'entrée unique. `EntityRelations{ Entity, Relations []ref.Relation }` apparie une entité (S35) avec les relations **déclarées sur elle** (S71). `AsyncOp{ Name, Async }` apparie le nom d'une operation async avec son bloc `operation.Async` (S73).
+- **`Validate(s)`** — vérifie que **tout** le schéma est projetable : un projet épinglé, chaque entité valide (`entities.Validate`), chaque relation **résolue** contre l'ensemble d'entités déclaré (`ref.Resolve` — une cible non déclarée est `UNKNOWN_RELATION_TARGET`, jamais devinée), chaque FK a une cible avec **un identifier** à référencer (`ErrTargetNoIdentifier` — une FK ne référence pas une colonne devinée), et chaque bloc async bien formé (`operation.ValidateAsync`). N'invente **rien**.
+- **`SchemaBody(s)` / `SchemaHash(s)`** — re-sérialise le schéma en un corps JSON **canonique, trié par clé**, en parcourant l'**ordre canonique** (entités par nom, async par nom) via `canonicalEntities` / `canonicalAsync`. L'ordre d'entrée ne **fuit jamais** dans l'adresse. `SchemaHash = records.Hash(SchemaBody)` (S02 réutilisé verbatim) : tout changement d'octet rend un nouveau hash, donc une nouvelle version émise.
+
+### `EmitDDL` — FK, tables de liaison, outbox
+
+- Une `CREATE TABLE` par entité, en **ordre canonique** (nom), une colonne par attribut en **ordre source**, le mapping scalaire→DDL **fermé** (réutilisé de S35), `NOT NULL` sur requis, `PRIMARY KEY` sur l'identifier.
+- Pour chaque relation **1-1 / 1-N** : une colonne FK `relname_id BIGINT [NOT NULL] [UNIQUE] REFERENCES "cible"("pk")` — la cible est une **vraie** table déclarée, sa PK est la **vraie** clé primaire (jamais devinée). `UNIQUE` pour un 1-1.
+- Pour chaque relation **N-N** : une **table de liaison** `owner_relname` émise **après** toutes les tables de base (donc les FK référencent des tables existantes), avec deux colonnes FK vers chaque bout et une **clé primaire composite** sur la paire.
+- Quand le schéma porte ≥ 1 op async : une table **`outbox`** (`effect_id TEXT PRIMARY KEY`, `operation`, `kind`, `target`, `payload JSONB`, `dispatched`, `created_at`) — le journal de livraison at-least-once que le worker draine.
+
+### `EmitTS` — associations typées + SDK de navigation (Hono/TS, ADR 0040)
+
+- Un `export type X = { … }` par entité, champs en ordre source, mapping scalaire→TS **fermé** (S35), un attribut ¬requis **optionnel**.
+- Une **association typée** par relation : un 1-1/1-N ajoute `relname_id: number` (l'id FK) **et** `relname?: Target` (l'association chargée) ; un N-N ajoute `relname?: Target[]` (la collection typée).
+- Un **SDK de navigation** : un `Reader` (port byId/many) + un loader typé par relation — `load<Owner><Rel>(reader, owner): Promise<Target | undefined>` (1-1/1-N) ou `Promise<Target[]>` (N-N). C'est la **navigation typée** que la done-criterion épingle.
+
+### `EmitWorker` — le drainer d'outbox (TS)
+
+- Pour chaque op async (ordre nom) : un `dispatch<Op>(outbox, dispatcher)` qui draine les entrées `pending` de l'outbox et dispatche chaque effet par le canal typé (`cron`/`queue`/`webhook_out`/`notification`), clé par l'`effect_id` (la clé d'idempotence S73).
+- Pour un trigger **cron** : la constante `<OP>_SCHEDULED_AT` (l'échéance `at`) baked-in.
+- Un schéma **sans** op async refuse `EmitWorker` (rien à émettre — `ErrAsyncNoName`).
+- **`EmitAll(s)`** fane le schéma sur l'ensemble clos (DDL, TS, puis Worker iff async) en une passe déterministe ; un `BlockReason` court-circuite (jamais d'arbre partiel).
+
+### Le refus — `errors.go`
+
+`block(cause)` plie une cause en `blockreason.BlockReason` (S13) : une cause de **forme de relation** réutilise le refus actionnable de S71 (`UNKNOWN_RELATION_TARGET` / `UNKNOWN_RELATION_KIND`) verbatim ; une entité/async malformée réutilise la famille `OUT_OF_SCOPE`. `how_to_fix` toujours non vide (no prison, KRD §44.5). **Jamais** de fichier partiel.
+
+### Le jumeau TS, le MCP, la route
+
+- **`front/web/lib/relation-emitter.ts`** — le jumeau qui **reproduit** les trois émetteurs pour l'écran (mêmes algorithmes canoniques, mêmes octets structurels). La sortie Go est **autoritaire** ; le jumeau la reproduit pour un aperçu live et déterministe.
+- **`back/mcp/relation-emitter`** (ADR 0009) — 5 outils purs : `emit_ddl`, `emit_ts`, `emit_worker`, `emit_all`, `schema_hash`. Pas d'LLM dans le serveur ; le code juge ; écrit **rien** (le mur).
+- **`front/web/app/relation-emitter`** — la route **action-capable** : choisir une cible (DDL/TS/Worker) + l'async, émettre, voir le code rendu + l'adresse de contenu. Thème ADR 0010, bilingue ADR 0011.
+
+### Les miroirs
+
+- **Fixture** (`relemit_fixture_test.go`) — les scénarios Given/When/Then : un N-N émet une table de liaison, les FK référencent de vraies tables, un nœud async émet worker + outbox, le TS porte les associations typées + le SDK de navigation, une cible inconnue / une FK sans identifier sont refusées.
+- **Property rapid** (`relemit_property_test.go`) — même schéma → octets byte-identiques ; émission **invariante à l'ordre d'entrée** (entités permutées → mêmes octets) ; chaque FK référence une table déclarée.
+- **Vitest + fast-check** (`relation-emitter.test.ts`) — le côté TS de la reproductibilité (déterminisme + invariance d'ordre + table de liaison + FK→vraie table).
+- **5 Playwright** (`relation-emitter.spec.ts`) — la route action-capable prouvée bout en bout.
+
+## Méta
+
+**Pourquoi un émetteur multi-entités séparé, et pas une extension de S35 ?** Parce que S35 émet **une entité isolée** ; les relations, les join tables, l'outbox sont des artefacts **inter-entités** — ils ne peuvent exister qu'avec une vue du **graphe complet**. Le séparer en `relemit` garde l'émetteur mono-entité simple et fait du multi-entités un **tooth** additif distinct (chaînable, non destructif).
+
+**Pourquoi canonicaliser avant de rendre ?** Parce que la done-criterion exige le **byte-identique**. Si l'ordre d'itération d'une `map` ou l'ordre d'entrée d'un slice fuyait dans les octets, deux ré-émissions du même schéma divergeraient. Trier par nom **avant** de rendre fait de l'émission une **fonction pure** au sens strict — l'invariance d'ordre est une **propriété**, pas un espoir.
+
+**Pourquoi refuser une FK sans identifier cible ?** Parce qu'une clé étrangère doit référencer **une colonne réelle** — la PK de la cible. Si la cible n'a pas d'identifier, il n'y a **rien** à référencer ; inventer une colonne serait un mensonge. Le refus (`ErrTargetNoIdentifier`) est l'**honnêteté de l'émetteur** : il rend ce que le schéma épingle, jamais une colonne devinée.
+
+**Pourquoi les tables de liaison après les tables de base ?** Pour que chaque FK de la join table référence une table **déjà créée** dans le même DDL — un script SQL valide à l'exécution, dans l'ordre. C'est de la **completeness structurelle** appliquée au DDL.
+
+## Méta-méta
+
+**La détermination-first appliquée à la génération de code.** S74 est l'instance la plus directe du mandat (CLAUDE.md §6/§8) : *générer du code à partir d'un AST est un calcul pur — donc c'est du code, jamais une IA*. Rendre une FK, une join table, un type TS, un worker est **reproductible** ; chaque émetteur a son **miroir de reproductibilité** (même schéma → mêmes octets) sur les deux plans (Go rapid + TS fast-check). L'IA n'entre **nulle part** dans l'émission — l'émetteur déterministe **gagne**, toujours.
+
+**L'honnêteté de l'ensemble clos, propagée.** Comme les six verbes de S10, les scalaires de S35, les cardinalités de S71, l'émetteur **n'élargit jamais** un ensemble fermé et **n'invente jamais** une cible : une relation hors-jeu est `UNKNOWN_RELATION_TARGET`, une FK sans cible-à-référencer est refusée. Le code émis ne peut référencer que ce que l'humain a **déclaré**.
+
+**Le mur, jusque dans le code émis.** Émettre **n'écrit aucune vérité** : les octets rendus sont une **projection** (S78 régénère), appartenant à l'app émise, jamais au truth-store. Le nœud de relation, le nœud async, le nœud blob restent des **sources** au-dessus de la ligne, promues par `/goal`. L'émetteur **rend des valeurs** ; il ne **fige** rien. Et la cible (TS/Hono, ADR 0040) est un **delta conséquentiel** sur la réalisation, jamais sur l'AST — le concept Kernel reste neutre au langage.
+
+<Card title="ADR 0040" icon="file-lines" href="/steps/concept/s74-relation-emitter">
+  La cible d'émission de l'app construite par AIDOS est TS/Hono ; sqlc/Go quitte l'arbre émis. Le worker async hérite cette cible (worker TS). EmitDDL (dialecte Postgres) inchangé. Reproductibilité byte-identique préservée.
+</Card>

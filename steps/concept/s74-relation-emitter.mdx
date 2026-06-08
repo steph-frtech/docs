@@ -1,0 +1,63 @@
+---
+title: "S74 · Des entités qui se parlent — FK, tables de liaison, workers, le tout généré"
+description: "S74 fait franchir un cap à votre app émise : jusqu'ici AIDOS savait générer UNE entité synchrone, sans fichiers. Désormais les émetteurs sont RELATION-AWARE et MULTI-ENTITÉS. À partir d'un schéma — vos entités + leurs relations (S71) + leurs operations asynchrones (S73) — EmitDDL/EmitTS/EmitWorker rendent : des colonnes de clé étrangère (FK) pour une relation 1-1 ou 1-N, une TABLE DE LIAISON pour chaque N-N, des associations TYPÉES + un SDK de NAVIGATION en TypeScript, et — pour un nœud async — un WORKER + une table OUTBOX. Tout est DÉTERMINISTE et protégé par le hash : le même schéma rend toujours les MÊMES octets, et chaque FK référence une VRAIE table déclarée — jamais une colonne devinée. La cible est TS/Hono (ADR 0040). Le mur tient : émettre n'écrit aucune vérité — le code émis est une projection régénérable."
+keywords: ["aidos", "krd", "S74", "émetteur", "emitter", "EmitDDL", "EmitTS", "EmitWorker", "relation-aware", "multi-entités", "multi-entity", "FK", "foreign key", "clé étrangère", "join table", "table de liaison", "N-N", "many-to-many", "1-N", "1-1", "association typée", "navigation SDK", "worker", "outbox", "async", "déterministe", "byte-identique", "byte-identical", "hash", "content-adressé", "schéma", "schema", "Hono", "TS", "TypeScript", "Postgres", "DDL", "ADR 0040", "le mur", "read-only", "projection", "S71", "S72", "S73", "S35", "EPIC 6"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S74](/steps/internals/s74-relation-emitter).</Note>
+
+## En une phrase
+
+S74 apprend aux **émetteurs** d'AIDOS à générer une app **multi-entités** : des entités qui **se référencent** (FK, tables de liaison N-N), une **navigation typée** entre elles, et des **workers** pour le travail de fond — le tout rendu de façon **déterministe**, à partir de votre schéma.
+
+## Le problème que S74 résout
+
+Avant S74, les émetteurs d'AIDOS (S35) savaient projeter **une seule entité à la fois**, sans liens entre elles, sans fichiers, sans travail asynchrone. C'était le **plafond** du système de types : une app réelle a besoin que ses entités **se parlent** — un livre a un auteur, un article a des tags, une commande a des lignes.
+
+S71 a ajouté le **nœud de relation** (1-1 / 1-N / N-N), S72 le **type blob/fichier**, S73 l'**operation asynchrone**. Mais ces nœuds restaient des *sources* : personne ne les **transformait encore en code**. S74 est l'émetteur qui les **réalise** — il lit le schéma complet et rend le SQL, le TypeScript et les workers de l'app émise.
+
+Deux pièges qu'AIDOS refuse :
+
+- **Inventer une FK vers une table qui n'existe pas.** Chaque clé étrangère du DDL référence une **vraie** table déclarée, avec sa vraie clé primaire. Une relation vers une entité non déclarée est **refusée** (`UNKNOWN_RELATION_TARGET`), jamais devinée.
+- **Confier la génération à une IA.** Rendre du SQL/TS à partir d'un AST est un **calcul pur et reproductible**. C'est du **code**, jamais une IA : le même schéma rend toujours les **mêmes octets** (le hash le prouve).
+
+## Ce que S74 apporte
+
+<CardGroup cols={2}>
+  <Card title="Des FK générées" icon="link">
+    Une relation <strong>1-1</strong> ou <strong>1-N</strong> devient une colonne de clé étrangère <code>relation_id</code> qui <strong>REFERENCES</strong> la vraie table cible — <code>NOT NULL</code> si la relation est requise, <code>UNIQUE</code> pour un 1-1.
+  </Card>
+  <Card title="Une table de liaison par N-N" icon="table-cells">
+    Une relation <strong>N-N</strong> (par ex. livre ⇄ tags) émet une <strong>table de liaison</strong> dédiée avec deux FK et une clé primaire composite — le motif canonique du many-to-many.
+  </Card>
+  <Card title="Des associations typées + un SDK de navigation" icon="diagram-project">
+    Le TypeScript émis porte les <strong>associations typées</strong> (<code>author?: Author</code>, <code>tags?: Tag[]</code>) et un <strong>SDK de navigation</strong> (<code>loadBookAuthor</code>, <code>loadBookTags</code>) pour parcourir le graphe en toute sécurité de type.
+  </Card>
+  <Card title="Un worker + une outbox par nœud async" icon="gears">
+    Une operation asynchrone (S73) émet un <strong>worker</strong> TS qui draine l'<strong>outbox</strong> et dispatche les effets — la réalisation émise du travail de fond.
+  </Card>
+</CardGroup>
+
+## Comment ça marche, vu de l'écran
+
+Le panneau **Workbench → Émetteurs relation-aware** vous laisse projeter un schéma de démo : `author` (1) ──< `book` (N) ──N-N── `tag`, plus une operation async cron `sendReminder`.
+
+1. Vous **choisissez une cible** : DDL Postgres, modèle TS, ou worker async.
+2. Vous **émettez**. Pour le **DDL**, le panneau déroule les tables, la colonne FK `author_id REFERENCES "author"("id")` (une **vraie** table), la **table de liaison** `book_tags` pour le N-N, et — schéma async — une table `outbox`.
+3. Pour le **TS**, le panneau montre les **types** avec leurs associations (`author?: Author`, `tags?: Tag[]`) et les **loaders** de navigation.
+4. Pour le **worker**, le panneau montre la fonction `dispatchSendReminder` qui draine l'outbox et l'**échéance** cron baked-in.
+5. À chaque émission, une **adresse de contenu** (le hash de la source) est affichée : ré-émettre rend **exactement** les mêmes octets.
+
+<Note>Tout cela se fait **par écran** (la loi d'ui-completeness) : le contrôle est lié au vrai moteur et exécutable depuis la page, prouvé par un test Playwright.</Note>
+
+## Le mur — ce que S74 ne fait PAS
+
+Émettre **n'écrit aucune vérité**. Le code rendu (SQL, TS, worker) est une **projection** — régénérable à volonté à partir de la source, et appartenant à l'app émise, pas au truth-store d'AIDOS. Le nœud de relation, le nœud async restent des **sources** au-dessus de la ligne ; les promouvoir passe par `idée → miroir → /goal → approbation humaine`, jamais par cet écran. L'émetteur **rend** ; il ne **fige** rien.
+
+## La cible : TS / Hono (ADR 0040)
+
+À partir de S74, la cible backend de l'app émise n'est plus Go : les handlers, les workers et la navigation deviennent du **TypeScript fonctionnel** (Hono), avec un client Postgres TS. Le `EmitDDL` (dialecte Postgres) reste **inchangé**. La reproductibilité byte-identique est **préservée** sur toutes les cibles.
+
+<Card title="ADR 0040" icon="file-lines" href="/steps/internals/s74-relation-emitter">
+  La cible d'émission de l'app construite par AIDOS est TS/Hono ; sqlc/Go quitte l'arbre émis. Le concept Kernel (les AST de relation/async) en est indépendant.
+</Card>
