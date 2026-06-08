@@ -1,0 +1,80 @@
+---
+title: "S73 · Operation async/planifiée + outbox (internals)"
+description: "Le détail d'implémentation de S73 : back/kernel/operation/async.go (Go) — AsyncTrigger (le nœud {kind, at} sur l'ensemble fermé { cron, queue, webhook_out, notification }), Effect + EffectID (clé d'idempotence content-adressée réutilisant records.Hash/Canonicalize verbatim), ValidateAsync (refus ASYNC_UNKNOWN_TRIGGER_KIND / ASYNC_CRON_MISSING_ECHEANCE), le Clock injecté + Due + Tick (planificateur PUR, déterministe sur l'horloge injectée), OutboxEntry + NewOutboxEntry + Outbox + Sink + Dispatch (outbox transactionnel exactly-once relatif — at-least-once + dispatch idempotent), BlockAsync (BlockReason S13 réutilisée). L'ancre SendReminder (cron + notification, effect id 3587dff2…), le jumeau TS lib/async-operation (byte-équivalent à EffectID), le MCP back/mcp/async-operation (5 outils purs), la route /async-operation action-capable, les miroirs (fixture + property rapid + Vitest + 4 Playwright). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "S73", "async", "asynchrone", "planifié", "AsyncTrigger", "Effect", "EffectID", "ValidateAsync", "Clock", "FixedClock", "Due", "Tick", "scheduler", "OutboxEntry", "Outbox", "Sink", "Dispatch", "NewOutboxEntry", "exactly-once relatif", "at-least-once", "idempotence", "outbox transactionnel", "cron", "queue", "webhook_out", "notification", "ASYNC_UNKNOWN_TRIGGER_KIND", "ASYNC_CRON_MISSING_ECHEANCE", "records.Hash", "content-adressé", "blockreason", "MCP", "rapid", "Vitest", "Playwright", "horloge injectée", "déterministe", "le mur", "S10", "Windmill", "NATS", "ADR 0043", "EPIC 6"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord complet. Pour la vue produit sans code, voir [Pour les futurs utilisateurs → S73](/steps/concept/s73-async-operation).</Note>
+
+## Implémentation
+
+S73 ajoute la **troisième dimension** de l'Operation DSL (S10) — un nœud async/planifié — **sans toucher** aux six verbes synchrones (`validate / authorize / read / mutate / branch / return`). L'extension est **purement additive** : une operation sans bloc `Async` reste une operation synchrone à l'identique. Tout est **pur, déterministe, content-adressé** ; rien n'écrit la vérité (le mur). L'horloge est **injectée**, l'outbox est un **point de jonction**.
+
+### Le moteur Go — `back/kernel/operation/async.go`
+
+- **`TriggerKind` + l'ensemble fermé** `{ cron, queue, webhook_out, notification }` — invented by neither agent nor LLM, exactement comme les six verbes de step. `IsTriggerKind` / `TriggerKinds()` exposent le set clos ; un kind hors-set est un **échec typé**, jamais un défaut silencieux.
+- **`AsyncTrigger{Kind, At}`** — le nœud déclaratif. Pour un `cron`, `At` est l'échéance RFC3339 (comparée à l'horloge injectée) ; pour `queue` / `webhook_out` / `notification`, `At` est vide (ils firent sur un événement, pas sur l'horloge).
+- **`Effect{Kind, Target, Payload}`** + **`Async{Trigger, Effects}`** — un effet est un side-effect sur le monde (un email, un POST de webhook). Il n'est **jamais** firé inline : il est écrit dans l'outbox, puis dispatché.
+- **`ValidateAsync(a)`** — kind dans l'ensemble fermé, un `cron` porte une échéance non vide (`ErrCronMissingEcheance`), chaque effet porte un kind connu (`ErrUnknownTriggerKind`). Un bloc bien formé → `nil` ; mal formé → cause typée.
+- **`EffectID(e)`** → `records.Hash(records.Canonicalize(json.Marshal(effectBody(e))))` — la **clé d'idempotence content-adressée**, S02 réutilisé **verbatim**. Deux effets byte-identiques partagent un id ; un rejeu collisionne avec son dispatch précédent. Ancre byte-équale partagée avec le jumeau TS : `3587dff209c7f0c5cdc916ee3648ba89f1adc1e10a0b0f7ac6e3a4437074a210`.
+
+### Le planificateur — pur sur l'horloge injectée
+
+- **`Clock` (seam) + `FixedClock{At}`** — la source de temps **injectée** (comme les `Deps` de S10). Le package ne lit **jamais** `time.Now()` ; la fixture passe une horloge fixe → `Tick` est une fonction pure (determinism-first, CLAUDE.md §6/§8). `async_clock.go` est le **seul** endroit qui touche `time`, et uniquement pour **parser** des instants déclarés (`parseRFC3339`), jamais pour lire l'horloge murale.
+- **`Due(echeance, now)`** → `now ≥ echeance`, total (un timestamp malformé → `(false, error)`, jamais un panic).
+- **`Tick(scheduled, clock)`** → les noms **triés** des operations cron dont l'échéance est arrivée. Un trigger non-cron ne fire jamais sur un tick. Pur : même `(schedule, now)` ⇒ même ensemble firé.
+
+### L'outbox transactionnel — exactly-once relatif
+
+- **`OutboxStatus` { pending, dispatched }** + **`OutboxEntry{ID, Effect, Status}`** + **`NewOutboxEntry(e)`** (le côté **write** : content-adresse l'effet, statut `pending` — l'operation l'écrit dans la transaction d'état).
+- **`Outbox` (seam)** { `Pending()`, `MarkDispatched(id)`, `IsDispatched(id)` } + **`Sink` (seam)** { `Deliver(e)` } — la vraie outbox est une table Postgres (sqlc/pgx), le vrai sink un client SMTP/HTTP ; la fixture passe des mocks. Le package ne touche **aucun** DB/HTTP directement (le mur).
+- **`Dispatch(outbox, sink)`** → pour chaque entrée `pending` : si `IsDispatched(id)` (la redélivraison « at-least-once » après crash), **supprime** la livraison ; sinon `sink.Deliver` puis `MarkDispatched`. Une panne de transport laisse l'entrée `pending` (rejouée), **jamais** marquée dispatchée (sinon on perdrait l'effet en silence). Retourne le nombre **effectivement livré** ce run.
+
+> **La garantie.** Un *write-then-crash* laisse une entrée `pending` que le run suivant ramasse et livre (at-least-once : jamais perdu). Un crash *après* livraison mais *avant* l'ack laisse l'id marqué dispatché (ou re-présenté en `pending`) — dans les deux cas `IsDispatched` supprime le doublon ⇒ **compte observable = 1** (exactly-once relatif).
+
+- **`BlockAsync(cause)`** — réutilise `blockreason.BlockReason` (S13) verbatim, code précis (`ASYNC_UNKNOWN_TRIGGER_KIND` / `ASYNC_CRON_MISSING_ECHEANCE` / `ASYNC_INVALID_TRIGGER`), `how_to_fix` non vide (no prison, KRD §44.5). Code **local** au step (le pattern de S72), pas une entrée du grand enum clos (qui exigerait son propre ChangeSet/ADR).
+
+### L'ancre — `async_anchor.go`
+
+**`SendReminder()`** reconstruit l'operation `sendReminder` (cron `2026-06-08T09:00:00Z` + un effet notification `user@example.com`) pour le miroir + la projection. C'est une **source** au-dessus de la ligne ; la ligne autoritaire est écrite par la CLI `aidos` via un ChangeSet approuvé, jamais ici (le mur).
+
+### Le jumeau TS — `front/web/lib/async-operation.ts`
+
+Projection DÉCLARÉE du package Go : `canonicalize` reproduit `records.Canonicalize` (clés triées, ordre de tableau préservé) → `effectId` byte-égal à `EffectID` (vérifié sur l'ancre `3587dff2…`). `validateAsync`, `due`, `tick`, `dispatch`, `blockAsync` : le **même** jugement, côté écran. Le Go est AUTORITAIRE ; le jumeau reproduit.
+
+### Le MCP — `back/mcp/async-operation` (ADR 0009)
+
+5 outils PURS, écrivant **rien** (le mur) : `async_validate`, `async_effect_id`, `async_due`, `async_tick`, `async_dispatch`. `async_dispatch` rejoue `Dispatch` sur un **snapshot value-backed** (outbox + set d'ids dispatchés en entrée) — jamais un datastore réel.
+
+### La route action-capable — `/async-operation`
+
+Page + `AsyncOperationPanel` + `actions.ts` (Server Action `runScheduleAction`). On épingle une horloge injectée ; le panneau ticke la planification (FIRE / PAS ENCORE) puis déroule le chemin **crash → rejeu** de l'outbox (livré une fois, rejeu supprimé) et affiche le **compte observable = 1**. Thème ccup (ADR 0010), bilingue FR-default (ADR 0011), entrée nav `WorkbenchHeader`. Écrit **rien** (le mur).
+
+### Les miroirs (écrits rouges d'abord)
+
+- **Fixture (Go)** `async_fixture_test.go` : `ScheduledOpFiresAtEcheance` (avant l'échéance : rien ; à l'échéance : fire une fois, effet écrit `pending`, jamais inline), `OutboxReplaysUndispatchedAfterCrash` (livraison after-crash), `ReplayNeverDuplicatesEffect` (rejeu supprimé, observable = 1), + les refus typés.
+- **Property (Go, rapid)** `async_property_test.go` : `TickDeterministic`, `DueIffNowGEEcheance`, `EffectIDStable` (order-stable), `DispatchNoDuplicate` (∀ interleaving ⇒ ≤ 1 livraison).
+- **Vitest (TS)** `async-operation.test.ts` : 13 tests, dont l'égalité byte-à-byte de `effectId` avec l'ancre Go.
+- **Playwright** `async-operation.spec.ts` : 4 e2e (rendu + contrôle, fire + exactly-once à l'échéance, déterminisme avant l'échéance, fire après l'échéance).
+
+## Méta
+
+**Pourquoi un nœud à part, et pas un septième verbe ?** Parce que l'async est une dimension **orthogonale** aux verbes : un même corps d'operation (`validate → mutate → return`) peut être déclenché de façon synchrone OU planifiée. La modéliser comme un bloc `Async{Trigger, Effects}` à côté des `Steps[]` garde les deux axes indépendants — la **completeness** du système de types des operations gagne l'axe synchrone/asynchrone sans déformer l'axe des verbes.
+
+**Pourquoi l'outbox, et pas un envoi inline ?** Un `mutate` qui enverrait l'email inline ne serait **atomique** ni d'un côté ni de l'autre : un crash après l'email mais avant le commit produit un doublon ; un crash après le commit mais avant l'email perd l'effet. L'outbox **co-localise** l'effet et l'état dans une seule transaction, puis découple la livraison — le seul motif qui rend l'**exactly-once relatif** atteignable sans transactions distribuées.
+
+**Pourquoi l'id content-adressé comme clé d'idempotence ?** Parce qu'il est **dérivé du contenu de l'effet**, pas généré : deux tentatives du même effet partagent forcément le même id, donc le dédoublonnage est **structurel**, pas un compteur fragile. On réutilise `records.Hash` verbatim — la même adresse que partout ailleurs dans le kernel.
+
+**Pourquoi l'horloge injectée ?** Parce que « quand une operation fire » est une **fonction pure** de `(schedule, now)`. Lire `time.Now()` rendrait le miroir non reproductible. L'injecter (`Clock` seam) fait du planificateur du **code testable et déterministe** — la généralisation §6/§8 « le juge est déterministe » appliquée au temps.
+
+## Méta-méta
+
+**La détermination-first appliquée au temps et à la livraison.** S73 est une instance directe du mandat : *tout ce qui peut être une fonction pure DOIT être du code*. Décider l'échéance (`Due`/`Tick`), adresser l'effet (`EffectID`), dédoublonner le rejeu (`IsDispatched`) — chacun est un calcul reproductible, donc chacun est **du code, jamais une IA**, avec un miroir de reproductibilité qui le prouve (même entrée → même sortie). L'IA n'entre **nulle part** dans la boucle runtime de S73.
+
+**L'honnêteté de l'ensemble clos, encore.** Comme les six verbes de S10 et les types scalaires de S35, l'ensemble des trigger `{ cron, queue, webhook_out, notification }` est **déclaré, jamais découvert** : un kind hors-set est un échec typé avec un `BlockReason` actionnable, jamais un défaut silencieux. Le système refuse d'**inventer** un canal de livraison que l'humain n'a pas déclaré.
+
+**Le mur, jusque dans le fond de tâche.** Même le travail asynchrone respecte la ligne : le nœud async est une **source** (promue par `/goal`), l'outbox un **point de jonction au-dessous de la ligne**. Le planificateur et le dispatcher **n'écrivent aucune vérité** — ils ticquent et dispatchent des **valeurs**. La réalisation émise (un worker TS + une table outbox, cible S74 ; substrat Windmill/NATS de DP16, ADR 0043) héritera la cible du langage d'émission — un delta conséquentiel, **pas** dans l'AST, qui reste neutre au langage.
+
+<Card title="ADR 0043" icon="file-lines" href="/steps/concept/s73-async-operation">
+  Le substrat d'exécution (Windmill pour le cron/queue, NATS pour le bus d'effets) est gated par ADR — slot replaceable ; le concept Kernel (l'AST async) en est indépendant.
+</Card>

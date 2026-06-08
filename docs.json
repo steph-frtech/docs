@@ -212,6 +212,8 @@
               "steps/internals/s71-entity-relation",
               "steps/concept/s72-blob-attribute",
               "steps/internals/s72-blob-attribute",
+              "steps/concept/s73-async-operation",
+              "steps/internals/s73-async-operation",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

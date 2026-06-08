@@ -1,0 +1,60 @@
+---
+title: "S73 · Du travail en arrière-plan, des rappels, des webhooks"
+description: "S73 apprend à vos operations à s'exécuter EN ARRIÈRE-PLAN et À UNE ÉCHÉANCE. Jusqu'ici une operation s'exécutait tout de suite, en réponse à une action de l'utilisateur (passer une commande, vider un panier). Désormais une operation peut être PLANIFIÉE — un rappel envoyé demain à 9h, un job de fond, un webhook sortant, une notification. C'est une TROISIÈME dimension de l'Operation DSL, à côté des verbes synchrones. AIDOS la modélise comme un nœud async/planifié dont le type de déclencheur appartient à un ensemble FERMÉ { cron, queue, webhook_out, notification } — jamais inventé. Et surtout : tout effet sur le monde (un email, un webhook) passe par l'OUTBOX transactionnel — l'effet est écrit dans la même transaction que le changement d'état, puis livré ; après un crash, un effet non livré est REJOUÉ sans jamais produire de doublon observable (exactly-once relatif). Le planificateur est du CODE déterministe sur une horloge injectée, jamais une IA. Le mur tient : planifier et livrer ne fait que ticker et dispatcher — ça n'écrit aucune vérité."
+keywords: ["aidos", "krd", "S73", "async", "asynchrone", "planifié", "scheduled", "cron", "queue", "webhook", "webhook sortant", "webhook_out", "notification", "email", "rappel", "reminder", "travail de fond", "background", "job", "outbox", "transactionnel", "exactly-once", "exactly-once relatif", "at-least-once", "idempotence", "idempotency key", "clé d'idempotence", "rejeu", "replay", "crash", "doublon", "duplicate", "échéance", "echeance", "horloge injectée", "déterministe", "scheduler", "dispatcher", "Operation DSL", "ASYNC_UNKNOWN_TRIGGER_KIND", "ASYNC_CRON_MISSING_ECHEANCE", "le mur", "read-only", "S10", "Windmill", "NATS", "ADR 0043", "EPIC 6"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S73](/steps/internals/s73-async-operation).</Note>
+
+## En une phrase
+
+S73 apprend à vos operations à **travailler en arrière-plan et à l'heure** : envoyer un rappel demain à 9h, traiter un job de fond, appeler un webhook — sans jamais perdre l'effet ni le livrer deux fois.
+
+## Le problème que S73 résout
+
+Avec S10 une operation s'exécutait **tout de suite**, en réponse directe à l'utilisateur : *passer une commande*, *vider un panier*. Mais une vraie app fait aussi des choses **plus tard** ou **toute seule** : un rappel par email, une relance, une synchronisation nocturne, un webhook qui prévient un système tiers. Sans un nœud dédié, votre app émise serait incapable du moindre travail de fond — un plafond qui interdit les rappels, les notifications, les webhooks sortants. S73 ajoute la pièce manquante : **l'operation asynchrone / planifiée**.
+
+Deux pièges qu'AIDOS refuse :
+
+- **Perdre un effet, ou le livrer deux fois.** Si votre serveur crashe pile entre « la commande est enregistrée » et « l'email de confirmation est parti », l'email ne doit être ni **perdu** ni **envoyé en double**. C'est exactement ce que garantit l'**outbox**.
+- **Confier l'horloge à une IA.** Décider *quand* une operation s'exécute est un calcul pur et reproductible. C'est du **code**, jamais une IA : à horloge identique, le planificateur fire toujours le même ensemble d'operations.
+
+## Ce que S73 apporte
+
+<CardGroup cols={2}>
+  <Card title="Un nœud async / planifié" icon="clock">
+    Une operation peut désormais déclarer comment elle s'exécute hors du flux direct : <strong>cron</strong> (à une échéance), <strong>queue</strong> (job de fond), <strong>webhook_out</strong> (appel sortant), <strong>notification</strong> (email/push). L'ensemble est <strong>fermé</strong> — jamais inventé.
+  </Card>
+  <Card title="L'outbox transactionnel" icon="inbox">
+    L'effet (l'email, le webhook) est écrit dans la <strong>même transaction</strong> que le changement d'état. Un crash ne peut jamais laisser un état changé sans son effet, ni un effet sans son état.
+  </Card>
+  <Card title="Exactly-once relatif" icon="shield-check">
+    Après un crash, un effet non livré est <strong>rejoué</strong> (jamais perdu) ; mais le rejeu d'un effet déjà livré est <strong>supprimé</strong> (jamais de doublon observable). Le compte de livraisons reste exactement 1.
+  </Card>
+  <Card title="Un planificateur déterministe" icon="microchip">
+    Avant l'échéance : rien ne fire. À/après l'échéance : l'operation fire. Toujours pareil, sur la même horloge — c'est du <strong>code</strong>, pas une IA.
+  </Card>
+</CardGroup>
+
+## Comment ça marche, vu de l'écran
+
+Le panneau **Workbench → Operation async/planifiée** vous laisse jouer l'operation `sendReminder` (un trigger cron à `2026-06-08T09:00:00Z` + un effet notification) :
+
+1. Vous **épinglez une horloge injectée** (par exemple `2026-06-08T08:59:59Z`) et lancez.
+2. **Avant l'échéance**, le panneau affiche *PAS ENCORE* : aucune operation ne fire. C'est le planificateur déterministe.
+3. Réglez l'horloge sur **l'échéance** (`09:00:00Z`) : le panneau affiche *FIRE* — l'operation s'exécute exactement une fois.
+4. Le panneau déroule alors **l'outbox** : l'effet est livré une fois, puis un **rejeu** (la redélivraison « at-least-once » qui suit un crash) est **supprimé** — le compte de **livraisons observables reste 1**.
+
+<Note>Tout cela se fait **par écran** (la loi d'ui-completeness) : le contrôle est lié au vrai moteur et exécutable depuis la page, prouvé par un test Playwright.</Note>
+
+## Le mur — ce que S73 ne fait PAS
+
+Planifier, ticker et dispatcher **n'écrit aucune vérité**. Une operation asynchrone est une **source** au-dessus de la ligne : seule la promotion `idée → miroir → /goal → approbation` la fige. L'outbox est une **table de datastore au runtime** (un point de jonction), jamais le coffre de vérité. Et le planificateur n'a **pas d'horloge réelle à lui** : l'horloge lui est **injectée**, ce qui le rend pur et reproductible.
+
+## Pourquoi c'est important
+
+S73 est le **substrat du fond de tâche** de toute app qu'AIDOS construit. Sans lui, pas de rappels, pas de relances, pas de webhooks sortants, pas de jobs nocturnes — et les **webhooks entrants** d'un futur module de facturation seraient impossibles à modéliser. Avec lui, le système de types des operations est complet sur l'axe **synchrone / asynchrone**, et l'outbox garantit qu'un effet survit à un crash **sans jamais devenir un doublon**.
+
+<Card title="La suite" icon="arrow-right" href="/steps/concept/s72-blob-attribute">
+  S73 complète S72 (les fichiers) : ensemble, relations (S71) + fichiers (S72) + async (S73) débloquent l'émission d'apps multi-entités avec travail de fond.
+</Card>
