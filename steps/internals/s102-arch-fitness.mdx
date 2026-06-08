@@ -1,0 +1,62 @@
+---
+title: "S102 · Ratchet structurel (arch-fitness) — implémentation"
+description: "Pour moi : l'implémentation de S102 — back/kernel/mirror/archfitness (Measure : les quatre métriques lower-is-better + témoins, violations = mur S100 par arête, cycles = Tarjan SCC ; Ratchet : la garde monotone, HELD ssi non croissant, BROKEN+STRUCTURAL_REGRESSION dès qu'une grimpe ; Propose : ChangeSet DRAFT spec+mirror), le MCP arch-fitness (measure/ratchet/gate/propose), le twin TS lib/arch-fitness + la route action-capable /arch-fitness, et les miroirs (rapid 4 props, fixture 9, fast-check 9/9, Playwright 7/7). Plus les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S102", "archfitness", "arch-fitness", "Measure", "Ratchet", "Tarjan", "SCC", "violation de frontière", "cycle inter-cellule", "STRUCTURAL_REGRESSION", "Propose", "ChangeSet", "MCP", "déterminisme", "EPIC 11", "second ratchet"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Pour la vue concept, voir [Pour les futurs utilisateurs → S102](/steps/concept/s102-arch-fitness).</Note>
+
+## Implémentation
+
+S102 ajoute le paquet pur **`back/kernel/mirror/archfitness`** sur le plan Mirror. C'est le **second ratchet** (KRD §47) : là où `mcp/mirror-runner` (S05) donne le ratchet **comportemental** (un miroir vert ne va jamais au rouge), celui-ci donne le ratchet **orthogonal** — l'**arch-fitness** sur le graphe de dépendances inter-cellules. Il empêche « tests verts, système pourri ».
+
+### Le modèle
+
+- `DepEdge{From, FromCell, To, ToCell}` — une dépendance dirigée ; **inter-cellule** ssi `FromCell != ToCell` (les arêtes intra-cellule sont des internes, ignorées).
+- `DepGraph{Project, Cells, Edges, Federation}` — une coupe : les cellules (avec leur nombre de nœuds → la complexité), les arêtes, et les paires de contrats **honorées** (S101, réutilisées via `cell.Federation`).
+- `StructuralMetric{BoundaryViolations, InterCellCycles, InterBCEdges, MaxCellComplexity, Violations, Cycles}` — la mesure content-addressée d'une coupe + les **témoins** concrets.
+
+### Les fonctions pures, totales
+
+- **`Measure(g) → StructuralMetric`** — la mesure arch-fitness de premier rang :
+  - **violations de frontière** : pour chaque arête inter-cellule **distincte**, le mur §46 est appliqué via **`cell.CheckCrossCellAccess`** (un seul mur, réutilisé — pas un second gate divergent) ; une arête sans paire honorée est une violation, avec son témoin.
+  - **cycles inter-cellules** : on construit le digraphe **au niveau des cellules** (une arête cross-cell `A→B` devient l'arête cellule `FromCell→ToCell`) et on compte ses cycles par **Tarjan SCC** (chaque composante de taille > 1).
+  - **arêtes inter-BC** : le nombre d'arêtes cross-cell **distinctes** (déduplication).
+  - **complexité max** : le plus grand `Cells[ref]`.
+- **`Ratchet(baseline, candidate) → RatchetVerdict`** — la garde **monotone** : `HELD` ssi **chaque** métrique est non croissante (candidat ≤ base, composante par composante) ; sinon `BROKEN` avec un `BlockReason{Code: STRUCTURAL_REGRESSION}` qui **bloque la coupe** et nomme **chaque** hausse (`MetricClimb{Metric, Baseline, Candidate}`). C'est la *done-criterion*.
+- **`Propose(g, baseline, label, parentPhase) → changeset.ChangeSet`** — déplace la base **le seul moyen légal** : un **ChangeSet DRAFT**, portant un `SpecDelta` (la métrique mesurée) **et** un `MirrorDelta` (le verdict du ratchet contre la base antérieure → la preuve structurelle). **N'écrit rien** (le mur).
+
+`Hash` réutilise `records.Hash`/`Canonicalize` (**non forké**) → id content-addressé, mesure rejouable.
+
+### Le MCP (ADR 0009)
+
+`back/mcp/arch-fitness` expose chaque op : `measure`, `ratchet`, `gate` (mesure le candidat **puis** cliquète contre la base, en un appel CI), `propose` — stdio, pur, **n'écrit aucune vérité**.
+
+### Le twin + l'écran
+
+`front/web/lib/arch-fitness.ts` est le jumeau déclaré (mêmes fonctions pures, Tarjan en TS). La route **action-capable** `/arch-fitness` (ui-completeness, §7) lie **quatre** contrôles au twin : mesurer, cliqueter, **la porte** (sélecteur `violation | cycle | clean` → fault-injection), proposer le ChangeSet DRAFT. Thème ADR 0010, bilingue ADR 0011 (bloc i18n `archFitness` fr/en + entrée de nav).
+
+### Les miroirs (red → green)
+
+- **rapid** `archfitness_property_test.go` — 4 propriétés : reproductibilité (même coupe → même métrique + même hash), ratchet monotone (HELD ssi non croissant), ratchet réflexif (une coupe contre elle-même tient), cohérence du mur (chaque violation est exactement une arête que `cell.CheckCrossCellAccess` refuse).
+- **fixture** `archfitness_fixture_test.go` — 9 scénarios checkout/billing/catalog (coupe propre, violation de frontière, cycle Tarjan, ratchet tenu/amélioré, nouvelle violation/nouveau cycle/croissance de complexité qui brisent, ChangeSet DRAFT).
+- **fast-check** `lib/arch-fitness.test.ts` — 9/9 (mesure, ratchet, propose, reproductibilité, monotonie).
+- **Playwright** `tests/e2e/arch-fitness.spec.ts` — 7/7 (les quatre contrôles, la coupe propre TIENT, une nouvelle violation/un nouveau cycle BRISENT et bloquent, le ChangeSet DRAFT).
+
+`go test ./kernel/mirror/archfitness/... ./mcp/arch-fitness/...` ok ; `go build ./...` propre.
+
+## Méta
+
+**Pourquoi un second ratchet, séparé du premier ?** Parce que les deux régressions sont **orthogonales** et un seul gate ne peut pas les voir toutes deux. Le ratchet comportemental compare des **verdicts de miroirs** ; le ratchet structurel compare des **métriques de graphe**. Un système peut être vert sur l'un et pourri sur l'autre — c'est précisément le trou que §47 ferme. Les deux ratchets sont des **diffs de jeux ordonnés** (déterminisme-first, CLAUDE.md §6/§8), jamais un jugement d'agent.
+
+**Un seul mur.** Les violations de frontière ne ré-implémentent pas la règle §46 : elles **réutilisent `cell.CheckCrossCellAccess`** (S100), comme `contextmap.CheckCrossCellCall` (S101). S100/S101/S102 partagent **une** porte — pas trois gardes qui pourraient diverger.
+
+**Pourquoi « ne peut que tenir ou s'améliorer » et non « doit valoir 0 » ?** Parce qu'une app réelle démarre avec de la dette structurelle. Un seuil absolu (« 0 violation ») bloquerait toute coupe d'un système imparfait. Le **ratchet** (monotone) accepte l'état actuel comme **plancher** et interdit seulement de **grimper** — la dette ne peut que décroître, jamais croître. Une hausse intentionnelle déplace le plancher par ChangeSet approuvé.
+
+## Méta-méta
+
+S102 est une **garde que la méta-boucle ne fait qu'AJOUTER** (CLAUDE.md §5) — elle n'enlève aucune garde existante : le ratchet comportemental reste, le mur reste, et le ratchet structurel se **superpose**. C'est un cliquet de plus, indépendant, qui ne peut que resserrer l'espace des coupes admissibles.
+
+Le ratchet structurel est lui-même **rejouable et content-addressé** : `Measure` est une fonction pure, ses témoins (violations, cycles) sont déterministes (Tarjan sur adjacence triée, sortie triée), et son hash réutilise le substrat S02. Donc le **jugement structurel** d'une coupe est aussi reproductible que les vérités qu'il garde — le juge est déterministe (CLAUDE.md §8), même quand ce qu'il juge est la forme du graphe et non le comportement.
+
+C'est aussi un exemple du principe **« réutiliser, ne pas réinventer » (ADR 0007)** appliqué au *jugement* : la sémantique go-arch-lint/depguard/dependency-cruiser est connue ; S102 ne l'externalise pas en shell-out (non rejouable, non content-addressable) mais la **réimplémente en code pur** au niveau de la fédération de cellules — la seule façon de la faire entrer dans le truth-store et le ratchet.

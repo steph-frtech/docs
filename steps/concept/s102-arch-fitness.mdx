@@ -1,0 +1,65 @@
+---
+title: "S102 · Le second ratchet — l'arch-fitness structurel : interdire « tests verts, système pourri »"
+description: "S102 vous donne le second ratchet : l'arch-fitness sur le graphe de dépendances inter-cellules. Quatre métriques — violations de frontière, cycles inter-cellules, arêtes inter-BC, complexité max — ne peuvent que tenir ou s'améliorer. Une nouvelle violation ou un nouveau cycle rougit le ratchet structurel et bloque la coupe, même si tous les miroirs comportementaux sont verts. Il empêche qu'une app passe ses tests tout en pourrissant son architecture."
+keywords: ["aidos", "krd", "S102", "ratchet structurel", "arch-fitness", "go-arch-lint", "depguard", "dependency-cruiser", "graphe de dépendances", "violation de frontière", "cycle inter-cellule", "bounded context", "STRUCTURAL_REGRESSION", "ChangeSet", "EPIC 11", "second cliquet"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S102](/steps/internals/s102-arch-fitness).</Note>
+
+## En une phrase
+
+S102 vous donne le **second ratchet** : l'**arch-fitness** sur le **graphe de dépendances inter-cellules**. Là où le premier ratchet protège le **comportement** (un miroir vert ne redevient jamais rouge), celui-ci protège l'**architecture** — et il **bloque la coupe** dès qu'elle pourrit, même si tous les tests passent.
+
+## Le problème que S102 résout
+
+Une app peut avoir **tous ses miroirs verts** et pourtant pourrir : on a câblé en douce une cellule à une autre sans contrat, introduit un **cycle** entre deux bounded contexts, fait grossir une cellule jusqu'à ce qu'elle redevienne un monolithe. Les tests comportementaux ne voient **rien** de tout cela — ils prouvent que le *quoi* marche, pas que la *structure* tient.
+
+> **« Tests verts, système pourri » est interdit.** Le ratchet structurel est la garde qui refuse une coupe dont l'architecture a régressé, *indépendamment* des miroirs comportementaux.
+
+## Les quatre métriques « plus c'est bas, mieux c'est »
+
+Le ratchet mesure quatre choses sur le graphe de dépendances inter-cellules. Chacune ne peut que **tenir ou diminuer** d'une coupe à la suivante :
+
+| Métrique | Ce qu'elle compte | Pourquoi plus bas est mieux |
+|---|---|---|
+| **Violations de frontière** | Arêtes inter-cellules sans contrat honoré | Le mur §46 cassé structurellement — une cellule en appelle une autre sans paire honorée |
+| **Cycles inter-cellules** | Cycles dans le digraphe des cellules | Une fédération reste un **DAG** ; un cycle est de la pourriture architecturale |
+| **Arêtes inter-BC** | Dépendances distinctes qui croisent une frontière | La **surface de couplage** : la grandeur vit dans le nombre de cellules, pas dans les arêtes entre elles |
+| **Complexité max** | Taille de la plus grosse cellule | Une cellule qui enfle dérive vers le monolithe |
+
+<Note>Ce sont exactement les jugements de **go-arch-lint / depguard** (côté AIDOS) et **dependency-cruiser** (côté app émise), rendus de premier rang et calculés en code pur — pas un shell-out, donc rejouable à l'identique.</Note>
+
+## Le ratchet : tenir ou s'améliorer, jamais grimper
+
+Entre deux coupes — une **base** et un **candidat** —, le ratchet compare les quatre métriques une à une :
+
+- si **chacune** est non croissante (candidat ≤ base), la coupe **TIENT** et peut procéder ;
+- dès qu'**une** grimpe, la coupe est **BRISÉE** : un `STRUCTURAL_REGRESSION` qui **bloque la coupe** et nomme précisément la (les) métrique(s) en hausse.
+
+<Note>Exemple. Vous câblez checkout → catalog sans concevoir le contrat (catalog n'a pas de paire honorée) : une nouvelle **violation de frontière** apparaît (0 → 1), le ratchet rougit, la coupe est bloquée — même si checkout et catalog passent tous leurs tests. Pour débloquer : retirez la dépendance, ou concevez le contrat manquant dans la Context-Map (S101).</Note>
+
+C'est la *done-criterion* de S102 : *une nouvelle violation de frontière ou un cycle inter-cell rougit le ratchet structurel et bloque la coupe, indépendamment des miroirs comportementaux verts.*
+
+## Le mur : la base structurelle se déplace par ChangeSet
+
+Si une hausse est **intentionnelle** (un vrai nouveau besoin d'architecture), on ne « force » pas le ratchet : on **déplace la base** via un **ChangeSet DRAFT** qu'un humain approuve. La base est une vérité Kernel ; l'écran ne la déplace jamais directement (le mur, CLAUDE.md §2).
+
+## Ce que vous faites à l'écran (`/arch-fitness`)
+
+<Steps>
+  <Step title="Mesurer">Voir les quatre métriques arch-fitness de la coupe propre.</Step>
+  <Step title="Cliqueter">La coupe propre contre elle-même TIENT (rien ne grimpe).</Step>
+  <Step title="La porte (fault-injection)">Injecter une nouvelle violation de frontière OU un cycle inter-cellule : le ratchet rougit (BRISÉ) et bloque la coupe.</Step>
+  <Step title="Proposer la base">Émettre le ChangeSet DRAFT — le seul moyen légal de déplacer la base structurelle.</Step>
+</Steps>
+
+## Ce que S102 vous garantit
+
+- L'architecture ne peut que **tenir ou s'améliorer** — jamais régresser en douce.
+- Une nouvelle **violation de frontière** ou un nouveau **cycle** **bloque la coupe**, même tests verts.
+- Le jugement est un **algorithme de graphe** (Tarjan, déduplication, max), jamais un LLM — donc rejouable.
+- Une hausse intentionnelle passe par l'**approbation** d'un ChangeSet — l'écran ne franchit pas le mur.
+
+## La suite
+
+S102 referme l'EPIC 11 (la **fédération de cellules** : S100 la partition, S101 les contrats, S102 le ratchet structurel). Les étapes suivantes bâtissent par-dessus une fédération désormais **doublement cliquetée** — comportement *et* structure.

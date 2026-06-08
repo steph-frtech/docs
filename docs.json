@@ -268,6 +268,8 @@
               "steps/internals/s100-cell-federation",
               "steps/concept/s101-context-map",
               "steps/internals/s101-context-map",
+              "steps/concept/s102-arch-fitness",
+              "steps/internals/s102-arch-fitness",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",
