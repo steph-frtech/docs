@@ -1,0 +1,60 @@
+---
+title: "S81 · Démarrez votre app depuis un template — pas depuis une page blanche"
+description: "S81 vous donne un catalogue de starters curatés (e-commerce, CRM, booking) packagés comme bundles content-adressés : entités + relations + behaviors (dont app-auth) + miroirs + operations + sources UI. Instancier un template produit un projet de départ DÉTERMINISTE et VERT — Kernel vert, miroirs présents, aucun monstre. « Fork this app » duplique un projet à une phase stable. Le mur tient : instancier est un calcul de valeur ; atterrir les vérités passe par la porte légale."
+keywords: ["aidos", "krd", "S81", "templates", "template", "starter", "starters", "catalogue", "e-commerce", "ecommerce", "CRM", "booking", "réservations", "bundle", "content-adressé", "content-addressed", "instancier", "instantiate", "duplicate-from-template", "fork", "fork this app", "phase stable", "projet de départ", "déterministe", "vert", "green", "miroirs", "aucun monstre", "app-auth", "S80", "S76", "S56", "EPIC 7", "anti-boilerplate", "page blanche"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S81](/steps/internals/s81-templates).</Note>
+
+## En une phrase
+
+S81 vous donne un **catalogue de templates** : des squelettes d'app curatés et prouvés que vous **instanciez en un clic** pour partir d'un projet **déjà vert**, au lieu d'une page blanche.
+
+## Le problème que S81 résout
+
+Chaque application réelle recommence par les mêmes fondations : une boutique a des `Customer`, `Product`, `Order` ; un CRM a des `Contact`, `Company`, `Deal` ; un outil de réservation a des `Resource`, `Slot`, `Reservation`. Réécrire ces entités, leurs relations, leurs operations et — surtout — leurs **miroirs** (les preuves) à chaque nouvelle app est répétitif et fait perdre le bénéfice du KRD : vous repartez sans aucune preuve.
+
+S81 capitalise ce travail : un **template** est un **bundle content-adressé** qui porte **tout** le squelette d'une app *et* ses preuves. Vous l'instanciez et obtenez un projet de départ **déterministe et vert** : le Kernel valide, chaque vérité a son miroir, aucun monstre.
+
+## Ce que S81 apporte
+
+<CardGroup cols={2}>
+  <Card title="Trois starters curatés" icon="layer-group">
+    <strong>E-commerce</strong> (Customer/Product/Order + checkout), <strong>CRM</strong> (Contact/Company/Deal + pipeline), <strong>Booking</strong> (Resource/Slot/Reservation). Chacun avec ses relations, ses operations et ses miroirs.
+  </Card>
+  <Card title="Un projet de départ VERT" icon="circle-check">
+    Instancier produit un projet où le Kernel valide, <strong>chaque entité/operation/behavior a au moins un miroir</strong>, et <strong>aucun monstre</strong> (ni vérité sans miroir, ni miroir orphelin) ne subsiste.
+  </Card>
+  <Card title="L'auth incluse, sans boilerplate" icon="key">
+    Chaque template déclare le behavior-macro <strong>app-auth</strong> (S80) : votre starter arrive avec User/Role/Session, login/logout et les permissions par rôle, expansés par l'unique fonction de S80.
+  </Card>
+  <Card title="Fork this app" icon="code-branch">
+    « Forkez » un projet à une <strong>phase stable</strong> : une copie déterministe de votre app à un point connu. Deux forks de la même phase sont identiques ; d'une phase différente, différents.
+  </Card>
+</CardGroup>
+
+## Content-adressé : la même chose, toujours la même empreinte
+
+Un template, comme tout dans AIDOS, est **content-adressé** : son identité est l'empreinte de son contenu. Conséquence pratique : instancier le **même** template pour le **même** slug d'app produit **exactement** le même projet de départ, avec la même empreinte — rien n'est deviné par une IA, tout est calculé par du code. C'est ce qui rend un starter **reproductible** : vous, ou un collègue, ou la machine demain, obtiendrez le starter identique.
+
+## Instancier, en clair
+
+Depuis le panneau **Catalogue de templates** du Workbench :
+
+1. Vous choisissez un template (`ecommerce`, `crm`, `booking`) et un **slug cible** (le nom de votre app).
+2. Vous cliquez **Instancier**. Le starter se matérialise : les entités, les relations, les operations, les miroirs, les sources UI — **plus** le sous-système d'auth de S80.
+3. Vous voyez la liste des **pièces matérialisées** et l'empreinte du starter. Le projet est prêt, vert, prouvé.
+
+Et « **Forker** » : vous donnez un nouveau slug et une **phase stable** de départ ; vous obtenez une duplication déterministe de l'app à cette phase.
+
+## Le mur tient (toujours)
+
+Instancier ou forker **n'écrit jamais** le Kernel. Ce sont des **calculs de valeur** (un dry-run) : vous voyez ce que le starter implique. Faire entrer les vérités du starter dans le Kernel passe par la **porte légale** : proposer → ChangeSet → approbation humaine. L'humain possède la vérité ; le starter ne fait que la proposer.
+
+## Là où S81 s'inscrit
+
+S81 est la promesse **anti-boilerplate** de l'EPIC 7, après les behaviors réutilisables (S76/S79) et l'auth de l'app émise (S80). Le `duplicate-from-template` qu'il alimente est celui posé par S56 (les racines DAG par projet). La suite (EPIC 8) fait **exécuter** la boucle-agent sur le starter pour amener votre code au vert.
+
+<Card title="Voir le détail d'implémentation" icon="screwdriver-wrench" href="/steps/internals/s81-templates">
+  Les bundles, l'instanciation déterministe, la complétude anti-monstre, le fork par phase, et les couches Méta / Méta-méta.
+</Card>

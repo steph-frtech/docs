@@ -228,6 +228,8 @@
               "steps/internals/s79-behaviors",
               "steps/concept/s80-app-auth",
               "steps/internals/s80-app-auth",
+              "steps/concept/s81-templates",
+              "steps/internals/s81-templates",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

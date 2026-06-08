@@ -1,0 +1,58 @@
+---
+title: "S81 · Catalogue de templates instanciables — internals"
+description: "Pour moi : l'implémentation de S81 — les bundles content-adressés (back/kernel/templates), l'instanciation déterministe + verte + monster-free, la complétude anti-monstre, le fork par phase stable, le MCP templates, le twin front byte-identique, la route Workbench et les miroirs. Plus les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S81", "templates", "internals", "bundle", "content-addressed", "Instantiate", "Validate", "Completeness", "Fork", "Propose", "monster-free", "determinism", "app-auth", "ExpandAppAuth", "records.Hash", "MCP", "twin", "byte-identical", "EPIC 7"]
+---
+
+<Note>Page « Pour moi » — le journal de construction complet. Côté usage produit, voir [Pour les futurs utilisateurs → S81](/steps/concept/s81-templates).</Note>
+
+## Implémentation
+
+### Objectif (une capacité vérifiable)
+
+Des templates curatés (e-commerce, CRM, booking) packagés comme **bundles content-adressés** (entités + relations + behaviors dont `app-auth` + miroirs + operations + sources UI) ; surfacés au `duplicate-from-template` de S56 ; « fork this app » duplique un projet à une phase stable.
+
+**Done-criterion (calculé) :** instancier un template produit un projet de départ **déterministe et vert** — Kernel vert, miroirs présents, aucun monstre.
+
+### Le paquet `back/kernel/templates`
+
+Tout est **pur** (pas de DB, d'horloge, de RNG, d'I/O), conformément au mandat determinism-first.
+
+- **`Bundle`** — un template curaté packagé : `id`, `labels` (FR requis, ADR 0011), `entities`, `relations`, `behaviors` (le token `app-auth`), `operations`, `mirrors`, `ui_sources`, et `BundleID = records.Hash(records.Canonicalize(body))` (réutilise S02 verbatim).
+- **`catalog.go`** — la table CLOSE et DÉCLARÉE des trois bundles. Chaque bundle est construit pour passer `Validate ∧ Completeness` : scalaires clos (+ `blob`), relations dont `from`/`target` sont des entités présentes (ou l'entité `User` d'app-auth), cardinalités closes, et **un miroir par entité, operation et behavior token**.
+- **`Validate(b)`** — la moitié « Kernel vert » : types scalaires clos, relations vers des cibles présentes (`ErrUnknownRelationTarget` — l'honnêteté de S71), cardinalités closes, formes de miroir déclarées. Appelle `Completeness`.
+- **`Completeness(b)`** — l'invariant **anti-monstre** : chaque vérité (entité/operation/behavior) a ≥ 1 miroir la réfléchissant (`ErrTruthWithoutMirror`), et chaque miroir réfléchit une vérité présente (`ErrOrphanMirror`).
+- **`Instantiate(id, slug)`** — le `duplicate-from-template` : valide, matérialise le squelette pour le slug, et **expanse `app-auth` via l'unique `appauth.ExpandAppAuth`** (la loi de la fonction unique, §24.6 — jamais une seconde expansion). `StarterID` content-adresse le résultat ; `WroteKernel` toujours false.
+- **`Fork(id, slug, parentPhase)`** — « fork this app » : ré-instancie pour un nouveau slug depuis une phase stable ; le `StarterID` inclut la phase (deux forks de la même phase → identiques ; d'une phase différente → différents).
+- **`Propose(id, slug, parentPhase)`** (`propose.go`) — la **porte du mur** : enveloppe le dry-run dans un `changeset.ChangeSet` DRAFT, jamais APPLIED. N'écrit rien.
+
+### app-auth : réutilisation, jamais fork
+
+Un bundle déclare `app-auth` comme **token de behavior**. `Instantiate` appelle l'unique fonction S80 ; il ajoute aussi `ExpandAppAuthEntities()` (un petit accesseur pur ajouté à `back/kernel/appauth`) pour qu'une relation puisse cibler l'entité `User` sans ré-encoder le shape. Résultat : le sous-système d'auth d'un starter est **byte-identique** à celui que S80 expanse pour le même slug — vérifié dans le miroir.
+
+### Les miroirs (mirror-first)
+
+- **`template_property_test.go`** (rapid, N1) — le done-criterion : `Instantiate` est byte-identique (déterminisme), chaque bundle curaté est `Validate`-vert et `Completeness`-monster-free, `WroteKernel=false` (le mur), et l'auth du starter == l'unique expander S80. Plus : cibles différentes ⇒ StarterID différents ; un monstre (vérité sans miroir / miroir orphelin) est refusé ; une relation vers une cible inconnue est refusée.
+- **`template_fixture_test.go`** (N2) — instancier e-commerce → un starter à 3 entités + 2 relations + l'auth ; la porte runtime d'app-auth marche dessus (viewer→logout REFUSÉ, editor→logout AUTORISÉ) ; fork déterministe par phase ; `Propose` atterrit via un DRAFT changeset (puis `Apply` le passe à APPLIED — la porte légale, mirror-backed).
+
+### MCP, twin front, route
+
+- **`back/mcp/templates`** (ADR 0009) — quatre outils PURS : `templates_list`, `templates_get`, `templates_instantiate` (duplicate-from-template), `templates_fork`. `main_test.go` vert.
+- **`front/web/lib/templates.ts`** — le twin byte-identique : il reproduit `records.Canonicalize` en TS et **re-keye le sous-système app-auth** vers le shape JSON Go (snake_case `expansion_id`/`wrote_kernel`) pour que le `starterId` corresponde au hash Go. Vérifié contre les valeurs Go (`8d9f0277…` pour ecommerce/shop-app) — `templates.test.ts` 10/10.
+- **`front/web/app/templates`** — route Workbench action-capable : INSTANTIATE + FORK liés au twin, thémée (ADR 0010) + bilingue (ADR 0011, namespace `templates` fr+en), câblée dans `WorkbenchHeader`. `tests/e2e/templates.spec.ts` 3/3 — dont l'assertion du `data-starter-id` byte-identique au Go.
+
+## Méta
+
+**Pourquoi un bundle porte ses preuves.** Un template qui ne livrerait que des entités serait une régression KRD : on repartirait sans miroir, donc avec des **monstres** (truth sans miroir) dès l'instanciation. En faisant porter au bundle **un miroir par vérité** et en l'imposant par `Completeness`, S81 garantit qu'un starter est **vert et complet** *par construction* — l'instanciation ne peut pas produire un projet incohérent. Le done-criterion « déterministe et vert, aucun monstre » est donc une propriété du **packaging**, pas une chance.
+
+**Pourquoi `app-auth` est un token, pas une copie.** La tentation serait de copier le User/Role/Session dans chaque bundle. Ce serait deux sources de la même expansion — la loi de la fonction unique (§24.6) l'interdit, car deux copies divergent et cassent la reproductibilité. Le bundle déclare donc un **token** et délègue à l'unique `ExpandAppAuth`. C'est le même principe que S67/S79 qui *consomment* l'`Expand` de S76.
+
+**Le fork est un déterminisme par phase.** « Fork this app » n'est pas une copie d'artefacts (le code est régénérable, jamais autoritatif — CLAUDE.md) : c'est une **ré-instanciation déterministe** keyée sur une phase content-adressée. La phase est l'autorité ; le starter est dérivable d'elle. C'est cohérent avec le rollback de S98 (ré-projection depuis une phase, pas restauration d'artefact stale).
+
+## Méta-méta
+
+**Le templating ne perce jamais le mur.** Tout S81 est below-the-line *en nature* (un catalogue de squelettes + une instanciation pure), mais ses **sorties** sont des vérités candidates : entités, operations, policies. Le harnais l'empêche de les écrire — `Instantiate`/`Fork` sont des valeurs (`WroteKernel=false`), et la seule entrée vers le Kernel est `Propose → ChangeSet → approbation`. Un template, aussi pratique soit-il, ne peut **pas** geler une vérité ; il ne peut que la proposer. L'asymétrie « l'humain possède la vérité, l'agent possède l'implémentation » tient même quand l'implémentation est « toute une app d'un coup ».
+
+**Determinism-first, jusqu'au catalogue.** Le contenu d'un template est de la **donnée déclarée** (`catalog.go`), pas une génération LLM. « Une IA qui génère une app de départ » serait un gap de déterminisme (non reproductible, non auditable). Ici, le starter est une **fonction pure** d'un id + un slug ; son empreinte le prouve. Le miroir de reproductibilité (`même (template, slug) → même StarterProject`) est la garantie mécanique que ce gap n'existe pas.
+
+**Le twin front est un double juge.** En reproduisant le hash Go **byte-pour-byte** côté TS (y compris le re-keyage du sous-système d'auth), le twin transforme « le Workbench affiche-t-il le bon starter ? » en une question **vérifiable** : si le `starterId` TS diverge du Go, le test casse. C'est l'application au templating du principe « le juge est déterministe » (§8) — la preuve n'est pas « ça a l'air bon », c'est « les deux empreintes sont égales ».
