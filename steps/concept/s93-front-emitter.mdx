@@ -1,0 +1,39 @@
+---
+title: "S93 · Le front-end de votre app, émis depuis le noyau — formulaires, navigation et vrais boutons"
+description: "S93 ÉMET le front-end de l'app qu'AIDOS construit pour vous : une page de navigation, un formulaire de création par entité (un champ par attribut, un sélecteur de fichier pour chaque upload, un menu déroulant pour chaque relation), et la verticale control+action rendue en VRAIS boutons — chacun portant sa fixture control-spec comme capteur de son propre comportement. Le front hérite du thème ccup et de l'i18n bilingue, et il est câblé sur l'API émise. L'émission est PURE : même noyau → même bundle, à l'octet près."
+keywords: ["aidos", "krd", "S93", "front-end", "émetteur UI", "formulaire", "navigation", "blob", "upload", "relation", "control", "action", "bouton", "fixture", "control-spec", "Hono JSX", "SSR", "ccup", "i18n", "ADR 0010", "ADR 0011", "ADR 0040", "EPIC 9", "déterminisme", "byte-stable"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S93](/steps/internals/s93-front-emitter).</Note>
+
+## En une phrase
+
+S93 **émet tout le front-end** de l'app qu'AIDOS construit pour vous : une **page de navigation**, un **formulaire de création par entité** (avec un sélecteur de fichier pour chaque upload et un menu déroulant pour chaque relation), et **vos boutons** — chaque bouton de la verticale control+action rendu en vrai bouton cliquable, **câblé sur l'API émise** — sans que vous écriviez la moindre page à la main.
+
+## Le problème que S93 résout
+
+Une fois que votre app a ses entités (S89), ses relations et ses blobs (S72), et son API (S90), il lui manque encore la **face visible** : les écrans que vos utilisateurs voient et utilisent. Quatre pièges classiques d'un générateur de front :
+
+1. **Un front qui dérive de l'app.** Ici les écrans sont **projetés depuis le même noyau** que l'API : un champ du formulaire = un attribut de l'entité, un bouton = un control de votre app. Le front ne peut pas mentir sur ce que l'app fait.
+2. **Des écrans en lecture seule.** Un « aperçu » qui affiche mais ne fait rien. S93 émet des **formulaires soumissibles** et des **vrais boutons** : on remplit, on téléverse un fichier, on clique, l'opération part vers l'API.
+3. **Un bouton sans garde-fou.** Chaque bouton émis **porte sa propre fixture** : la règle qui dit quand il est visible et quand il est activé. Le bouton est le **capteur de son propre comportement** — on peut prouver, depuis l'écran, qu'il obéit à sa spec.
+4. **Un front qui ne ressemble à rien.** Le front émis **hérite du thème** d'AIDOS (les couleurs, la typographie) et il est **bilingue par défaut** — exactement comme le cockpit.
+
+## Comment S93 émet le front (et pourquoi c'est sûr)
+
+1. **Une page de navigation.** Un lien vers le formulaire de chaque entité de votre app.
+2. **Un formulaire par entité.** Un champ de saisie par attribut (texte, nombre, case à cocher, date selon le type), **un sélecteur de fichier par upload** (avec la liste des types autorisés), **un menu déroulant par relation** (la clé étrangère). Le formulaire **poste vers la même route** que l'API émise par S90.
+3. **Vos boutons, en vrai.** La verticale control+action — le bouton, la règle de visibilité, la règle d'activation, l'opération déclenchée — devient un **vrai bouton** qui exécute l'opération au clic.
+4. **Chaque bouton porte sa fixture.** Le bouton embarque, en clair, le scénario de sa spec : « quand le panier est vide, je suis visible mais désactivé ». C'est ce qui permet de **vérifier automatiquement** que le bouton rendu obéit à sa control-spec.
+
+## Hono JSX/SSR : la décision tranchée
+
+S93 tranche une question laissée ouverte : faut-il un front « application monopage » qui parle à l'API, ou un front **rendu côté serveur** ? S93 choisit le **rendu côté serveur (Hono JSX/SSR)** : les pages et les formulaires sont du HTML produit par le même service qui sert l'API — un seul processus, pas d'étape de build séparée. Le formulaire est du HTML simple, donc **n'importe quel navigateur le soumet**, et un test de bout en bout peut le piloter directement. Le partage de types front↔back que l'on voulait survit : le formulaire poste vers la route émise, et les types du modèle (émis par S74) sont le contrat partagé.
+
+## Ce que vous voyez à l'écran
+
+Le panneau Workbench `/front-emitter` est **action-capable** : vous basculez si l'entité `order` porte son upload (le reçu) et sa relation (le client), puis vous **émettez le front**. L'écran montre le **bundle byte-identique** (avec son empreinte), la **source du formulaire émis** (l'upload → sélecteur de fichier, la relation → menu déroulant), et **vos boutons** — chacun portant sa fixture. Plus bas, un **vrai formulaire** soumet une opération de création contre le datastore, **upload de fichier inclus** : la preuve que le formulaire généré est exécutable, pas en lecture seule. Émettre **n'écrit aucune vérité** : le front est une projection de votre app.
+
+## Ce que S93 ne fait pas
+
+S93 **n'invente** ni formulaire, ni champ, ni route, ni bouton : il **lit** vos entités et vos controls et les **projette**. Un bouton sans opération liée (un déclencheur orphelin) est **refusé**, jamais deviné. Il n'écrit jamais dans le noyau (le mur). Et il ne met **jamais** un LLM dans la boucle : l'émission est une fonction pure — même noyau → même bundle, à l'octet près.

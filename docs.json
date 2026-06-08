@@ -252,6 +252,8 @@
               "steps/internals/s91-secret-store",
               "steps/concept/s92-ops-observability",
               "steps/internals/s92-ops-observability",
+              "steps/concept/s93-front-emitter",
+              "steps/internals/s93-front-emitter",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",
