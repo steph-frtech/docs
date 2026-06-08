@@ -1,0 +1,56 @@
+---
+title: "S79 · La librairie behaviors — réutilisez vos comportements, sans réécrire le boilerplate"
+description: "S79 vous donne la librairie behaviors de votre projet : une étagère de comportements réutilisables (owner-scoping, soft-delete, audit…) que vous parcourez, cherchez, taguez, publiez, commentez et soft-supprimez — le tout scopé à votre projet. La recherche est un match déterministe (comme rg), jamais une IA : la même requête rend toujours les mêmes résultats. Et quand vous ATTACHEZ un comportement à une entité, l'écran prévisualise tout ce que ce comportement implique (ses policies et ses fixtures scopées) en appelant l'UNIQUE fonction d'expansion de S76 — puis l'atterrit via un ChangeSet APPROUVÉ. Le mur tient : attacher n'écrit aucune vérité directement ; l'expansion passe par la porte légale propose → approuve."
+keywords: ["aidos", "krd", "S79", "behaviors", "comportement", "behavior", "librairie", "library", "owner-scoping", "soft-delete", "audit", "browse", "parcourir", "search", "recherche", "match déterministe", "rg", "tag", "attach", "attacher", "publish", "publier", "comment", "commenter", "soft-delete", "project-scopé", "project-scoped", "Expand", "expansion", "policies", "fixtures", "ChangeSet approuvé", "approved", "le mur", "propose", "approve", "réutilisation", "S76", "EPIC 7"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S79](/steps/internals/s79-behaviors).</Note>
+
+## En une phrase
+
+S79 vous donne **la librairie behaviors** de votre projet : une étagère de comportements réutilisables que vous **parcourez, cherchez, taguez, publiez, commentez et soft-supprimez** — et que vous **attachez** à une entité en prévisualisant tout ce qu'ils impliquent, avant de l'atterrir via un ChangeSet approuvé.
+
+## Le problème que S79 résout
+
+Le même comportement revient sans cesse dans une app : « seul le propriétaire peut modifier » (owner-scoping), « on archive, on ne supprime jamais » (soft-delete), « toute mutation est tracée » (audit). Le réécrire à la main pour la 50ᵉ entité est une perte de temps et une source de bugs.
+
+S76 a déjà appris à AIDOS **comment** un comportement s'expanse — owner-scoping ajoute un `owner_id`, une relation `owner`, une policy de scoping, et les fixtures qui le prouvent. Mais S76 expose cette mécanique pièce par pièce. Il vous manque l'**étagère** : un endroit où vos comportements vivent, se cherchent, se réutilisent, et s'attachent en un geste.
+
+## Ce que S79 apporte
+
+<CardGroup cols={2}>
+  <Card title="Parcourir & chercher" icon="magnifying-glass">
+    Listez les comportements de votre projet, ou cherchez par propriétaire, tag ou libellé. La recherche est un <strong>match déterministe</strong> (comme <code>rg</code>) — <strong>jamais une IA</strong> : la même requête rend toujours les mêmes résultats, dans le même ordre.
+  </Card>
+  <Card title="Tag · publish · comment" icon="tags">
+    Classez un comportement par tags, publiez-le pour le partager, ouvrez un fil de commentaires — tout est <strong>append-only</strong> (rien n'est détruit).
+  </Card>
+  <Card title="Soft-delete" icon="trash-can">
+    Soft-supprimez un comportement : il <strong>disparaît</strong> de la liste par défaut mais reste dans la corbeille — <strong>jamais détruit</strong>.
+  </Card>
+  <Card title="Attacher = prévisualiser + atterrir" icon="link">
+    Attachez owner-scoping à une entité : l'écran <strong>prévisualise</strong> les policies+fixtures scopées via l'<strong>UNIQUE</strong> expansion de S76, puis les <strong>atterrit</strong> via un ChangeSet <strong>approuvé</strong>.
+  </Card>
+</CardGroup>
+
+## Attacher, étape par étape
+
+Imaginez que vous voulez rendre votre entité `Order` « owner-scoped ».
+
+1. **Vous cherchez** `owner-scoping` (ou `alice`, son propriétaire, ou le tag `scoping`) dans la librairie. La recherche déterministe vous le ramène.
+2. **Vous l'attachez** à `Order`. AIDOS appelle l'UNIQUE fonction d'expansion de S76 et vous **prévisualise** ce que cela implique : la **policy** `owner-scoping` (scope `OPERATION`, effet `DENY`) et les **fixtures** scopées (`owner-only-mutation-allowed`, `non-owner-mutation-denied`) — les preuves que le comportement devra satisfaire.
+3. **Vous approuvez.** L'expansion **atterrit** via un ChangeSet **APPROUVÉ** (APPLIED), scopé à `Order` (`behavior-expansion@Order`).
+
+À aucun moment l'écran n'a écrit dans le Kernel directement : l'expansion a voyagé par la **porte légale** — proposer, puis approuver.
+
+## Une seule expansion, jamais deux
+
+S79 ne réimplémente **jamais** l'expansion : il **consomme** l'unique `Expand` de S76. C'est crucial — s'il y avait deux codes qui expansaient un comportement, ils pourraient diverger, et la reproductibilité serait perdue. Il y a **un seul code faisant autorité**, et la librairie l'appelle, point.
+
+## Le mur, intact
+
+Attacher un comportement **ne fige aucune vérité**. La prévisualisation est un essai à blanc (elle n'écrit rien) ; l'atterrissage produit une **valeur** de ChangeSet approuvé — pas une écriture directe du Kernel. Seul le CLI `aidos`, après votre approbation, gèle réellement la source via `/goal`. Vous gardez la main.
+
+## Et ensuite
+
+La librairie behaviors est la fondation que S80 (la macro `app-auth`) et S81 (les templates d'app) réutilisent : ils consomment, eux aussi, l'unique expansion de S76 — jamais une seconde.

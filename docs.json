@@ -224,6 +224,8 @@
               "steps/internals/s77-dsl-editor",
               "steps/concept/s78-app-regenerator",
               "steps/internals/s78-app-regenerator",
+              "steps/concept/s79-behaviors",
+              "steps/internals/s79-behaviors",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

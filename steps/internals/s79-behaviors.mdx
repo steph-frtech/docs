@@ -1,0 +1,63 @@
+---
+title: "S79 · Librairie behaviors user-facing (consomme l'Expand de S76) — internals"
+description: "Le détail d'implémentation de S79 : le package back/kernel/behavior/library.go (Library project-scopée, sept gestes purs : browse/search/tag/attach/soft-delete/publish/comment), le MCP back/mcp/behaviors (7 outils purs), la route Workbench /behaviors action-capable, et les miroirs GREEN (fixture owner-scoping, property search-déterministe, Vitest+fast-check, Playwright). Trois couches : Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "S79", "behaviors", "library", "librairie", "library.go", "LibEntry", "Library", "browse", "search", "match déterministe", "rg", "tag", "attach", "PreviewAttach", "LandAttach", "soft-delete", "publish", "comment", "project-scopé", "Propose", "Expand", "changeset.Apply", "ChangeSet approuvé", "APPLIED", "le mur", "MCP", "behaviors_attach", "rapid", "fast-check", "Playwright", "déterminisme", "S76", "EPIC 7"]
+---
+
+<Note>Côté « Pour moi » — l'implémentation complète. La vue produit est dans [Pour les futurs utilisateurs → S79](/steps/concept/s79-behaviors).</Note>
+
+## Implémentation
+
+### Le périmètre exact
+
+S79 est la **couche librairie** posée SUR S76. S76 (record.go + behavior.go) possède l'UNIQUE `Expand`/`Propose` ; S79 n'y touche pas — il **consomme** `Propose` et ajoute le plan librairie que S76 n'expose pas : une étagère **project-scopée** avec les sept gestes user-facing.
+
+### Le package `back/kernel/behavior/library.go`
+
+| Type | Rôle |
+|---|---|
+| `LibEntry` | un enregistrement de la librairie : le `Record` S76 + le cycle de vie librairie (`Published`, `Deleted`, `Comments`) |
+| `Library` | la librairie d'**un** projet (`ProjectID` + `Entries` indexés par `RecordID`) |
+| `LandedAttachment` | le résultat d'un attach atterri : la `Preview` (Proposal dry-run) + le ChangeSet `Applied` (APPLIED) |
+
+Les sept gestes sont des **fonctions pures, totales** d'une `Library` value :
+
+- `Browse(includeDeleted)` — liste les entrées vivantes en **ordre canonique** (rang catalogue, owner, version, id) — pas de fuite d'ordre d'itération de map.
+- `Search(query)` — le matcher **déterministe type-`rg`** : un `strings.Contains` casse-folé sur kind + owner + tags triés + tous les labels de locale, dans l'ordre `Browse`. Requête vide → tout le vivant. **Jamais un LLM.**
+- `Tag(recordID, tag)` — ajoute un tag (dédupé/trié) ; comme `RecordID` est adressé-contenu sur les tags, l'entrée **se re-clé** sous le nouvel id (un record EST ses tags).
+- `Publish` / `SoftDelete` / `Comment` — flip monotone / soft-delete (caché, jamais détruit) / fil append-only.
+- `PreviewAttach(recordID, entity, existing, parentPhase)` — appelle l'UNIQUE `Propose` de S76 → la Proposal dry-run (policies+fixtures scopées + ChangeSet DRAFT). **N'écrit rien.**
+- `LandAttach(…, approvedAt)` — prévisualise PUIS atterrit via `changeset.Apply` sur le DRAFT, gardé par `changeset.SpecHasMirror` (un spec_delta exige son mirror_delta). Un envelope incomplet est **REFUSÉ** avec la `BlockReason` du changeset — jamais une écriture directe du Kernel.
+
+### Le MCP `back/mcp/behaviors` (ADR 0009)
+
+Sept outils purs, un par geste : `behaviors_browse`, `behaviors_search`, `behaviors_tag`, `behaviors_publish`, `behaviors_soft_delete`, `behaviors_comment`, `behaviors_attach` (preview OU land selon `land`). Le serveur est **sans état** : l'appelant passe les records du projet (l'état matérialisé) ; chaque outil est une fonction pure de l'état + l'entrée. `attach` atterrit via `changeset.Apply` (un calcul de valeur), jamais une écriture DB.
+
+### La route Workbench `/behaviors`
+
+Action-capable (ui-completeness, §7) : deux contrôles liés au moteur réel et exécutables depuis l'écran — **SEARCH** (le matcher déterministe) et **ATTACH** (preview + land). Server Actions sur le twin TS pur `lib/behaviors.ts` (qui importe le `propose` de `lib/behavior-expander`, lui-même sur l'UNIQUE `expand`). Thème ADR 0010, bilingue ADR 0011. Câblée dans la nav `WorkbenchHeader`.
+
+### Les miroirs (tous GREEN)
+
+- `library_fixture_test.go` — la **done-criterion** verbatim : attacher owner-scoping prévisualise la policy `owner-scoping` (OPERATION/DENY) + les fixtures scopées, et atterrit via un ChangeSet **APPLIED** scopé `behavior-expansion@Order` ; + les six autres gestes.
+- `library_property_test.go` (rapid) — search-déterministe, search-order-invariant, search-subset-of-browse, tag-then-search, softdelete-hides.
+- `lib/behaviors.test.ts` (Vitest + fast-check, 10/10) — la done-criterion côté front + l'invariant de reproductibilité de la recherche.
+- `tests/e2e/behaviors.spec.ts` (Playwright, 4/4) — la route rend les contrôles ; la recherche est déterministe (un hit `alice`, zéro sur `zzz`) ; attacher atterrit un ChangeSet APPLIED scopé.
+
+## Méta
+
+**Pourquoi une couche au-dessus de S76, et pas dans S76 ?** Parce que la nature diffère. S76 est le **moteur** (l'expansion, faisant autorité, déterministe). S79 est l'**étagère** (la réutilisation, la recherche, le cycle de vie social — tag/publish/comment). Les mélanger ferait deux responsabilités dans un package. La frontière est nette : S79 importe `Propose`, ne le réimplémente jamais (la **loi de la fonction unique**, §24.6) — sinon deux expansions pourraient diverger et la reproductibilité serait perdue.
+
+**Le déterminisme-first appliqué à la recherche.** La recherche est exactement le genre de capacité qu'on serait tenté de confier à un LLM (« trouve-moi le comportement de scoping »). C'est interdit : un match de sous-chaîne est une **fonction pure** — donc il DOIT être du code (`strings.Contains` casse-folé), faisant autorité. Le miroir de reproductibilité (même librairie + requête → mêmes hits, même ordre) le **prouve**, et l'anti-faux-positif (`zzz` → zéro) interdit l'hallucination d'un LLM.
+
+**Le re-clé sur tag.** Un `Record` est adressé-contenu sur ses tags. Tagger change l'identité → l'entrée se re-clé. C'est cohérent avec l'anti-overwrite (§9) : on ne mute pas un record en place, on en crée une nouvelle version adressée-contenu.
+
+**Le mur, encore.** Attacher est le geste qui se rapproche le plus d'une écriture de vérité. La discipline : prévisualiser (dry-run, n'écrit rien) → atterrir via `changeset.Apply` (une **valeur** APPLIED, gardée par la complétude). Le gel réel reste le job du CLI `aidos` via `/goal`. L'écran propose, l'humain approuve.
+
+## Méta-méta
+
+**La librairie comme cliquet de réutilisation.** S79 fait de la réutilisation un objet de première classe, **mesurable et traçable** : un comportement publié, tagué, commenté, attaché à N entités — c'est une trace de capitalisation. Plus une app grandit, plus l'étagère paie. C'est le même mouvement que la mémoire procédurale du cerveau (le brain), mais au plan des comportements source-shaped.
+
+**La porte unique se propage.** S76 (Expand) précède et est consommé par S67 (attach à la capture), S79 (la librairie), S80 (`app-auth`), S81 (templates). Cinq consommateurs, **un seul** code d'expansion. C'est la garantie structurelle : la reproductibilité de l'app émise ne dépend jamais de QUEL chemin a déclenché l'expansion — il n'y a qu'un moteur. S79 valide ce pattern à l'échelle d'une librairie entière.
+
+**Le geste social sous le mur.** Tag/publish/comment sont des écritures, mais **sous la ligne** (plan librairie, pas plan vérité) : elles peuvent agir directement, append-only. Seul attach (qui touche au Kernel) passe par propose → approuve. La distinction below-the-line / above-the-line (§7) est ici parfaitement lisible : six gestes agissent, un seul propose.
