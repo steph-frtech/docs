@@ -1,0 +1,48 @@
+---
+title: "S65 · Grillez VOTRE intention (la boucle de grilling en produit)"
+description: "S65 ouvre la deuxième marche de la chaîne KRD pour l'utilisateur : une surface conversationnelle où vous GRILLEZ votre intention — vous l'écrivez avec jusqu'à cinq scénarios, vous prononcez le verdict (nette | floue | mauvaise), et AIDOS la route DÉTERMINISTIQUEMENT : nette → grilled (saute le spike), floue → spiking (la branche floue), mauvaise → rejected (tracée avec sa raison). Le verdict + la provenance sont enregistrés. Le routage fait AUTORITÉ ; le LLM n'est l'exception barricadée que pour le dialogue, et tout verdict qu'il propose est re-vérifié contre le schéma de verdict clos avant de router quoi que ce soit. Sous le mur : le schéma ideas est du staging au-dessus de la ligne, jamais le noyau ; la promotion vers une vérité gelée passe par /goal."
+keywords: ["aidos", "krd", "S65", "grill", "grilling", "boucle de grilling", "verdict", "sharp", "fuzzy", "bad", "nette", "floue", "mauvaise", "grilled", "spiking", "rejected", "intention", "scénarios", "≤ 5 scénarios", "provenance", "routage déterministe", "exception barricadée", "schéma de verdict", "LLM", "idea-intake", "le mur", "staging", "above the line", "ideas schema", "promotion", "goal", "S28", "S64", "exploration", "déterminisme"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S65](/steps/internals/s65-grilling-loop).</Note>
+
+## En une phrase
+
+S65 est le moment où **vous** pouvez enfin **challenger** ce que vous avez dit : une surface conversationnelle prend votre intention (et jusqu'à cinq scénarios), vous laisse prononcer un **verdict**, et la **route** vers la bonne voie — sans qu'un prompt ne saute jamais au noyau.
+
+## Le problème que S65 résout
+
+En S64 vous avez **capturé** votre intention : un brouillon dans l'inbox de votre projet. Mais une idée brute n'est pas encore prête pour un miroir. Avant de payer le coût d'un miroir et d'un `/goal`, il faut la **trier** : est-elle **falsifiable maintenant** (on peut l'écrire en miroir rouge tout de suite) ? est-elle **trop floue** (il faut d'abord une sonde jetable) ? est-elle simplement **mauvaise** (à rejeter, mais en gardant la trace) ? C'est le geste `/grill` — et S65 le rend **exécutable en produit**, pas seulement en ligne de commande.
+
+## Ce que S65 apporte
+
+<CardGroup cols={2}>
+  <Card title="Une boîte d'intention + ≤ 5 scénarios" icon="comments">
+    Vous écrivez votre intention en clair et, au choix, jusqu'à <strong>cinq scénarios</strong> qui l'esquissent (Étant donné / Quand / Alors). Un sixième est <strong>refusé</strong>, jamais tronqué en silence.
+  </Card>
+  <Card title="Trois verdicts, jamais un quatrième" icon="scale-balanced">
+    Vous prononcez le verdict dans un jeu <strong>clos</strong> : <strong>nette</strong>, <strong>floue</strong>, <strong>mauvaise</strong>. Il n'y a pas de quatrième valeur — ni « approuvé », ni « oui », ni « plus tard ».
+  </Card>
+  <Card title="Un routage qui fait autorité" icon="route">
+    Nette → <code>grilled</code> (saute le spike). Floue → <code>spiking</code> (la branche floue). Mauvaise → <code>rejected</code>, <strong>tracée</strong> avec sa raison. Le routage est <strong>déterministe</strong> : le même verdict route toujours pareil.
+  </Card>
+  <Card title="Verdict + provenance enregistrés" icon="fingerprint">
+    Chaque décision de grilling est écrite avec <strong>votre provenance</strong> (humain) et le verdict qui a routé l'idée — la trace réapparaît dans l'inbox des idées routées de votre projet.
+  </Card>
+</CardGroup>
+
+## Le LLM parle, le code juge
+
+La surface est **conversationnelle** : un modèle peut vous aider à **formuler** l'intention, paraphraser, suggérer un verdict. Mais le verdict qu'il propose n'est **jamais cru sur parole** : il est **re-vérifié contre le schéma de verdict clos** avant de pouvoir router quoi que ce soit. S'il propose « Sharp », « approved » ou « oui », c'est **refusé** — le code ne se rabat pas sur le verdict « le plus proche ». L'autorité, c'est la fonction de routage déterministe ; le LLM est l'**exception barricadée**, cantonnée au dialogue.
+
+## Une mauvaise idée n'est pas effacée
+
+Le verdict **mauvaise** ne supprime rien : l'idée passe à `rejected` **avec sa raison tracée**, en append-only. Rien n'est jamais perdu — une idée rejetée reste consultable, sa raison aussi. C'est la règle §118 du Tome : on trace, on n'efface pas.
+
+## Grillé n'est pas gelé
+
+Router une intention vers `grilled` (ou `spiking`, ou `rejected`) **ne fige aucune vérité**. Une idée routée reste une **vérité-CANDIDATE** : pas de version, pas de miroir (le type rend ces deux absences inreprésentables). Promouvoir, c'est l'**acte** d'écrire le miroir — c'est le `/goal`, c'est le gel dans le Kernel — et ça vient plus tard (S66), **jamais** depuis cet écran. Le mur tient : cette surface n'écrit que le schéma `ideas` (du staging au-dessus de la ligne), jamais le noyau.
+
+## Où elle vit
+
+La route Workbench `/grilling-loop` (« Boucle de grilling »), thémée et bilingue, dans le groupe **Build** à côté de `/exploration`. Vous y grillez une intention, vous voyez la voie où elle est routée, et l'inbox plus bas liste la **trace** de vos décisions de grilling, par projet.

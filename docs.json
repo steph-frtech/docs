@@ -196,6 +196,8 @@
               "steps/internals/s63-authority-binding",
               "steps/concept/s64-capture-idea",
               "steps/internals/s64-capture-idea",
+              "steps/concept/s65-grilling-loop",
+              "steps/internals/s65-grilling-loop",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

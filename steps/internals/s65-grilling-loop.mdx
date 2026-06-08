@@ -1,0 +1,52 @@
+---
+title: "S65 · Boucle de grilling — internals (Implémentation · Méta · Méta-méta)"
+description: "Internals de S65 : le package Runtime back/runtime/grillingloop ajoute la boucle de grilling en produit PAR-DESSUS le routage de verdict S28 (back/runtime/exploration) — Intention{intent, scenarios ≤ 5}.Validate, Route(proposes, intention, verdict, detail, reason) → VerdictRecord (idée routée + verdict + raison tracée), KnownVerdict + VerifyLLMVerdict (la barricade re-vérifiant un verdict LLM contre le schéma clos). Tout est pur et total : Route DÉLÈGUE chaque transition à exploration.Grill (lui-même délègue à ideas.Grill/Spike/Reject) — aucune transition réimplémentée. Le front /grilling-loop ajoute la surface action-capable (Server Action routeIntentionAction écrivant ideas.idea below-the-line, provenance humain forcée, scope = projet actif S57) + l'inbox des idées routées. Le jumeau pur lib/grilling-loop.ts route BYTE-IDENTIQUE au Go (réutilise routeVerdict S28 + captureIdea S64). MCP back/mcp/grilling-loop (grill_route, grill_verify_verdict, grill_verdicts) — pure computation, écrit rien (le mur). Miroirs : fixture par branche de verdict (Go) + rapid (déterminisme, jeu clos) + Vitest/fast-check (front) + Playwright (5 tests). Det. : routage = fonction pure faisant autorité ; LLM = exception barricadée re-vérifiée."
+keywords: ["aidos", "krd", "S65", "grillingloop", "grilling-loop", "Intention", "Validate", "MaxScenarios", "Route", "VerdictRecord", "KnownVerdict", "VerifyLLMVerdict", "exploration.Grill", "GrillVerdict", "VerdictSharp", "VerdictFuzzy", "VerdictBad", "ideas.Grill", "ideas.Spike", "ideas.Reject", "routeVerdict", "captureIdea", "routeIntentionAction", "inboxSnapshot", "lib/grilling-loop", "grill_route", "grill_verify_verdict", "grill_verdicts", "MCP", "ADR 0009", "provenance", "humain", "draft", "no mirror", "scope", "S54", "S57", "S28", "S64", "le mur", "staging", "fixture", "rapid", "fast-check", "Playwright", "déterminisme", "exception barricadée"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Le concept est [ici](/steps/concept/s65-grilling-loop).</Note>
+
+## En une phrase
+
+S65 **surface en produit** le routage de verdict `/grill` déjà construit (le moteur `exploration` de S28) : un package Runtime borné (`grillingloop`) ajoute la **session de grilling** (une intention ≤ 5 scénarios), **délègue** le routage à `exploration.Grill` (l'autorité), **re-vérifie** tout verdict LLM contre le schéma clos, et le **branche à un écran action-capable** qui écrit un vrai record `ideas` routé, scopé au projet actif.
+
+## Implémentation
+
+### Le package Runtime `back/runtime/grillingloop`
+
+La nouveauté est **bornée** : tout ce qui était déjà `exploration` (S28) est **réutilisé**, jamais redéclaré.
+
+- `MaxScenarios = 5` — la borne ≤ 5 scénarios déclarée (KRD §75), jamais découverte. `Intention{Intent, Scenarios}.Validate()` refuse un intent vide (`ErrIntentEmpty`) et un sixième scénario (`ErrTooManyScenarios`) — refusé, **jamais tronqué**.
+- `Route(proposes, intention, verdict, detail, reason) (VerdictRecord, error)` — la boucle : valide l'intention, content-adresse l'esquisse en draft via `ideas.Capture` (provenance **humain forcée** — la surface est un grilling humain), puis **DÉLÈGUE** le routage à `exploration.Grill(draft, verdict, reason)`. Aucune transition n'est réimplémentée : `exploration.Grill` délègue lui-même à `ideas.Grill`/`ideas.Spike`/`ideas.Reject`. Retourne un `VerdictRecord{Idea, Verdict, Reason}` — l'idée routée (`grilled | spiking | rejected`), le verdict enregistré, et (pour `bad`) la raison tracée.
+- `KnownVerdict(v)` — l'autorité sur l'appartenance au jeu clos `{sharp, fuzzy, bad}` (délègue à `exploration.Verdicts()`).
+- `VerifyLLMVerdict(raw) (GrillVerdict, error)` — **la barricade** : un verdict brut produit par un modèle n'est typé que s'il valide le schéma clos (match exact, sensible à la casse) ; sinon `ErrOffSchemaVerdict`. Jamais coercé vers le plus proche — c'est ce qui empêche le LLM d'inventer un quatrième verdict.
+- Tout est **pur et total** : pas d'horloge, pas de rng, pas d'I/O, ne panique pas. Écrit **rien** (le mur) — la persistance ride la porte idea-intake.
+
+### Le front `/grilling-loop`
+
+- `lib/grilling-loop.ts` — le **jumeau pur** byte-identique au Go : même `MAX_SCENARIOS`, même `validateIntention`, même `route` (réutilise `routeVerdict` de `lib/exploration` — le jumeau S28 — et `captureIdea` de `lib/capture-idea` — le jumeau S64, donc l'id ancré au Go), même `verifyLlmVerdict`/`knownVerdict`.
+- `app/grilling-loop/actions.ts` — `routeIntentionAction` (Server Action) : valide intention + nature + verdict (gate de schéma **faisant autorité** : un verdict hors schéma route **rien**), borne ≤ 5 scénarios, exige une raison pour `bad` (rejet tracé), lit le **projet actif** (cookie S57), force la **provenance humain**, route via le jumeau, et **upsert** le record `ideas.idea` routé below-the-line. `inboxSnapshot` lit la trace des idées routées du projet (`status in (grilled, spiking, rejected)`), fallback démo déterministe (une idée par voie) si Postgres est injoignable.
+- `app/grilling-loop/{page.tsx, GrillingLoopPanel.tsx}` — la route action-capable : la boîte d'intention + scénarios + nature + **picker de verdict offrant exactement le jeu clos** (`verdicts()`) + raison, bound au routage ; l'inbox des idées routées avec un badge de voie par carte. Thémé ADR 0010, bilingue next-intl ADR 0011 (namespace `grillingLoop`, parité fr=en). Entrée nav ajoutée dans le groupe Build à côté de `/exploration`. Aucune route existante touchée.
+
+### Le MCP `back/mcp/grilling-loop` (ADR 0009)
+
+Trois outils, **pure computation**, écrivent **rien** (le mur) — la persistance ride la porte idea-intake :
+- `grill_route` — valide l'intention (≤ 5) + route sur le verdict → `VerdictRecord` ;
+- `grill_verify_verdict` — re-vérifie un verdict LLM contre le schéma clos (`ok=false` pour tout hors-schéma, jamais coercé) ;
+- `grill_verdicts` — lit le jeu clos `{sharp, fuzzy, bad}` en ordre canonique.
+
+## Les miroirs
+
+- **Fixture par branche de verdict (Go)** — `grillingloop_fixture_test.go` : le critère de done verbatim, une ligne `state → command → events` par voie (nette→grilled, floue→spiking, mauvaise→rejected/tracée), chacune enregistrant le statut routé + le verdict + la provenance humain ; + la borne ≤ 5 (sixième refusé, cinquième accepté), le rejet tracé, le verdict inconnu refusé, et la barricade LLM (verified→route identique au verdict humain).
+- **Property/rapid back** — `grillingloop_property_test.go` : routage **déterministe** (même intention + verdict → record identique), statut toujours dans `{grilled, spiking, rejected}`, provenance humain + intent verbatim, et le gate de schéma **clos** (`VerifyLLMVerdict` accepte exactement les trois littéraux).
+- **Vitest + fast-check front** — `lib/grilling-loop.test.ts` : les trois branches, la borne ≤ 5, la barricade, l'**id ancré au Go** (anti-dérive via `captureIdea`), et le déterminisme en property.
+- **Go MCP** — `back/mcp/grilling-loop/main_test.go` : chaque outil route/vérifie déterministiquement sans I/O.
+- **Playwright** — `tests/e2e/grilling-loop.spec.ts` (5 tests) : la route rend le panneau ; le picker offre **exactement** le jeu clos de trois verdicts ; l'inbox liste des idées routées avec badge de voie ; le contrôle de grilling s'exécute (ligne de résultat) ; une mauvaise idée sans raison est refusée (gate du rejet tracé).
+
+## Méta
+
+S65 **ne réinvente rien** : il **surface** une capacité déjà bâtie. Le jeu de verdicts clos, le routage et les transitions appartiennent à `exploration` (S28), qui appartiennent eux-mêmes à `ideas` (S27). La seule nouveauté **genuinely-produit** est (a) la **session de grilling** bornée (≤ 5 scénarios), (b) la **barricade LLM** (`VerifyLLMVerdict` — un verdict de modèle re-vérifié contre le schéma avant de router), et (c) l'écran qui rend tout cela action-capable. Le routage **délègue** chaque transition — il ne réimplémente jamais une transition ni n'invente un verdict. Comme en S64, la porte canonique d'écriture below-the-line est le MCP idea-intake fronté par la passerelle (S58) ; le front écrit ici directement le schéma `ideas` via Server Action (la **même forme** que la passerelle dispatche) — réconcilier au cutover S59 est une **OpenQuestion par design** (forward-dependency, ne bloque pas le pas).
+
+## Méta-méta
+
+C'est le pas où la **deuxième marche de la chaîne KRD devient exécutable par l'humain final**, et où le mandat **déterminisme-first** (§6/§8) se voit en pleine lumière. Le verdict est prononcé par un humain (ou suggéré par un LLM), mais **le routage est une fonction pure faisant autorité** : il n'y a pas d'« agent de routage », pas de cast LLM, pas de quatrième verdict possible. Le LLM est cantonné au **dialogue** (générer/paraphraser/suggérer) — son seul produit qui touche le routage, le verdict, **repasse par un re-check de schéma** déterministe. C'est l'archétype de la barricade du Tome : *l'IA esquisse, le code juge, l'humain possède la vérité*. Et le gel reste interdit ici — une idée grillée n'a, par construction de type, ni version ni miroir ; la promotion attend son miroir et son `/goal`. Le souhait est challengé, routé, tracé — proprement, déterministiquement, en attendant la marche suivante.
