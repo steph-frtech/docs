@@ -1,0 +1,47 @@
+---
+title: "S86 · Regardez votre build se construire, tour par tour"
+description: "S86 ajoute la console de build live : l'agrégation déterministe et en lecture seule de tout ce qu'un humain regarde pendant qu'AIDOS construit votre app — le diff streamé par tentative, les résultats de senseurs (les miroirs qui tombent du rouge au vert), la consommation du budget (minutes CI, tokens LLM/goal), l'état du disjoncteur, la timeline AgentRun et la porte d'approbation humaine. L'état que vous voyez ÉGALE l'AgentRun enregistré — la console ne peut jamais mentir sur ce qui s'est passé. Plus l'enregistrement de phase stable par projet : aidos stable enregistre un nœud DAG quand le verdict passe ; une coupe incohérente est refusée."
+keywords: ["aidos", "krd", "S86", "console de build", "build console", "live", "diff", "tentative", "senseurs", "miroir", "rouge au vert", "HarnessCostBudget", "budget", "minutes CI", "tokens LLM", "disjoncteur", "circuit breaker", "AgentRun", "timeline", "approbation", "approval", "phase stable", "stable phase", "aidos stable", "nœud DAG", "S23", "S40", "coupe incohérente", "STABLE_PHASE_INCONSISTENT_CUT", "projection fidèle", "EPIC 8"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S86](/steps/internals/s86-build-console).</Note>
+
+## En une phrase
+
+S86 vous donne **la console live d'un build** : pendant qu'AIDOS construit votre app, vous voyez chaque tentative (le diff produit), chaque miroir qui tombe du rouge au vert, le coût consommé, l'état du disjoncteur et les vérités proposées en attente — et **ce que vous voyez est exactement ce qui s'est passé**, jamais un résumé inventé.
+
+## Le problème que S86 résout
+
+Aux étapes précédentes, la boucle de build (S83) tourne, s'auto-certifie (S84) et propose ses vérités à votre approbation (S85). Mais tout cela se passe **sous le capot**. Sans console, vous ne pouvez pas répondre aux questions qu'un humain se pose en regardant un agent travailler : *où en est-il ? combien ça a coûté ? est-ce qu'il avance, ou est-ce qu'il tourne en rond ? qu'attend-il de moi ?*
+
+S86 ouvre le capot — **sans rien ajouter à ce qui s'est réellement passé**. La console n'est pas un journaliste qui raconte le build à sa façon : c'est une **projection fidèle** des enregistrements qui existent déjà (l'AgentRun, l'historique de la boucle, le budget mesuré, l'inbox d'approbation).
+
+## Ce que la console vous montre
+
+- **Le diff par tentative** — chaque tour de la boucle, avec le hash du diff produit et si l'écriture a été autorisée (sous la ligne de flottaison) ou refusée (au-dessus — le mur a tenu).
+- **Les résultats de senseurs** — exactement quels miroirs sont verts après le dernier tour. C'est là que vous **voyez un rouge tomber au vert**.
+- **La consommation du budget** — les minutes CI et les tokens LLM/goal dépensés, face au plafond déclaré (le `HarnessCostBudget`, S51).
+- **L'état du disjoncteur** — le verdict de la boucle : continue, vert, ou *arrêt honnête* (`no_progress`) quand le build dépense sans avancer (S83).
+- **La timeline AgentRun** — le résultat terminal du run (vert / encore rouge / bloqué).
+- **La porte d'approbation** — combien de vérités proposées attendent votre décision (S85).
+
+## La garantie qui compte : la console ne peut pas mentir
+
+Le cœur de S86, c'est une invariant non-contournable : **l'état streamé ÉGALE l'AgentRun enregistré.** La console ne peut pas afficher une tentative qui n'a pas eu lieu, un vert qui n'a pas été certifié, un résultat différent du vrai, ou une écriture « autorisée » que le mur a en fait refusée. Si l'état dérivait de l'enregistrement, la vérification le rejetterait. Vous regardez **ce qui s'est passé**, pas une histoire.
+
+## La phase stable, par projet
+
+S86 ferme aussi une boucle restée ouverte depuis S23 : **`aidos stable` enregistre désormais un nœud DAG par projet** quand le verdict de stabilité passe. Une *phase stable*, c'est une coupe cohérente — chaque lien résout, chaque senseur est vert (le verdict S23/S40). Quand votre app atteint cet état, AIDOS enregistre la phase comme un nœud dans la frontière DAG **de votre projet** (chaque projet a son propre espace de version, S56) — un point de reprise content-addressé.
+
+Et si la coupe **n'est pas** cohérente — un miroir rouge, un lien périmé — l'enregistrement est **refusé** avec `STABLE_PHASE_INCONSISTENT_CUT`. « Stable » se **calcule**, jamais ne se déclare : aucun nœud ne naît d'un miroir rouge.
+
+## Ce que vous faites à l'écran
+
+Le panneau **Console de build** (`/build-console`) a deux contrôles, exécutables depuis l'écran :
+
+1. **Projeter l'état du build** — vous fournissez l'AgentRun enregistré (id, but, résultat, écritures), l'historique d'itérations, le verdict de boucle, le budget consommé et les approbations en attente, et AIDOS calcule l'état streamé **et prouve qu'il égale l'AgentRun** (le voyant « projection FIDÈLE »).
+2. **Enregistrer une phase stable** — vous fournissez la coupe §43 du projet (heads, liens, senseurs), et AIDOS enregistre le nœud DAG quand c'est stable, ou refuse une coupe incohérente.
+
+## Le mur, toujours
+
+Les deux ops sont des **lectures/calculs sous la ligne de flottaison** — elles n'écrivent **aucune vérité**. La console projette des enregistrements qui existent déjà ; le nœud DAG d'une phase stable est *enregistré* par le rôle privilégié `aidos` dans un ChangeSet approuvé, jamais par l'agent. Et aucun LLM n'entre : la projection est une transformation, le verdict de stabilité est le moteur §43. L'agent code au moment du build ; il ne s'assoit pas dans la boucle d'exécution à faire ce qu'une fonction pure fait mieux.

@@ -1,0 +1,72 @@
+---
+title: "S86 · Console de build live + phase stable par projet — internals"
+description: "Pour moi : l'implémentation de S86 — la projection de console (back/runtime/buildconsole) qui agrège l'AgentRun enregistré (S52) + l'historique de boucle (S83) + la décision de terminaison + le budget mesuré (S51) + l'inbox d'approbation (S85) en un état streamé, avec l'invariant non-contournable StateEqualsRun (l'état ÉGALE l'AgentRun). Plus RecordStablePhase qui calcule le verdict §43 (phases.IsStable, RÉUTILISÉ) et n'enregistre un nœud DAG par projet (projectdag, S56) qu'au verdict ; une coupe incohérente est refusée STABLE_PHASE_INCONSISTENT_CUT. Le branchement aidos stable --project ; le MCP build-console ; le twin front byte-identique ; la route action-capable et les miroirs fixture+property+e2e. Plus les couches Méta et Méta-méta."
+keywords: ["aidos", "krd", "S86", "build console", "console de build", "internals", "Project", "BuildConsoleState", "StateEqualsRun", "projection fidèle", "RecordStablePhase", "StablePhaseRequest", "StablePhaseResult", "phases.IsStable", "projectdag", "ProjectDAG", "dag.Node", "STABLE_PHASE_INCONSISTENT_CUT", "AgentRun", "agentrun", "buildloop", "Decision", "economics", "HarnessCostBudget", "MeasuredCost", "BuildInbox", "S52", "S83", "S51", "S85", "S23", "S40", "S56", "aidos stable", "MCP", "build-console", "twin", "byte-identical", "déterminisme", "mur", "EPIC 8"]
+---
+
+<Note>Page « Pour moi » — le journal de construction complet. Côté usage produit, voir [Pour les futurs utilisateurs → S86](/steps/concept/s86-build-console).</Note>
+
+## Implémentation
+
+### Objectif (une capacité vérifiable)
+
+Streamer l'état d'un build — le diff par tentative, les résultats de senseurs, la consommation du `HarnessCostBudget` (minutes CI, tokens LLM/goal), l'état du disjoncteur S83, la timeline AgentRun, la porte d'approbation humaine — **et prouver que l'état streamé ÉGALE l'AgentRun enregistré** ; plus le calcul de phase stable réel par projet (`aidos stable` enregistre un nœud DAG au verdict S23/S40). **Done-criteria :** l'état streamé égale l'AgentRun ; Playwright — lancer un build, voir un rouge tomber au vert, approuver la vérité proposée ; une coupe incohérente refusée.
+
+### La projection — `back/runtime/buildconsole`
+
+Un paquet **pur** (aucune DB, horloge, rng, I/O, LLM, écriture). Deux surfaces faisant autorité :
+
+- **`Project(Input) → BuildConsoleState`.** L'agrégation. Elle dérive l'état regardé **entièrement** des enregistrements passés en `Input` :
+  - l'**Input** porte l'`agentrun.AgentRun` enregistré (S52, la source de vérité), la `buildloop.History` (S83, les hashes de diff + greens par tour), la `buildloop.Decision` (le verdict du disjoncteur), le `economics.HarnessCostBudget` + `MeasuredCost` (S51, plafond + dépensé), et les ids de propositions en attente (S85 `BuildInbox`) ;
+  - le **flux de tentatives** zippe les *write actions* du run avec les diff-hashes de l'historique (1 entrée par tour, l'indice humain 1-based), portant le verdict du mur que le run a stampé ;
+  - les **senseurs** sont l'ensemble vert du dernier tour de l'historique, trié ;
+  - le **compteur de coût** est `MeasuredCost` face à `HarnessCostBudget` + les axes over-budget de la décision ;
+  - le **disjoncteur** est la `Decision` verbatim ; le **résultat** est le `Result` du run verbatim ; la **porte d'approbation** est les propositions en attente triées.
+  Parce que chaque champ est **copié d'un enregistrement**, l'état que `Project` retourne satisfait toujours `StateEqualsRun`.
+- **`StateEqualsRun(state, run) → bool`.** L'invariant non-contournable (le premier done-criterion). Vrai **ssi** l'identité du run (id, but, résultat) correspond, et chaque tentative *autorisée* de l'état correspond à une *write action* autorisée du run. Un état qui inventerait un tour, un autre but, un autre résultat, ou une autorisation que le run ne porte pas, est **rejeté**. « Égale » ici est la relation de **projection fidèle**, pas l'égalité octet : l'état est une *vue* dérivée, mais il ne peut pas **contredire** le run.
+
+### La phase stable par projet — `RecordStablePhase`
+
+- **`RecordStablePhase(StablePhaseRequest) → StablePhaseResult`.** Le calcul de phase stable réel, par projet (le second done-criterion). Le flux est honnête :
+  1. **Calcule** le verdict §43 avec `phases.IsStable` — l'**unique** moteur faisant autorité, **RÉUTILISÉ**, jamais ré-implémenté ici.
+  2. **Si STABLE** — retourne le `dag.Node` à enregistrer dans la frontière **du projet** : son id est l'adresse-contenu de la phase (le lockfile du noyau, S02), ses `ParentIDs` sont les heads courants du projet (`projectdag.ProjectDAG.Heads`, S56), `Stratum` above-the-line, avec le label demandé. `Recorded = true`.
+  3. **Si UNSTABLE** — **REFUSE** avec `STABLE_PHASE_INCONSISTENT_CUT`, nommant les miroirs fautifs (les `reasons` du verdict). Aucun nœud ne naît d'un miroir rouge (§43 : « stable » se calcule, jamais ne se déclare).
+  La fonction est totale : sur une erreur d'adresse-contenu (impossible pour une coupe valide), elle dégrade en refus plutôt qu'un panic — jamais un id fabriqué.
+
+### Le branchement CLI — `aidos stable --project <slug>`
+
+`aidos stable <coupe> --project <slug>` calcule le verdict §43 de la coupe canonique nommée **contre la frontière du projet** (via `buildconsole.RecordStablePhase`) et imprime le nœud DAG par projet (quand stable) ou le refus (sinon). **READ-ONLY** (le mur) : il retourne le nœud comme **valeur** ; le rôle privilégié `aidos` l'enregistre dans un ChangeSet. C'est le tooth qui ferme l'OpenQuestion OQ-S23-1 (« enregistrer le nœud ») côté *valeur* — la persistance dans `dag.node` reste la voie writer privilégiée.
+
+### Le MCP — `back/mcp/build-console` (ADR 0009)
+
+Deux outils purs (un outil = une op backend) : `buildconsole_project` (projette l'état + retourne `faithful_projection`, l'assertion `StateEqualsRun` à la frontière MCP) et `buildconsole_record_stable_phase` (calcule le verdict §43 → nœud ou refus `STABLE_PHASE_INCONSISTENT_CUT`). **Aucun outil d'écriture de vérité** — le mur tient. `main_test.go` prouve les deux done-criteria au bord MCP.
+
+### Le front — `/build-console`, action-capable
+
+Le twin déterministe `lib/build-console.ts` (byte-identique à l'autorité Go : `project` / `stateEqualsRun` / `isStable` / `recordStablePhase`) ; `lib/build-console.test.ts` (fast-check) épingle déterminisme + projection-fidèle-toujours + record-iff-stable. La route `/build-console` est **action-capable** (ui-completeness, §7) : deux ops liées à des Server Actions (`projectBuildStateAction` + `recordStablePhaseAction`), thémée (ADR 0010) + bilingue (ADR 0011, namespace `buildConsole` fr/en). `tests/e2e/build-console.spec.ts` prouve contre la route live : projeter un run rend une projection FIDÈLE (un rouge tombe au vert, disjoncteur vert) ; une coupe verte enregistre une phase ; une coupe incohérente est refusée `STABLE_PHASE_INCONSISTENT_CUT`.
+
+### Les miroirs (rouges d'abord, puis verts)
+
+- **`buildconsole_fixture_test.go`** — l'état streamé égale l'AgentRun enregistré ; un état trafiqué (autorisation fabriquée) échoue `StateEqualsRun` ; une coupe verte enregistre un nœud content-addressé descendant des heads ; une coupe incohérente est refusée.
+- **`buildconsole_property_test.go`** (rapid) — `Project` déterministe ∧ projection toujours fidèle ; `RecordStablePhase` : record ⇔ stable ⇔ ¬refusal, nœud content-addressé parenté quand stable, totalité.
+- Côté CLI : `stable_test.go` — `aidos stable green --project shop` enregistre un nœud, `red-sensor --project shop` refuse `STABLE_PHASE_INCONSISTENT_CUT`.
+
+`go build ./...` propre ; `go vet` propre ; `go test ./runtime/buildconsole/ ./mcp/build-console/ ./cmd/aidos/` OK ; vitest 3/3 ; Playwright 4/4.
+
+## Méta
+
+**Pourquoi une projection, et pas un log ?** Un log raconte ; une **projection** *dérive*. Le choix de S86 est que la console soit un `Project(records) → état` pur, avec un prédicat `StateEqualsRun` qui rend la fidélité **falsifiable** : on peut écrire un test qui trafique l'état et vérifie qu'il est rejeté. C'est la différence entre « la console dit qu'il y a 3 tours » et « la console ne peut afficher que les tours que le run enregistre ». La fidélité n'est pas une promesse de prose, c'est une invariant prouvée.
+
+**Pourquoi réutiliser `phases.IsStable` plutôt que recalculer ?** Parce qu'il y a **un seul** moteur de verdict §43 dans tout AIDOS (le `aidos stable` de S23, le panneau `/phase-stable`, et maintenant l'enregistrement par projet de S86 l'appellent tous). Ré-implémenter le verdict ici créerait deux sources de vérité qui pourraient diverger — exactement le « monstre » que la loi de complétude interdit. S86 **enveloppe** le moteur d'une frontière projet (`projectdag`), il ne le re-juge pas.
+
+**Pourquoi le nœud descend des heads du projet ?** Une phase stable est un point de reprise dans le DAG ; elle ne naît pas dans le vide. Ses `ParentIDs` sont les heads courants de **ce** projet (S56) — pas ceux d'un autre projet (la frontière de version est inviolable). Une phase de projet A est invisible des heads de projet B.
+
+**Détermisme-first, au plan exact où ça compte.** La console est le cas canonique de « ce qui *peut* être une fonction pure DOIT être du code » : construire l'état regardé à partir d'un run enregistré est une **transformation**, jamais un appel LLM « résume le build ». De même le verdict de stabilité est un calcul de coupe, jamais un « je pense que c'est stable ». Aucun LLM n'entre dans S86.
+
+## Méta-méta
+
+**Le mur tient même à l'écran le plus tentant.** Une console de build est l'endroit où l'humain est *le plus tenté* d'agir — il regarde un build vert, il voudrait « le valider d'un clic ». S86 résiste : la console **n'écrit aucune vérité**. Enregistrer une phase stable retourne un *nœud-valeur* ; faire atterrir une vérité proposée passe par la porte S85 (propose→ChangeSet→approbation). L'agent possède l'implémentation et la *vue* ; l'humain possède la vérité. La console rend la vue **honnête**, pas le pouvoir d'écrire.
+
+**La complétude se referme par tooth.** S23 a calculé le verdict de stabilité mais a *différé* l'enregistrement du nœud (une OpenQuestion explicite, OQ-S23-1). S86 referme ce tooth — non pas en cassant le mur (la persistance reste la voie writer privilégiée), mais en fournissant la **valeur** que ce writer enregistre, par projet. C'est le motif KRD : un step laisse une dépendance-avant documentée, un step ultérieur la résout sans jamais réécrire un artefact antérieur. Rien ne casse silencieusement ce qui précède.
+
+**La projection fidèle est un garde-fou anti-Goodhart.** Si la console pouvait embellir l'état (montrer plus de verts, masquer un refus de mur), elle deviendrait un *proxy* qu'on optimise au lieu de la réalité. `StateEqualsRun` ancre la console à l'AgentRun enregistré — le **juge déterministe** (le miroir + le run), jamais le récit de l'agent. La console ne peut pas se rendre plus belle qu'elle n'est.
