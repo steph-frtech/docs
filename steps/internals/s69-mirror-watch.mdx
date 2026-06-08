@@ -1,0 +1,60 @@
+---
+title: "S69 · Matérialiser-et-le-voir-rougir (internals)"
+description: "Le détail d'implémentation de S69 : back/kernel/mirror/watch (Go) — Materialize(Proposal) (dispatch par TestKind vers Godog/rapid/fixture via une table close + rendu canonique de la source), CodeProbe (la sonde de présence du code), RunStream (le flux live queued→materialized→running→verdict, verdict décidé par la présence du code : absent ⇒ RED, stub ⇒ GREEN). Le jumeau TS lib/mirror-watch, le MCP back/mcp/mirror-watch (2 outils purs), la route /mirror-watch action-capable, les miroirs (rapid + fixture + Vitest/fast-check + Playwright). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "S69", "watch", "Materialize", "RunStream", "CodeProbe", "Runner", "Godog", "rapid", "fixture", "table close", "dispatch", "TestKind", "présence du code", "verdict", "RED", "GREEN", "Liveness", "alive", "dead", "watch it fail", "stream", "queued materialized running verdict", "fonction pure", "déterminisme", "reproductibilité", "rapid", "fast-check", "Playwright", "MCP", "le mur", "n'écrit rien", "S68", "S20", "S06", "§34", "§56"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S69](/steps/concept/s69-mirror-watch).</Note>
+
+## Implémentation
+
+S69 livre le **chemin déclenché par l'utilisateur** qui matérialise un miroir autoré (S68) vers son runner et **stream le verdict rouge/vert en direct** — le « watch it fail » du KRD rendu produit. Sur les deux plans (Go faisant autorité + jumeau TS) avec une surface action-capable.
+
+### Le moteur Go — `back/kernel/mirror/watch`
+
+Tout est **pur, total, déterministe** (aucune horloge, aucun rng, aucune I/O) :
+
+- **`Materialize(p shapeeditor.Proposal) → MaterializedMirror`** : projette la `Proposal` de S68 en un miroir **exécutable**. Elle (a) **dispatche** par `p.Mirror.TestKind` vers le runner via la **table close** `testKindToRunner` (`acceptance → godog`, `property → rapid`, `fixture → fixture`) — un kind absent renvoie `ErrUnknownRunner`, jamais un runner deviné ; (b) **rend une source canonique** depuis la `ParsedSpec` via `renderSource` (même proposal ⇒ texte byte-identique). C'est le geste de matérialisation de `/derive-mirror` rendu code, jamais un LLM.
+- **`CodeProbe{Present bool}`** : l'unique **couture impure** abstraite — « le code sous test existe-t-il ? ». La sonde réelle compile + lance Godog/rapid/l'interpréteur contre le code du projet ; ici, c'est l'**entrée** dont le verdict est une fonction pure.
+- **`RunStream(m MaterializedMirror, probe CodeProbe) → Stream`** : le **flux live**. Il déroule l'ordre de phases fixe `PhaseQueued → PhaseMaterialized → PhaseRunning → PhaseVerdict` et **décide le verdict terminal par la présence du code** : `Present=false ⇒ LivenessDead` (RED — watch it fail), `Present=true ⇒ LivenessAlive` (GREEN). Les méthodes `Stream.Final()` et `Stream.IsRed()` exposent le verdict. **Même (miroir, sonde) ⇒ flux byte-identique** (la propriété de reproductibilité l'épingle).
+
+Le vocabulaire de verdict réutilise `records.Liveness` (S06 : `Alive`=vert, `Dead`=rouge) ; les types `Proposal`/`ParsedSpec`/`Shape` sont `shapeeditor.*` (S68) verbatim.
+
+### Le jumeau TS — `front/web/lib/mirror-watch.ts`
+
+Réplique verbatim la logique Go (`materialize`, `renderSource`, `runStream`) — pur, mêmes verdicts, même ordre de phases. Le `mirrorId` du front est un handle stable ; l'adresse de contenu faisant autorité reste celle de Go.
+
+### Le MCP — `back/mcp/mirror-watch` (ADR 0009)
+
+Deux outils de **pure computation**, sans outil d'écriture : `watch_materialize` (projette la Proposal en `MaterializedMirror`), `watch_run` (lance contre une sonde → le flux rouge/vert). `main_test.go` vert (matérialise → RED absent → GREEN stub).
+
+### La route — `front/web/app/mirror-watch`
+
+Action-capable (`ui-completeness`, §7) : **un contrôle** lié au moteur — autorer → matérialiser → exécuter, avec une **bascule de présence du code**. Le flux live se rend en `<ol data-testid="watch-stream">` (un point rouge/vert par phase). Thème ADR 0010, bilingue ADR 0011 (parité i18n 3756/3756). Entrée de nav dans le groupe **Build** à côté de `/shape-editor`.
+
+### Les miroirs (rouge → vert)
+
+- **Go** : `watch_test.go` — la **fixture canonique** (matérialise → RED contre code absent → stub → GREEN), le dispatch par forme (table close), le refus d'une proposal vide, et **deux property tests rapid** (le flux est reproductible + la présence du code décide le verdict ; `Materialize` reproductible).
+- **TS** : `lib/mirror-watch.test.ts` (Vitest + fast-check — les mêmes invariants que le property Go : dispatch, journey rouge→vert, refus, reproductibilité).
+- **MCP** : `back/mcp/mirror-watch/main_test.go`.
+- **e2e** : `tests/e2e/mirror-watch.spec.ts` (4/4 — rend le contrôle, RED contre code absent dispatché Godog, GREEN avec stub, source non parsable refusée).
+
+## Méta
+
+**Pourquoi ce découpage ?** S69 sépare nettement **trois préoccupations** : la **matérialisation** (projection pure Proposal → exécutable), la **sonde** (la seule couture impure, isolée derrière `CodeProbe`), et le **flux de verdict** (projection pure du verdict en phases live). Chaque part déterministe porte son miroir de reproductibilité — le mandat *determinism-first* est satisfait : le dispatch et le verdict sont des **fonctions**, jamais un agent. L'LLM n'entre nulle part (lancer un runner et comparer un verdict **est** une fonction, pas un jugement).
+
+**La couture impure réduite à un booléen.** Tout l'I/O réel (compiler, lancer Godog/rapid/l'interpréteur) est confiné à *une seule* abstraction — `CodeProbe.Present`. La **logique** du verdict reste pure et totalement testable sans lancer un seul process de test. C'est le même motif que le `BaselineReplayer` du mirror-runner (S05) : l'orchestration est prouvable hors de tout process réel.
+
+**Le mur, structurellement.** `watch` ne possède aucun chemin d'écriture : il **lit** la Proposal autorée + **calcule** un Stream. Aucune fonction n'écrit le schéma `mirrors` ; le gel reste le chemin propose → ChangeSet → approbation (S68/S20). Le rôle DB de l'agent n'a aucun GRANT. Exécuter une preuve ne touche jamais la vérité.
+
+**Réutilisation, jamais de fork.** `records.Liveness` (S06), `shapeeditor.Proposal/ParsedSpec/Shape` (S68) sont réutilisés verbatim. Aucun nouvel ADR — S69 fige un artefact (le chemin matérialiser-et-exécuter), il ne déplace aucun contrat antérieur.
+
+## Méta-méta
+
+**« Watch it fail » est une loi, pas un confort.** Le critère le plus profond de S69 est que, **contre du code absent, le verdict est toujours ROUGE**. Ce n'est pas un défaut : c'est la discipline du KRD (§56 : le red set EST le goal). Un chemin qui rendrait vert un miroir sans code serait un *monster* — une preuve qui ment. Le property test `present=false ⇒ IsRed` épingle exactement cette loi.
+
+**Le verdict est dérivé, jamais déclaré.** La présence du code **décide** le rouge/vert, mécaniquement — l'humain (ni un agent) ne *déclare* pas « c'est vert ». C'est l'application au plan du runner du principe anti-Goodhart du §8 : *« done » est calculé, jamais déclaré*. Personne ne peut forcer le vert ; seul un code présent le produit.
+
+**Le flux est l'honnêteté de l'attente.** Rendre le verdict comme un **flux ordonné** (en file → matérialisé → en cours → verdict) plutôt qu'un booléen final, c'est refuser le retour opaque. L'utilisateur voit *où* en est sa preuve. C'est la même honnêteté que le `BlockReason` actionnable du mur : un état n'est jamais un mystère.
+
+**La reproductibilité comme garde-fou de méta-niveau.** Les deux plans (Go + TS) portent des property tests indépendants qui épinglent le **même** verdict déterministe. Si un jour un agent était tenté de « juger intelligemment » si un miroir passe, ces tests le détecteraient comme une dérive de déterminisme — un *determinism gap* qui bloque l'étape, au même titre qu'un monster ou une capacité headless.

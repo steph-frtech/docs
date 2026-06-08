@@ -1,0 +1,63 @@
+---
+title: "S69 · Matérialisez votre miroir et regardez-le rougir"
+description: "S69 transforme le « watch it fail » du KRD en geste produit : vous DÉCLENCHEZ la matérialisation d'un miroir que vous avez autoré (S68) vers son runner — Gherkin → Godog, propriété → rapid, fixture → l'interpréteur — et vous regardez le verdict s'écouler EN DIRECT. Contre du code absent, le miroir est ROUGE ; dès qu'un stub existe, il passe VERT. Le runner est DÉRIVÉ de la forme (jamais choisi), et le verdict est décidé par la PRÉSENCE DU CODE — une fonction pure, jamais un LLM. Le mur tient : S69 ne fait qu'EXÉCUTER le miroir autoré au-dessus de la ligne, il n'écrit aucune vérité."
+keywords: ["aidos", "krd", "S69", "miroir", "matérialiser", "watch it fail", "voir le miroir rougir", "rouge vert", "runner", "Godog", "rapid", "fixture", "interpréteur", "dériver le runner", "code absent", "stub", "présence du code", "verdict", "fonction pure", "déterminisme", "stream", "live", "queued materialized running verdict", "le mur", "above the line", "exécuter pas écrire", "S68", "S20", "§34", "§56"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S69](/steps/internals/s69-mirror-watch).</Note>
+
+## En une phrase
+
+S69 est l'écran où vous **lancez** un miroir que vous venez d'autorer (S68) et où vous **regardez sa preuve échouer** : le verdict s'écoule en direct — **ROUGE** contre du code qui n'existe pas encore, **VERT** dès qu'un stub le satisfait.
+
+## Le problème que S69 résout
+
+S68 vous laisse **écrire** un miroir rouge. Mais un miroir rouge n'est qu'une promesse tant que vous ne l'avez pas **vu** échouer contre le code réel. C'est le cœur du KRD : *« regardez-le échouer »* (watch it fail) **avant** de coder. Sans ce retour, vous codez à l'aveugle ; avec lui, vous savez exactement quand la preuve passe au vert. S69 vous donne ce retour, déclenché par vous, **en direct**.
+
+## Ce que S69 apporte
+
+<CardGroup cols={2}>
+  <Card title="Le runner dérivé de la forme" icon="route">
+    Vous ne choisissez pas le runner : la <strong>forme</strong> de votre miroir le détermine — Gherkin → <strong>Godog</strong>, propriété → <strong>rapid</strong>, fixture → l'<strong>interpréteur</strong>. Une table close, jamais devinée.
+  </Card>
+  <Card title="Rouge contre du code absent" icon="circle-xmark">
+    Vous lancez le miroir <strong>sans code</strong> : il est <strong>ROUGE</strong>. C'est le « watch it fail » du KRD rendu visible — la preuve échoue parce que le comportement n'existe pas encore.
+  </Card>
+  <Card title="Vert dès qu'un stub existe" icon="circle-check">
+    Vous cochez « code présent » (un stub) : le même miroir passe <strong>VERT</strong>. Le verdict est décidé par la <strong>présence du code</strong>, mécaniquement — jamais par un jugement flou.
+  </Card>
+  <Card title="Un flux en direct" icon="wave-pulse">
+    Le verdict ne tombe pas d'un coup : il <strong>s'écoule</strong> — <em>en file → matérialisé → en cours → verdict</em> — pour que vous voyiez la progression rouge/vert au fur et à mesure.
+  </Card>
+</CardGroup>
+
+## Comment vous l'utilisez
+
+<Steps>
+  <Step title="Vous choisissez la nature et la couche">
+    Nature de la vérité (acceptation, invariant, workflow) + la couche reflétée (ex. <code>Order.place</code>). La forme — et donc le runner — en sont <strong>dérivées</strong>.
+  </Step>
+  <Step title="Vous tapez la source du miroir">
+    Par exemple un scénario Gherkin <code>Scenario:/Given/When/Then</code>. AIDOS la <strong>parse</strong> par une fonction pure ; une source illisible est <strong>refusée</strong>, jamais exécutée au hasard.
+  </Step>
+  <Step title="Vous lancez — sans code">
+    « Code présent » décoché : vous matérialisez et exécutez. Le flux s'écoule jusqu'au verdict <strong>ROUGE</strong>. Vous venez de voir votre preuve échouer.
+  </Step>
+  <Step title="Vous ajoutez un stub et relancez">
+    « Code présent » coché : le même miroir passe <strong>VERT</strong>. La boucle rouge → vert est bouclée — vous savez quoi coder, et quand c'est fait.
+  </Step>
+</Steps>
+
+## Le mur — ce que S69 ne fait jamais
+
+S69 ne fait qu'**exécuter** un miroir que vous avez autoré **au-dessus de la ligne** : il **lit** la source + **calcule** un verdict. Il **n'écrit aucune vérité** — le miroir reste un brouillon proposé ; le gel passe par le mur (propose → ChangeSet → approbation, hérité de S68/S20). Regarder une preuve échouer ne change rien à la vérité ; ça vous dit seulement où en est le code.
+
+## Ce que S69 ne fait pas (et qui le fait)
+
+- **Écrire le miroir dans le noyau** — c'est le chemin ChangeSet de S68/S20, sous approbation humaine.
+- **Compiler et lancer pour de vrai le code de l'app** — la sonde de code (« code présent ? ») est ici la frontière ; le branchement réel sur le compilateur/runner appartient à l'enveloppe d'exécution.
+- **Lister vos miroirs par projet + détecter les monstres** — c'est S70.
+
+## En un mot
+
+> S69, c'est le **« watch it fail »** rendu cliquable : vous lancez votre miroir, vous le voyez **rougir** contre l'absence de code, puis **verdir** dès qu'un stub existe — la discipline du KRD, en direct, sans jamais toucher à la vérité.

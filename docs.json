@@ -204,6 +204,8 @@
               "steps/internals/s67-behavior-capture",
               "steps/concept/s68-shape-editor",
               "steps/internals/s68-shape-editor",
+              "steps/concept/s69-mirror-watch",
+              "steps/internals/s69-mirror-watch",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",
