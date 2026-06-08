@@ -1,0 +1,62 @@
+---
+title: "S76 · Réutiliser un comportement entier — sans le réécrire pour la 50ᵉ fois"
+description: "S76 vous donne des BEHAVIOR-MACROS : des comportements réutilisables (« cette entité appartient à un propriétaire », « cette entité s'archive au lieu d'être supprimée », « chaque changement est tracé ») que vous ATTACHEZ à une de vos entités. AIDOS les EXPANSE alors — automatiquement — en tous les morceaux qu'ils impliquent : attributs, relations, opérations, policies et fixtures. Une seule fonction fait autorité pour cette expansion (jamais un LLM, jamais deux versions différentes) : même comportement + même entité → toujours le même résultat, à l'octet près. Et comme toujours, l'expansion est une PROPOSITION (un ChangeSet brouillon), jamais une vérité écrite en passant. Le behavior-macro est lui-même un objet que vous possédez, versionnez, taggez et localisez."
+keywords: ["aidos", "krd", "S76", "behavior", "behavior-macro", "comportement", "réutilisable", "reusable", "Expand", "expansion", "ownable", "soft-deletable", "auditable", "owner-scoping", "boilerplate", "owner_id", "attributs", "relations", "opérations", "policies", "fixtures", "record", "ownable", "versionné", "versioned", "taggable", "localisable", "localizable", "propose", "ChangeSet", "DRAFT", "brouillon", "déterministe", "deterministic", "idempotent", "fonction pure", "une seule fonction", "single source", "le mur", "wall", "§24.6", "EPIC 7", "S67", "S79", "S80", "S81"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S76](/steps/internals/s76-behavior-expander).</Note>
+
+## En une phrase
+
+S76 vous laisse **attacher un comportement réutilisable** (un *behavior-macro*) à une entité, et AIDOS l'**expanse** — par une **seule fonction faisant autorité** — en tous les attributs, relations, opérations, policies et fixtures qu'il implique, puis vous le **propose** comme brouillon de vérité, jamais écrit en passant.
+
+## Le problème que S76 résout
+
+À chaque app, vous réécrivez les mêmes comportements. « Cette commande appartient à un client, et seul ce client peut la modifier. » Cela suppose à chaque fois : un attribut `owner_id`, une relation vers l'utilisateur, une **policy** qui refuse l'accès aux autres, et des **preuves** (« le propriétaire peut, un autre ne peut pas »). C'est du **boilerplate** — la 50ᵉ fois que vous le tapez, vous le tapez moins bien.
+
+Pire : si deux endroits différents d'AIDOS « savaient » comment dérouler ce comportement, ils pourraient le dérouler **différemment** — et vous perdriez la reproductibilité. La règle de S76 est donc stricte : il existe **UNE seule** fonction qui sait expanser un behavior, et **tout le reste l'appelle** (la capture d'idée en S67, la librairie en S79, l'auth d'app en S80, les templates en S81). Jamais une deuxième implémentation.
+
+## Ce que S76 apporte
+
+<CardGroup cols={2}>
+  <Card title="Des comportements réutilisables" icon="layer-group">
+    <code>ownable</code> (appartenance à un propriétaire), <code>soft-deletable</code> (archivage au lieu de suppression), <code>auditable</code> (traçabilité). Vous les attachez à une entité — vous ne réécrivez plus le boilerplate.
+  </Card>
+  <Card title="L'expansion automatique" icon="wand-magic-sparkles">
+    Attacher <code>ownable</code> à <code>Order</code> produit d'un coup : un attribut <code>owner_id</code>, une relation <code>owner → User</code>, la policy <code>owner-scoping</code> et deux fixtures de preuve.
+  </Card>
+  <Card title="Une seule fonction, un seul résultat" icon="fingerprint">
+    Même comportement + même entité → toujours la même expansion, à l'octet près (une adresse de contenu le prouve). Jamais un LLM : c'est du code, déterministe et reproductible.
+  </Card>
+  <Card title="Proposer, pas écrire" icon="file-signature">
+    L'expansion est un ChangeSet <code>proposed</code> (DRAFT). Un humain l'approuve (elle rejoint le Kernel) ou la rejette (rien n'a bougé). L'écran ne franchit jamais le mur.
+  </Card>
+</CardGroup>
+
+## Le behavior-macro est un objet que vous gérez
+
+Un behavior-macro n'est pas qu'un mot-clé : c'est un **record** que vous :
+
+- **possédez** (`owner`) — il vous appartient ;
+- **versionnez** (`version`) — il évolue sans écraser l'ancien ;
+- **taggez** (`tags`) — « scoping », « sécurité »… pour le retrouver ;
+- **localisez** (`labels`) — un libellé par langue, **français requis** (bilingue par défaut).
+
+## L'idempotence — attacher deux fois ne casse rien
+
+Si votre entité a **déjà** un `owner_id` (vous aviez déjà attaché `ownable`), une seconde expansion **n'ajoute pas** une deuxième colonne : elle n'émet que les morceaux **manquants**. Ré-attacher un comportement déjà présent ne produit rien de neuf — l'expansion est **idempotente**.
+
+## Comment vous l'utilisez (écran `/behavior-expander`)
+
+1. Choisissez un **behavior** (`ownable` / `soft-deletable` / `auditable`) et une **entité** (`Order`).
+2. Renseignez le record : propriétaire, version, tags, libellé FR.
+3. Cliquez **« Proposer l'expansion »**.
+4. L'écran affiche les **pièces** expansées (attributs, relations, opérations, policies, fixtures), leur **adresse de contenu**, et un **ChangeSet DRAFT** — jamais appliqué.
+
+## Le mur tient
+
+Proposer une expansion **n'écrit aucune vérité**. Le ChangeSet reste **DRAFT** ; seul l'outil `aidos`, après **approbation humaine**, l'applique. Un rejet laisse le Kernel **intact** — l'écran propose, il n'écrit pas.
+
+## Ce qui s'appuie sur S76
+
+S76 est **fondateur** : il atterrit **avant** les étapes qui le consomment. La capture d'idée (S67) surface la librairie et prévisualise une expansion ; la librairie user-facing (S79) la rejoue ; l'auth de l'app émise (S80) est elle-même un behavior-macro ; les templates (S81) en instancient plusieurs. **Tous appellent la même unique fonction** — jamais une copie.

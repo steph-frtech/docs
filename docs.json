@@ -218,6 +218,8 @@
               "steps/internals/s74-relation-emitter",
               "steps/concept/s75-entity-modeler",
               "steps/internals/s75-entity-modeler",
+              "steps/concept/s76-behavior-expander",
+              "steps/internals/s76-behavior-expander",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

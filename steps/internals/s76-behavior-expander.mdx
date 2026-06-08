@@ -1,0 +1,52 @@
+---
+title: "S76 · behavior-macro + l'UNIQUE Expand (internals)"
+description: "Le détail d'implémentation de S76 : back/kernel/behavior — le record behavior (ownable/versionné/taggable/localisable) et l'UNIQUE fonction pure faisant autorité Expand(Attachment) → Expansion (attributs/relations/operations/policies/fixtures, en ordre canonique, idempotente, content-adressée ExpansionID, WroteKernel=false), plus Propose(Attachment, Record, parentPhase) → Proposal qui enveloppe le dry-run dans un changeset.ChangeSet DRAFT (jamais APPLIED — le mur). Le jumeau TS lib/behavior-expander (sur l'UNIQUE expander de lib/compound + l'adresse byte-twin de lib/behavior), le MCP back/mcp/behavior-expander (4 outils purs : behavior_catalogue/behavior_validate_record/behavior_expand/behavior_propose), la route /behavior-expander action-capable, et les miroirs (fixture + property rapid + Vitest/fast-check + 5 Playwright). Les trois couches : Implémentation, Méta, Méta-méta."
+keywords: ["aidos", "krd", "S76", "behavior", "Expand", "Propose", "Record", "ownable", "versioned", "taggable", "localizable", "Expansion", "ExpansionID", "RecordID", "idempotent", "déterministe", "content-addressed", "changeset", "DRAFT", "WroteKernel", "le mur", "wall", "fonction pure", "single source", "MCP", "behavior-expander", "rapid", "fast-check", "Playwright", "§24.6", "EPIC 7", "S67", "S79", "S80", "S81"]
+---
+
+<Note>Côté implémentation — le journal de construction. Pour la version sans code, voir [Pour les futurs utilisateurs → S76](/steps/concept/s76-behavior-expander).</Note>
+
+## Implémentation
+
+S76 freeze le **behavior-macro** (KRD §24.6, ROADMAP app-builder EPIC 7) : un record réutilisable et l'**UNIQUE** fonction d'expansion qui fait autorité. Le cœur `Expand` préexistait (posé par la piste S64/S67) ; S76 ajoute le **record** (ownable/versionné/taggable/localisable) et **Propose** (l'expansion = un ChangeSet proposé), sans jamais forker l'expander.
+
+### Le moteur Go — `back/kernel/behavior`
+
+- `behavior.go` — l'**UNIQUE** `Expand(Attachment) (Expansion, error)`. Pour chaque `Kind` du catalogue clos (`ownable` / `soft-deletable` / `auditable`), une table déclarée (`catalogueExpansion`) donne les attributs / relations / operations / policies / fixtures. `Expand` filtre contre la `Shape` déjà présente (**idempotence** : un morceau n'est émis que si son nom est absent), trie en ordre canonique, et content-adresse le résultat (`ExpansionID = records.Hash(records.Canonicalize(body))`). `WroteKernel` est **toujours false** — c'est un *dry-run*. Une behavior inconnue ou une entité vide est une erreur typée (`ErrUnknownBehavior` / `ErrNoEntity`), jamais une expansion devinée.
+- `record.go` (S76) — le **record** `Record{Kind, Owner, Version, Tags, Labels}` et `ValidateRecord` (les quatre clauses §24.6 : kind dans le catalogue, `Owner` non vide, `Version ≥ 1`, libellé `fr` requis — ADR 0011). `RecordID` content-adresse l'identité (tags dédupliqués + triés → invariant à l'ordre). `Propose(a, r, parentPhase) (Proposal, error)` valide le record, refuse un **mismatch** record/attachment (`ErrRecordKindMismatch`), lance l'**UNIQUE** `Expand` (jamais une 2ᵉ expansion) et **enveloppe** son dry-run dans un `changeset.Open` — un `ChangeSet` **DRAFT** (`spec_delta` portant l'expansion canonique + `mirror_delta`, project-scopé `behavior-expansion@<entity>`). **Il n'écrit rien** : `changeset.Open` est pur ; le DRAFT n'est jamais `APPLIED`.
+
+### Le jumeau TS — `front/web/lib/behavior-expander.ts`
+
+Il **n'a pas** de seconde implémentation : il importe l'**UNIQUE** `expand` de `lib/compound`, l'adresse byte-twin `expansionId` de `lib/behavior`, et ajoute seulement `BehaviorRecord`, `validateRecord`, `recordId` (même schéma canonique → hex SHA-256 stable, invariant à l'ordre des tags) et `propose` (DRAFT, `wroteKernel=false`). Le `propose` Go et TS suivent la même loi : l'expansion est byte-identique à un `Expand` direct.
+
+### Le MCP — `back/mcp/behavior-expander`
+
+ADR 0009 (un op backend = un outil MCP). Quatre outils **purs** (aucun LLM, aucune I/O), transport stdio :
+
+- `behavior_catalogue` — les kinds en ordre canonique ;
+- `behavior_validate_record` — verdict + `RecordID` ;
+- `behavior_expand` — l'**UNIQUE** `Expand` → l'expansion dry-run ;
+- `behavior_propose` — `Expand` + enveloppe DRAFT (jamais d'`apply` — c'est le commit-gate S20, le freeze c'est `/goal`).
+
+### La route Workbench — `/behavior-expander`
+
+Action-capable (ui-completeness, CLAUDE.md §7) : un contrôle **PROPOSE** lié au moteur pur (`actions.ts` → `proposeAction` → `lib/behavior-expander.propose`). On choisit behavior + entité, on possède/versionne/tagge/localise le record, on propose : l'écran rend les pièces expansées, l'`ExpansionID`, le `RecordID` et le statut **DRAFT**. Thème ADR 0010, bilingue ADR 0011 (clé `behaviorExpander`, lien nav ajouté). Le mur : l'écran n'écrit aucune vérité.
+
+### Les miroirs (BDD-first, rouge avant le code)
+
+- `behavior_propose_test.go` (fixture) — `state` (un record versionné/taggé/localisé attaché) → `command` (`Propose`) → `events` (un `ChangeSet` **DRAFT**, jamais `APPLIED`, `spec_delta`+`mirror_delta`, l'expansion byte-identique à `Expand`) ; record bien/mal formé ; mismatch refusé.
+- `behavior_propose_property_test.go` (rapid) — `Propose` déterministe (même entrée → même id de ChangeSet), **toujours DRAFT**, `WroteKernel=false` ; `RecordID` content-adresse stable.
+- `behavior-expander.test.ts` (Vitest + fast-check) — les quatre clauses, `recordId` invariant à l'ordre des tags, `propose` = DRAFT byte-identique à `expand`.
+- `behavior-expander.spec.ts` (Playwright, ×5) — la route est exécutable : proposer ownable sur Order ouvre un DRAFT portant `owner_id`/`owner-scoping`, l'expansion est déterministe (re-propose → même id), soft-deletable expanse `archive`/`deleted_at`, un record sans propriétaire est refusé.
+
+## Méta
+
+- **Une seule fonction faisant autorité.** Le risque réel est la **double implémentation** : si S67, S79, S80, S81 déroulaient chacun leur expansion, deux apps « identiques » divergeraient. S76 impose **un seul `Expand`** (Go) et **un seul `expand`** (TS, via `lib/compound`) ; tout consommateur l'**importe**. `Propose` ne ré-expanse pas — il enveloppe. La propriété « l'expansion portée par Propose == un `Expand` direct » est un miroir : elle interdit la copie silencieuse.
+- **Déterminisme-first (§6/§8).** L'expansion est un *mapping de table*, pas un jugement — donc du **code**, jamais un LLM. L'`ExpansionID`/`RecordID` (adresse de contenu) rendent la reproductibilité **testable** ; l'idempotence rend une ré-attache **inoffensive**. Un « agent qui expanserait un behavior » serait un *determinism gap* — interdit.
+- **Le mur, deux fois.** L'expansion est un *dry-run* (`WroteKernel=false`) **et** Propose ne produit qu'un **DRAFT** (`changeset.Open`, jamais `Apply`). Aucune vérité n'est écrite depuis le moteur ni depuis l'écran ; le freeze passe par `idée → miroir → /goal → approbation`.
+
+## Méta-méta
+
+- **Réutiliser, jamais réinventer (ADR 0007).** `RecordID`/`ExpansionID` réutilisent `records.Canonicalize/Hash` (S02) — un seul espace d'adresses de contenu dans tout AIDOS. `Propose` réutilise `changeset.Open` (S20) et son gate de complétude (`SpecHasMirror`) — la même enveloppe DRAFT que le modeleur S75. Pas de nouvel ADR : S76 freeze un nouvel artefact (le catalogue + son expansion + son record), il ne déplace aucun contrat antérieur.
+- **Bootstrap & dépendances forward.** S76 **atterrit avant** S67/S79/S80/S81 (note de dépendances ROADMAP) : `/long-run` l'exécute en premier ou les consommateurs mockent l'expander en OpenQuestion documentée jusqu'à S76. C'est la trajectoire prévue, pas un défaut.
+- **Accrétion d'artefacts (ADR 0009).** S76 ajoute un MCP dédié (`behavior-expander`) distinct du `behavior-capture` de S67 : chaque op backend reste un outil. Le meta-loop n'**ajoute** que des garde-fous (le miroir « une seule fonction »), il n'en retire aucun.
