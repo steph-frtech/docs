@@ -1,0 +1,45 @@
+---
+title: "S92 · Opérer votre app au quotidien — logs, traces, taux d'erreur"
+description: "S92 donne à chaque app émise son panneau d'exploitation : les logs, les traces de requêtes, les événements d'erreur, et un dashboard de latence (p50/p95/p99) et de taux d'erreur — pour que vous opériez votre app au jour le jour. L'app est instrumentée OpenTelemetry ; ses signaux alimentent un panneau d'ops PAR APP. C'est distinct de « la télémétrie comme senseur du noyau » : l'observabilité d'exploitation n'écrit AUCUNE vérité — elle rend, elle n'apprend pas. Un secret qu'une app aurait loggué par mégarde est redacté avant d'être affiché."
+keywords: ["aidos", "krd", "S92", "observabilité", "exploitation", "logs", "traces", "OpenTelemetry", "OTel", "latence", "p50", "p95", "p99", "taux d'erreur", "error tracking", "dashboard", "ops", "SigNoz", "GlitchTip", "DP17", "ADR 0043", "EPIC 9", "déterminisme", "le mur"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S92](/steps/internals/s92-ops-observability).</Note>
+
+## En une phrase
+
+S92 donne à chaque app émise **son panneau d'exploitation** — logs, traces de requêtes, erreurs, latence et taux d'erreur — pour que **vous opériez votre app au quotidien**, sans qu'aucune de ces données ne devienne une vérité du noyau.
+
+## Le problème que S92 résout
+
+Une fois votre app construite et en service, vous devez l'**opérer** : savoir si une requête est lente, repérer une erreur, lire les logs après un incident. Sans un panneau d'exploitation, vous êtes aveugle :
+
+1. **Pas de logs lisibles.** Quand une requête échoue, vous ne savez pas pourquoi. S92 collecte les **logs** de l'app et les **rend** dans un fil lisible.
+2. **Pas de visibilité sur la latence.** Une route lente passe inaperçue jusqu'à ce qu'un utilisateur se plaigne. S92 calcule la **latence p50 / p95 / p99** par route — la vue canonique de l'exploitation.
+3. **Pas de suivi des erreurs.** Une exception se noie dans le bruit. S92 isole un **fil d'erreurs** (error-tracking) à part.
+4. **Le risque de confondre exploitation et apprentissage.** Observer la latence pour opérer votre app ne doit **jamais** modifier ce que le noyau d'AIDOS tient pour vrai. S92 **n'écrit aucune vérité**.
+
+## Comment S92 vous donne la main sur votre app
+
+1. **Votre app émet des signaux OpenTelemetry** : des *logs* (lignes de log avec leur sévérité), des *spans* (traces de requêtes avec leur durée et leur issue), des *événements d'erreur* (les exceptions).
+2. **Les signaux alimentent un panneau d'ops PAR APP** : un panneau par projet. Le signal d'une app A n'apparaît **jamais** dans le panneau d'une app B.
+3. **Le panneau agrège** : nombre de requêtes, taux d'erreur, latence p50/p95/p99 (globale et par route), fil de logs, fil d'erreurs.
+4. **Tout est déterministe** : les mêmes signaux donnent toujours le même panneau, à l'octet près — une empreinte le prouve.
+5. **Un secret loggué par mégarde est redacté** avant d'être affiché : le panneau ne montre jamais un mot de passe ou une clé en clair (la même loi qu'au S91).
+
+## La séparation qui compte : exploitation ≠ senseur du noyau
+
+AIDOS a **deux** usages de la télémétrie, et il ne faut **jamais** les confondre :
+
+- **Le senseur du noyau (E12, le RealityMirror).** Quand la production *contredit* le noyau — un incident récurrent, un budget dépassé — c'est un signal qui peut faire **apprendre** AIDOS : il devient une *idée* candidate, qui devra acquérir son miroir et passer un `/goal` avant de toucher le noyau. C'est le **seul** chemin de la réalité vers la vérité.
+- **L'observabilité d'exploitation (S92).** C'est l'inverse : un panneau que **vous** lisez pour opérer votre app. Voir une latence n'est **pas** une décision de vérité. S92 **rend**, il n'**apprend** pas — il n'écrit **aucune vérité**.
+
+Cette frontière est le cœur de S92 : un dashboard d'exploitation n'est jamais une porte vers le noyau.
+
+## Ce que l'écran vous montre
+
+Le panneau **« Observabilité d'exploitation »** du Workbench vous laisse **émettre** des signaux OTel (pour voir le panneau réagir) et **construire** le dashboard — depuis l'écran, exécutable. Vous y lisez le nombre de requêtes, le taux d'erreur, la latence par percentile, le fil de logs et le fil d'erreurs. Le panneau affiche aussi, explicitement, qu'il **n'a écrit aucune vérité** (`wroteKernel: false`).
+
+## Ce que S92 ne fait pas
+
+S92 ne *juge* pas votre app : il ne décide pas qu'une latence est « trop haute » au point de changer le noyau (ça, c'est le rôle du senseur E12, via une idée et un `/goal`). Il ne stocke aucune vérité, n'apprend rien tout seul, et ne laisse jamais une donnée d'exploitation franchir le mur. Il vous donne les yeux pour opérer — rien de plus, rien de moins.
