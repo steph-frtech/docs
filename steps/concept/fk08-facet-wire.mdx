@@ -1,0 +1,55 @@
+---
+title: "FK08 · Câbler les facettes S/R/V/M/X : une colonne par nature de vérité"
+description: "FK08 réalise les six paires de chaque facette NON-FONCTIONNELLE — Sécurité (S), Fiabilité (R), Évolutivité (V), Maintenabilité (M), Expérience (X) — comme des COLONNES PARALLÈLES du même squelette 6-paires, chacune réutilisant un senseur qui existe déjà (les scans, le chaos, la migration, l'arch-fitness, l'ExperienceClaim). Casser une paire ROUGIT la bonne colonne ; les facettes sont orthogonales ; X reste advisory — elle informe, elle ne bloque jamais. Le juge est un CALCUL : la même comparaison structurelle que le doc-miroir."
+keywords: ["aidos", "krd", "FK08", "facettes", "S", "R", "V", "M", "X", "squelette 6 paires", "colonne", "non-fonctionnel", "sécurité", "fiabilité", "évolutivité", "maintenabilité", "expérience", "advisory", "orthogonal", "senseur réutilisé", "le juge est un calcul", "FKE-1.3"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK08](/steps/internals/fk08-facet-wire).</Note>
+
+## En une phrase
+
+FK08 prend les cinq **facettes non-fonctionnelles** de votre vérité — est-ce **sûr** ? **résilient** ? **durable** ? **sain** ? **utilisable** ? — et les câble comme **cinq colonnes parallèles** du même squelette à six paires que la facette fonctionnelle. Chaque colonne **réutilise un senseur qui existe déjà** ; casser une paire **rougit sa colonne** et aucune autre ; et la colonne **Expérience** ne bloque jamais — elle vous prévient.
+
+## Le problème que FK08 résout
+
+Aux étapes précédentes, AIDOS a appris à **déclarer** quelles facettes une vérité instancie (FK02) et à vérifier qu'aucune paire requise ne manque (FK04, le « monstre » généralisé). Mais déclarer une facette ne suffit pas : il faut savoir **ce que prouve** la facette « Sécurité » d'un endpoint, **quel senseur** s'en charge, et **quelle paire casser** pour la voir rougir. C'est le travail de FK08 : **câbler** chaque facette non-fonctionnelle à son squelette concret et à son senseur.
+
+La tentation serait d'inventer un nouveau juge par facette — un « juge sécurité », un « juge perf »… AIDOS refuse. Chaque facette **réutilise un outil mûr qui existe déjà** (on ne réinvente pas la roue), et le **juge reste le même calcul** : la comparaison structurelle d'ensembles, exactement celle du doc-miroir.
+
+## Le squelette à six paires, lu sous cinq angles
+
+Toute vérité — fonctionnelle ou non — a la **même anatomie** : une intention, un comportement, des scénarios, un modèle, un contrat, une preuve. Six rungs, six paires « déclaré ↔ prouvé ». Une **facette** est simplement cette anatomie **lue sous un angle** :
+
+| Facette | Question | Le senseur réutilisé |
+|---|---|---|
+| **S** Sécurité | est-ce sûr ? | les scans + la police (gosec, gitleaks, evals d'injection) |
+| **R** Fiabilité | est-ce résilient ? | le chaos, le failover, le restore, les disjoncteurs, l'outbox |
+| **V** Évolutivité | est-ce durable ? | la migration expand-contract, le backfill, le restore |
+| **M** Maintenabilité | est-ce sain ? | l'arch-fitness (le 2ᵉ cliquet), go-arch-lint / depguard |
+| **X** Expérience | est-ce utilisable ? | l'ExperienceClaim (vérité **molle**) |
+
+Pour chaque colonne, FK08 compare ce que le squelette **exige** (les paires déclarées) à ce qu'un senseur vivant **prouve** réellement. Une paire **déclarée mais non prouvée** est une **paire cassée** : la colonne rougit.
+
+## Casser une paire rougit la bonne colonne
+
+C'est le cœur de FK08, et c'est exactement la mécanique du doc-miroir, appliquée par facette :
+
+- **Toutes alignées → vert.** Chaque paire déclarée d'une colonne est prouvée par son senseur. Le verdict global est vert.
+- **Casser une paire d'une colonne dure (S/R/V/M) → cette colonne rougit.** La preuve a disparu (le senseur est rouge, ou absent). **Seule cette colonne** rougit ; les autres restent vertes — les facettes sont **orthogonales**, elles n'interagissent pas. Le verdict global passe au rouge.
+- **Une paire « prouvée sans être déclarée »** est l'autre côté de la même différence : le senseur affirme quelque chose que le squelette n'avait jamais exigé. C'est aussi une divergence structurelle.
+
+Une faille de sécurité, une régression de chaos, une migration qui perd des données, une architecture qui dérive : ce sont des **monstres**, exactement comme un test fonctionnel manquant.
+
+## X informe, X ne bloque jamais
+
+La colonne **Expérience** est l'exception qui fait toute la finesse de FK08. C'est une vérité **molle** (§13.6). Casser une paire d'Expérience produit bien une divergence — mais **advisory** : elle s'affiche, elle vous prévient, et le verdict reste **vert**. Un squelette dont la **seule** colonne cassée est X reste **vert** globalement.
+
+Pourquoi ? Parce que sur-contraindre l'expérience utilisateur serait l'**erreur symétrique** (§13.4) : transformer chaque ajustement d'ergonomie en « régression bloquante » figerait l'UX ou pousserait à mentir au juge. FK08 garde **durement** ce qui est vérifiable (sécurité, fiabilité, migration, architecture) et **souplement** ce qui relève du jugement humain (l'expérience). X **ne cliquette jamais dur**.
+
+## Ce que vous voyez à l'écran
+
+La route **`/facet-wire`** rend tout ça **exécutable** : choisissez un scénario (toutes alignées, casser S, casser R, casser X), cliquez **CÂBLER**, et les cinq colonnes apparaissent avec leur verdict, leur senseur réutilisé et leurs paires cassées. Vous **voyez** la colonne S rougir quand on casse sa paire, les colonnes R/V/M rester vertes (orthogonalité), et la colonne X rester verte avec un advisory ambre quand on la casse. Le verdict est **déterministe** : relancé deux fois, il est identique.
+
+## Pourquoi c'est important
+
+FK08 complète le **système de coordonnées de la vérité** : chaque vérité porte non seulement sa **place** (niveau × facette, FK01–FK03) mais aussi, pour chacune de ses facettes non-fonctionnelles, **le squelette concret et le senseur** qui la prouvent. C'est ce qui permet à la **conscience** (l'étape suivante) d'agréger, paire par paire, sur **toutes** les facettes, sans jamais ajouter de nouveau juge.

@@ -465,7 +465,9 @@
               "steps/concept/fk06-derive-doc",
               "steps/internals/fk06-derive-doc",
               "steps/concept/fk07-doc-mirror",
-              "steps/internals/fk07-doc-mirror"
+              "steps/internals/fk07-doc-mirror",
+              "steps/concept/fk08-facet-wire",
+              "steps/internals/fk08-facet-wire"
             ]
           }
         ]

@@ -1,0 +1,50 @@
+---
+title: "FK08 · Câbler les facettes S/R/V/M/X (internals)"
+description: "Implémentation, Méta et Méta-méta de FK08 : WireColumn/WireSkeleton — le squelette 6-paires câblé par facette non-fonctionnelle (S/R/V/M/X), chacune réutilisant un senseur existant, jugé par la même comparaison structurelle ensembliste que le doc-miroir. Casser une paire rougit la bonne colonne (orthogonalité) ; X reste advisory (ne cliquette pas dur) ; même squelette → même verdict (content-adressé)."
+keywords: ["aidos", "krd", "FK08", "facetwire", "WireColumn", "WireSkeleton", "S", "R", "V", "M", "X", "squelette 6 paires", "rung", "senseur réutilisé", "orthogonal", "advisory", "soft", "ExperienceClaim", "le juge est un calcul", "byte-identique", "FKE-1.3", "déterminisme", "rapid", "fast-check"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord interne. Pour la version sans code, voir [Pour les futurs utilisateurs → FK08](/steps/concept/fk08-facet-wire).</Note>
+
+## Implémentation
+
+FK08 est le **juge pur** qui câble les cinq facettes non-fonctionnelles comme des **colonnes parallèles** du même squelette 6-paires (KRD FKE-1.3, les 6 tables de facettes) — `back/kernel/mirror/facetwire/`. Il réutilise le moteur de comparaison structurelle du doc-miroir (FK07) sans ajouter de juge. Aucun I/O, aucune horloge, aucun rng, aucun LLM dans le cœur.
+
+**Le squelette.** Six `Rung` clos, dans l'ordre canonique 1→6 : `1-spec` (l'intention, s1), `2-behaviour` (s4), `3-scenarios` (s5), `4-model` (le contrat de la facette), `5-contract` (la frontière déclaré↔prouvé), `6-evidence` (le verdict du senseur). `Rungs()` les rend dans cet ordre déclaré (jamais l'itération de map) — le content-addressing en dépend.
+
+**Les cinq colonnes et leurs senseurs réutilisés.** `facetSensor` est une table DÉCLARÉE (ADR 0007, on ne réinvente pas) : `S → gv-gosec-gitleaks-policy`, `R → chaos-failover-restore-breaker-outbox`, `V → migrate-expand-contract-backfill-restore` (réutilise S95/migrate), `M → arch-fitness-go-arch-lint-depguard` (le 2ᵉ cliquet §47, S102/FN02), `X → experience-claim` (§13.6, SOFT). `NonFunctionalColumns()` renvoie S, R, V, M, X dans l'ordre de l'octuor. F (et I, plan des invariants) ne sont PAS des colonnes FK08.
+
+**L'entrée.** Une `Column` porte la facette et l'état de ses six rungs : `RungState{Rung, Declared, Proven}`. `Declared` = le squelette exige cette paire ; `Proven` = un senseur/miroir vivant l'affirme (vert). Le caller (la jointure FK04 / un runner) remplit `Declared` depuis le facet-set FK02 et `Proven` depuis les verdicts vivants ; FK08 ne fait que **juger**.
+
+**Le calcul — `WireColumn`.** Pour la facette, on indexe les rungs (last-wins → total sur toute entrée), puis on parcourt l'ordre canonique : `Declared ∧ ¬Proven` → `PairBroken` (la paire cassée qui rougit) ; `¬Declared ∧ Proven` → `PairUndeclared` (la différence symétrique). C'est exactement le `diffSet` de FK07, projeté sur les rungs. Les divergences sont triées par `sortDivergences` (rung → kind) : indépendance à l'ordre d'entrée, byte-identité.
+
+**L'asymétrie X (le cœur de l'étape).** `soft := col.Facet.IsSoft()` (seul X est soft). Pour une facette **dure**, le verdict est `red` ssi au moins une divergence existe. Pour la facette **molle X**, les divergences identiques sont rangées dans `Advisories`, `Divergences` reste vide, et le verdict est **toujours vert** — X informe, ne cliquette jamais dur (§13.6).
+
+**Le calcul — `WireSkeleton`.** Juge chaque colonne, les ré-ordonne en ordre octuor (S, R, V, M, X), et calcule le verdict global : `red` ssi une colonne **dure** est rouge ; la colonne **molle X** ne flippe **jamais** le verdict global. Le `SkeletonReport` est marshalé puis `records.Canonicalize`'d → `Bytes`, et `records.Hash(Bytes)` → `Hash` : parité content-adressée avec le truth-store.
+
+**Les jumeaux et les portes.** Le jumeau TS `front/web/lib/facetwire.ts` (Go autoritatif) miroite `wireColumn` + `wireSkeleton`. Le MCP `aidos-facet-wire` (`back/mcp/facet-wire/`, ADR 0009) expose `facet_wire` (une colonne) et `facet_skeleton` (les cinq) — write-nothing. La route `/facet-wire` est action-capable (contrôle CÂBLER lié à `wireSkeleton`), thème ADR 0010, bilingue ADR 0011.
+
+## Méta
+
+**Pourquoi réutiliser le moteur de FK07 et pas un juge par facette.** C'est le mandat *determinism-first* (§6) + *reuse, don't reinvent* (ADR 0007). Comparer « ce qui est exigé » à « ce qui est prouvé » est une **différence d'ensembles** — une fonction pure totale, qui DOIT être du code et qui est **autoritaire**. Inventer un « juge sécurité » ou un « juge perf » distinct serait dupliquer la même logique cinq fois et risquer cinq verdicts incohérents. FK08 a **un** juge (le set-comparison) lu **cinq fois** sous cinq angles ; les senseurs (gosec, le chaos, migrate, l'arch-fitness) sont les outils existants qu'il câble, pas des juges qu'il réécrit.
+
+**Pourquoi X est advisory (l'erreur symétrique, §13.4).** Bloquer sur l'expérience serait sur-contraindre : tout ajustement d'UX deviendrait une « régression bloquante », poussant à figer l'ergonomie ou à mentir au juge. FK08 garde **durement** le vérifiable (S/R/V/M) et **souplement** le jugement humain (X). C'est la même asymétrie que la prose advisory de FK07, transposée à la facette molle : la vérité molle **informe**, elle ne **cliquette pas dur**.
+
+**L'orthogonalité.** Casser une paire de S ne touche QUE la colonne S — `WireSkeleton` juge chaque colonne indépendamment. C'est la traduction de l'axe **orthogonal** de FKE-1.4 : les facettes se séparent (elles n'interagissent pas), seule la verticale produit→entité couple. Le miroir le prouve : briser S laisse R/V/M verts.
+
+**Le critère « done » est calculé.** Les done-criteria (casser une paire rougit la bonne colonne ; X reste advisory ; chaque facette = le squelette 6-paires sous son angle) sont des **propriétés** de `WireColumn`/`WireSkeleton`, prouvées par les miroirs, jamais déclarées. Le verdict ne lit pas la confiance de l'agent.
+
+**Le mur.** Le `SkeletonReport` est une **projection** sous la ligne de flottaison : une colonne rouge est un **signal**, agir dessus passe par idée → miroir → /goal. Aucun écran, aucun MCP n'écrit le kernel/mirrors/fitness. Additif (anti-overwrite §9) : FK08 ajoute un câbleur, ne touche aucun contrat antérieur (il **lit** les facettes de FK02 et compose le moteur de FK07).
+
+## Méta-méta
+
+**Les miroirs (la preuve avant le code).**
+
+- `facetwire_property_test.go` (rapid) — la **reproductibilité** : même colonne → même verdict et même ensemble de divergences ; **invariance sous réordonnancement** des rungs (le squelette est indépendant de l'ordre) ; le **hash du skeleton** invariant sous réordonnancement des colonnes ; et deux propriétés ciblées : **X ne bloque JAMAIS** (quel que soit l'état des rungs, la colonne X est verte, ses divergences advisory) ; un item structurel **one-sided** sur une facette dure est **toujours** rouge.
+- `facetwire_fixture_test.go` — la **fault-injection** nommée, **par facette** : sur la tranche checkout, casser la paire `6-evidence` d'une colonne dure (S/R/V/M) **rougit cette colonne** avec `pair_broken` ; casser la même paire sur X reste **vert + advisory** ; briser S laisse R/V/M verts (orthogonalité) ; un rung prouvé-non-déclaré est structurel ; chaque facette nomme son senseur réutilisé ; un kernel sans colonne non-fonctionnelle est vert.
+- `facetwire.test.ts` (fast-check/Vitest) — le jumeau : 5 tests verts (aligné + senseur ; casser une colonne dure → rouge ; X advisory ; seule X cassée → vert global + orthogonalité ; propriété de reproductibilité + X ne bloque pas).
+- `tests/e2e/facet-wire.spec.ts` (Playwright) — 4 tests : le contrôle s'affiche ; toutes alignées → vert + déterministe + 5 colonnes ; casser S → colonne S rouge (paire `6-evidence` `pair_broken` visible) + R verte ; casser X → vert global + colonne X verte + advisory visible.
+
+**Le cliquet généralisé.** FK08 est la pièce qui rend le squelette 6-paires **lisible par facette** : chaque colonne non-fonctionnelle est la même loi de complétude (FK04), exécutée comme une divergence ensembliste « exigé ↔ prouvé » sous l'angle d'une nature de vérité. Dans le système de coordonnées FKE (niveau × facette), FK08 câble l'axe **orthogonal** — les preuves S/R/V/M/X — que FK04 ne faisait que compter.
+
+**Ce que FK08 prépare.** FK09 (la conscience) composera ces verdicts par colonne — sourcés, déterministes, agrégeables — avec les autres juges existants (runner, complétude, SemanticDiff, RealityMirror), paire par paire, sur **toutes** les facettes instanciées, **sans ajouter de nouveau juge**. FK08 lui fournit exactement la forme dont l'agrégateur a besoin : un verdict par facette (vert/rouge/advisory + divergences typées), content-adressé.
