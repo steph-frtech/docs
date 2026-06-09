@@ -1,0 +1,46 @@
+---
+title: "S115 · Funnel d'onboarding réel (internals) — Implémentation · Méta · Méta-méta"
+description: "Le journal d'implémentation de S115 : `/first-app` réécrit d'une simulation locale (le FirstAppBuilder à confettis, retiré) en un funnel guidé-mais-RÉEL. Le cœur est lib/first-app-funnel — une machine à états PURE, TOTALE, déterministe qui enfile l'input à travers les jumeaux existants (templates S81, capture-idea S64, grilling-loop S65, goal, build-loop S83), template-first par défaut, idée-blanche en avancé. Chaque étape produit un artéfact réel ; la checklist y est liée ; le mur tient."
+keywords: ["aidos", "krd", "S115", "first-app", "funnel", "template-first", "blank-idea", "déterminisme", "machine à états", "starterId", "ideaId", "set rouge", "build-loop", "Stop non contournable", "fast-check", "Playwright", "le mur", "jumeau"]
+---
+
+<Note>Côté « Pour moi » — l'implémentation complète. Pour le concept, voir [Pour les futurs utilisateurs → S115](/steps/concept/s115-first-app-funnel).</Note>
+
+## Implémentation
+
+S115 **compose** des moteurs déjà verts ; il ne reconstruit aucun moteur. Il **retire** la simulation `FirstAppBuilder` (la visite guidée locale à confettis) et la remplace par un funnel dont chaque étape calcule un **vrai artéfact** via les jumeaux déterministes existants :
+
+- **S81 `templates`** (`lib/templates.ts`) — `instantiate(id, slug)` rend un **StarterProject déterministe et vert**, content-addressé (`starterId`). C'est le défaut template-first.
+- **S64 `capture-idea`** (`lib/capture-idea.ts`) — `contentAddress(proposes, intent, provenance)` content-adresse l'idée/modification (`ideaId`).
+- **S65 `grilling-loop`** (`lib/grilling-loop.ts`) — `knownVerdict(v)` valide le verdict du grilling (nette/floue/mauvaise).
+- **goal / build-loop S83** (`lib/build-loop.ts`) — `isClosed(redSet, stop)` est le **Stop non contournable** (set rouge → vert ∧ vert antérieur intact ∧ mutation ≥ plancher ∧ aucun monstre), et `terminate(...)` rend le verdict (`green` / `continue` / `no_progress`).
+
+Le nouveau cœur est **`front/web/lib/first-app-funnel.ts`** — une machine à états **pure, totale, déterministe** :
+
+- **`FunnelInput`** — l'entrée close : `path` (`template-first` | `blank-idea`), `email`, `template`, `slug`, `proposes`, `intent`, `verdict`, `sensors`, `priorGreen`, `mutation`.
+- **`FUNNEL_STEPS`** — l'ordre clos `signup → project → idea → grill → goal → build → deploy` (le voyage utilisateur).
+- **`funnelRedSet(path, starter, ideaId)`** — le set rouge **calculé depuis les artéfacts** : sur template-first, les miroirs du starter PLUS le miroir de la modification (content-addressé sur l'ideaId) ; sur idée-blanche, le seul miroir de la nouvelle behaviour (pas de miroirs de starter sur lesquels surfer — d'où le risque de rater la porte d'acceptance).
+- **`computeBuildVerdict(redSet, stop)`** — le verdict via le **même** `terminate` que le moteur Go (build à un coup, sans historique ⇒ `green`-ou-`continue`, jamais un faux vert).
+- **`deploySubdomain(slug, starter, ideaId)`** — le sous-domaine content-adressé (ancre = `starterId` sur template-first, `ideaId` sur idée-blanche).
+- **`runFunnel(input)`** — la machine à états : elle enfile l'input à travers les jumeaux, coche une case **uniquement si l'artéfact réel existe**, et **s'arrête honnêtement** au premier obstacle (e-mail vide → bloque au signup ; verdict ≠ sharp → pas de goal ; build non vert → pas de deploy). `reached` = le nombre de cases en tête contiguës.
+
+Tout est **pur, total, déterministe** : pas d'horloge, pas de rng, pas d'I/O, pas de LLM. Le funnel **n'écrit rien** — chaque artéfact est une **valeur DRY-RUN** calculée par un jumeau (lui-même byte-twin d'une autorité Go qui respecte le mur). La row starter-projet et la row idée seraient écrites BELOW the line par le chemin projet/idea-intake ; une vérité noyau passe par propose → ChangeSet → `/goal`.
+
+### Le miroir (BDD d'abord, rouge avant le code)
+
+- **Reproductibilité ∀** (`lib/first-app-funnel.test.ts`, Vitest + fast-check) — la machine à états est PURE : **même `FunnelInput` → `FunnelState` byte-identique** (propriété sur l'espace complet des inputs), l'ordre clos des étapes, et **le funnel ne déclare jamais un deploy sans un build vert** (propriété). Plus les cas pinés : le défaut template-first ; template-first plein vert → app déployée (8 = 7 miroirs starter + 1 modification) ; idée-blanche → 1 seul miroir, pas de starter ; e-mail vide → bloque au signup ; verdict flou/mauvais → s'arrête avant le goal ; build non vert → pas de deploy ; mutation sous plancher → pas de deploy ; `deploySubdomain` content-adressé stable. **11 tests verts.**
+
+### UI action-capable + e2e
+
+- **Route Workbench `/first-app`** (thème ADR 0010, bilingue ADR 0011, déjà dans la nav `firstApp` + le hero d'accueil). Le composant client **`FirstAppFunnel`** est **action-capable** : un formulaire (chemin · compte · template · slug · première modification · verdict du grill · résultat du build) → la Server Action `runFunnelAction` (`app/first-app/actions.ts`) lance le funnel PUR et rend la `FunnelState`. La checklist est liée aux **vrais artéfacts** (`starter:` / `idea:` / `redset:` / `build:` / `deploy:`), avec un sous-domaine de déploiement réel et des boutons **Prévisualiser** (`/preview`) / **Déployer** (`/deploy`).
+- **`tests/e2e/first-app.spec.ts`** (Playwright-bdd) — 6 tests verts contre le serveur live : template-first par défaut → app déployée pilotée par le vrai moteur (chaque étape liée à un artéfact réel) ; **idée-blanche testée séparément** (deploy avec NO starter) ; build non vert → pas de deploy (Stop non contournable) ; e-mail vide → bloque au signup ; panneaux deep-linkés ; joignable depuis le hero.
+
+## Méta
+
+S115 est l'incarnation de **« tout se fait par écran »** (CLAUDE.md §6/§7) appliquée à l'**onboarding** : la première expérience d'un inconnu n'est pas un tutoriel passif, c'est le **vrai moteur** réduit à un funnel guidé. La porte d'acceptance — « un inconnu peut s'en servir » — est satisfaite par une décision de **défaut** : template-first, parce que **instancie → modifie** réussit là où **idée-blanche → build** peut rater la porte d'acceptance. Le défaut n'est pas un goût ; c'est une propriété mesurable du chemin (le starter porte déjà ses miroirs verts ; la modification surfe dessus).
+
+C'est aussi un cas net de **déterminisme-first** (§8) appliqué à un funnel : un onboarding « intelligent » serait la tentation de mettre un agent dans la boucle (« deviner ce que l'utilisateur veut »). Ici **rien de tout ça** — le funnel est une **fonction pure** des artéfacts. Le seul jugement (le verdict du grilling) est un **input humain** ; le seul « vert » (le build) est le **Stop non contournable**, pas une déclaration. La checklist liée à de vrais artéfacts est l'anti-Goodhart : on ne peut pas cocher une case sans produire l'artéfact qu'elle atteste — pas de confettis.
+
+## Méta-méta
+
+S115 prouve une invariance du **NIVEAU 3** : la couche d'onboarding **réutilise** la couche de fond sans la **dupliquer**. Le funnel ne refait ni l'instanciation de template, ni le content-addressing d'une idée, ni le Stop d'un goal — il les **enfile**. Si l'autorité Go d'un de ces moteurs change, le funnel suit, parce qu'il dépend du **jumeau** (byte-twin), pas d'une copie ré-implémentée. La complétude est préservée : un nouvel écran (l'onboarding) **ajoute** un miroir vivant (le funnel) sans créer de monstre — le miroir de reproductibilité atteste que la projection est fidèle. Le méta-loop n'AJOUTE qu'un garde-fou : la propriété « jamais un deploy sans un build vert » est désormais une loi exécutable, pas une promesse de l'UI.

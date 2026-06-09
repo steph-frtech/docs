@@ -1,0 +1,58 @@
+---
+title: "S115 · Votre première app — un funnel guidé, mais RÉEL"
+description: "Comment un inconnu construit sa première application avec AIDOS : un funnel d'onboarding guidé-mais-réel, template-first par défaut (on instancie un starter déterministe et vert, puis on le modifie), avec le chemin idée-blanche en mode avancé. Signup → projet → première modification → grill → goal → miroir → build au vert → preview/deploy, et une checklist liée à de VRAIS artéfacts — jamais une simulation, jamais des confettis."
+keywords: ["aidos", "krd", "S115", "onboarding", "funnel", "première app", "template-first", "starter", "idée-blanche", "grill", "goal", "build-loop", "deploy", "preview", "checklist", "porte d'acceptance"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — le concept. Pour les internals, voir [Pour moi → S115](/steps/internals/s115-first-app-funnel).</Note>
+
+## Ce que S115 vous apporte
+
+S115 réécrit l'écran **`/first-app`** : avant, c'était une **simulation locale** (une jolie visite guidée à confettis qui ne touchait rien de réel). Désormais c'est un **funnel guidé-mais-RÉEL** : chaque étape produit un **vrai artéfact** piloté par le moteur. Vous ne *regardez* plus une démo — vous *construisez* votre première app.
+
+### Deux chemins, un seul moteur
+
+| Chemin | Pour qui | Comment vous démarrez |
+|---|---|---|
+| **Template-first** (recommandé, le défaut) | un inconnu, un premier run | on **instancie un starter déterministe et vert** (une boutique, un CRM, des réservations) puis vous le **modifiez** |
+| **Idée blanche** (avancé) | quelqu'un qui sait où il va | vous partez d'une **intention libre**, sans starter |
+
+Pourquoi le **template-first par défaut** ? Parce qu'un inconnu réussit son premier run par **instancie → modifie**, pas par **idée-blanche → build** (qui peut **rater la porte d'acceptance**). Le starter est **déjà vert** : la porte d'acceptance est franchie d'emblée, et votre première modification **se greffe** dessus. Vous arrivez à une app déployée du premier coup.
+
+### Le parcours, étape par étape
+
+Le funnel suit exactement le **voyage de l'utilisateur** :
+
+1. **Créer un compte** — un vrai signup (un e-mail).
+2. **Créer un projet** — template-first instancie un starter ; idée-blanche crée un projet vide.
+3. **Première modification / idée** — vous décrivez ce que vous ajoutez (« ajouter un code promo au paiement »).
+4. **Griller l'intention** — est-elle nette ? Nette → prête pour un goal ; floue → exploration (`/spike`) ; mauvaise → rejetée.
+5. **Ouvrir un goal** — le **set rouge** est calculé à partir de vos vrais artéfacts.
+6. **Boucle de build au vert** — l'agent code jusqu'à ce que le set rouge passe au vert (jugé par un Stop **non contournable**).
+7. **Prévisualiser / déployer** — l'app est servie sur un sous-domaine.
+
+### Une checklist liée à de VRAIS artéfacts (pas des confettis)
+
+Chaque case n'est cochée **que si son artéfact réel existe** :
+
+- l'étape « projet » porte un **starterId content-addressé** (sur template-first) ;
+- l'étape « idée » porte un **ideaId content-addressé** ;
+- l'étape « goal » porte le **set rouge calculé** ;
+- l'étape « build » porte le **verdict non contournable** ;
+- l'étape « deploy » porte le **sous-domaine content-addressé**.
+
+### L'honnêteté du funnel
+
+Le funnel **ne déclare jamais** un déploiement sans un build vert. Il s'arrête **honnêtement** au premier obstacle réel :
+
+- un **e-mail vide** → bloque au signup (pas de projet sans compte) ;
+- un **verdict flou ou mauvais** → pas de goal (l'intention part en `/spike` ou est rejetée) ;
+- un **build non vert** (un sensor rouge, ou un score de mutation sous le plancher) → **pas de déploiement**.
+
+C'est la **porte d'acceptance « un inconnu peut s'en servir »** : pas un succès théâtral, mais un vrai chemin du compte à l'app déployée.
+
+<Note>Tout se fait par écran : le funnel est **action-capable**. Vous remplissez un formulaire, vous lancez, et le moteur calcule de vrais artéfacts — rien n'est écrit en passant dans le noyau (le mur tient ; une vérité proposée passe par propose → ChangeSet → `/goal`).</Note>
+
+## Et après
+
+Une fois votre première app déployée, les boutons **Prévisualiser** et **Déployer** vous mènent aux vrais panneaux (`/preview`, `/deploy`). Et les huit dents de la boucle KRD restent reliées aux panneaux réels (« le faire pour de vrai ») — vous passez du funnel guidé au cockpit complet sans rupture.
