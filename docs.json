@@ -455,7 +455,9 @@
               "steps/concept/fk01-truth-level",
               "steps/internals/fk01-truth-level",
               "steps/concept/fk02-facets",
-              "steps/internals/fk02-facets"
+              "steps/internals/fk02-facets",
+              "steps/concept/fk03-grid",
+              "steps/internals/fk03-grid"
             ]
           }
         ]

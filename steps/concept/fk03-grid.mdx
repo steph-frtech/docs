@@ -1,0 +1,73 @@
+---
+title: "FK03 · La grille : chaque vérité a deux coordonnées, et une seule cellule"
+description: "FK03 donne à toute vérité de votre projet DEUX coordonnées — son NIVEAU (la verticale architecturale produit→entité, l'axe latéral qui couple) et sa FACETTE (la nature de la vérité, l'axe orthogonal qui sépare) — et la résout à une CELLULE déterministe. La verticale couple : changer une vérité basse (l'entité) marque les rungs au-dessus (l'opération, le bouton, le produit…) à reprouver. Les facettes ne s'influencent pas : changer la sécurité d'une vérité ne touche jamais son budget. C'est la grille que le ContextRouter lit pour savoir où vit chaque vérité."
+keywords: ["aidos", "krd", "FK03", "grille", "grid", "niveau", "facette", "cellule", "cell", "verticale", "orthogonal", "couplage", "latéral", "FKE-1.4", "produit", "entité", "ContextRouter", "rung"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK03](/steps/internals/fk03-grid).</Note>
+
+## En une phrase
+
+FK03 place **chaque vérité** de votre projet à un **croisement** : son **niveau** (à quelle hauteur architecturale elle vit — du produit jusqu'à l'entité) **×** sa **facette** (de quelle nature elle est — fonctionnel, sécurité, perf…). Ce croisement est **une cellule**, et c'est de là que le système sait **où** ranger et **quoi** revérifier quand quelque chose change.
+
+## Le problème que FK03 résout
+
+[FK01](/steps/concept/fk01-truth-level) a donné le **niveau** d'une vérité. [FK02](/steps/concept/fk02-facets) a donné sa **facette**. Mais tant qu'on les regarde séparément, deux questions restent sans réponse :
+
+1. **Où vit exactement cette vérité ?** « La sécurité de l'opération de paiement » n'est pas « la sécurité » en général, ni « l'opération » en général — c'est **précisément** la case sécurité × opération. Sans les deux coordonnées ensemble, on ne sait pas l'adresser.
+2. **Que faut-il revérifier quand je change quelque chose ?** Si je change l'**entité commande**, est-ce que le **bouton payer** est encore bon ? Et est-ce que ça touche la **perf** de l'entité, ou seulement son **fonctionnel** ? Sans la grille, on revérifie tout (trop cher) ou rien (dangereux).
+
+FK03 répond avec **une grille à deux axes** qui se comportent différemment — et c'est tout l'intérêt.
+
+## Les deux axes (et pourquoi ils ne se ressemblent pas)
+
+### La verticale — l'axe qui **couple** (latéral)
+
+C'est l'échelle architecturale, du haut vers le bas :
+
+| # | Niveau | Ce que c'est |
+|---|---|---|
+| 0 | **produit** | l'intention + les scénarios |
+| 1 | **parcours** | le parcours utilisateur |
+| 2 | **écran** | l'écran (but + zones + données) |
+| 3 | **bouton** | le bouton (visible quand / actif quand) |
+| 4 | **action** | l'action (qui invoque une opération) |
+| 5 | **opération** | l'opération (étapes + fixture) |
+| 6 | **entité** | l'entité (les attributs) — la **fondation** |
+
+Cet axe **couple** : un niveau **repose** sur ceux en dessous. Un bouton repose sur son action ; une action sur son opération ; une opération sur son entité. **Conséquence :** quand vous changez une vérité **basse**, toutes les vérités **au-dessus** qui reposaient dessus deviennent suspectes. Changer l'**entité** marque l'opération, l'action, le bouton, l'écran, le parcours et le produit **à reprouver**. La fondation a bougé : ce qui était posé dessus doit être revérifié.
+
+C'est exactement le **critère de done** de FK03 : *un changement bas marque les rungs source au-dessus.*
+
+### La facette — l'axe qui **sépare** (orthogonal)
+
+Ce sont les huit lentilles de FK02 : **F** fonctionnel · **I** invariants · **S** sécurité · **B** budgets · **R** fiabilité · **V** évolutivité · **M** maintenabilité · **X** expérience.
+
+Cet axe **sépare** : les facettes **ne s'influencent pas**. Changer la **sécurité** d'une opération ne change rien à son **budget**. Prouver la **perf** d'une entité ne touche pas sa **maintenabilité**. Chaque facette est une **colonne indépendante** qu'on lit sans déranger les autres.
+
+C'est l'autre moitié du critère de done : *les facettes n'interagissent pas.*
+
+## La cellule
+
+Croisez les deux axes et vous obtenez une **cellule** : `opération × sécurité`, `entité × budget`, `produit × fonctionnel`… Chaque vérité de votre projet résout à **exactement une** cellule, toujours la même (c'est déterministe). Le **ContextRouter** — la machine qui décide quel contexte un agent reçoit pour travailler un but — lit cette grille pour savoir **où** vit chaque vérité, et donc **quoi** charger.
+
+## Ce que vous voyez à l'écran
+
+Le panneau **/grid** du Workbench vous laisse l'éprouver :
+
+1. Vous choisissez un **niveau** (un rung) et une **facette**.
+2. Vous cliquez **Résoudre & marquer**.
+3. Le panneau affiche :
+   - la **cellule résolue** et son adresse (loi 1) ;
+   - les **cellules au-dessus marquées stales**, à **facette constante** — la verticale qui couple (loi 2) ;
+   - les **sept autres facettes intactes** — l'orthogonalité qui sépare (loi 3).
+
+Choisissez `entité × sécurité` : vous verrez les six niveaux au-dessus marqués stales, **tous en sécurité** (jamais en budget). Choisissez `produit × fonctionnel` : rien au-dessus (le produit est le sommet).
+
+## Ce que FK03 vous garantit
+
+- **Adressage exact.** Toute vérité a une cellule unique et stable — on sait toujours où elle vit.
+- **Revérification juste.** Un changement bas remonte le long de la verticale (ni trop, ni trop peu), sans jamais déborder sur une autre facette.
+- **Le mur tient.** Une cellule est une **coordonnée** que le système expose — jamais une vérité posée à la main. FK03 ne change aucune vérité ; il dit seulement **où** elles sont.
+
+<Note>FK03 est la **grille** des deux axes posés par [FK01](/steps/concept/fk01-truth-level) (le niveau) et [FK02](/steps/concept/fk02-facets) (la facette). La suite, [FK04](/steps/concept/fk02-facets), généralisera la complétude (« le monstre ») à cette grille : chaque cellule occupée doit porter sa preuve.</Note>
