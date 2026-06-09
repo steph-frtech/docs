@@ -1,0 +1,64 @@
+---
+title: "FK01 · Savoir, pour chaque vérité, où elle en est entre « une phrase de chat » et « réconciliée »"
+description: "FK01 donne à chaque vérité de votre projet un NIVEAU sur une échelle de 7 barreaux, de Raw (ce qui a été dit, collé, observé) jusqu'à Reconciled (ce que la conscience conclut après comparaison). Ce niveau n'est jamais posé à la main : il est CALCULÉ à partir de ce qui s'est réellement passé (une idée a-t-elle été capturée ? un changement a-t-il été proposé, accepté, projeté en code, observé en production ?). Et un miroir de parité vérifie en permanence que le niveau stocké est bien celui que le calcul donne — toute divergence devient rouge."
+keywords: ["aidos", "krd", "FK01", "niveau de vérité", "truth level", "raw", "interpreted", "proposed", "accepted", "projected", "observed", "reconciled", "FKE-5", "parité", "déterministe", "cache prouvé"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK01](/steps/internals/fk01-truth-level).</Note>
+
+## En une phrase
+
+FK01 attribue à **chaque vérité** un **niveau** (de 1 *raw* à 7 *reconciled*) qui dit **où elle en est** de son trajet — de « une phrase de chat » jusqu'à « validée, codée, observée, réconciliée » — et ce niveau est **toujours calculé**, jamais posé à la main.
+
+## Le problème que FK01 résout
+
+Dans AIDOS, une vérité ne naît pas validée. Elle commence comme un **signal brut** — une phrase, un ticket, un log, un prototype — puis elle **monte** : quelqu'un l'interprète, la propose au-dessus du mur, la valide, AIDOS la projette en code, les tests et la production l'observent, et enfin la conscience la **réconcilie**. À tout moment, vous voulez pouvoir poser une question simple : **« cette vérité, elle en est où ? »**
+
+Sans FK01, la réponse est floue et dangereuse :
+
+1. **On confond un signal et une décision.** « C'est dans le chat, donc c'est décidé. » Non — une phrase de chat est *raw*, pas *accepted*. Confondre les deux fait coder ce que personne n'a validé.
+2. **On pose le niveau à la main.** Quelqu'un marque une vérité « validée » alors qu'aucune validation n'a eu lieu. Le niveau ment.
+3. **Le niveau et la réalité divergent en silence.** Le record dit « projeté » mais aucun code n'a été émis. Personne ne le voit.
+
+## Les 7 niveaux de vérité (Raw → Reconciled)
+
+FK01 reprend l'échelle de KRD (FKE-5), **les mêmes mots partout** :
+
+| Niveau | Nom | Ce que ça veut dire |
+|---|---|---|
+| 1 | **raw** | ce qui a été **dit, collé, observé** ou généré expérimentalement |
+| 2 | **interpreted** | ce que le **cerveau gauche** pense avoir compris (une idée existe) |
+| 3 | **proposed** | ce qui est **proposé au-dessus du mur** (un ChangeSet brouillon) |
+| 4 | **accepted** | ce qui est **validé** par vous ou un Governor |
+| 5 | **projected** | ce qui est **généré** (code, config, test, doc, MCP, infra) |
+| 6 | **observed** | ce que **tests, logs, métriques, scans, runtime** montrent |
+| 7 | **reconciled** | ce que la **conscience conclut** après comparaison |
+
+Les barreaux 1 à 4 sont la **montée vers le mur** ; 5 et 6 sont la **descente en reflet** (la vérité se réalise et se prouve) ; 7 **referme la boucle**.
+
+## La règle d'or : le niveau est calculé, jamais posé à la main
+
+Le niveau **n'est pas une étiquette qu'on colle**. C'est le résultat d'une **fonction** qui regarde ce qui s'est réellement passé : *Y a-t-il une idée ? un changement proposé ? accepté ? une projection ? une observation ? une réconciliation ?* Le niveau est **le plus haut barreau atteint**. Personne ne peut écrire « accepted » sur une vérité qui n'a jamais été acceptée — le calcul ne le dira pas.
+
+C'est le principe **« done is computed »** d'AIDOS appliqué au niveau lui-même : on **stocke** le niveau sur le record (pour pouvoir le **chercher** et le **filtrer** vite), mais ce stockage n'est qu'un **cache prouvé du calcul**, jamais une seconde source de vérité.
+
+## Le miroir de parité : la divergence devient rouge
+
+Comment être sûr que le niveau stocké ne ment pas ? FK01 ajoute un **miroir de parité** qui, en permanence, **recalcule** le niveau et le **compare** au niveau stocké :
+
+- **stored == computed** → 🟢 aligné (le cache est juste).
+- **stored ≠ computed** → 🔴 **rouge** (le cache ment ; quelque chose a été posé à la main ou a dérivé).
+
+Une divergence n'est jamais ignorée : c'est un signal d'alarme, exactement comme un test qui casse.
+
+## Ce que vous voyez à l'écran
+
+Le panneau **« Les 7 niveaux de vérité »** du Workbench montre l'échelle des 7 barreaux et vous laisse **filtrer vos records par niveau** : choisissez « accepted » et vous ne voyez que les vérités validées ; choisissez « observed » et vous voyez celles que la production a confirmées. Chaque record affiche son **badge de parité** 🟢 ou 🔴 — vous voyez d'un coup d'œil si son niveau est honnête.
+
+## Pourquoi ça compte pour vous
+
+- Vous savez **toujours** où en est chaque vérité — pas d'ambiguïté entre « on en a parlé » et « c'est décidé ».
+- Personne ne peut **maquiller** l'avancement : le niveau est calculé, et la parité le surveille.
+- Vous pouvez **filtrer** : « montre-moi tout ce qui est proposé mais pas encore accepté », « montre-moi ce qui est codé mais pas encore observé ».
+
+FK01 est la première **coordonnée** de la vérité dans AIDOS : *où en est-elle ?* Les étapes suivantes ajouteront la seconde — *de quelle nature est-elle ?* (les facettes).
