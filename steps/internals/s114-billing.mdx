@@ -1,0 +1,53 @@
+---
+title: "S114 · Plans, métrage & quotas (internals) — Implémentation · Méta · Méta-méta"
+description: "Le journal d'implémentation de S114 : le package billing — plans en ensemble clos déclaré, MeterUsage qui COMPTE la consommation depuis les AgentRun (S111/S52) attribuée par projet, CheckQuota qui refuse un over-quota avec QUOTA_EXCEEDED + un chemin d'upgrade (jamais silencieux), IngestWebhook qui ingère un webhook provider idempotemment (S73 run inbound), et un contrat Pact provider-vérifié avec Stripe (ADR 0049). Pur, total, déterministe — un comptage, jamais un LLM ; le mur tient."
+keywords: ["aidos", "krd", "S114", "billing", "plans", "quotas", "QUOTA_EXCEEDED", "MeterUsage", "AgentRun", "RunMeter", "S111", "webhook", "S73", "idempotent", "Pact", "Stripe", "ADR 0049", "MCP", "déterminisme", "le mur"]
+---
+
+<Note>Côté « Pour moi » — l'implémentation complète. Pour le concept, voir [Pour les futurs utilisateurs → S114](/steps/concept/s114-billing).</Note>
+
+## Implémentation
+
+S114 **compose** des moteurs déjà verts, il n'en reconstruit aucun :
+
+- **S111 `costmeter` / S52 `agentrun`** — le `RunMeter` (BA11) qui porte la consommation réelle d'un run (`Tokens`, `CIMinutes`). S114 le réutilise verbatim comme substrat de métrage.
+- **S73 `operation` async/outbox** — la garantie exactly-once-relative (at-least-once + dispatch idempotent ⇒ pas de doublon observable). S114 la **court à l'envers** : un webhook entrant, content-adressé, est l'inverse d'un effet sortant à l'outbox.
+- **S61 / S53** — l'identité compte et le `project_id` qui keyent l'attribution.
+- **`records.Hash`/`Canonicalize`** (S02) — le content-addressing réutilisé tel quel pour l'idempotence des webhooks.
+
+Le nouveau package est `back/runtime/billing`. Son cœur :
+
+- **`Plan` + `planQuotas`** — l'ensemble CLOS `free→pro→scale→enterprise` (l'ordre = le chemin d'upgrade, `NextPlan`), et la table de quotas DÉCLARÉE (§8 — au-dessus de la ligne, jamais apprise), strictement ascendante sur chaque axe (prouvé par fixture). Quatre axes : `MaxLLMTokens`, `MaxBuildLoopMinutes`, `MaxSandboxHours`, `MaxDeployedApps`.
+- **`MeterUsage(account, runs)`** — le **fold de comptage** pur, total, monotone : il somme le `RunMeter` (S111) de chaque `MeteredRun` dont le compte correspond, attribué exactement par projet ; les heures-sandbox floor-divisent les secondes sommées. Même `(account, runs)` ⇒ même `Usage`. `MeterProject` filtre par `(account, project)` — les usages par projet somment à l'usage compte (prouvé property).
+- **`CheckQuota(plan, usage)`** — dénie sur **tout** axe dépassé (OR par axe ; égal-à-la-limite = dans le quota, plafond inclusif) avec un `BlockReason{QUOTA_EXCEEDED}` dont le `how_to_fix` nomme les axes ET le `NextPlan`. Un plan inconnu dénie `UNKNOWN_PLAN`. `CanRunBuild` est la porte nommée que la boucle-build (S83) consulte. **Jamais d'échec silencieux** — un `how_to_fix` vide serait la prison §44.5, interdite.
+- **`IngestWebhook(log, event)`** — content-adresse l'événement (`records.Hash(Canonicalize(webhookBody))`, byte-identique au jumeau TS) ; un webhook **rejoué** collisionne avec son ingest antérieur et est **supprimé** (S73 exactly-once-relative, run inbound) ; un événement mal formé est **refusé** (`ErrInvalidWebhook`), jamais silencieusement ignoré. `ApplyEvent(current, event)` est la transition de plan autoritative (checkout/subscription.updated → le plan ; canceled → free ; payment → inchangé).
+- **`pact.go`** — `EmitContract` rend un contrat Pact-v3 (un ACK par kind entrant + une interaction DENY pour un event mal formé) ; `VerifyContract` lève l'endpoint billing en-process (`httptest`) et rejoue chaque interaction via le **même** `IngestWebhook` que le runtime. Vérifier ce provider vérifie le handler entrant, sans réseau. Le provider nommé est `stripe` (`ProviderName`, ADR 0049).
+
+Tout est **pur, total, déterministe** : pas d'horloge, pas de rng, pas d'I/O, pas de LLM. Le package **n'écrit rien** — plans/usage/quotas/webhook-events sont des rows runtime/commerciales (un seam below-the-line), jamais un schéma `kernel`/`mirrors`/`fitness`.
+
+### Les miroirs (BDD d'abord, rouge avant le code)
+
+- **Godog** (`billing_bdd_test.go`, matérialisé `tests/runtime/billing.feature`) : un build sous quota autorisé ; un build over-quota refusé `QUOTA_EXCEEDED` + chemin d'upgrade vers `pro` ; le métrage exactement attribuable par projet ; un webhook rejoué idempotent (un seul événement, plan appliqué).
+- **Fixture** (`billing_fixture_test.go`) : over-quota → upgrade path + over_axes nommé ; égal-à-la-limite dans le quota ; ladder strictement ascendant ; transitions de plan ; ingest idempotent ; event mal formé refusé ; le provider Pact vérifie.
+- **Reproductibilité ∀** (`billing_property_test.go`, rapid) : `MeterUsage` reproductible + comptage exact + attribution par projet + un autre compte jamais compté ; `CheckQuota` jamais silencieux (over ⇒ QUOTA_EXCEEDED + how_to_fix non vide ; under ⇒ allow) ; plan inconnu dénie ; webhook idempotent sous N replays ; le provider vérifie de façon stable ; le contrat byte-stable.
+- **Jumeau TS** (`front/web/lib/billing.test.ts`, Vitest + fast-check, 12 verts) — loi pour loi avec le miroir Go, **dont une ancre de parité cross-langue** : `eventId` byte-identique au `records.Hash` Go (`e0162ca7…`).
+
+### MCP, UI, jumeau
+
+- **MCP `aidos-billing`** (`back/mcp/billing`, ADR 0009) — 6 outils, un par op : `billing_plans`, `billing_meter`, `billing_meter_project`, `billing_check_quota`, `billing_ingest_webhook`, `billing_pact_verify`, chacun déférant au moteur Go pur. `main_test.go` pin les done-criteria à la porte MCP.
+- **Jumeau TS pur** (`front/web/lib/billing.ts` + `lib/billing-verify.ts`) — `meterUsage / meterProject / checkQuota / ingestWebhook / applyEvent`, le content-addressing byte-équal au Go.
+- **Route Workbench `/billing`** (thème ADR 0010, bilingue ADR 0011), ajoutée à la nav `billing`. **Action-capable** : métrer (compte + par projet), vérifier le quota (affiche `QUOTA_EXCEEDED` + upgrade), ingérer un webhook (prouve le replay supprimé), provider-vérifier le Pact — chaque op liée au jumeau pur. `tests/e2e/billing.spec.ts` (Playwright, 5 tests verts contre le serveur live).
+
+## Méta
+
+**Pourquoi un package séparé de `costmeter` (S111) ?** Parce que S111 répond à « ce coût build-time vaut-il sa valeur ? » (un verdict **advisory** pour l'architecte, sur une **cellule**), et S114 à « ce build peut-il tourner sous le plan du **client** ? » (un quota **blocking** pour le client, sur un **compte**). Les deux partagent le substrat de métrage — le `RunMeter` réel des AgentRun — et **rien d'autre**. Fusionner les deux confondrait deux publics et deux natures de verdict. La frontière est exactement la phrase de la roadmap : « couche économique customer-facing, **distincte** du HarnessCostBudget kernel ».
+
+**Pourquoi le webhook entrant est une operation async S73 (run inbound) ?** Parce qu'un webhook **est** out-of-band par nature : le provider le pousse quand il veut, le retransmet en cas d'incertitude réseau. La seule façon honnête de le modéliser est l'idempotence par content-addressing — exactement la garantie outbox de S73, mais l'événement entre au lieu de sortir. On **réutilise** le même `records.Hash` que l'outbox sortant ; la 5e nature de trigger (le webhook entrant) projette les quatre de S73.
+
+**Pourquoi le métrage est-il un comptage et jamais un LLM ?** C'est le mandat determinism-first (§6/§8) appliqué à la facturation : compter des tokens/minutes est une **pure fonction** (un fold sur un ledger), donc cela DOIT être du code, faisant autorité. Un agent qui « estime » l'usage serait un gap de déterminisme — et pire, une facturation non reproductible (anti-Goodhart). Le miroir de reproductibilité (même ledger ⇒ même usage) verrouille cette garantie.
+
+## Méta-méta
+
+S114 illustre la **frontière du mur appliquée à l'argent** : la couche commerciale touche des rows runtime, jamais le truth-store. Appliquer un changement de plan modifie une row commerciale (un seam), pas le kernel — l'agent reste sans GRANT sur la vérité. C'est la généralisation §2 : *toute* écriture autoritative passe la porte `idea → mirror → /goal`, et la facturation, qui n'est **pas** une vérité produit, n'a pas à la franchir — elle vit explicitement **sous la ligne**.
+
+Et le `BlockReason{QUOTA_EXCEEDED}` est la preuve, côté économique, de l'anti-prison §44.5 : un blocage sans issue est un monstre. Un over-quota porte **toujours** son `NextPlan` (le chemin d'upgrade) ; le code refuse structurellement d'émettre un blocage à `how_to_fix` vide. La facturation, comme le mur, **explique toujours comment se débloquer** — la même loi qui gouverne un refus du kernel gouverne un refus de quota.

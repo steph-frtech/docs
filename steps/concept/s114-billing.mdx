@@ -1,0 +1,57 @@
+---
+title: "S114 · Plans, métrage & quotas — la facturation de votre compte"
+description: "Comment AIDOS facture votre usage : des plans au niveau compte (free → pro → scale → enterprise), une consommation MÉTRÉE déterministe depuis vos vrais runs (tokens LLM, minutes de build-loop, heures-sandbox, apps déployées), un quota qui refuse un build au-delà de la limite avec un chemin d'upgrade clair (jamais un échec silencieux), et une facturation via Stripe dont les webhooks sont idempotents."
+keywords: ["aidos", "krd", "S114", "facturation", "plans", "quotas", "métrage", "billing", "Stripe", "webhook", "QUOTA_EXCEEDED", "upgrade", "tokens", "build-loop", "sandbox"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — le concept. Pour les internals, voir [Pour moi → S114](/steps/internals/s114-billing).</Note>
+
+## Ce que S114 vous apporte
+
+S114 est la **couche économique de votre compte** : elle décide ce que vous pouvez faire selon votre **plan**, mesure honnêtement ce que vous consommez, et encaisse via un provider de paiement. C'est la première étape « SaaS » — elle enveloppe un moteur qui marche, elle ne le remplace pas.
+
+### Votre plan
+
+Quatre plans, du plus petit au plus grand :
+
+| Plan | À qui | Quotas (extrait) |
+|---|---|---|
+| **free** | l'essai (le défaut du funnel) | 100 000 tokens · 60 min de build · 1 app déployée |
+| **pro** | un individu | 2 000 000 tokens · 1 200 min · 10 apps |
+| **scale** | une équipe | 20 000 000 tokens · 12 000 min · 100 apps |
+| **enterprise** | une organisation | quotas sur-mesure |
+
+L'ordre **est** le chemin d'upgrade : `free → pro → scale → enterprise`.
+
+### Votre consommation est COMPTÉE, jamais estimée
+
+AIDOS ne devine pas votre usage : il le **compte** depuis vos **runs réellement exécutés** (chaque build-loop, chaque déploiement laisse une trace mesurée). Quatre axes sont métrés :
+
+- **tokens LLM** consommés par l'agent qui code votre app ;
+- **minutes de build-loop** (le temps CI des cycles rouge→vert) ;
+- **heures-sandbox** (le temps de bac à sable par app) ;
+- **apps déployées**.
+
+La consommation est **exactement attribuable par projet** : vous voyez quel projet a brûlé quoi. C'est un comptage déterministe — le même historique donne toujours le même total, jamais une approximation d'un modèle.
+
+### Un build au-delà du quota est refusé — clairement
+
+Si un build dépasserait votre quota, AIDOS **le refuse avec un message actionnable**, jamais un échec silencieux. Le refus porte le code `QUOTA_EXCEEDED`, nomme l'axe dépassé, et **vous donne le chemin d'upgrade** :
+
+> Le quota du plan « free » est dépassé sur llm_tokens. Réduisez la consommation, **ou passez au plan « pro »** pour relever le quota.
+
+Vous savez toujours pourquoi un build est bloqué et comment le débloquer.
+
+### La facturation passe par Stripe
+
+AIDOS ne stocke jamais votre carte : le paiement vit chez **Stripe** (le provider nommé, voir l'ADR 0049). Quand vous achetez un plan, Stripe envoie un **webhook** à AIDOS (« checkout réussi », « abonnement changé »), et AIDOS **applique** le changement de plan. Ces webhooks sont **idempotents** : si Stripe renvoie le même événement deux fois (cela arrive), AIDOS le traite une seule fois — vous n'êtes jamais double-facturé.
+
+## Où cela vit dans le Workbench
+
+La route **/billing** vous montre vos plans et leurs quotas, métre votre consommation (compte et par projet), vérifie le quota d'un build (et affiche le `QUOTA_EXCEEDED` + l'upgrade le cas échéant), simule un webhook provider (et prouve qu'un replay est supprimé), et vérifie le contrat avec le provider. Tout est exécutable depuis l'écran.
+
+## Ce que S114 ne fait pas
+
+- Il **ne stocke pas** votre carte (c'est Stripe).
+- Il **n'estime pas** votre usage (il le compte depuis vos vrais runs).
+- Il **ne bloque jamais en silence** (un refus porte toujours un chemin d'upgrade).
