@@ -1,0 +1,49 @@
+---
+title: "S111 · Compteur de coût par cellule — un budget câblé à de vrais compteurs"
+description: "S111 donne à chaque cellule un budget déclaré (minutes de CI, tokens LLM par goal, durée de mutation, minutes de revue humaine, réduction de risque attendue) et le câble à la consommation RÉELLE des agents qui y travaillent : le compteur additionne les vrais runs enregistrés — un comptage, jamais une estimation — et compare la somme au cap. Une cellule trop chère qui ne justifie pas sa valeur est signalée (advisory), jamais bloquée en silence ; et le signal d'over-budget nourrit le disjoncteur qui arrête une boucle de build qui dépense sans avancer."
+keywords: ["aidos", "krd", "S111", "budget", "HarnessCostBudget", "ValueCase", "économie du harnais", "coût", "compteur", "métrage", "AgentRun", "disjoncteur", "circuit-breaker", "advisory", "§66.3", "EPIC 13", "gouvernance", "le mur", "déterminisme"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S111](/steps/internals/s111-cost-meter).</Note>
+
+## En une phrase
+
+S111 met un **prix** sur chaque cellule : un **budget déclaré** d'un côté, la **consommation réelle** de ses agents de l'autre, et une règle simple — **plus une contrainte coûte cher, plus elle doit justifier sa valeur**.
+
+## Le problème que S111 résout
+
+AIDOS sait déjà nommer le prix d'une vérité (le `HarnessCostBudget` de S51) et enregistrer ce qu'un agent a consommé (l'`AgentRun` de S52). Mais entre les deux, il manquait un fil : **rien n'additionnait** la consommation des **nombreux** runs réels qu'une cellule brûle pour confronter ce total à son budget. Le budget était une déclaration sans compteur en face.
+
+S111 pose ce fil. Pour une cellule, il prend ses **vrais runs enregistrés**, **additionne** leur consommation, et compare la somme au cap déclaré. Si la cellule dépasse, elle est **signalée** — un avertissement actionnable, jamais un blocage muet.
+
+## Un budget par cellule, déclaré au-dessus de la ligne
+
+Chaque cellule déclare cinq choses, **au-dessus de la ligne** (dans la zone `fitness`, en lecture seule) :
+
+- `max_ci_minutes` — le plafond de minutes d'intégration continue ;
+- `max_llm_tokens_per_goal` — le plafond de tokens LLM par goal ;
+- `max_mutation_runtime` — le plafond de durée des tests de mutation ;
+- `max_human_review_minutes` — le plafond de minutes de revue humaine ;
+- `expected_risk_reduction` — le risque que ce budget est censé faire baisser.
+
+L'agent **lit** ce budget ; il ne l'écrit **jamais**. Relever un cap n'est pas une édition discrète, c'est un `/goal` contre la fitness déclarée. C'est **le mur** (§2/§8) : les seuils sont déclarés, jamais appris.
+
+## Le métrage est un comptage, jamais une estimation
+
+C'est le cœur déterministe de S111. Le coût mesuré d'une cellule est la **somme exacte** des compteurs de ses vrais runs — pas une moyenne, pas une projection, pas un jugement d'un LLM. Trois runs qui ont consommé 12 000, 18 000 et 8 000 tokens donnent **38 000**, point. Si l'on ajoute un run lourd de 40 000 tokens, la somme passe à **78 000** — et si le cap était à 50 000, la cellule est désormais au-dessus.
+
+Le même tas de runs, dans n'importe quel ordre, donne **toujours** le même total (l'addition est commutative). Une cellule qui n'a rien exécuté coûte **zéro** — on ne fabrique jamais un coût qu'on n'a pas mesuré.
+
+## Signalé, jamais bloqué en silence
+
+Une cellule au-dessus de son budget **sans** justification est **signalée** : elle porte un avertissement actionnable (`HARNESS_COST_EXCEEDS_BUDGET`) qui nomme **quels** axes ont dépassé et **comment** s'en sortir — ouvrir une `ValueCase`, réduire le coût, ou relever le cap via un `/goal`. C'est un **conseil**, jamais un mur silencieux : on ne fait jamais disparaître un dépassement sans le dire.
+
+Et la règle d'or, « plus c'est cher, plus ça doit se justifier », s'incarne dans la **ValueCase** : si l'humain atteste, avec une décision **justified**, que cette cellule coûteuse a gagné sa place (au regard du risque qu'elle protège), l'avertissement est **levé**. Une décision « trop cher » ou « à revoir » ne lève **rien** — seule une justification explicite le fait.
+
+## Le fil vers le disjoncteur (S83)
+
+Le signal d'over-budget ne reste pas décoratif : il **alimente le disjoncteur** de la boucle de build (S83). La règle est nette — le disjoncteur **se déclenche** si et seulement si la cellule est au-dessus du budget **sans** ValueCase justifiée. Une cellule dans le budget, ou justifiée, ne le déclenche **jamais**. Ainsi une boucle de build qui dépense sans avancer s'arrête honnêtement, au lieu de brûler des tokens à l'infini.
+
+## Ce que vous voyez à l'écran
+
+Le panneau **Compteur de coût & budget** du Workbench montre le budget déclaré, puis vous laisse **métrer** la cellule depuis ses vrais runs (avec ou sans le run lourd, avec ou sans ValueCase justifiée) et **calculer** le signal du disjoncteur. Chaque verdict est **calculé** sous vos yeux, jamais déclaré : c'est la même fonction pure qui décide, à l'écran comme dans le moteur.

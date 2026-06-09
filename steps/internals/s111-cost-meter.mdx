@@ -1,0 +1,54 @@
+---
+title: "S111 · Compteur de coût par cellule (internals) — Implémentation · Méta · Méta-méta"
+description: "Le journal d'implémentation de S111 : le package costmeter qui agrège la consommation des vrais AgentRun (S52) en un MeasuredCost compté, le confronte au HarnessCostBudget déclaré via economics.Evaluate (S51), et projette le verdict over-budget sur le signal du disjoncteur (S83). Pur, total, déterministe — un comptage, jamais une estimation ; le cockpit n'écrit aucune vérité."
+keywords: ["aidos", "krd", "S111", "costmeter", "HarnessCostBudget", "ValueCase", "AgentRun", "RunMeter", "economics.Evaluate", "disjoncteur", "S83", "BlockReason", "MCP", "déterminisme", "le mur", "§66.3"]
+---
+
+<Note>Côté « Pour moi » — l'implémentation complète. Pour le concept, voir [Pour les futurs utilisateurs → S111](/steps/concept/s111-cost-meter).</Note>
+
+## Implémentation
+
+S111 **compose** des moteurs déjà verts, il n'en reconstruit aucun :
+
+- **S51 `economics`** (`back/runtime/economics`) — le `HarnessCostBudget`, la `ValueCase`, et `Evaluate(budget, cost, vc)` qui rend le verdict `within_budget | over_budget_justified | over_budget_flagged`. C'est le **juge faisant autorité** ; S111 ne le ré-implémente pas.
+- **S52 `agentrun`** (`back/runtime/agentrun`) — l'`AgentRun` enregistré, content-adressé (S52), et le `RunMeter` (BA11) qui porte sa consommation (`tokens`, `ci_minutes`, `turns`, `wall_clock`).
+
+Le nouveau package est `back/runtime/costmeter`. Son cœur :
+
+- **`RunCost`** — un `AgentRun` enregistré apparié à son `RunMeter`. L'appariement garde le coût **content-adressé** au run qui l'a brûlé (`Run.ID`), donc le compteur ne peut jamais dériver du run.
+- **`AggregateMeter(runs)`** — le **fold de comptage** pur, total, monotone : chaque axe du résultat est la **somme** de cet axe sur les runs. Commutatif et associatif (l'addition entière), donc **indépendant de l'ordre** ; la tranche vide donne le mètre zéro. Les axes négatifs égarés sont clampés à zéro (la discipline monotone de BA11 au bord de l'agrégation).
+- **`MeasuredCostOf(meter)`** — projette le mètre sommé sur les deux axes §66.3 qu'un run consomme (`tokens → llm_tokens`, `ci_minutes → ci_minutes`), en **réutilisant** la discipline de BA27. Les axes `mutation_runtime` et `human_review_minutes` ne sont **pas** produits par un run d'agent → restent à zéro (les fabriquer serait un monstre).
+- **`MeterCell(budget, runs, vc)`** — la clé de voûte : agrège, projette, puis **défère** à `economics.Evaluate`. Rend le `CellMeter` (le snapshot compté) et l'`EconomicsDecision`. Un over-budget est **flaggé** (advisory), jamais bloqué en silence.
+- **`OverBudget(dec)`** + **`DisjoncteurSignal(dec)`** — le **fil nommé S111→S83** : `Trip == (verdict == over_budget_flagged)`. Une cellule dans le budget ou justifiée ne déclenche pas le disjoncteur. Le `buildloop.Terminate` (S83) compose déjà exactement ce prédicat (`econ.Verdict == OverBudgetFlagged`) — S111 le **nomme** comme signal.
+
+Tout est **pur, total, déterministe** : pas d'horloge, pas de rng, pas d'I/O, pas de LLM. `MeterCell` **n'écrit rien** — `economics.Evaluate` est un diagnostic en lecture seule sur le budget DÉCLARÉ (l'agent est SELECT-only sur `fitness`).
+
+### Les miroirs (BDD d'abord, rouge avant le code)
+
+- **Fixture** (`costmeter_fixture_test.go`, matérialisé `tests/runtime/checkout-costmeter.fixture.md`) : trois vrais runs → `within_budget` (coût compté 38000/6) ; + le run lourd → `over_budget_flagged` advisory, `HARNESS_COST_EXCEEDS_BUDGET`, `over_axes ∋ llm_tokens`, le disjoncteur **se déclenche** ; même coût + `ValueCase{justified}` → `over_budget_justified`, pas de blocage, pas de déclenchement.
+- **Reproductibilité ∀** (`costmeter_property_test.go`, rapid) : déterminisme, comptage-jamais-estimation, indépendance d'ordre, advisory-jamais-blocage (over-budget sans justification **toujours** flaggé), justified-lève-le-flag, et le fil `Trip == OverBudget(dec)`.
+- **Jumeau TS** (`front/web/lib/cost-meter.test.ts`, Vitest + fast-check, 12 verts) — loi pour loi avec le miroir Go.
+
+### MCP, UI, jumeau
+
+- **MCP `aidos-cost-meter`** (`back/mcp/cost-meter`, ADR 0009) — 3 outils : `cost_meter_cell`, `cost_disjoncteur_signal`, `cost_validate_budget`, chacun déférant au moteur Go pur. `main_test.go` : 6 tests verts.
+- **Jumeau TS pur** (`front/web/lib/cost-meter.ts`) — `aggregateMeter / meterCell / disjoncteurSignal`, bâti sur `lib/economics.ts` (le jumeau de S51, déjà présent).
+- **Route Workbench `/cost-meter`** (thème ADR 0010, bilingue ADR 0011), ajoutée à la nav `costMeter`. **Action-capable** : un contrôle « métrer la cellule » (toggles run lourd / ValueCase) et un contrôle « signal du disjoncteur », chacun lié à une Server Action exécutant le jumeau pur. `tests/e2e/cost-meter.spec.ts` (Playwright, 4 tests verts contre le serveur live).
+
+## Méta
+
+**Pourquoi un package séparé et pas une extension d'`economics` ?** Parce que S51 répond à « ce coût est-il dans le budget ? » (la fonction de jugement) et S52 à « qu'a consommé ce run ? » (l'événement). S111 répond à une **troisième** question — « combien cette cellule a-t-elle consommé **au total**, à travers ses nombreux runs ? » — qui est une **agrégation**, pas un jugement. Garder l'agrégation hors du juge préserve l'autorité unique d'`Evaluate` : il y a **un seul** code qui rend le verdict, et S111 lui **défère** au lieu de le dupliquer (sinon hasard de reproductibilité — deux juges qui divergent).
+
+**Pourquoi le coût reste apparié au run (`RunCost`) ?** Pour que le compteur soit **traçable** : chaque token compté pointe vers le run content-adressé qui l'a brûlé. Un compteur global anonyme serait un nombre qu'on ne peut pas auditer ; l'appariement le rend réconciliable avec le ledger Merkle des runs (GV03).
+
+**Pourquoi advisory et pas blocage ?** L'économie du harnais est un **diagnostic**, pas un mur. Le mur (§2) garde les **vérités** ; le budget garde la **dépense**. Bloquer une écriture parce qu'elle coûte cher confondrait les deux. La famille advisory est la même que la `KernelDebt` de S41 (fixtures périmées, mutants survivants) : détecter, conseiller, ne rien supprimer. Le seul endroit où l'over-budget **agit**, c'est le disjoncteur de build (S83) — et même là, il **arrête une boucle**, il n'efface aucune vérité.
+
+## Méta-méta
+
+S111 illustre trois invariants de fond d'AIDOS.
+
+**Le déterminisme d'abord, appliqué au métrage.** « Plus une contrainte coûte cher, plus elle doit justifier sa valeur » est une règle qui *pourrait* tenter une estimation par LLM (« je pense que cette cellule coûte trop cher »). S111 refuse : le métrage est un **comptage** — une somme arithmétique des vrais compteurs. Le LLM n'entre nulle part. Un agent faisant ce qu'une addition fait serait un **écart de déterminisme** qui bloque l'étape. Le miroir de reproductibilité (même runs → même verdict) le cloue.
+
+**Les seuils sont déclarés, jamais appris (§8 anti-Goodhart).** Le budget vit au-dessus de la ligne, en lecture seule. S111 le **lit** et ne peut jamais relever la barre contre laquelle il se mesure — sinon la boucle pourrait s'auto-absoudre en élargissant son propre cap. Relever un cap est un `/goal` contre la fitness, soumis à l'humain. C'est ce qui empêche l'optimisation de Goodhart : on ne peut pas tricher en bougeant la cible.
+
+**L'override comme décision enregistrée, pas comme édition.** La `ValueCase{justified}` qui lève l'avertissement n'est pas un contournement : c'est une **décision humaine attestée** (le risque protégé, l'impact attendu, la décision). C'est la même grammaire que partout dans AIDOS — un override est une décision tracée (provenance + raison), jamais un effacement silencieux (§9). La règle « plus c'est cher, plus ça doit se justifier » est ainsi **mécanisée** : la justification est une donnée, vérifiée déterministiquement, jamais une opinion.
