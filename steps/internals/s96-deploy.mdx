@@ -1,6 +1,6 @@
 ---
 title: "S96 · Pour moi — le pipeline de déploiement keyé sur les phases stables, Stop-gate hérité, ré-projection depuis la phase"
-description: "Pour moi : l'implémentation de S96 — back/runtime/deploy (BuildPlan : Stop-gate d'abord — phases.IsStable (S23) ∧ Gate{mutation ≥ seuil, 0 monstre} sinon PHASE_NOT_STABLE → ré-émission depuis la phase via preview.EmittedAppHash (S94) → migration forward-only datamigrate.Build (S95) → URL keyée sur la phase + `pulumi up` ; pur, total, content-adressé via S02 ; IsDeployable, DeployedMatchesPhase, MigrationIsForwardOnly), le nouveau code BlockReason CodePhaseNotStable, le MCP deploy (plan/gate/check_served/forward_only), le twin TS lib/deploy + sa route action-capable /deploy, et les miroirs (Godog 5 scénarios, rapid 5 propriétés, fixture 12 cas, fast-check 6/6, Playwright 6/6). Plus les couches Méta et Méta-méta."
+description: "Pour moi : l'implémentation de S96 — back/runtime/deploy (BuildPlan : Stop-gate d'abord — phases.IsStable (S23) ∧ Gate{mutation ≥ seuil, 0 monstre} sinon PHASE_NOT_STABLE → ré-émission depuis la phase via aperçu.EmittedAppHash (S94) → migration forward-only datamigrate.Build (S95) → URL keyée sur la phase + `pulumi up` ; pur, total, content-adressé via S02 ; IsDeployable, DeployedMatchesPhase, MigrationIsForwardOnly), le nouveau code BlockReason CodePhaseNotStable, le MCP deploy (plan/gate/check_served/forward_only), le twin TS lib/deploy + sa route action-capable /deploy, et les miroirs (Godog 5 scénarios, rapid 5 propriétés, fixture 12 cas, fast-check 6/6, Playwright 6/6). Plus les couches Méta et Méta-méta."
 keywords: ["aidos", "krd", "S96", "deploy", "BuildPlan", "IsDeployable", "Gate", "phases.IsStable", "StablePhase", "PHASE_NOT_STABLE", "EmittedAppHash", "ré-projection", "DeployedMatchesPhase", "MigrationIsForwardOnly", "datamigrate", "pulumi", "records.Hash", "rapid", "fast-check", "Playwright", "Godog", "MCP", "EPIC 10", "DP26", "ADR 0043", "déterminisme"]
 ---
 
@@ -14,7 +14,7 @@ S96 ajoute le **pipeline de déploiement keyé sur les phases stables** : `back/
 
 - `BuildPlan(in Input) → (DeployPlan, *BlockReason)`. L'ordre est crucial (fail-closed) :
   1. **STOP-GATE D'ABORD** — `IsDeployable(phase, gate)` : la phase doit être **déployable** AVANT toute ré-émission. Une phase non-déployable est refusée **`PHASE_NOT_STABLE`** sans rien émettre.
-  2. `validateSurface` — une surface complète (server/front/infra) du **même projet** (sinon `OUT_OF_SCOPE`, réutilisé comme preview).
+  2. `validateSurface` — une surface complète (server/front/infra) du **même projet** (sinon `OUT_OF_SCOPE`, réutilisé comme aperçu).
   3. **RÉ-ÉMISSION DEPUIS LA PHASE** — `preview.EmittedAppHash(PhaseRef{phaseHash}, surface)` : le hash de l'app déployée **EST** le hash émis de la phase (jamais un artefact bac-à-sable périmé).
   4. **MIGRATION FORWARD-ONLY** — si `in.Change.Kind != ""`, `datamigrate.Build(change)` (S95) ; un breaking-no-backfill est refusé **`BREAKING_MIGRATION_NO_BACKFILL`** (délégué à S95, jamais reforké).
   5. URL keyée sur la phase (`d-` + 12 hex), stack Pulumi déterministe, `pulumi up`/`pulumi destroy`, puis `contentAddress` (S02). Même `Input` → `DeployPlan` byte-identique (même `ID`, même URL, même migration).

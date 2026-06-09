@@ -98,7 +98,7 @@ C'est la version qui réconcilie **mutabilité** et **cliquet**. La même dévia
     Une déviation d'une contrainte `@v` **sans** changer sa version = une **régression**. Rouge. Interdite.
   </Card>
   <Card title="Avec bump (+ ADR + approbation)" icon="circle-check" color="#16A34A">
-    La même déviation **avec** bump de version, un ADR et l'autorité qui approuve = une **évolution** légitime. La vague de rouge est *attendue* — c'est la worklist.
+    La même déviation **avec** bump de version, un ADR et l'autorité qui approuve = une **évolution** légitime. La vague de rouge est *attendue* — c'est la liste de travail.
   </Card>
 </Columns>
 
@@ -167,7 +167,7 @@ flowchart TB
 
 La **vague de rouge** (RedWave) n'est rien d'autre que **l'ensemble des liens périmés** après un bump de version. Elle **part du miroir** — qui ne reflète plus la bonne version — puis se propage aux projections, en cascade, à travers les couches.
 
-Vous changez une entité → l'API, la base, les types, l'opération, l'action et le bouton rendu virent au rouge, l'un après l'autre. La worklist de régénération est **calculée**, jamais chassée. Vous ne demandez jamais « qu'est-ce que ça impacte ? » — le rouge vous le dit.
+Vous changez une entité → l'API, la base, les types, l'opération, l'action et le bouton rendu virent au rouge, l'un après l'autre. La liste de travail de régénération est **calculée**, jamais chassée. Vous ne demandez jamais « qu'est-ce que ça impacte ? » — le rouge vous le dit.
 
 ```mermaid
 flowchart LR
@@ -178,7 +178,7 @@ flowchart LR
     mir ==> types["types TS / Go"]:::red
     api ==> op["operation"]:::red
     op ==> ui["action + bouton rendu"]:::red
-    ui -.->|"= votre worklist exacte,<br/>calculée"| done["à réconcilier<br/>jusqu'au vert"]:::work
+    ui -.->|"= votre liste de travail exacte,<br/>calculée"| done["à réconcilier<br/>jusqu'au vert"]:::work
     classDef bump fill:#DDD6FE,stroke:#6D28D9,color:#4C1D95
     classDef red fill:#FEE2E2,stroke:#DC2626,color:#991B1B
     classDef work fill:#FEF3C7,stroke:#D97706,color:#92400E
@@ -298,7 +298,7 @@ Détail de design important : il **n'y a pas de statut `FAILED`**. Sur erreur du
   <Step title="La version est la licence de changer">
     Sans bump = régression interdite ; avec bump + ADR = évolution attendue.
   </Step>
-  <Step title="La vague de rouge est votre worklist">
+  <Step title="La vague de rouge est votre liste de travail">
     Elle part du miroir, se propage aux projections, et donne — calculé — l'ensemble exact à réconcilier.
   </Step>
   <Step title="La phase stable clôt le cycle">

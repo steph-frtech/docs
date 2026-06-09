@@ -21,7 +21,7 @@ Quand on confie une tâche longue à un agent, deux choses tournent mal :
     Sans cible exécutable, un `/goal` s'arrête « quand l'agent *pense* avoir fini ». C'est exactement la circularité que KRD existe pour fermer : celui qui code est aussi celui qui décide si c'est bon.
   </Card>
   <Card title="L'agent vagabonde" icon="route">
-    Sans but précis, il sous-tire (il en fait trop peu) ou il sur-ingénierie et part en vrille (le *context drift*). Le périmètre n'est borné par rien.
+    Sans but précis, il sous-tire (il en fait trop peu) ou il sur-ingénierie et part en vrille (le *context dérive*). Le périmètre n'est borné par rien.
   </Card>
 </Columns>
 
@@ -164,7 +164,7 @@ Et le piège de séquencement à ne jamais oublier : la **phase noyau** (vous é
 
 <AccordionGroup>
   <Accordion title="Le cas qui fait toute la différence — modifier l'existant" icon="rotate">
-    Vous éditez une vérité du noyau : son hash change, et *tous les consommateurs de l'ancien hash virent au rouge automatiquement*. Cette **vague de rouge** (RedWave) n'est pas une panne — c'est votre worklist, l'ensemble exact de ce qui reste à réconcilier. L'agent réconcilie ; les fixtures inchangées tiennent. Le vieux problème « les facts changent » est résolu mécaniquement.
+    Vous éditez une vérité du noyau : son hash change, et *tous les consommateurs de l'ancien hash virent au rouge automatiquement*. Cette **vague de rouge** (RedWave) n'est pas une panne — c'est votre liste de travail, l'ensemble exact de ce qui reste à réconcilier. L'agent réconcilie ; les fixtures inchangées tiennent. Le vieux problème « les facts changent » est résolu mécaniquement.
   </Accordion>
   <Accordion title="L'exemple déroulé — accueil → connexion → page protégée → la règle change" icon="list-check">
     En quatre itérations, chacune = un delta de noyau (vous) + une réconciliation (l'IA) :

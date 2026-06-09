@@ -1,7 +1,7 @@
 ---
 title: "S104 · Strangler-fig — geler le legacy, refactorer sans rien perdre"
-description: "S104 absorbe un système legacy dans la fédération SANS réécriture big-bang (le pattern strangler-fig, §50). On taille une cellule autour du legacy, on GÈLE son comportement courant avec des miroirs de caractérisation auto-générés (input→output, bug-for-bug), on publie son contrat, puis on laisse la boucle-build refactorer DANS la cellule gelée. Les miroirs de caractérisation restent VERTS à travers un refactor interne et le contrat publié est honoré ; tout changement de comportement (drift) ou contrat cassé est REFUSÉ. Rien de ce que faisait le legacy n'est silencieusement perdu."
-keywords: ["aidos", "krd", "S104", "strangler-fig", "legacy", "caractérisation", "characterization test", "cellule", "freeze", "refactor", "drift", "contrat publié", "boucle-build", "EPIC 11", "§50"]
+description: "S104 absorbe un système legacy dans la fédération SANS réécriture big-bang (le pattern strangler-fig, §50). On taille une cellule autour du legacy, on GÈLE son comportement courant avec des miroirs de caractérisation auto-générés (input→output, bug-for-bug), on publie son contrat, puis on laisse la boucle-build refactorer DANS la cellule gelée. Les miroirs de caractérisation restent VERTS à travers un refactor interne et le contrat publié est honoré ; tout changement de comportement (dérive) ou contrat cassé est REFUSÉ. Rien de ce que faisait le legacy n'est silencieusement perdu."
+keywords: ["aidos", "krd", "S104", "strangler-fig", "legacy", "caractérisation", "characterization test", "cellule", "freeze", "refactor", "dérive", "contrat publié", "boucle-build", "EPIC 11", "§50"]
 ---
 
 <Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S104](/steps/internals/s104-strangler).</Note>
@@ -31,7 +31,7 @@ Ces miroirs sont **tagués « caractérisation »** pour qu'on ne les confonde j
 La boucle-build refactore l'intérieur de la cellule. À chaque tentative, AIDOS rejoue les miroirs de caractérisation contre le comportement **observé** du code refactoré :
 
 - si chaque entrée gelée donne la **même** sortie **et** le contrat publié tient → le refactor est **ACCEPTÉ** ;
-- si **une** sortie change (un *drift*) → le miroir correspondant rougit, le refactor est **REFUSÉ** (`STRANGLER_CHARACTERIZATION_DRIFT`) ;
+- si **une** sortie change (un *dérive*) → le miroir correspondant rougit, le refactor est **REFUSÉ** (`STRANGLER_CHARACTERIZATION_DRIFT`) ;
 - si le comportement est préservé mais le **contrat publié** casse → **REFUSÉ** (`STRANGLER_PUBLISHED_CONTRACT_BROKEN`).
 
 ## Pourquoi c'est important pour vous

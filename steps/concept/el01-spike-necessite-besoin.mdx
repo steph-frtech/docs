@@ -12,7 +12,7 @@ EL01 est un **spike de nécessité** (KRD §84 : **cliquet OFF, rigueur T0, jeta
 
 ## Le problème que ça résout
 
-AIDOS interdit **`prompt → code`** (la règle fondatrice) : l'humain possède la **vérité** (le « quoi »), l'agent possède l'**implémentation** (le « comment »), et **le mur** les sépare. Pourtant, l'entrée de l'app-builder (la S64 « capturez votre idée ») est aujourd'hui **une seule boîte de texte** : l'utilisateur jette un prompt plat, et l'agent doit **inférer** toute la verticale KRD §23 (`product → journey → view → control → action → operation → entity`) à partir de ce blob. C'est exactement le raccourci que le mur interdit. L'idée du track : **forcer l'utilisateur à expliquer son app rung par rung**, au-dessus du mur, pour que le besoin **suive l'architecture**. Mais avant de bâtir le substrat (grammaire, graphe, porte de forçage, MCP, hook, wizard), il faut **prouver** que ça vaut la peine. Le spike le **mesure**.
+AIDOS interdit **`prompt → code`** (la règle fondatrice) : l'humain possède la **vérité** (le « quoi »), l'agent possède l'**implémentation** (le « comment »), et **le mur** les sépare. Pourtant, l'entrée de l'app-builder (la S64 « capturez votre idée ») est aujourd'hui **une seule boîte de texte** : l'utilisateur jette un prompt plat, et l'agent doit **inférer** toute la verticale KRD §23 (`product → journey → view → control → action → operation → entity`) à partir de ce blob. C'est exactement le raccourci que le mur interdit. L'idée du track : **forcer l'utilisateur à expliquer son app rung par rung**, au-dessus du mur, pour que le besoin **suive l'architecture**. Mais avant de bâtir le substrat (grammaire, graphe, porte de forçage, MCP, hook, assistant), il faut **prouver** que ça vaut la peine. Le spike le **mesure**.
 
 ## Les idées-clés
 
@@ -38,20 +38,20 @@ AIDOS interdit **`prompt → code`** (la règle fondatrice) : l'humain possède 
 
 ## Ce que le spike a mesuré (déterministe, sans LLM)
 
-| richesse du backlog | BesoinGraph | prompt plat | Δ |
+| richesse de la file de travail | BesoinGraph | prompt plat | Δ |
 |---|---|---|---|
 | Ideas émises (rungs mappants) | **5** | 1 | **+4** |
 | à ref sortante résolue | 5 | 0 | +5 |
 | portant les 4 métadonnées | 5 | 0 | +5 |
 | portant des `anchors_above` | 4 | 0 | +4 |
-| backlog ordonné (topologique) | oui | non | dominance |
+| file de travail ordonné (topologique) | oui | non | dominance |
 | rungs NoEmit seedant les ancres | 2 | 0 | — |
 
 Le BesoinGraph émet **5 Ideas** dans l'ordre `product → control → action → operation → entity`, chacune typée et résolvant sa ref `@rung` ; `journey`/`view` sont **2 nœuds NoEmit** qui seedent les ancres sans émettre. Le prompt plat ne donne **qu'1 candidate** indifférenciée, non typée, sans ordre ni arête.
 
 ## Verdict : GO
 
-Capturer le besoin en **BesoinGraph top-down avec porte de forçage** produit un backlog **strictement plus riche/ordonné** que la boîte texte-libre, bien au-dessus du plancher déclaré (gain d'Ideas ≥ 3), de façon **reproductible**. La boîte plate force `prompt → code` (le mur l'interdit) ; le BesoinGraph force l'utilisateur à **expliquer son app niveau par niveau, au-dessus du mur**. Le track est **nécessaire** → on poursuit vers **EL02** (la grammaire close `BesoinLevel`). On **harveste** l'Idea-ancre « le besoin doit suivre l'architecture, niveau par niveau » — une candidate **DRAFT** (sans miroir, sans version figée), promotion = `/goal` plus tard.
+Capturer le besoin en **BesoinGraph top-down avec porte de forçage** produit une file de travail **strictement plus riche/ordonné** que la boîte texte-libre, bien au-dessus du plancher déclaré (gain d'Ideas ≥ 3), de façon **reproductible**. La boîte plate force `prompt → code` (le mur l'interdit) ; le BesoinGraph force l'utilisateur à **expliquer son app niveau par niveau, au-dessus du mur**. Le track est **nécessaire** → on poursuit vers **EL02** (la grammaire close `BesoinLevel`). On **harveste** l'Idea-ancre « le besoin doit suivre l'architecture, niveau par niveau » — une candidate **DRAFT** (sans miroir, sans version figée), promotion = `/goal` plus tard.
 
 ## Les questions restées ouvertes (OpenQuestions)
 

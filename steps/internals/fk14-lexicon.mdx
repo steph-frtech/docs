@@ -1,7 +1,7 @@
 ---
 title: "FK14 · Le Lexicon Kernel et le linter inter-couches (internals)"
-description: "Implémentation, Méta et Méta-méta de FK14 : le Lexicon Kernel + le linter inter-couches. LexiconKernel{Concept, Symbols map[Layer]string} sur les 16 couches closes (FKE-21). Lint(k, []Observation) → []Drift est une fonction pure totale : RENAMED (symbole hors lexique) / UNKNOWN_SYMBOL (couche non pinnée) / UNKNOWN_LAYER (hors des 16), drifts triés stablement. Le fork de stockage est tranché ici : un lexique vit dans un kernel.link content-adressé (link_kind:lexicon), pas un nouveau record-kind. SerializeBody/ParseBody/Record via records.NewRecord. Aucun LLM ; le mur intact."
-keywords: ["aidos", "krd", "FK14", "Lexicon Kernel", "linter", "16 couches", "Lint", "Drift", "RENAMED", "UNKNOWN_SYMBOL", "UNKNOWN_LAYER", "fork de stockage", "kernel.link", "content-adressé", "déterminisme", "rapid", "fast-check", "le mur", "FKE-21"]
+description: "Implémentation, Méta et Méta-méta de FK14 : le Lexicon Kernel + le linter inter-couches. LexiconKernel{Concept, Symbols map[Layer]string} sur les 16 couches closes (FKE-21). Lint(k, []Observation) → []Dérive est une fonction pure totale : RENAMED (symbole hors lexique) / UNKNOWN_SYMBOL (couche non pinnée) / UNKNOWN_LAYER (hors des 16), drifts triés stablement. Le fork de stockage est tranché ici : un lexique vit dans un kernel.link content-adressé (link_kind:lexicon), pas un nouveau record-kind. SerializeBody/ParseBody/Record via records.NewRecord. Aucun LLM ; le mur intact."
+keywords: ["aidos", "krd", "FK14", "Lexicon Kernel", "linter", "16 couches", "Lint", "Dérive", "RENAMED", "UNKNOWN_SYMBOL", "UNKNOWN_LAYER", "fork de stockage", "kernel.link", "content-adressé", "déterminisme", "rapid", "fast-check", "le mur", "FKE-21"]
 ---
 
 <Note>Côté « Pour moi » — le journal de bord interne. Pour la version sans code, voir [Pour les futurs utilisateurs → FK14](/steps/concept/fk14-lexicon).</Note>
@@ -18,7 +18,7 @@ FK14 est le **Lexicon Kernel** + le **linter inter-couches** — `back/kernel/le
 1. couche hors des 16 ⇒ `UNKNOWN_LAYER` ;
 2. lexique ne fige **aucun** symbole pour cette couche ⇒ `UNKNOWN_SYMBOL` (le concept n'y est pas nommé — pas un laissez-passer) ;
 3. symbole observé ≠ symbole du lexique ⇒ `RENAMED` (avec `Expected` = le symbole attendu).
-Sinon, l'observation est **dans** le lexique (aucun drift). Les drifts reviennent **triés stablement** (index canonique de couche, puis symbole) — `sort.SliceStable`. `Clean(k, obs)` = `len(Lint)==0` (le verdict vert).
+Sinon, l'observation est **dans** le lexique (aucun dérive). Les drifts reviennent **triés stablement** (index canonique de couche, puis symbole) — `sort.SliceStable`. `Clean(k, obs)` = `len(Lint)==0` (le verdict vert).
 
 **`Validate`** refuse un concept vide (`ErrNoConcept`), un symbole sous une couche inconnue (`ErrUnknownLayer`), un symbole vide (`ErrEmptySymbol`) — mais **n'exige pas** les 16 couches (un kernel effondré, §1.3, en porte un sous-ensemble).
 
@@ -28,7 +28,7 @@ Sinon, l'observation est **dans** le lexique (aucun drift). Les drifts reviennen
 
 **Le MCP** `aidos-lexicon-linter` (`back/mcp/lexicon-linter/`, ADR 0009) expose quatre outils **purs, write-nothing** : `lint`, `validate`, `serialize`, `layers`. Chaque erreur est mappée sur son code de `BlockReason` clos (`NO_CONCEPT` / `UNKNOWN_LAYER` / `EMPTY_SYMBOL`).
 
-**Les miroirs.** Fixture `lexicon_fixture_test.go` (l'exemple FKE-21 *ReturnRequest*, la fault-injection « table renommée → rouge », les drifts unknown-layer/unknown-symbol, l'ordre stable, le round-trip content-adressé) ; property `lexicon_property_test.go` (rapid : déterminisme, « drift = fonction pure du lexique + symboles », `Clean ⇔ no drift`, ordre stable, round-trip). Le jumeau TS porte le miroir de reproductibilité `lexicon.test.ts` (fast-check, mêmes invariants). E2e Playwright `lexicon.spec.ts` (4/4) : la fault-injection rouge, le verdict propre, les deux autres drifts, exécutés depuis l'écran.
+**Les miroirs.** Fixture `lexicon_fixture_test.go` (l'exemple FKE-21 *ReturnRequest*, la fault-injection « table renommée → rouge », les drifts unknown-layer/unknown-symbol, l'ordre stable, le round-trip content-adressé) ; property `lexicon_property_test.go` (rapid : déterminisme, « dérive = fonction pure du lexique + symboles », `Clean ⇔ no drift`, ordre stable, round-trip). Le jumeau TS porte le miroir de reproductibilité `lexicon.test.ts` (fast-check, mêmes invariants). E2e Playwright `lexicon.spec.ts` (4/4) : la fault-injection rouge, le verdict propre, les deux autres drifts, exécutés depuis l'écran.
 
 ## Le fork de stockage — tranché ici (record-kind vs kind:layer)
 
@@ -41,7 +41,7 @@ La migration `kernel_lexicon_baseline.sql` est une **baseline documentaire** : a
 
 ## Méta
 
-FK14 incarne le **déterminisme d'abord** (§8) à la lettre : la vérification d'un drift est **parsing/validation/matching** — exactement ce qui *doit* être code, jamais un agent. Un « agent qui estime si deux noms se ressemblent » serait une **faille de déterminisme** qui bloque l'étape. Ici le juge est une **égalité de chaînes sur un ensemble clos** ; le miroir de reproductibilité (property : même `(lexique, symboles)` → mêmes drifts) le prouve.
+FK14 incarne le **déterminisme d'abord** (§8) à la lettre : la vérification d'un dérive est **parsing/validation/matching** — exactement ce qui *doit* être code, jamais un agent. Un « agent qui estime si deux noms se ressemblent » serait une **faille de déterminisme** qui bloque l'étape. Ici le juge est une **égalité de chaînes sur un ensemble clos** ; le miroir de reproductibilité (property : même `(lexique, symboles)` → mêmes drifts) le prouve.
 
 Le **langage ubiquitaire** (DDD) devient ainsi *vérifiable par calcul* : FKE-21 promet qu'un concept est « reconnaissable dans toutes les couches » ; FK14 transforme cette promesse en un **prédicat exécutable**. Le lexique est lui-même une **vérité content-adressée** — le langage du projet a une adresse, une version, un historique (append-only) ; le renommer est un événement tracé, pas une dérive silencieuse.
 

@@ -21,7 +21,7 @@ La nouveauté est **bornée** : tout ce qui était déjà `goal` (S29) et `autho
   2. **l'ouverture (S29)** — `goal.OpenGoal(in)` : ouvre un ChangeSet DRAFT enveloppant le `spec_delta` + le `mirror_delta` atomiquement, DÉRIVE le set rouge via l'Impact S22, refuse une idée sans miroir (`IDEA_WITHOUT_MIRROR`) et un set rouge vide (`NO_RED_SET`).
   Retourne un `PilotResult{Actor, Goal}` — l'acteur porté pour la provenance + le goal OUVERT (ChangeSet DRAFT proposé + set rouge live). Écrit **rien**.
 - `PilotCloseGoal(g Goal, in StopInput) *PilotBlock` — DÉLÈGUE entièrement au Stop non-gameable de S29 (`goal.CloseBlockReason` → `goal.IsClosed`) : le refus `GOAL_STILL_RED` tant qu'une des quatre conditions échoue, `nil` quand le goal est fermable. Ne marque **jamais** `CLOSED` (ça reste le rôle CLI `aidos`). **Aucun champ de confiance d'agent** en entrée.
-- `CanClose(g, in)` / `LiveRedSet(g)` — commodités pour l'indicateur live + la worklist triée (délèguent à `goal.IsClosed` / `goal.RedSetSorted`).
+- `CanClose(g, in)` / `LiveRedSet(g)` — commodités pour l'indicateur live + la liste de travail triée (délèguent à `goal.IsClosed` / `goal.RedSetSorted`).
 - `PilotBlock` — le refus unifié porté à l'écran : le **code verbatim** (stringifié) de la porte qui a refusé — `PLACEHOLDER_ACTOR`/`INSUFFICIENT_AUTHORITY` (S63, un `BlockCode` local) ou `IDEA_WITHOUT_MIRROR`/`NO_RED_SET`/`GOAL_STILL_RED` (S29, un `blockreason.Code`). Porter la chaîne **évite d'inventer un membre** dans l'un ou l'autre des enums **clos** (CLAUDE.md §9) : le code est **copié**, jamais forgé.
 - Tout est **pur et total** : pas d'horloge, pas de rng, pas d'I/O, ne panique pas. Écrit **rien** (le mur).
 
@@ -29,14 +29,14 @@ La nouveauté est **bornée** : tout ce qui était déjà `goal` (S29) et `autho
 
 - `lib/goal-piloting.ts` — le **jumeau pur** byte-identique au Go : `pilotOpenGoal` compose `requireRealActor` (jumeau S63, `lib/authority-binding`) + le set rouge live, et `pilotCloseGoal`/`canClose` DÉLÈGUENT à `isClosed` (jumeau S29, `lib/goal`). Même sémantique, aucune dérive — le verdict à l'écran égale celui du moteur Go.
 - `app/goal-piloting/actions.ts` — `proposeGoalAction` (la porte d'acteur + l'ouverture, retourne le ChangeSet DRAFT proposé + le set rouge live ; **écrit rien** — le rôle agent est SELECT-only sur `ideas.goal` + `changesets`) et `checkCloseAction` (le Stop non-gameable live, retourne le verdict + les quatre conditions calculées). Lit le **projet actif** (cookie S57).
-- `app/goal-piloting/{page.tsx, GoalPilotingPanel.tsx}` — la route action-capable : la boîte « proposer » (acteur + idée + set rouge → ChangeSet DRAFT + worklist red-set live) et la boîte « Stop » (les quatre verdicts live → fermable ou refusé, condition par condition). Thémé ADR 0010, bilingue next-intl ADR 0011 (namespace `goalPiloting`, parité fr=en 3658/3658). Entrée nav ajoutée dans le groupe Build à côté de `/grilling-loop`. Aucune route existante touchée.
+- `app/goal-piloting/{page.tsx, GoalPilotingPanel.tsx}` — la route action-capable : la boîte « proposer » (acteur + idée + set rouge → ChangeSet DRAFT + liste de travail red-set live) et la boîte « Stop » (les quatre verdicts live → fermable ou refusé, condition par condition). Thémé ADR 0010, bilingue next-intl ADR 0011 (namespace `goalPiloting`, parité fr=en 3658/3658). Entrée nav ajoutée dans le groupe Build à côté de `/grilling-loop`. Aucune route existante touchée.
 
 ### Le MCP `back/mcp/goal-piloting` (ADR 0009)
 
 Trois outils, **pure computation**, écrivent **rien** (le mur) — la persistance ride la porte changeset sous approbation :
 - `goal_pilot_open` — acteur + input → ChangeSet DRAFT proposé + set rouge live (ou un refus tracé) ;
 - `goal_pilot_close` — la porte de fermeture non-gameable (`closeable` + le refus `GOAL_STILL_RED`) ;
-- `goal_live_red_set` — la worklist red-set en ordre stable trié.
+- `goal_live_red_set` — la liste de travail red-set en ordre stable trié.
 Pas d'outil apply/close-stamp : appliquer est le commit-gate de S20, fermer est le rôle `aidos`.
 
 ## Les miroirs

@@ -35,13 +35,13 @@ Trois outils purs :
 
 - `app_auth_expand` — dry-run de l'expansion du sous-système. N'écrit rien.
 - `app_auth_check_access` — la porte runtime de l'app émise (rôle × operation → AUTORISÉ/REFUSÉ + rôle requis). Lookup déterministe, **jamais un LLM**.
-- `app_auth_attach` — preview OU atterrissage via un ChangeSet APPROUVÉ (le mur : propose → approve). Selon `land`.
+- `app_auth_attach` — aperçu OU atterrissage via un ChangeSet APPROUVÉ (le mur : propose → approve). Selon `land`.
 
 Le serveur est **sans état** : chaque outil est une fonction pure de son entrée ; `attach` atterrit via `changeset.Apply` (un calcul de valeur), jamais une écriture DB.
 
 ### La route Workbench `/app-auth`
 
-Action-capable (ui-completeness, §7) : deux contrôles liés au moteur réel et exécutables depuis l'écran — **CHECK ACCESS** (la porte runtime : refuse un rôle insuffisant) et **ATTACH** (preview du sous-système + atterrissage). Server Actions sur le twin TS pur `lib/app-auth.ts` (byte-twin du Go : la même `expansionId` `2a2bcf91…`). Thème ADR 0010, bilingue ADR 0011. Câblée dans la nav `WorkbenchHeader`.
+Action-capable (ui-completeness, §7) : deux contrôles liés au moteur réel et exécutables depuis l'écran — **CHECK ACCESS** (la porte runtime : refuse un rôle insuffisant) et **ATTACH** (aperçu du sous-système + atterrissage). Server Actions sur le twin TS pur `lib/app-auth.ts` (byte-twin du Go : la même `expansionId` `2a2bcf91…`). Thème ADR 0010, bilingue ADR 0011. Câblée dans la nav `WorkbenchHeader`.
 
 ### Les miroirs (tous GREEN)
 
@@ -63,6 +63,6 @@ La distinction **auth de l'app émise ≠ approbateurs AIDOS** est elle-même m�
 
 ## Méta-méta
 
-Pourquoi est-ce que l'auth de l'app émise est un **behavior-macro** et pas un module en dur ? Parce que le pari d'AIDOS est que **tout comportement réutilisable est une donnée déclarative expansible**, pas du code spécial. L'auth — le plus universel et le plus sensible des comportements — passe par exactement la même mécanique que owner-scoping : un macro, une expansion pure déterministe, une preview, un atterrissage gardé par le mur. Si l'auth n'avait PAS pu entrer dans ce moule, le moule serait suspect. Qu'elle y entre proprement (avec sa propre fonction, mais la même discipline) **valide la généralité** du concept de behavior-macro.
+Pourquoi est-ce que l'auth de l'app émise est un **behavior-macro** et pas un module en dur ? Parce que le pari d'AIDOS est que **tout comportement réutilisable est une donnée déclarative expansible**, pas du code spécial. L'auth — le plus universel et le plus sensible des comportements — passe par exactement la même mécanique que owner-scoping : un macro, une expansion pure déterministe, un aperçu, un atterrissage gardé par le mur. Si l'auth n'avait PAS pu entrer dans ce moule, le moule serait suspect. Qu'elle y entre proprement (avec sa propre fonction, mais la même discipline) **valide la généralité** du concept de behavior-macro.
 
 Et l'expansion déterministe est ce qui rend l'auth **auditable** : il n'y a pas d'IA qui « génère du code d'auth » avec ses angles morts. La même app produit toujours le même socle d'auth, byte pour byte, prouvé par un miroir de reproductibilité Go ET TS qui partagent la même empreinte. Une faille de permission ne peut pas se glisser par non-déterminisme — elle serait un changement d'empreinte, donc visible, donc gardée par le mur.

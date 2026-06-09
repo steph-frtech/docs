@@ -1,14 +1,14 @@
 ---
 title: "S107 · /learn — l'incident devient un nouveau miroir et une nouvelle dent"
-description: "S107 referme la boucle externe : un record de réalité (idée draft, provenance=incident, issu de S106) re-rentre à idée → grill → /goal ; sur VOTRE approbation, un NOUVEAU miroir (par exemple out-of-stock-during-checkout) est attaché à l'opération ou à la policy, son hash CHANGE mécaniquement, et un red wave CIBLÉ devient votre worklist. Le « facts change » est résolu mécaniquement : un nouveau miroir content-adressé ⇒ une nouvelle adresse de la cible ⇒ une vague de rouge à drainer. Le bump de hash et le red wave sont des fonctions PURES ; la boucle ne rédige PAS le miroir — vous le faites au /goal. Rien n'apprend sa propre fitness."
-keywords: ["aidos", "krd", "S107", "/learn", "incident", "nouveau miroir", "nouvelle dent", "red wave", "vague de rouge", "bump de hash", "content-adressé", "worklist", "provenance incident", "idée draft", "RealityMirror", "facts change", "EPIC 12", "E12", "§42", "§67", "§98", "le mur", "anti-circularité"]
+description: "S107 referme la boucle externe : un record de réalité (idée draft, provenance=incident, issu de S106) re-rentre à idée → grill → /goal ; sur VOTRE approbation, un NOUVEAU miroir (par exemple out-of-stock-during-checkout) est attaché à l'opération ou à la policy, son hash CHANGE mécaniquement, et une vague de rouge CIBLÉE devient votre liste de travail. Le « facts change » est résolu mécaniquement : un nouveau miroir content-adressé ⇒ une nouvelle adresse de la cible ⇒ une vague de rouge à drainer. Le bump de hash et la vague de rouge sont des fonctions PURES ; la boucle ne rédige PAS le miroir — vous le faites au /goal. Rien n'apprend sa propre fitness."
+keywords: ["aidos", "krd", "S107", "/learn", "incident", "nouveau miroir", "nouvelle dent", "vague de rouge", "vague de rouge", "bump de hash", "content-adressé", "liste de travail", "provenance incident", "idée draft", "RealityMirror", "facts change", "EPIC 12", "E12", "§42", "§67", "§98", "le mur", "anti-circularité"]
 ---
 
 <Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S107](/steps/internals/s107-learn).</Note>
 
 ## En une phrase
 
-S107 **referme la boucle** : l'incident que S106 a capté comme idée draft re-rentre à `idée → grill → /goal`, et **dès que vous approuvez un nouveau miroir**, le hash de l'opération (ou de la policy) **change tout seul** et une **vague de rouge ciblée** apparaît comme votre prochaine liste de travail.
+S107 **referme la boucle** : l'incident que S106 a capté comme idée draft re-rentre à `idée → grill → /goal`, et **dès que vous approuvez un nouveau miroir**, le hash de l'opération (ou de la policy) **change tout seul** et une **vague de rouge cibléee** apparaît comme votre prochaine liste de travail.
 
 ## Le problème que S107 résout
 
@@ -22,9 +22,9 @@ Dans AIDOS, l'identité d'une opération ou d'une policy est son **hash de conte
 
 Vous voyez, à l'écran, l'adresse **avant** et **après** : si elles diffèrent, le bump est réel.
 
-## Le red wave ciblé devient votre worklist
+## La vague de rouge ciblée devient votre liste de travail
 
-Quand l'adresse de la cible bouge, tous les liens qui pointaient vers son **ancienne** version deviennent **périmés**. C'est la **vague de rouge** (§42) : exactement l'ensemble des liens périmés, **calculé** — ni plus, ni moins, jamais chassé à la main. Elle **part du miroir** (le miroir rougit en premier, §98), puis cascade vers les projections (l'API, le handler, les types). Cet ensemble ordonné **est votre worklist** : la boucle-build le draine ensuite, dent par dent, jusqu'au vert.
+Quand l'adresse de la cible bouge, tous les liens qui pointaient vers son **ancienne** version deviennent **périmés**. C'est la **vague de rouge** (§42) : exactement l'ensemble des liens périmés, **calculé** — ni plus, ni moins, jamais chassé à la main. Elle **part du miroir** (le miroir rougit en premier, §98), puis cascade vers les projections (l'API, le handler, les types). Cet ensemble ordonné **est votre liste de travail** : la boucle-build le draine ensuite, dent par dent, jusqu'au vert.
 
 C'est ça, « facts change » résolu **mécaniquement** : un nouveau miroir ⇒ une nouvelle adresse ⇒ une vague de rouge à éteindre.
 
@@ -36,10 +36,10 @@ C'est la garde anti-circularité (§8). La boucle `/learn` ne **rédige pas** le
 
 Depuis l'écran `/learn` (loi `ui-completeness`), vous pouvez :
 
-1. **Fermer la boucle** : sur l'incident out-of-stock, attacher le miroir approuvé → le hash de `createOrder` **bump** (l'adresse avant ≠ après) et un **red wave ciblé** (mirror-first) devient la worklist ;
+1. **Fermer la boucle** : sur l'incident out-of-stock, attacher le miroir approuvé → le hash de `createOrder` **bump** (l'adresse avant ≠ après) et un **vague de rouge ciblée** (mirror-first) devient la liste de travail ;
 2. **Basculer « re-réflexion »** : re-attacher un miroir **déjà reflété** → **aucun bump**, une vague **vide** (une re-réflexion cosmétique n'est pas une nouvelle dent).
 
-Vous lisez à l'écran la provenance (incident #NNNN), l'adresse avant/après, le statut du mur, et la worklist ordonnée mirror-first.
+Vous lisez à l'écran la provenance (incident #NNNN), l'adresse avant/après, le statut du mur, et la liste de travail ordonnée mirror-first.
 
 ## Ce que S107 garantit
 

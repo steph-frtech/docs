@@ -1,7 +1,7 @@
 ---
 title: "FK14 · Le Lexicon Kernel et le linter inter-couches : un mot, partout pareil"
 description: "FK14 ajoute le Lexicon Kernel : un concept est NOMMÉ à travers les 16 couches (humain, BDD, code, test, DB, API, event, log, metric, MCP, skill, agent, doc, CI, policy, memory) comme une source unique, et un linter PUR détecte un symbole hors lexique, couche par couche. Renommer une table hors lexique → rouge. Le juge est une vérification d'appartenance ensembliste, jamais un prompt. Le fork de stockage (record-kind vs kind:layer) est tranché ici : un lexique vit dans un kernel.link content-adressé."
-keywords: ["aidos", "krd", "FK14", "Lexicon Kernel", "langage ubiquitaire", "16 couches", "linter", "drift de langue", "RENAMED", "UNKNOWN_SYMBOL", "UNKNOWN_LAYER", "déterminisme", "content-adressé", "kernel.link", "fork de stockage", "FKE-21"]
+keywords: ["aidos", "krd", "FK14", "Lexicon Kernel", "langage ubiquitaire", "16 couches", "linter", "dérive de langue", "RENAMED", "UNKNOWN_SYMBOL", "UNKNOWN_LAYER", "déterminisme", "content-adressé", "kernel.link", "fork de stockage", "FKE-21"]
 ---
 
 <Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK14](/steps/internals/fk14-lexicon).</Note>
@@ -33,9 +33,9 @@ Le **Lexicon Kernel** est cette source unique. Il **lie** le concept à son symb
 2. le lexique fige-t-il un symbole pour ce concept dans cette couche ? Sinon → `UNKNOWN_SYMBOL` (le concept n'y est pas nommé — pas un laissez-passer) ;
 3. le symbole observé **égale-t-il** celui du lexique ? Sinon → `RENAMED` (le symbole a **dérivé**).
 
-Aucun drift = **vert**. Un seul symbole hors lexique = **rouge**. C'est exactement le critère de FK14 : **renommer une table hors lexique → rouge**.
+Aucun dérive = **vert**. Un seul symbole hors lexique = **rouge**. C'est exactement le critère de FK14 : **renommer une table hors lexique → rouge**.
 
-## Le drift de langue, vérifiable par calcul
+## La dérive de langue, vérifiable par calcul
 
 Le point KRD essentiel : cette vérification n'est **pas** une affaire de jugement. Ce n'est pas un agent qui « estime » si deux noms se ressemblent. C'est une **comparaison d'appartenance** : le symbole observé est-il, oui ou non, celui que le lexique fige pour cette couche ? Une **égalité de chaînes** sur un ensemble clos de couches. Le **juge est le code**, jamais un prompt — et le même `(lexique, symboles)` donne toujours les mêmes drifts (déterminisme).
 

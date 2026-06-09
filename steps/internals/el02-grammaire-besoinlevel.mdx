@@ -21,7 +21,7 @@ Le paquet Go **`back/runtime/besoin`** (deux fichiers source à EL02) :
 
 **Pourquoi une grammaire close, et pourquoi maintenant ?** Le compound du besoin exige des niveaux **ordonnés, append-only, à références résolvant par code** : chaque niveau résolu devient une **ancre figée** que le niveau inférieur lit comme grounding. Sans un vocabulaire fermé et un ordre total **avant** tout graphe, l'agent inventerait des niveaux ad hoc — le `prompt → code` que le mur interdit (CLAUDE.md règle fondatrice). EL02 est donc le **premier maillon** du substrat EL-E1 : EL03 (le record `BesoinGraph`), EL05 (`LevelToProposes`), EL07 (`CanDescend`) s'appuient tous sur cette grammaire.
 
-**La décision tranchée : `policy` est une bande, pas un rung.** Le ROADMAP l'exigeait explicitement « tranchée en EL02, pas en prose implicite ». Une `policy` (autorisation) ne se descend pas après `entity` ; elle **croise** `operation`/`entity` latéralement, comme un `invariant` croise tout rung. Les coder comme bandes (jamais retournées par `NextLevel`) empêche le wizard EL19 de les présenter comme une étape verticale erronée.
+**La décision tranchée : `policy` est une bande, pas un rung.** Le ROADMAP l'exigeait explicitement « tranchée en EL02, pas en prose implicite ». Une `policy` (autorisation) ne se descend pas après `entity` ; elle **croise** `operation`/`entity` latéralement, comme un `invariant` croise tout rung. Les coder comme bandes (jamais retournées par `NextLevel`) empêche le assistant EL19 de les présenter comme une étape verticale erronée.
 
 **Déterminisme-first (CLAUDE.md §6/§8).** L'ordre, le `NextLevel`, le `ParseLevel`, la table des specs : tout est **fonction pure totale**, sans clock/rng/IO/LLM. C'est la définition même d'une grammaire faisant **autorité** — le code décide, jamais un LLM d'altitude. Le miroir de reproductibilité (property : même entrée → même sortie) le pin sur les deux plans (Go + TS).
 
@@ -36,4 +36,4 @@ Le paquet Go **`back/runtime/besoin`** (deux fichiers source à EL02) :
 ## OpenQuestions portées (non bloquantes)
 
 - `saga`/`temporal`/`globalinvariant` : pas de rung d'élicitation v1 (déclaré, refusé dur). Un EL ultérieur pourra étendre la grammaire — ce sera un **changement de grammaire** (idée → miroir → /goal), jamais une édition silencieuse.
-- Le record `BesoinGraph`, la table `LevelToProposes`, la porte `CanDescend` et le wizard sont à EL03+ : EL02 ne fournit que la grammaire (la forme), pas encore le graphe ni la gate.
+- Le record `BesoinGraph`, la table `LevelToProposes`, la porte `CanDescend` et le assistant sont à EL03+ : EL02 ne fournit que la grammaire (la forme), pas encore le graphe ni la gate.

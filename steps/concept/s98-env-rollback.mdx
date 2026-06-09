@@ -1,14 +1,14 @@
 ---
 title: "S98 · Environnements + rollback par ré-projection — revenir en arrière, c'est ré-émettre une phase antérieure, jamais restaurer un artefact périmé"
-description: "S98 vous donne les environnements (preview → staging → prod) et le rollback. Un rollback n'est PAS la restauration d'un vieux build : c'est le checkout d'une phase DAG stable ANTÉRIEURE qui RÉ-ÉMET déterministiquement votre app depuis cette phase, réconcilie vos données, et ENREGISTRE la décision (qui, quoi, pourquoi). Rien n'est supprimé, rien n'est restauré comme artefact stale. Promouvoir une phase non-stable est refusé ; revenir à une phase non-antérieure est refusé."
-keywords: ["aidos", "krd", "S98", "environnements", "preview", "staging", "prod", "rollback", "ré-projection", "re-emit", "phase stable", "DAG", "ENV_PROMOTE_NOT_STABLE", "ROLLBACK_NOT_EARLIER", "provenance", "append-only", "incident", "DP28", "ADR 0043", "EPIC 10"]
+description: "S98 vous donne les environnements (aperçu → staging → prod) et le rollback. Un rollback n'est PAS la restauration d'un vieux build : c'est le checkout d'une phase DAG stable ANTÉRIEURE qui RÉ-ÉMET déterministiquement votre app depuis cette phase, réconcilie vos données, et ENREGISTRE la décision (qui, quoi, pourquoi). Rien n'est supprimé, rien n'est restauré comme artefact stale. Promouvoir une phase non-stable est refusé ; revenir à une phase non-antérieure est refusé."
+keywords: ["aidos", "krd", "S98", "environnements", "aperçu", "staging", "prod", "rollback", "ré-projection", "re-emit", "phase stable", "DAG", "ENV_PROMOTE_NOT_STABLE", "ROLLBACK_NOT_EARLIER", "provenance", "append-only", "incident", "DP28", "ADR 0043", "EPIC 10"]
 ---
 
 <Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S98](/steps/internals/s98-env-rollback).</Note>
 
 ## En une phrase
 
-S98 vous donne les **environnements** (preview → staging → prod) et le **rollback** — et un rollback n'est jamais « remettre le vieux build » : c'est **ré-émettre** votre app depuis une **phase stable antérieure**, déterministiquement, en enregistrant la décision et sans rien supprimer.
+S98 vous donne les **environnements** (aperçu → staging → prod) et le **rollback** — et un rollback n'est jamais « remettre le vieux build » : c'est **ré-émettre** votre app depuis une **phase stable antérieure**, déterministiquement, en enregistrant la décision et sans rien supprimer.
 
 ## Le problème que S98 résout
 
@@ -20,7 +20,7 @@ Vous avez déployé une nouvelle version en production (S96). Un incident éclat
 
 ## Les environnements : une échelle de promotion
 
-S98 organise trois environnements en échelle : **preview** (éphémère), **staging** (pré-prod durable), **prod** (la production — la cible des senseurs de réalité). On **promeut** une phase stable d'un environnement vers le suivant. Promouvoir une phase **non-stable** est refusé (`ENV_PROMOTE_NOT_STABLE`) : on ne met jamais un miroir rouge en production. Chaque environnement a sa propre pile d'infrastructure (Pulumi).
+S98 organise trois environnements en échelle : **aperçu** (éphémère), **staging** (pré-prod durable), **prod** (la production — la cible des senseurs de réalité). On **promeut** une phase stable d'un environnement vers le suivant. Promouvoir une phase **non-stable** est refusé (`ENV_PROMOTE_NOT_STABLE`) : on ne met jamais un miroir rouge en production. Chaque environnement a sa propre pile d'infrastructure (Pulumi).
 
 ## Le rollback = ré-projection, jamais checkout d'artefact
 
@@ -37,7 +37,7 @@ Même phase antérieure → même app ré-émise → même empreinte. Rien n'est
 
 Le panneau Workbench `/env-rollback` est **action-capable** : deux gestes exécutables depuis l'écran.
 
-- **Promouvoir** une phase dans un environnement (preview/staging/prod) → l'écran montre la pile par environnement et le hash de l'app ré-émise. Un toggle « phase non-stable » montre le refus `ENV_PROMOTE_NOT_STABLE`.
+- **Promouvoir** une phase dans un environnement (aperçu/staging/prod) → l'écran montre la pile par environnement et le hash de l'app ré-émise. Un toggle « phase non-stable » montre le refus `ENV_PROMOTE_NOT_STABLE`.
 - **Rollback** la prod vers une phase antérieure → l'écran montre la **décision** (de N vers N-1), le **hash de l'app ré-émise depuis N-1** (servie après rollback), la **provenance** (acteur · raison), et la **propriété de ré-projection** : « prod sert la ré-émission fraîche de N-1 » ✓ et « l'artefact périmé de N est rejeté » ✓. Des toggles montrent le refus `ROLLBACK_NOT_EARLIER` (cibler la phase servie, ou une phase non-antérieure).
 
 ## Ce que S98 ne fait pas

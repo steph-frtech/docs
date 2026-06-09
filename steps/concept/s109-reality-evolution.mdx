@@ -1,14 +1,14 @@
 ---
 title: "S109 · Cockpit réalité & évolution — un seul écran pour la boucle externe et l'archive QD"
-description: "S109 réunit en UN cockpit par projet tout ce que la réalité de production renvoie à votre Kernel : l'ingestion d'un incident en idée draft (S106), la porte d'approbation /learn qui transforme un incident approuvé en nouvelle dent et fait apparaître un red wave ciblé (S107), et l'archive Quality-Diversity de vos élites d'implémentation (S108). Tout est exécutable depuis l'écran : ingérer un incident, approuver le miroir appris, voir le red wave apparaître, promouvoir une élite — sans qu'une ligne de vérité ne soit jamais écrite par la machine."
-keywords: ["aidos", "krd", "S109", "cockpit", "réalité", "évolution", "incident", "RealityMirror", "/learn", "red wave", "miroir appris", "Quality-Diversity", "QD", "élite", "promotion", "anti-Goodhart", "le mur", "EPIC 12", "E12", "§67", "§64", "§66"]
+description: "S109 réunit en UN cockpit par projet tout ce que la réalité de production renvoie à votre Kernel : l'ingestion d'un incident en idée draft (S106), la porte d'approbation /learn qui transforme un incident approuvé en nouvelle dent et fait apparaître une vague de rouge ciblée (S107), et l'archive Quality-Diversity de vos élites d'implémentation (S108). Tout est exécutable depuis l'écran : ingérer un incident, approuver le miroir appris, voir la vague de rouge apparaître, promouvoir une élite — sans qu'une ligne de vérité ne soit jamais écrite par la machine."
+keywords: ["aidos", "krd", "S109", "cockpit", "réalité", "évolution", "incident", "RealityMirror", "/learn", "vague de rouge", "miroir appris", "Quality-Diversity", "QD", "élite", "promotion", "anti-Goodhart", "le mur", "EPIC 12", "E12", "§67", "§64", "§66"]
 ---
 
 <Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S109](/steps/internals/s109-reality-evolution).</Note>
 
 ## En une phrase
 
-S109 est le **tableau de bord** où la **production de votre app** parle à votre Kernel : un incident y devient une idée, votre approbation y devient une **nouvelle dent** (un red wave apparaît), et vos meilleures implémentations y attendent votre feu vert — le tout sur **un seul écran**, sans qu'aucune vérité ne soit jamais écrite à votre place.
+S109 est le **tableau de bord** où la **production de votre app** parle à votre Kernel : un incident y devient une idée, votre approbation y devient une **nouvelle dent** (une vague de rouge apparaît), et vos meilleures implémentations y attendent votre feu vert — le tout sur **un seul écran**, sans qu'aucune vérité ne soit jamais écrite à votre place.
 
 ## Le problème que S109 résout
 
@@ -22,9 +22,9 @@ Le cœur du cockpit est **un parcours en trois temps**, déclenché d'un clic :
 
 1. **Ingérer un incident.** La production de votre app émet de la télémétrie ; une divergence (« createOrder échoue 30 % du temps sur rupture de stock ») devient un **RealityMirror** project-scopé et une **idée draft** dont le texte est rendu par un template déterministe — jamais un résumé inventé.
 2. **Approuver le miroir appris.** Vous (l'humain) avez grillé cette idée puis gelé un **nouveau miroir** au /goal (« out-of-stock-during-checkout »). Le cockpit l'**attache** : l'adresse de contenu de l'opération `createOrder` **change** mécaniquement.
-3. **Voir le red wave apparaître.** Ce changement d'adresse déclenche un **red wave ciblé** (les miroirs d'abord) : la worklist mécanique de ce qu'il reste à faire. « Les faits ont changé » est résolu **mécaniquement**, pas par discussion.
+3. **Voir la vague de rouge apparaître.** Ce changement d'adresse déclenche un **vague de rouge ciblée** (les miroirs d'abord) : la liste de travail mécanique de ce qu'il reste à faire. « Les faits ont changé » est résolu **mécaniquement**, pas par discussion.
 
-C'est exactement le critère de réussite de l'étape : **ingérer un incident, approuver le miroir appris, voir le red wave apparaître.**
+C'est exactement le critère de réussite de l'étape : **ingérer un incident, approuver le miroir appris, voir la vague de rouge apparaître.**
 
 ## L'archive QD de vos élites, au même endroit
 
@@ -38,6 +38,6 @@ Tout ce que le cockpit fait au-dessus de la ligne est une **valeur**, pas une é
 
 ## Ce que ça vous apporte
 
-- **Un seul écran** pour la boucle de réalité de votre projet : ingestion, approbation, red wave, élites.
+- **Un seul écran** pour la boucle de réalité de votre projet : ingestion, approbation, vague de rouge, élites.
 - La preuve, faite devant vous, que **les faits qui changent** deviennent du travail **mécaniquement** — pas un débat.
 - La garantie que **rien n'est écrit à votre place** : la réalité enseigne, vous décidez.

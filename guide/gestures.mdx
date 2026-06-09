@@ -136,7 +136,7 @@ Les gestes se rangent par moment du cycle. Vous les parcourez à peu près dans 
 
 <AccordionGroup>
   <Accordion title="semantic-diff — nommer le changement et son rayon d'impact" icon="code-compare">
-    Classe un changement du noyau (`add` / `refine` / `override` / `rescope` / `reweight` / `deprecate`) et calcule sa **blast radius** — chaque vérité, miroir et projection qu'il perturbe — **avant** de l'appliquer. **Quand :** quand un changeset s'apprête à toucher le noyau, ou pour répondre à « qu'est-ce que ce changement casse ? ». La sous-commande `aidos diff` l'exposera. *À venir.*
+    Classe un changement du noyau (`add` / `refine` / `override` / `rescope` / `reweight` / `deprecate`) et calcule sa **rayon d'impact** — chaque vérité, miroir et projection qu'il perturbe — **avant** de l'appliquer. **Quand :** quand un changeset s'apprête à toucher le noyau, ou pour répondre à « qu'est-ce que ce changement casse ? ». La sous-commande `aidos diff` l'exposera. *À venir.*
   </Accordion>
   <Accordion title="merge-semantic — fusionner par le miroir, pas par le diff texte" icon="code-merge">
     Joint deux branches du DAG en calculant la **coupe fusionnée** et en re-jouant **tous** les miroirs dessus : le miroir est le juge, un diff texte propre ne suffit pas. Tout miroir rouge **bloque** la fusion. **Quand :** quand deux phases stables doivent être jointes, ou pour demander « cette fusion est-elle sûre ? ». *À venir.*
@@ -160,7 +160,7 @@ Les mêmes gestes seront accessibles en ligne de commande, pour scripter le cycl
 | `aidos goal` | Ouvre un goal et calcule le red set. | `/goal` |
 | `aidos check` | Lance les capteurs / miroirs et calcule l'état vert. | `check-completeness` |
 | `aidos impact` | Calcule le rayon d'impact d'un changement. | `semantic-diff` |
-| `aidos diff` | Classe un changement du noyau et sa blast radius. | `semantic-diff` |
+| `aidos diff` | Classe un changement du noyau et sa rayon d'impact. | `semantic-diff` |
 | `aidos stable` | Pose ou inspecte une **phase stable**. | — |
 | `aidos explain` | Rend un blocage en BlockReason actionnable. | `explain-block` |
 | `aidos trim` | Mesure la KernelDebt et propose des réductions. | `trim-kernel` |

@@ -1,14 +1,14 @@
 ---
 title: "S22 · La vague de rouge — l'ensemble exact des liens périmés après un bump"
-description: "Après un bump de noyau, la vague de rouge (red wave) EST exactement l'ensemble des liens périmés — calculée, jamais traquée (KRD §42). Elle PART du miroir de la source bumpée, puis cascade vers les projections (api/db/types/operation/action/button), dans cet ordre (mirror-first, §42/§98). Un changement d'entité rougit api/db/types ; un changement de bouton rougit sa vue SSI le bouton est load-bearing (un changement cosmétique ne propage pas). La vague se déverse dans la RedWorkQueue (un RedWorkItem par lien périmé, status open). aidos impact la prévisualise en lecture seule (= krd impact, §82.1). S22 fige le calcul de la vague et son enfilement ; le scheduler qui réclame/leasé/résout les items est une dent ultérieure."
-keywords: ["aidos", "krd", "vague de rouge", "red wave", "impact", "aidos impact", "RedWorkQueue", "RedWorkItem", "version_stale", "failed_test", "incident", "open", "claimed", "blocked", "resolved", "mirror-first", "load-bearing", "cosmetic", "lien périmé", "stale link", "Resolve", "PostKernelChange", "stigmergie", "le mur", "lecture seule", "KRD §42", "KRD §49.4", "KRD §74", "KRD §82.1", "KRD §98", "KRD §112"]
+description: "Après un bump de noyau, la vague de rouge (vague de rouge) EST exactement l'ensemble des liens périmés — calculée, jamais traquée (KRD §42). Elle PART du miroir de la source bumpée, puis cascade vers les projections (api/db/types/operation/action/button), dans cet ordre (mirror-first, §42/§98). Un changement d'entité rougit api/db/types ; un changement de bouton rougit sa vue SSI le bouton est load-bearing (un changement cosmétique ne propage pas). La vague se déverse dans la RedWorkQueue (un RedWorkItem par lien périmé, status open). aidos impact la prévisualise en lecture seule (= krd impact, §82.1). S22 fige le calcul de la vague et son enfilement ; le scheduler qui réclame/leasé/résout les items est une dent ultérieure."
+keywords: ["aidos", "krd", "vague de rouge", "vague de rouge", "impact", "aidos impact", "RedWorkQueue", "RedWorkItem", "version_stale", "failed_test", "incident", "open", "claimed", "blocked", "resolved", "mirror-first", "load-bearing", "cosmetic", "lien périmé", "stale link", "Resolve", "PostKernelChange", "stigmergie", "le mur", "lecture seule", "KRD §42", "KRD §49.4", "KRD §74", "KRD §82.1", "KRD §98", "KRD §112"]
 ---
 
 <Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S22](/steps/internals/s22-red-wave).</Note>
 
 ## En une phrase
 
-S22 fige la **vague de rouge** (*red wave*, KRD §42) : après un **bump de noyau** (une source change de version), AIDOS **calcule** l'ensemble exact des **liens périmés** que ce bump entraîne — partant du **miroir** de la source, puis cascadant vers ses **projections** (api/db/types/operation/action/button) — et déverse cette vague dans la **RedWorkQueue**, la liste de travail qui dit « voici ce qui doit redevenir vert ».
+S22 fige la **vague de rouge** (*vague de rouge*, KRD §42) : après un **bump de noyau** (une source change de version), AIDOS **calcule** l'ensemble exact des **liens périmés** que ce bump entraîne — partant du **miroir** de la source, puis cascadant vers ses **projections** (api/db/types/operation/action/button) — et déverse cette vague dans la **RedWorkQueue**, la liste de travail qui dit « voici ce qui doit redevenir vert ».
 
 ## Le problème que ça résout
 

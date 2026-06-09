@@ -34,7 +34,7 @@ FK15 part (a) est l'**émetteur de projections d'outillage** — `back/kernel/to
 
 **Le MCP** `aidos-tool-projection` (`back/mcp/tool-projection/`, ADR 0009) expose cinq outils **purs, write-nothing** : `emit`, `emit_all`, `detect_drift`, `validate`, `serialize`. Chaque erreur est mappée sur son `BlockReason` clos (`NO_PROJECT` / `UNKNOWN_KIND` / `EMPTY_ID` / `UNKNOWN_TARGET`).
 
-**Les miroirs.** Property (rapid, `back/kernel/toolproject`) : déterminisme (mêmes kernels → fichiers byte-identiques, le critère de done), order-independence, *drift ⇔ hand-edit*, round-trip content-adressé, le source-hash pilote le marqueur. Fixture : les quatre cibles portent leurs kinds, l'injection de faute (hand-edit → `HAND_EDITED`), `MISSING_MARKER`, `STALE_HASH`, le round-trip. Le jumeau TS rejoue les mêmes invariants en fast-check (Vitest). Playwright e2e (`tests/e2e/tool-projection.spec.ts`) : émettre CLAUDE.md (le mur + le source-hash + le marqueur), AGENTS.md (le persona, pas le mur), vérifier propre (vert), vérifier hand-édité (`HAND_EDITED`, rouge).
+**Les miroirs.** Property (rapid, `back/kernel/toolproject`) : déterminisme (mêmes kernels → fichiers byte-identiques, le critère de done), order-independence, *dérive ⇔ hand-edit*, round-trip content-adressé, le source-hash pilote le marqueur. Fixture : les quatre cibles portent leurs kinds, l'injection de faute (hand-edit → `HAND_EDITED`), `MISSING_MARKER`, `STALE_HASH`, le round-trip. Le jumeau TS rejoue les mêmes invariants en fast-check (Vitest). Playwright e2e (`tests/e2e/tool-projection.spec.ts`) : émettre CLAUDE.md (le mur + le source-hash + le marqueur), AGENTS.md (le persona, pas le mur), vérifier propre (vert), vérifier hand-édité (`HAND_EDITED`, rouge).
 
 ## Le fork de stockage — la même décision que FK14
 
@@ -44,7 +44,7 @@ Comme `lexicon` (FK14), `why_tree` (FK13) et `caused_by` (FK12), un *ToolingKern
 
 FK15 incarne le **déterminisme d'abord** (§8) : une projection (rendu, hash, diff) est *par nature* une fonction pure — exactement ce qui **doit** être code, jamais un « agent qui rédige CLAUDE.md ». Le juge est un **rendu déterministe + une comparaison d'octets** ; le miroir de reproductibilité (mêmes kernels → fichiers byte-identiques) le prouve. Émettre `CLAUDE.md` par un LLM serait une **faille de déterminisme** qui bloque l'étape — un émetteur pur le rend authoritatif.
 
-C'est la **même anatomie 1-pour-1** que les autres émetteurs (Go structs, DDL, types TS depuis l'AST d'entité) appliquée à l'outillage : la doc-outil est une **projection** d'une source de kernel, pas une vérité parallèle. La **protection par hash** généralise « ne pas hand-éditer les fichiers générés » (§9) à un prédicat exécutable : le drift n'est pas une politique d'honneur, c'est un `DetectDrift` qui rougit.
+C'est la **même anatomie 1-pour-1** que les autres émetteurs (Go structs, DDL, types TS depuis l'AST d'entité) appliquée à l'outillage : la doc-outil est une **projection** d'une source de kernel, pas une vérité parallèle. La **protection par hash** généralise « ne pas hand-éditer les fichiers générés » (§9) à un prédicat exécutable : la dérive n'est pas une politique d'honneur, c'est un `DetectDrift` qui rougit.
 
 Le **mur** est intact : l'émetteur **lit** des kernels et **rend** des fichiers / **signale** des drifts ; il n'écrit aucune vérité. Figer/mettre à jour un *ToolingKernel* passe par idée → miroir → /goal → approbation humaine.
 

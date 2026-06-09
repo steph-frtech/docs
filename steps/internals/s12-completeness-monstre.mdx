@@ -35,7 +35,7 @@ Le comportement de S12 est prouvé par **trois miroirs** (les natures attendues)
   </Step>
 </Steps>
 
-La route **`/completeness`** (`front/web/app/completeness/page.tsx`, thème ADR 0010, bilingue ADR 0011) **projette** `runtime.completeness_runs` : le verdict de la coupe courante (`COMPLETE` / `BLOCKED — MONSTER`), l'ensemble des monstres avec leur raison + `how_to_fix`, et un flux des blocages récents. **Lecture seule** assumée : la porte est tenue par le hook Go invoqué par la harness, jamais par un écran — aucune capacité headless cachée (le rerun-à-la-demande est OQ-S12-1). L'e2e `tests/e2e/completeness.spec.ts` (Playwright) prouve le rendu des deux raisons + des deux verdicts.
+La route **`/completeness`** (`front/web/app/completeness/page.tsx`, thème ADR 0010, bilingue ADR 0011) **projette** `runtime.completeness_runs` : le verdict de la coupe courante (`COMPLETE` / `BLOCKED — MONSTER`), l'ensemble des monstres avec leur raison + `how_to_fix`, et un flux des blocages récents. **Lecture seule** assumée : la porte est tenue par le hook Go invoqué par le harnais, jamais par un écran — aucune capacité headless cachée (le rerun-à-la-demande est OQ-S12-1). L'e2e `tests/e2e/completeness.spec.ts` (Playwright) prouve le rendu des deux raisons + des deux verdicts.
 
 ## Méta-méta
 

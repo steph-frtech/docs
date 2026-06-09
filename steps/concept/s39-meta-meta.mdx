@@ -1,5 +1,5 @@
 ---
-title: "S39 · Méta-méta — le self-test du harness (fitness inviolable)"
+title: "S39 · Méta-méta — le self-test du harnais (fitness inviolable)"
 description: "S39 ferme la boucle méta-méta du KRD (LIVRE XIII §70) : un hook SessionStart (harness-self-test) qui, à chaque démarrage de session, lance une injection de faute DÉTERMINISTE prouvant les trois garanties inviolables du NIVEAU 3 — chaque capteur se déclenche encore, le mur refuse toujours les écritures kernel/mirrors/fitness de l'agent, et la fitness (définition de « réussi ») n'a pas été modifiée par la boucle méta. La boucle méta peut AJOUTER un garde-fou, jamais en RETIRER un. Cette étape n'écrit pas la fitness — elle la LIT et affirme qu'elle est inchangée. Il n'y a pas de niveau 4."
 keywords: ["aidos", "krd", "méta-méta", "meta-meta", "NIVEAU 3", "fitness", "self-test", "harness-self-test", "SessionStart", "injection de faute", "fault injection", "le miroir du miroir", "mirror of the mirrors", "inviolable", "le mur", "the wall", "garde-fou", "guardrail", "MUTED_SENSOR", "WALL_BREACHED", "FITNESS_MUTATED", "BlockReason", "déterministe", "lecture seule", "read-only", "baseline gravée", "S02", "S04", "S07", "S13", "pas de niveau 4", "no level 4", "/meta", "/self-test"]
 ---
@@ -45,4 +45,4 @@ AIDOS s'améliore tout seul (la boucle méta : sensors, mur, complétude, évolu
 
 ## Le critère « done »
 
-Le self-test est **vert** : harness sain ⇒ chaque capteur déclenché, mur refusé sur kernel ∧ mirrors ∧ fitness, fitness inchangée. Un capteur muet, un mur percé, une fitness modifiée **virent chacun au rouge** avec le bon BlockReason. Vu à l'écran sur **/meta**.
+Le self-test est **vert** : harnais sain ⇒ chaque capteur déclenché, mur refusé sur kernel ∧ mirrors ∧ fitness, fitness inchangée. Un capteur muet, un mur percé, une fitness modifiée **virent chacun au rouge** avec le bon BlockReason. Vu à l'écran sur **/meta**.

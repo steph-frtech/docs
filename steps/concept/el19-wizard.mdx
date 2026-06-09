@@ -1,14 +1,14 @@
 ---
-title: "EL19 · le wizard Compound du besoin (tout par écran)"
-description: "EL19 est la route Workbench /compound-besoin : le wizard tunnel niveau par niveau (escalier vertical) où l'utilisateur EXPLIQUE son app rung par rung, dans l'ordre de la verticale KRD §23. Une étape N+1 est VERROUILLÉE tant que CanDescend(N) n'est pas enough (la gate de forçage EL07 rendue visible) ; un niveau qui parse mais ne contraint rien (anti-vacuité) ne débloque pas. La vue /compound-besoin/doc génère le document d'exigences déterministe (EmitRequirementsDoc) — même BesoinGraph → doc byte-identique. « Projeter vers idea-intake » fait surgir les vraies Ideas (ordre topologique, NoEmit exclus) ; « Ouvrir comme goals » est refusé tant que le graphe n'est pas complet (gate EL09). Above le mur : l'écran PROPOSE, n'écrit jamais le Kernel."
-keywords: ["aidos", "krd", "besoin", "compound du besoin", "EL19", "wizard", "tunnel", "escalier vertical", "/compound-besoin", "/compound-besoin/doc", "CanDescend", "anti-vacuité", "anti-gaming", "ShrinkOptionSpace", "verticale KRD §23", "EmitRequirementsDoc", "document d'exigences", "requirements doc", "graph_hash", "Projeter", "idea-intake", "Ouvrir comme goals", "EL09", "NoEmit", "le mur", "HasMirror", "Workbench", "thémé", "bilingue", "déterminisme", "tout par écran"]
+title: "EL19 · le assistant Compound du besoin (tout par écran)"
+description: "EL19 est la route Workbench /compound-besoin : le assistant tunnel niveau par niveau (escalier vertical) où l'utilisateur EXPLIQUE son app rung par rung, dans l'ordre de la verticale KRD §23. Une étape N+1 est VERROUILLÉE tant que CanDescend(N) n'est pas enough (la gate de forçage EL07 rendue visible) ; un niveau qui parse mais ne contraint rien (anti-vacuité) ne débloque pas. La vue /compound-besoin/doc génère le document d'exigences déterministe (EmitRequirementsDoc) — même BesoinGraph → doc byte-identique. « Projeter vers idea-intake » fait surgir les vraies Ideas (ordre topologique, NoEmit exclus) ; « Ouvrir comme goals » est refusé tant que le graphe n'est pas complet (gate EL09). Above le mur : l'écran PROPOSE, n'écrit jamais le Kernel."
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "EL19", "assistant", "tunnel", "escalier vertical", "/compound-besoin", "/compound-besoin/doc", "CanDescend", "anti-vacuité", "anti-gaming", "ShrinkOptionSpace", "verticale KRD §23", "EmitRequirementsDoc", "document d'exigences", "requirements doc", "graph_hash", "Projeter", "idea-intake", "Ouvrir comme goals", "EL09", "NoEmit", "le mur", "HasMirror", "Workbench", "thémé", "bilingue", "déterminisme", "tout par écran"]
 ---
 
 <Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL19](/steps/internals/el19-wizard).</Note>
 
 ## En une phrase
 
-EL19 est l'**écran** où vous expliquez votre app : un **tunnel niveau par niveau** (product → journey → view → control → action → operation → entity) qui ne s'ouvre **rung par rung** que lorsque chaque niveau est **suffisamment déclaré**. Au bout, il **projette** votre besoin en un backlog d'Ideas ordonné et un **document d'exigences** que l'app-builder consomme.
+EL19 est l'**écran** où vous expliquez votre app : un **tunnel niveau par niveau** (product → journey → view → control → action → operation → entity) qui ne s'ouvre **rung par rung** que lorsque chaque niveau est **suffisamment déclaré**. Au bout, il **projette** votre besoin en une file de travail d'Ideas ordonné et un **document d'exigences** que l'app-builder consomme.
 
 ## Le problème que ça résout
 
@@ -35,7 +35,7 @@ C'est le **forçage rendu visible**. Vous voyez, en direct :
 </Field>
 
 <Field name="Le document d'exigences (byte-identique)" type="EmitRequirementsDoc">
-  La vue `/compound-besoin/doc` génère le **requirements doc** : les rungs ordonnés + les métadonnées + les OpenQuestions + le backlog topo-trié, adressés par le `graph_hash`. **Même besoin → mêmes octets** : c'est un rendu pur, jamais un LLM.
+  La vue `/compound-besoin/doc` génère le **requirements doc** : les rungs ordonnés + les métadonnées + les OpenQuestions + la file de travail topo-trié, adressés par le `graph_hash`. **Même besoin → mêmes octets** : c'est un rendu pur, jamais un LLM.
 </Field>
 
 <Field name="Ouvrir comme goals (la gate de complétude)" type="EL09">

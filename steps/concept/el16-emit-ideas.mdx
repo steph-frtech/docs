@@ -1,14 +1,14 @@
 ---
-title: "EL16 · emit-ideas (l'émetteur déterministe vers le backlog d'idées)"
+title: "EL16 · emit-ideas (l'émetteur déterministe vers la file de travail d'idées)"
 description: "EL16 est l'émetteur déterministe EmitIdeas(graph) → []Idea, via la porte idea-intake, gouverné par la table close LevelToProposes (EL05). Pour chaque nœud résolu dont le rung mappe, une Idea draft est émise (proposes = LevelToProposes(level), intent = l'utterance verbatim, provenance humaine) ; les rungs NoEmit (journey/view/invariant) n'émettent rien — pas de cast silencieux. L'id réutilise records.Hash → l'Idea est content-adressée + idempotente (ré-émission byte-identique). Above le mur : aucune écriture kernel/mirror, HasMirror toujours false ; la promotion = écrire le miroir via /goal (hand-off S64)."
-keywords: ["aidos", "krd", "besoin", "compound du besoin", "emit-ideas", "EmitIdeas", "émetteur déterministe", "BesoinGraph", "Idea", "backlog", "LevelToProposes", "EL05", "NoEmit", "idea_capture", "idea-intake", "le mur", "HasMirror", "content-addressed", "idempotence", "graph_hash", "déterminisme", "S64", "app-builder", "EL15", "EL16"]
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "emit-ideas", "EmitIdeas", "émetteur déterministe", "BesoinGraph", "Idea", "file de travail", "LevelToProposes", "EL05", "NoEmit", "idea_capture", "idea-intake", "le mur", "HasMirror", "content-addressed", "idempotence", "graph_hash", "déterminisme", "S64", "app-builder", "EL15", "EL16"]
 ---
 
 <Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL16](/steps/internals/el16-emit-ideas).</Note>
 
 ## En une phrase
 
-EL16 prend votre **BesoinGraph** — l'app que vous avez expliquée niveau par niveau — et le **projette en un backlog d'idées** : une idée par niveau résolu qui mappe, **jamais du code en passant**, jamais dans le noyau.
+EL16 prend votre **BesoinGraph** — l'app que vous avez expliquée niveau par niveau — et le **projette en une file de travail d'idées** : une idée par niveau résolu qui mappe, **jamais du code en passant**, jamais dans le noyau.
 
 ## Le problème que ça résout
 
@@ -42,8 +42,8 @@ Trois garanties qu'il tient :
 
 ## Comment vous l'utilisez
 
-Depuis l'écran **`/emit-ideas`** du Workbench : vous façonnez le graphe déjà-décidé (le statut de chaque rung), puis **« Émettre les Ideas »** lance l'émetteur. Le backlog apparaît dans l'ordre topologique (product d'abord, puis la descente), prêt pour le hand-off vers l'app-builder.
+Depuis l'écran **`/emit-ideas`** du Workbench : vous façonnez le graphe déjà-décidé (le statut de chaque rung), puis **« Émettre les Ideas »** lance l'émetteur. La file de travail apparaît dans l'ordre topologique (product d'abord, puis la descente), prêt pour le hand-off vers l'app-builder.
 
 ## Le hand-off (S64)
 
-`EmitIdeas` → `idea-intake` (provenance humaine) → **S64** (« capturez votre idée ») → **S65** (`/grill`) → **S66** (`/goal`, ouverts dans l'ordre topologique du backlog) → **S67**. La promotion est **toujours** écrire le miroir via `/goal`, jamais une écriture noyau directe.
+`EmitIdeas` → `idea-intake` (provenance humaine) → **S64** (« capturez votre idée ») → **S65** (`/grill`) → **S66** (`/goal`, ouverts dans l'ordre topologique de la file de travail) → **S67**. La promotion est **toujours** écrire le miroir via `/goal`, jamais une écriture noyau directe.

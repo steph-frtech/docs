@@ -56,7 +56,7 @@ idée  →  miroir (rouge)  →  /goal  →  approbation humaine  →  ChangeSet
 
 Le **cliquet** (ratchet) est la garantie que le comportement ne peut qu'**avancer**, jamais reculer. Chaque vérité gelée est un cran. L'IA refactore, réécrit, optimise — les miroirs du noyau sont la paroi qui dit « tu n'as rien cassé ».
 
-Le cliquet **n'interdit pas le changement** ; il interdit le changement *non-versionné*. Une déviation d'une contrainte sans bump de version est une **régression** (rouge, interdite). La même déviation *avec* bump (+ ADR + approbation humaine) est une **évolution** (la RedWave / vague de rouge est attendue — c'est la worklist). La version est le sceau qui distingue l'évolution légitime de la régression silencieuse.
+Le cliquet **n'interdit pas le changement** ; il interdit le changement *non-versionné*. Une déviation d'une contrainte sans bump de version est une **régression** (rouge, interdite). La même déviation *avec* bump (+ ADR + approbation humaine) est une **évolution** (la RedWave / vague de rouge est attendue — c'est la liste de travail). La version est le sceau qui distingue l'évolution légitime de la régression silencieuse.
 
 ### « Done est calculé, pas déclaré »
 
@@ -111,7 +111,7 @@ Tout est **versionné dans Postgres** : un override n'est pas une édition, c'es
 
 ## Les cinq garde-fous mécaniques
 
-Le mur et le cliquet sont deux des cinq garde-fous, tous implémentés comme **hooks** (binaires Go invoqués par le harness) :
+Le mur et le cliquet sont deux des cinq garde-fous, tous implémentés comme **hooks** (binaires Go invoqués par le harnais) :
 
 | # | Garde-fou | Hook | Ce qu'il garantit |
 |---|---|---|---|

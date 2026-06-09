@@ -1,7 +1,7 @@
 ---
 title: "S46 · Démo checkout — internals (la tranche end-to-end)"
 description: "Le détail d'implémentation de S46 : la tranche de démonstration checkout, une composition mince qui appelle les dents S27/S29/S20/S34-38/S10/S23 dans l'ordre pour porter « un client passe une commande depuis son panier » de l'idée au bouton, du rouge au vert. Trois couches : l'implémentation (le driver Go + le jumeau TS + le panneau /demo-checkout), la méta (les miroirs Godog/fixture/property/playwright-bdd qui la prouvent), la méta-méta (sa place dans le cliquet KRD, le mur, la complétude, l'honnêteté)."
-keywords: ["aidos", "krd", "demo checkout", "checkout slice", "RunSlice", "Trace", "createOrder", "Order", "panier", "cart", "Testcontainers", "Godog", "playwright-bdd", "fixture", "rapid", "fast-check", "ChangeSet", "phases.IsStable", "OpenGoal", "red wave", "le mur", "complétude", "déterminisme", "OpenQuestion", "tout par écran", "composition acceptance"]
+keywords: ["aidos", "krd", "demo checkout", "checkout slice", "RunSlice", "Trace", "createOrder", "Order", "panier", "cart", "Testcontainers", "Godog", "playwright-bdd", "fixture", "rapid", "fast-check", "ChangeSet", "phases.IsStable", "OpenGoal", "vague de rouge", "le mur", "complétude", "déterminisme", "OpenQuestion", "tout par écran", "composition acceptance"]
 ---
 
 <Note>Côté « Pour moi » — le détail complet. Pour le concept sans code, voir [Pour les futurs utilisateurs → S46](/steps/concept/s46-demo-checkout).</Note>

@@ -8,7 +8,7 @@ keywords: ["aidos", "krd", "implémentation", "S00", "contrat d'exécution", "st
   Côté détail. Pour le concept, voir [Pour les futurs utilisateurs → S00](/steps/concept/s00-exec-contract).
 </Info>
 
-S00 est la **racine du plan** : aucune ligne de code-moteur, seulement la **loi** que toutes les étapes suivantes devront respecter. Cette loi est un seul fichier, lu par deux lecteurs — la machine (le harness) et l'humain (le [Workbench](/concepts/five-subsystems)). C'est le premier cran du [cliquet](/internals/the-wall-and-ratchet).
+S00 est la **racine du plan** : aucune ligne de code-moteur, seulement la **loi** que toutes les étapes suivantes devront respecter. Cette loi est un seul fichier, lu par deux lecteurs — la machine (le harnais) et l'humain (le [Workbench](/concepts/five-subsystems)). C'est le premier cran du [cliquet](/internals/the-wall-and-ratchet).
 
 ## Implémentation
 
@@ -34,7 +34,7 @@ Le bloc `contract:` porte un en-tête (`version: "1.0.0"`, `kind: step-contract`
   gate: computational
 ```
 
-Le champ `gate` vaut `computational` (le harness peut trancher sans humain) ou `human` (une décision humaine est requise). Les neuf phases, dans l'ordre, sont `grill-with-docs` (human), `bdd-mirror-first` (computational), `tdd` (computational), `sensors-green` (computational), `completeness` (computational), `diagnose` (human), `ui-playwright` (computational), `improve-architecture` (human), `artifacts` (computational).
+Le champ `gate` vaut `computational` (le harnais peut trancher sans humain) ou `human` (une décision humaine est requise). Les neuf phases, dans l'ordre, sont `grill-with-docs` (human), `bdd-mirror-first` (computational), `tdd` (computational), `sensors-green` (computational), `completeness` (computational), `diagnose` (human), `ui-playwright` (computational), `improve-architecture` (human), `artifacts` (computational).
 
 `granularity[]` — les **cinq propriétés** que toute étape doit satisfaire (`id` + `label` + `description`, sans `gate`) : `minimal`, `autonomous`, `visualizable`, `non-destructive`, `chainable`.
 
@@ -114,7 +114,7 @@ L'enregistrement du miroir dans le schema Postgres `mirrors` (`reflects=S00-exec
 
 ### S00 est la racine du cliquet
 
-S00 ne fait pas tourner le [cliquet](/internals/the-wall-and-ratchet) — il **l'établit**. Le contrat est la loi contre laquelle toutes les étapes suivantes sont vérifiées : la boucle par étape (les neuf phases) et la règle de granularité (les cinq propriétés) deviennent le standard que le harness lit et que la Workbench rend. C'est le premier cran : self-describing, additif seulement.
+S00 ne fait pas tourner le [cliquet](/internals/the-wall-and-ratchet) — il **l'établit**. Le contrat est la loi contre laquelle toutes les étapes suivantes sont vérifiées : la boucle par étape (les neuf phases) et la règle de granularité (les cinq propriétés) deviennent le standard que le harnais lit et que la Workbench rend. C'est le premier cran : self-describing, additif seulement.
 
 ### Le mur tient déjà
 

@@ -1,7 +1,7 @@
 ---
 title: "S105 · Cockpit de fédération — le graphe de cellules d'un coup d'œil"
-description: "S105 vous donne le seul vrai tableau de bord de la grandeur (§50) : un cockpit qui montre votre fédération de cellules d'un coup — le graphe des cellules, les contrats inter-cellules, le statut des DEUX ratchets (comportemental par cellule + structurel sur la coupe), la stabilité locale vs globale, et le red wave fan-out. Exécutable : assembler le cockpit, faire déferler le red wave transverse, et voir une cellule shipper sa coupe locale verte pendant qu'une voisine est encore rouge. La preuve du fractal §43 : la grandeur vit dans le NOMBRE de cellules, pas dans la taille d'une."
-keywords: ["aidos", "krd", "S105", "cockpit", "fédération", "graphe de cellules", "context-map", "deux ratchets", "ratchet comportemental", "ratchet structurel", "red wave", "fan-out", "stabilité locale", "stabilité globale", "bounded context", "EPIC 11", "§50", "§43"]
+description: "S105 vous donne le seul vrai tableau de bord de la grandeur (§50) : un cockpit qui montre votre fédération de cellules d'un coup — le graphe des cellules, les contrats inter-cellules, le statut des DEUX ratchets (comportemental par cellule + structurel sur la coupe), la stabilité locale vs globale, et la vague de rouge fan-out. Exécutable : assembler le cockpit, faire déferler la vague de rouge transverse, et voir une cellule shipper sa coupe locale verte pendant qu'une voisine est encore rouge. La preuve du fractal §43 : la grandeur vit dans le NOMBRE de cellules, pas dans la taille d'une."
+keywords: ["aidos", "krd", "S105", "cockpit", "fédération", "graphe de cellules", "context-map", "deux ratchets", "ratchet comportemental", "ratchet structurel", "vague de rouge", "fan-out", "stabilité locale", "stabilité globale", "bounded context", "EPIC 11", "§50", "§43"]
 ---
 
 <Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S105](/steps/internals/s105-federation-cockpit).</Note>
@@ -14,7 +14,7 @@ S105 vous donne **le cockpit de votre fédération** : un seul écran qui montre
 
 Une grosse app n'est **jamais** un seul Kernel indivis (§43–§51) : c'est une **fédération de cellules** (bounded contexts), chacune avec son propre Kernel et son propre ratchet, liées uniquement par des contrats (S100, S101). La grandeur vit dans le **NOMBRE** de cellules, jamais dans la taille d'une seule.
 
-Mais une fédération de dizaines de cellules est invisible si vous n'avez pas de **tableau de bord**. Vous avez besoin de voir, d'un coup d'œil : quelles cellules existent, comment elles se parlent, laquelle est verte et ship, laquelle est rouge et bloquée — et si le **changement transverse** (une policy globale, un red wave) est en train de déferler.
+Mais une fédération de dizaines de cellules est invisible si vous n'avez pas de **tableau de bord**. Vous avez besoin de voir, d'un coup d'œil : quelles cellules existent, comment elles se parlent, laquelle est verte et ship, laquelle est rouge et bloquée — et si le **changement transverse** (une policy globale, une vague de rouge) est en train de déferler.
 
 ## Les deux ratchets, côte à côte
 
@@ -25,18 +25,18 @@ Le cœur de S105, c'est de rendre visibles les **deux** cliquets de la fédérat
 
 Le cockpit montre les deux **en même temps**. Une fédération n'est **globalement stable** que si **toutes** ses cellules shippent **ET** le ratchet structurel tient.
 
-## Le red wave transverse, vu d'un coup
+## La vague de rouge transverse, vue d'un coup
 
-Quand une **policy globale** change (par exemple « tout PII oubliable », réutilisée par S116), elle déclenche un **red wave fan-out** : exprimée **une fois**, elle rougit exactement les cellules qui la **violent**, chacune réconciliant **localement** sa propre file de travail. Les cellules non concernées **restent vertes**.
+Quand une **policy globale** change (par exemple « tout PII oubliable », réutilisée par S116), elle déclenche un **vague de rouge fan-out** : exprimée **une fois**, elle rougit exactement les cellules qui la **violent**, chacune réconciliant **localement** sa propre file de travail. Les cellules non concernées **restent vertes**.
 
-Le cockpit rend ce déferlement visible : vous lancez le red wave, et vous voyez `payment` rougir et cesser de shipper, tandis qu'`order` — qui ne viole pas la policy — **montre une coupe locale verte et continue de shipper**. C'est exactement le done-criterion du §50.
+Le cockpit rend ce déferlement visible : vous lancez la vague de rouge, et vous voyez `payment` rougir et cesser de shipper, tandis qu'`order` — qui ne viole pas la policy — **montre une coupe locale verte et continue de shipper**. C'est exactement le done-criterion du §50.
 
 ## Les gestes exécutables
 
 Le cockpit n'est pas en lecture seule (loi `ui-completeness`). Depuis l'écran, vous pouvez :
 
 1. **Assembler le cockpit** sur vos cellules réelles (le graphe, les contrats, les deux ratchets, ce qui ship maintenant) ;
-2. **Faire déferler le red wave transverse** : une cellule rougit, sa voisine reste verte et ship ;
+2. **Faire déferler la vague de rouge transverse** : une cellule rougit, sa voisine reste verte et ship ;
 3. **Casser la structure** : une nouvelle dépendance inter-cellule non contractée fait passer le second ratchet à BROKEN — la fédération n'est plus globalement stable, **même avec des cellules vertes**.
 
 ## Pourquoi c'est important pour vous

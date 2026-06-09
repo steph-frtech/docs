@@ -1,7 +1,7 @@
 ---
 title: "FK11 · L'AI Lab : le cockpit trialogue (internals)"
 description: "Implémentation, Méta et Méta-méta de FK11 : le cockpit /ai-lab comme COMPOSITION pure de la conscience FK09. back/runtime/ailab (autoritatif) + front/web/lib/ai-lab (jumeau). ProposeSlot (GAUCHE, refus au mur), BuildCockpit (CENTRE, voyants + tier par source), ScopeForPair (clic → scope gauche+droite), ApplyCardValidation (DROITE, fix_below_wall flippe 🔴→🟢 par re-réconciliation, sinon ouvre un /goal). Deux modes = un réglage de zoom. MCP aidos-ai-lab (4 outils). Tout pur ; même entrée → même sortie ; le mur intact."
-keywords: ["aidos", "krd", "FK11", "AI Lab", "cockpit", "trialogue", "ailab", "ProposeSlot", "BuildCockpit", "ScopeForPair", "ApplyCardValidation", "PairTier", "voyant", "le mur", "WallRefusal", "AI_LAB_DIRECT_TRUTH_WRITE", "decision card", "red wave", "promotion gate", "conscience", "FK09", "déterminisme", "rapid", "fast-check", "MCP", "FKE-38"]
+keywords: ["aidos", "krd", "FK11", "AI Lab", "cockpit", "trialogue", "ailab", "ProposeSlot", "BuildCockpit", "ScopeForPair", "ApplyCardValidation", "PairTier", "voyant", "le mur", "WallRefusal", "AI_LAB_DIRECT_TRUTH_WRITE", "decision card", "vague de rouge", "porte de promotion", "conscience", "FK09", "déterminisme", "rapid", "fast-check", "MCP", "FKE-38"]
 ---
 
 <Note>Côté « Pour moi » — le journal de bord interne. Pour la version sans code, voir [Pour les futurs utilisateurs → FK11](/steps/concept/fk11-ai-lab).</Note>
@@ -22,7 +22,7 @@ FK11 n'ajoute **aucun nouveau juge** : le cockpit est une **composition pure** d
 
 **Le MCP — `back/mcp/ai-lab/` (`aidos-ai-lab`, ADR 0009).** Quatre outils purs, write-nothing : `build_cockpit`, `propose_slot`, `scope_pair`, `validate_card`. Ils reconstruisent le `ConsciousnessReport` (même schéma d'entrée que le MCP conscience) puis appellent le cœur `ailab`. Transport stdio.
 
-**L'UI — `front/web/app/ai-lab/`.** La route `/ai-lab` (thème ADR 0010, bilingue 0011) rend le trialogue en trois `<section>` : `pane-left` (chat → `proposed-slot` / `wall-refusal`), `pane-center` (les `pair-cell` cliquables avec voyant + tier), `pane-right` (red wave + promotion gate + decision cards avec options). Chaque op a son contrôle lié à une Server Action (ui-completeness, §7) ; un e2e Playwright prouve chaque chemin.
+**L'UI — `front/web/app/ai-lab/`.** La route `/ai-lab` (thème ADR 0010, bilingue 0011) rend le trialogue en trois `<section>` : `pane-left` (chat → `proposed-slot` / `wall-refusal`), `pane-center` (les `pair-cell` cliquables avec voyant + tier), `pane-right` (vague de rouge + porte de promotion + decision cards avec options). Chaque op a son contrôle lié à une Server Action (ui-completeness, §7) ; un e2e Playwright prouve chaque chemin.
 
 ## Méta
 

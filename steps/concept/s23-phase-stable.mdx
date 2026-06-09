@@ -43,7 +43,7 @@ Quand peut-on dire que le système est *cohérent* — qu'on tient un point sur 
 ## Ce que S23 ne fait pas (dents ultérieures)
 
 - **Pas de branches / merge / revert du DAG** : seul le nœud de phase stable + son arête `parent`. Le merge sémantique (§122/§130) est S25.
-- **Pas de red-wave / worklist d'impact** : la staleness par lien est **consommée** de S17 ; la vague de rouge (§42) est S22. S23 est la **décision de coupe agrégée**, pas le calcul par lien.
+- **Pas de red-wave / liste de travail d'impact** : la staleness par lien est **consommée** de S17 ; la vague de rouge (§42) est S22. S23 est la **décision de coupe agrégée**, pas le calcul par lien.
 - **Pas de curation / quality-diversity** (§44.4) : garder/compresser/tombstone les nœuds est S26.
 - **Pas de stabilité globale / fédération** (§43 fractal) : stabilité **locale** (cellule) seulement.
 - **Pas de MCP, pas de hook** : `IsStable` est une bibliothèque pure et `aidos stable` une commande ; le MCP `dag` qui parcourt branches/reverts est ultérieur.

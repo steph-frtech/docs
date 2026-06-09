@@ -21,7 +21,7 @@ Le piège serait de demander à un LLM « ces deux textes disent-ils la même ch
 FK07 compare les deux docs sur **deux plans**, et **un seul** des deux décide :
 
 - **Le plan structurel — le JUGE.** Trois ensembles de chaque côté : les **concepts**, les **comportements** (par identifiant) et les **erreurs**. FK07 calcule la **différence symétrique** : ce qui est dans l'un et pas dans l'autre. Toute divergence structurelle **bloque** (verdict rouge). C'est une simple opération sur des ensembles : déterministe, **même paire → même verdict**.
-- **Le plan de la prose — ADVISORY.** Le texte libre qui décrit chaque comportement. Si la formulation a dérivé (même comportement, phrase réécrite), FK07 émet un **signal consultatif** — il le **montre**, il ne bloque pas. Un LLM, ailleurs, *pourrait* signaler ce drift ; ici, **il n'arbitre jamais**. Éditer seulement la prose laisse le verdict **vert**.
+- **Le plan de la prose — ADVISORY.** Le texte libre qui décrit chaque comportement. Si la formulation a dérivé (même comportement, phrase réécrite), FK07 émet un **signal consultatif** — il le **montre**, il ne bloque pas. Un LLM, ailleurs, *pourrait* signaler cette dérive ; ici, **il n'arbitre jamais**. Éditer seulement la prose laisse le verdict **vert**.
 
 C'est la traduction directe d'une règle fondatrice d'AIDOS : *le juge est un calcul* (§8). Le structurel tranche ; la prose informe.
 

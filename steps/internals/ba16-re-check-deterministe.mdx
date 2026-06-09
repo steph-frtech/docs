@@ -39,7 +39,7 @@ Le choix de modéliser le juge par `Observed` (une lecture de sensor injectée) 
 
 > Une action dont la nature ne porte **aucun** post-check déterministe est elle-même un *determinism gap* qui bloque le pas.
 
-C'est le §8 (« done is computed ») descendu au grain de l'action. Trois conséquences que le harness garde vivantes :
+C'est le §8 (« done is computed ») descendu au grain de l'action. Trois conséquences que le harnais garde vivantes :
 
 1. **Le juge est le miroir, jamais la confiance.** `PostCheck` ne lit jamais un champ « l'agent pense que c'est vert » ; il lit `observed`. La propriété d'invariance-à-la-confiance le prouve : ré-étiqueter la confiance ne change pas le Résultat, seule la lecture de sensor le peut.
 2. **CHAQUE action est re-checkée**, pas seulement celles qui changent du code — un read et un propose ont, eux aussi, leur juge déterministe (no-op / forme). C'est ce qui ferme le gap D2 généralisé.

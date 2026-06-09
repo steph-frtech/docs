@@ -1,7 +1,7 @@
 ---
 title: "FK11 · L'AI Lab : le cockpit trialogue"
-description: "FK11 réunit en un seul écran zoomable — /ai-lab — les trois conversations du travail KRD. À GAUCHE, le chat scopé au nœud : il propose des slots, il n'écrit jamais la vérité. Au CENTRE, la couche navigable : le kernel et son anatomie 1-pour-1, le mur dessiné, un voyant 🟢/🔴/🟡 par paire de chaque facette (la conscience live). À DROITE, les decision cards, le blast radius, la red wave et la promotion gate. Deux modes — conversationnel et navigationnel — sont le même écran à un zoom différent. Le chat propose ; le mur tient ; les écarts sont déterministes."
-keywords: ["aidos", "krd", "FK11", "AI Lab", "cockpit", "trialogue", "chat", "slot proposé", "couche navigable", "anatomie 1-pour-1", "le mur", "voyant", "facette", "conscience", "decision card", "blast radius", "red wave", "promotion gate", "mode conversationnel", "mode navigationnel", "FKE-38"]
+description: "FK11 réunit en un seul écran zoomable — /ai-lab — les trois conversations du travail KRD. À GAUCHE, le chat scopé au nœud : il propose des slots, il n'écrit jamais la vérité. Au CENTRE, la couche navigable : le kernel et son anatomie 1-pour-1, le mur dessiné, un voyant 🟢/🔴/🟡 par paire de chaque facette (la conscience live). À DROITE, les decision cards, le rayon d'impact, la vague de rouge et la porte de promotion. Deux modes — conversationnel et navigationnel — sont le même écran à un zoom différent. Le chat propose ; le mur tient ; les écarts sont déterministes."
+keywords: ["aidos", "krd", "FK11", "AI Lab", "cockpit", "trialogue", "chat", "slot proposé", "couche navigable", "anatomie 1-pour-1", "le mur", "voyant", "facette", "conscience", "decision card", "rayon d'impact", "vague de rouge", "porte de promotion", "mode conversationnel", "mode navigationnel", "FKE-38"]
 ---
 
 <Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK11](/steps/internals/fk11-ai-lab).</Note>
@@ -32,7 +32,7 @@ Chaque paire porte son **voyant** : 🟢 (alignée), 🔴 (en écart), 🟡 (adv
 
 ### DROITE — les décisions
 
-Pour chaque écart, une **decision card** : l'écart, le juge qui l'a vu, sa **classe de drift**, son **blast radius** (jusqu'où ça propage), et les **options** de routage. À côté, la **red wave** (la liste des paires rouges) et la **promotion gate** (le niveau d'autonomie de l'agent, FK10).
+Pour chaque écart, une **decision card** : l'écart, le juge qui l'a vu, sa **classe de dérive**, son **rayon d'impact** (jusqu'où ça propage), et les **options** de routage. À côté, la **vague de rouge** (la liste des paires rouges) et la **porte de promotion** (le niveau d'autonomie de l'agent, FK10).
 
 Valider une carte avec l'option *« réparer sous le mur »* fait **repasser la paire au vert** — déterministe, sous vos yeux. Choisir une option *au-dessus du mur* n'écrit rien : ça **ouvre un /goal** (la porte légale).
 

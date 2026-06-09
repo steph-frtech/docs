@@ -1,7 +1,7 @@
 ---
 title: "S66 · Ouvrez un /goal depuis l'écran (le /goal piloté)"
-description: "S66 ouvre la troisième marche de la chaîne KRD pour l'utilisateur : depuis une idée grilled, un user PORTEUR D'AUTORITÉ ouvre un goal directement à l'écran. AIDOS PROPOSE un ChangeSet DRAFT (la vérité + son miroir, atomiquement) et calcule le VRAI set rouge — la worklist live des miroirs à passer au vert. Le Stop reste NON-GAMEABLE : fermer un goal est refusé tant que les quatre conditions ne tiennent pas (set rouge → vert ∧ vert antérieur intact ∧ mutation ≥ seuil ∧ aucun monstre). « Done » est CALCULÉ, jamais déclaré. Le mur tient : l'écran PROPOSE un ChangeSet, il n'écrit JAMAIS le Kernel — la persistance passe par la porte changeset et l'approbation humaine."
-keywords: ["aidos", "krd", "S66", "goal", "/goal piloté", "ouvrir un goal", "ChangeSet DRAFT", "set rouge", "red set", "worklist", "Stop non-gameable", "fermeture", "GOAL_STILL_RED", "set rouge vert", "vert antérieur intact", "mutation", "seuil", "monstre", "done calculé", "autorité", "acteur réel", "placeholder", "PLACEHOLDER_ACTOR", "IDEA_WITHOUT_MIRROR", "le mur", "propose", "approbation", "S29", "S63", "S20", "S65", "idée grilled", "promotion", "vérité"]
+description: "S66 ouvre la troisième marche de la chaîne KRD pour l'utilisateur : depuis une idée grilled, un user PORTEUR D'AUTORITÉ ouvre un goal directement à l'écran. AIDOS PROPOSE un ChangeSet DRAFT (la vérité + son miroir, atomiquement) et calcule le VRAI set rouge — la liste de travail live des miroirs à passer au vert. Le Stop reste NON-GAMEABLE : fermer un goal est refusé tant que les quatre conditions ne tiennent pas (set rouge → vert ∧ vert antérieur intact ∧ mutation ≥ seuil ∧ aucun monstre). « Done » est CALCULÉ, jamais déclaré. Le mur tient : l'écran PROPOSE un ChangeSet, il n'écrit JAMAIS le Kernel — la persistance passe par la porte changeset et l'approbation humaine."
+keywords: ["aidos", "krd", "S66", "goal", "/goal piloté", "ouvrir un goal", "ChangeSet DRAFT", "set rouge", "red set", "liste de travail", "Stop non-gameable", "fermeture", "GOAL_STILL_RED", "set rouge vert", "vert antérieur intact", "mutation", "seuil", "monstre", "done calculé", "autorité", "acteur réel", "placeholder", "PLACEHOLDER_ACTOR", "IDEA_WITHOUT_MIRROR", "le mur", "propose", "approbation", "S29", "S63", "S20", "S65", "idée grilled", "promotion", "vérité"]
 ---
 
 <Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S66](/steps/internals/s66-goal-piloting).</Note>
@@ -21,7 +21,7 @@ En S65 vous avez **grillé** votre intention : elle est `grilled`, prête pour u
     Vous donnez votre identité d'acteur, l'idée source, et le set rouge — AIDOS <strong>propose</strong> un <strong>ChangeSet DRAFT</strong> portant la vérité <em>et</em> son miroir, atomiquement.
   </Card>
   <Card title="Le vrai set rouge, live" icon="list-check">
-    Le panel affiche la <strong>worklist red-set live</strong> : les miroirs qui échouent et <strong>QUI SONT</strong> le goal (§56 : « le set rouge EST la todo-list »). Pas une fixture — la vraie liste.
+    Le panel affiche la <strong>liste de travail red-set live</strong> : les miroirs qui échouent et <strong>QUI SONT</strong> le goal (§56 : « le set rouge EST la todo-list »). Pas une fixture — la vraie liste.
   </Card>
   <Card title="Un Stop non-gameable" icon="lock">
     Fermer le goal est <strong>refusé</strong> tant que les quatre conditions ne tiennent pas : <strong>set rouge → vert</strong> ∧ <strong>vert antérieur intact</strong> ∧ <strong>mutation ≥ seuil</strong> ∧ <strong>aucun monstre</strong>. « Done » est <strong>calculé</strong>, jamais déclaré.

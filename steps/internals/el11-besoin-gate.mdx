@@ -28,7 +28,7 @@ Les deux disjoncts sont **indépendants** : chacun pose son drapeau et contribue
 
 ### Distinct du `Stop` kernel + dispatch
 
-Ce binaire est le gate **besoin** ; `back/hooks/stop` est le gate **complétude-kernel** (qui lit le CUT du schéma `mirrors`). Deux processus distincts câblés sur la même phase `Stop` : le harness lance le gate kernel sur le CUT `mirrors` et ce gate sur l'événement besoin. L'ordre est **indépendant** — chacun fail-closed sur sa propre zone ; aucun ne relâche l'autre (le mur n'ajoute que).
+Ce binaire est le gate **besoin** ; `back/hooks/stop` est le gate **complétude-kernel** (qui lit le CUT du schéma `mirrors`). Deux processus distincts câblés sur la même phase `Stop` : le harnais lance le gate kernel sur le CUT `mirrors` et ce gate sur l'événement besoin. L'ordre est **indépendant** — chacun fail-closed sur sa propre zone ; aucun ne relâche l'autre (le mur n'ajoute que).
 
 ### Les miroirs (red→green)
 

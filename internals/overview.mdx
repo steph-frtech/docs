@@ -35,10 +35,10 @@ Le `Inputs` est ce qui rend la chaîne réelle : S01 consomme S00, S04 consomme 
 
 ## La boucle par étape — les 9 phases du contrat
 
-Chaque étape suit la même boucle, encodée comme **loi machine** dans `/data/dev/aidos/docs/implementation_contract.md`. Ce fichier porte un bloc YAML en tête qui est la source canonique ; la prose en dessous n'en est qu'une projection lisible. Le harness lit le YAML ; le Workbench le projette.
+Chaque étape suit la même boucle, encodée comme **loi machine** dans `/data/dev/aidos/docs/implementation_contract.md`. Ce fichier porte un bloc YAML en tête qui est la source canonique ; la prose en dessous n'en est qu'une projection lisible. Le harnais lit le YAML ; le Workbench le projette.
 
 Chaque phase a un `id` stable, un `label` et un **gate** :
-- `computational` — le harness évalue la phase sans revue humaine.
+- `computational` — le harnais évalue la phase sans revue humaine.
 - `human` — la phase demande une décision ou un jugement humain.
 
 | # | id | Label | Gate |
@@ -86,7 +86,7 @@ Le détail de chaque phase, tel qu'il figure dans le contrat :
 </Steps>
 
 <Note>
-La répartition des gates est le partage du travail : 6 phases `computational` (que le harness tranche seul) et 3 phases `human` (`grill-with-docs`, `diagnose`, `improve-architecture`) qui réclament un jugement. C'est cohérent avec le contrat AIDOS : l'humain possède la vérité, l'agent possède l'implémentation, le harness tient le mur.
+La répartition des gates est le partage du travail : 6 phases `computational` (que le harnais tranche seul) et 3 phases `human` (`grill-with-docs`, `diagnose`, `improve-architecture`) qui réclament un jugement. C'est cohérent avec le contrat AIDOS : l'humain possède la vérité, l'agent possède l'implémentation, le harnais tient le mur.
 </Note>
 
 ## La règle de granularité — ce qu'une étape a le droit d'être

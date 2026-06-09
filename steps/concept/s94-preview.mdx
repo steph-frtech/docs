@@ -1,41 +1,41 @@
 ---
-title: "S94 · Une preview jetable de votre app, à une URL — démarrée et démontée à la demande"
-description: "S94 démarre l'app qu'AIDOS construit pour vous — serveur, datastore et écrans — à une URL de preview, le temps que vous la regardiez tourner ; puis elle se démonte proprement. Chaque preview est rattachée à une PHASE précise de votre app (une version content-adressée), si bien que la même phase donne toujours la même URL, et qu'AIDOS peut prouver que la preview sert BIEN cette phase : l'empreinte de l'app servie égale l'empreinte émise de la phase. Le serveur démarré est un processus Hono (Node/Bun/edge), pas un binaire, et il est démarré par le programme d'infrastructure émis."
-keywords: ["aidos", "krd", "S94", "preview", "éphémère", "URL", "phase", "content-adressé", "pulumi", "démontage", "déterministe", "Hono", "Node", "Bun", "edge", "datastore", "empreinte", "hash", "ADR 0043", "DP25", "EPIC 10"]
+title: "S94 · Un aperçu jetable de votre app, à une URL — démarrée et démontée à la demande"
+description: "S94 démarre l'app qu'AIDOS construit pour vous — serveur, datastore et écrans — à une URL de aperçu, le temps que vous la regardiez tourner ; puis elle se démonte proprement. Chaque aperçu est rattachée à une PHASE précise de votre app (une version content-adressée), si bien que la même phase donne toujours la même URL, et qu'AIDOS peut prouver que l'aperçu sert BIEN cette phase : l'empreinte de l'app servie égale l'empreinte émise de la phase. Le serveur démarré est un processus Hono (Node/Bun/edge), pas un binaire, et il est démarré par le programme d'infrastructure émis."
+keywords: ["aidos", "krd", "S94", "aperçu", "éphémère", "URL", "phase", "content-adressé", "pulumi", "démontage", "déterministe", "Hono", "Node", "Bun", "edge", "datastore", "empreinte", "hash", "ADR 0043", "DP25", "EPIC 10"]
 ---
 
 <Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S94](/steps/internals/s94-preview).</Note>
 
 ## En une phrase
 
-S94 **démarre votre app à une URL de preview** — son serveur, son datastore et ses écrans — le temps de la regarder tourner, puis la **démonte proprement** ; chaque preview est **rattachée à une version précise** de votre app, et AIDOS **prouve** que l'URL sert bien cette version-là.
+S94 **démarre votre app à une URL de aperçu** — son serveur, son datastore et ses écrans — le temps de la regarder tourner, puis la **démonte proprement** ; chaque aperçu est **rattachée à une version précise** de votre app, et AIDOS **prouve** que l'URL sert bien cette version-là.
 
 ## Le problème que S94 résout
 
-Vous avez une phase stable de votre app : ses entités, son API, ses écrans, tous émis depuis le même noyau. Mais avant de la déployer pour de bon, vous voulez **la voir tourner** — cliquer dans les vrais écrans, soumettre une vraie commande. Quatre pièges classiques d'un environnement de preview :
+Vous avez une phase stable de votre app : ses entités, son API, ses écrans, tous émis depuis le même noyau. Mais avant de la déployer pour de bon, vous voulez **la voir tourner** — cliquer dans les vrais écrans, soumettre une vraie commande. Quatre pièges classiques d'un environnement de aperçu :
 
-1. **Une preview qui ne correspond à rien.** « C'est quelle version, ça ? » S94 **rattache chaque preview à une phase content-adressée** : une empreinte qui identifie exactement l'app. La même phase donne **toujours la même URL**, et deux phases différentes ne partagent jamais une URL.
-2. **Une preview qui ment.** Rien ne garantit que l'URL sert bien la version annoncée. S94 **compare deux empreintes** : celle de l'app réellement servie et celle émise par la phase. Si elles diffèrent, la preview est **refusée** comme périmée. C'est du **calcul**, pas une promesse.
-3. **Des previews qui s'accumulent.** Un environnement qu'on oublie de fermer coûte cher et pollue. La preview de S94 se **démonte déterministiquement** : la commande de démontage est connue d'avance et fait exactement l'inverse du démarrage.
-4. **Un démarrage bricolé.** Un script de déploiement écrit à la main qui dérive de l'app. Ici la preview est **démarrée par le programme d'infrastructure émis depuis la phase** : démarrer = ré-émettre, jamais un script à part.
+1. **Un aperçu qui ne correspond à rien.** « C'est quelle version, ça ? » S94 **rattache chaque aperçu à une phase content-adressée** : une empreinte qui identifie exactement l'app. La même phase donne **toujours la même URL**, et deux phases différentes ne partagent jamais une URL.
+2. **Un aperçu qui ment.** Rien ne garantit que l'URL sert bien la version annoncée. S94 **compare deux empreintes** : celle de l'app réellement servie et celle émise par la phase. Si elles diffèrent, l'aperçu est **refusée** comme périmée. C'est du **calcul**, pas une promesse.
+3. **Des previews qui s'accumulent.** Un environnement qu'on oublie de fermer coûte cher et pollue. L'aperçu de S94 se **démonte déterministiquement** : la commande de démontage est connue d'avance et fait exactement l'inverse du démarrage.
+4. **Un démarrage bricolé.** Un script de déploiement écrit à la main qui dérive de l'app. Ici l'aperçu est **démarrée par le programme d'infrastructure émis depuis la phase** : démarrer = ré-émettre, jamais un script à part.
 
-## Comment S94 démarre une preview (et pourquoi c'est sûr)
+## Comment S94 démarre un aperçu (et pourquoi c'est sûr)
 
 1. **On part de la phase.** Une version content-adressée de votre app, avec sa surface émise : le serveur, les écrans, le programme d'infrastructure, le datastore.
 2. **On calcule une empreinte d'app.** Une seule empreinte pour **toute** l'app émise de la phase (serveur ⊕ écrans ⊕ infra ⊕ datastore). C'est elle qui dit « voici l'app de cette phase ».
-3. **On en déduit une URL.** Une URL de preview **dérivée de l'empreinte de la phase** — un sous-domaine stable. Même phase → même URL.
+3. **On en déduit une URL.** Une URL de aperçu **dérivée de l'empreinte de la phase** — un sous-domaine stable. Même phase → même URL.
 4. **On démarre.** La commande de démarrage lance le **programme d'infrastructure émis** (`pulumi up`), qui met debout le serveur (un processus Hono), le datastore et les écrans.
-5. **On prouve.** L'app servie expose sa propre empreinte ; AIDOS vérifie qu'elle **égale** l'empreinte émise de la phase. Égalité = la preview sert bien cette phase.
+5. **On prouve.** L'app servie expose sa propre empreinte ; AIDOS vérifie qu'elle **égale** l'empreinte émise de la phase. Égalité = l'aperçu sert bien cette phase.
 6. **On démonte.** La commande de démontage (`pulumi destroy`) défait exactement ce qui a été monté — déterministiquement.
 
 ## Un processus, pas un binaire
 
-Le « serveur » que S94 démarre en preview n'est **pas un binaire compilé** : c'est un **processus Hono** (Node, Bun ou edge), le même runtime que celui de l'app émise. Le datastore et les écrans suivent. Le rattachement à la phase content-adressée et le démontage déterministe, eux, ne changent pas : ce sont des propriétés de l'environnement, indépendantes du langage du serveur.
+Le « serveur » que S94 démarre en aperçu n'est **pas un binaire compilé** : c'est un **processus Hono** (Node, Bun ou edge), le même runtime que celui de l'app émise. Le datastore et les écrans suivent. Le rattachement à la phase content-adressée et le démontage déterministe, eux, ne changent pas : ce sont des propriétés de l'environnement, indépendantes du langage du serveur.
 
 ## Ce que vous voyez à l'écran
 
-Le panneau Workbench `/preview` est **action-capable** : vous donnez le projet et l'empreinte de la phase, puis vous **construisez la preview**. L'écran montre l'**URL de preview** (rattachée à la phase), l'**empreinte de l'app émise**, les commandes de **démarrage** (`pulumi up`) et de **démontage** (`pulumi destroy`), et le **verdict** : l'empreinte servie égale-t-elle l'empreinte émise ? (le critère de réussite, calculé). Basculez « ré-émettre la surface » pour voir qu'une nouvelle version donne une nouvelle empreinte. Plus bas, un **vrai formulaire servi par la preview** soumet une opération contre le datastore (upload de fichier inclus) : **cliquer un bouton émis exécute l'opération liée**. Construire la preview **n'écrit aucune vérité** : c'est un environnement éphémère par-dessus une app déjà émise.
+Le panneau Workbench `/preview` est **action-capable** : vous donnez le projet et l'empreinte de la phase, puis vous **construisez l'aperçu**. L'écran montre l'**URL de aperçu** (rattachée à la phase), l'**empreinte de l'app émise**, les commandes de **démarrage** (`pulumi up`) et de **démontage** (`pulumi destroy`), et le **verdict** : l'empreinte servie égale-t-elle l'empreinte émise ? (le critère de réussite, calculé). Basculez « ré-émettre la surface » pour voir qu'une nouvelle version donne une nouvelle empreinte. Plus bas, un **vrai formulaire servi par l'aperçu** soumet une opération contre le datastore (upload de fichier inclus) : **cliquer un bouton émis exécute l'opération liée**. Construire l'aperçu **n'écrit aucune vérité** : c'est un environnement éphémère par-dessus une app déjà émise.
 
 ## Ce que S94 ne fait pas
 
-S94 **n'invente** ni URL, ni phase : une preview sans phase content-adressée est **refusée**, jamais devinée. Une app servie dont l'empreinte ne correspond pas à la phase est **refusée**, jamais acceptée « à peu près ». La comparaison des empreintes est faite par du **code**, jamais par un LLM. Et S94 n'écrit jamais dans le noyau (le mur) : il planifie un environnement par-dessus une surface déjà émise.
+S94 **n'invente** ni URL, ni phase : un aperçu sans phase content-adressée est **refusée**, jamais devinée. Une app servie dont l'empreinte ne correspond pas à la phase est **refusée**, jamais acceptée « à peu près ». La comparaison des empreintes est faite par du **code**, jamais par un LLM. Et S94 n'écrit jamais dans le noyau (le mur) : il planifie un environnement par-dessus une surface déjà émise.

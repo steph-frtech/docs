@@ -15,7 +15,7 @@ keywords: ["fke", "livre xxx", "adr 0044", "adr 0045", "8 facettes", "deux axes"
 | Organe FKE | Implémentation AIDOS existante |
 |---|---|
 | Intent Wall | le mur — hook PreToolUse + GRANTs Postgres (deux couches) |
-| Vibe Lab / Promotion Gate | `/spike` (ratchet OFF, confiné) · `/harvest` + `/grill` + `/goal` |
+| Vibe Lab / Porte de promotion | `/spike` (ratchet OFF, confiné) · `/harvest` + `/grill` + `/goal` |
 | Cerveau gauche / droit | l'interview EL (compound du besoin) · la boucle-build S83 |
 | Police / policy-as-code | agentlayer 5 axes + enforcers fail-closed + ledger Merkle (GV) |
 | Memory Wall | le memory-firewall (`ToKernel` bloqué, `ViaIdea` seul chemin) |
@@ -24,7 +24,7 @@ keywords: ["fke", "livre xxx", "adr 0044", "adr 0045", "8 facettes", "deux axes"
 | Facette M (maintenabilité) | arch-fitness (go-arch-lint/depguard/dependency-cruiser, FN02) = le 2ᵉ cliquet §47 |
 | Facette R (fiabilité) | fault-injection, disjoncteur S83, outbox S73, restore |
 | Facette X (expérience) | ExperienceClaim §13.6 (vérité molle, déjà typée) |
-| Causalité AVANT | red wave §42 (cause→effets) ; l'arrière (`caused_by`) est FK12 |
+| Causalité AVANT | vague de rouge §42 (cause→effets) ; l'arrière (`caused_by`) est FK12 |
 | Runtime loop / legacy | RealityMirror → `/learn` · strangler-fig + miroirs de caractérisation |
 
 La couche **Implémentation** de chaque concept sera complétée au vert de son étape FK :
@@ -50,11 +50,11 @@ Les vérités et miroirs que la piste FK devra prouver :
 
 ## Méta-méta
 
-- **Les deux axes (FKE-1.4).** Une vérité a deux coordonnées : sa **facette** (NATURE — axe orthogonal, qui *sépare* : régler la sécurité ne touche pas la perf) et son **niveau** dans la verticale produit→entité (axe latéral, qui *couple* : une vérité basse contraint ses rungs SOURCE au-dessus, et le red wave REMONTE cette ligne). Coordonnées complètes : niveau × facette × côté-du-mur × échelle-fractale.
-- **La causalité dans les deux sens.** Le red wave (§42) propage AVANT (cause→effets) ; le **WhyTree** (FKE-35.1) remonte ARRIÈRE (effet→cause racine) sur le lien `caused_by`. C'est le 5-pourquoi **redressé** : pas une facette (geste du loopback, transversal) ; déterministe sur le graphe ; LLM gaté + cause vérifiée ; un arbre (fishbone) ; terminaison en miroir.
+- **Les deux axes (FKE-1.4).** Une vérité a deux coordonnées : sa **facette** (NATURE — axe orthogonal, qui *sépare* : régler la sécurité ne touche pas la perf) et son **niveau** dans la verticale produit→entité (axe latéral, qui *couple* : une vérité basse contraint ses rungs SOURCE au-dessus, et la vague de rouge REMONTE cette ligne). Coordonnées complètes : niveau × facette × côté-du-mur × échelle-fractale.
+- **La causalité dans les deux sens.** La vague de rouge (§42) propage AVANT (cause→effets) ; le **WhyTree** (FKE-35.1) remonte ARRIÈRE (effet→cause racine) sur le lien `caused_by`. C'est le 5-pourquoi **redressé** : pas une facette (geste du loopback, transversal) ; déterministe sur le graphe ; LLM gaté + cause vérifiée ; un arbre (fishbone) ; terminaison en miroir.
 - **La place dans le cliquet.** FKE ne touche ni le mur ni la fitness : il **renforce la loi de complétude** (de « une vérité ↔ un miroir vivant » vers « toutes les paires de toutes les facettes instanciées ») — un garde-fou ne peut qu'être AJOUTÉ, jamais retiré (méta-loi §5). L'incompressible (intention + paire de preuve) garantit que le gabarit effondrable n'amollit rien.
 - **L'anti-Goodhart tenu.** Toutes les tentations de juge-non-déterministe ont été écartées : doc-miroirs jugés structurellement (prose advisory) ; conscience = agrégateur (aucun second juge) ; WhyTree = graphe + cause reproduite ; facette X = soft (informe, ne bloque pas — pas de sur-contrainte UX, l'erreur symétrique §13.4). Le juge reste le miroir déterministe (§8).
 - **La fermeture par construction + croisement externe.** Le modèle des facettes est **clos à 8** non par fatigue mais par un **test de décision** (facette intrinsèque vs arête vs sous-lentille vs propriété de graphe/changeset) **croisé contre ISO 25010** — qui a révélé deux oublis (R fiabilité, X expérience) en plus du 2ᵉ cliquet (M). Note : I (Invariants ∀) est un axe de **rigueur de preuve**, pas un attribut ISO.
 - **L'honnêteté v8.1.** Par la formule du Tome, le LIVRE XXX entre avec **définition + exemples** ; ses **records/hooks/propagations** arrivent par FK01-FK16 — d'ici là, des OpenQuestions datées, pas des vérités opérantes.
-- **Les décisions** : ADR 0044 (fusion + 8 forks) + ADR 0045 (anatomie complète) ; termes canoniques §161 (FKE, conscience, paire-miroir, facette, kernel effondré, Vibe Lab, Promotion Gate, pipeline VIBE AI LAB, WhyTree, caused_by, les deux axes) ; placement §162 (→ Livre XXX) ; glossaire partagé `CONTEXT-MAP.md`.
+- **Les décisions** : ADR 0044 (fusion + 8 forks) + ADR 0045 (anatomie complète) ; termes canoniques §161 (FKE, conscience, paire-miroir, facette, kernel effondré, Vibe Lab, Porte de promotion, pipeline VIBE AI LAB, WhyTree, caused_by, les deux axes) ; placement §162 (→ Livre XXX) ; glossaire partagé `CONTEXT-MAP.md`.
 - **Frontière constructrice/construite inchangée** : AIDOS reste Go (ADR 0040), l'app émise reste Hono/TS + IaC Pulumi/TS (ADR 0043) — FKE les décrit tous deux comme instances de la même anatomie (fractalité à travers les plans).

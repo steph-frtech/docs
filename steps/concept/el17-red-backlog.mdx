@@ -1,7 +1,7 @@
 ---
-title: "EL17 · red-backlog (le tri topologique du backlog d'idées)"
+title: "EL17 · red-backlog (le tri topologique de la file de travail d'idées)"
 description: "EL17 est le RedBacklog ordonné pour l'app-builder (S53+) : RedBacklog(graph) topo-trie les Ideas émises (les rungs mappants, EL16) selon les arêtes constrains/seeds → l'ordre exact de promotion que l'app-builder ouvre ses /goal dans, exactement la verticale §23. Chaque Idea porte ses anchors_above (dont les nœuds NoEmit journey/view qui la contraignent sans émettre) et sa forme de miroir attendue (LevelMirrorForm, EL10) ANNEXÉE — jamais écrite. Un cycle d'arêtes est refusé (BESOIN_CYCLE). Le tri est un algorithme pur (Kahn, départage déterministe), jamais un LLM. Above le mur : aucune écriture kernel/mirror, HasMirror toujours false."
-keywords: ["aidos", "krd", "besoin", "compound du besoin", "red-backlog", "RedBacklog", "tri topologique", "topological sort", "BesoinGraph", "Idea", "backlog", "constrains", "seeds", "BESOIN_CYCLE", "LevelMirrorForm", "EL10", "anchors_above", "NoEmit", "le mur", "HasMirror", "verticale", "S64", "app-builder", "EL16", "EL17", "déterminisme", "forme de miroir"]
+keywords: ["aidos", "krd", "besoin", "compound du besoin", "red-backlog", "RedBacklog", "tri topologique", "topological sort", "BesoinGraph", "Idea", "file de travail", "constrains", "seeds", "BESOIN_CYCLE", "LevelMirrorForm", "EL10", "anchors_above", "NoEmit", "le mur", "HasMirror", "verticale", "S64", "app-builder", "EL16", "EL17", "déterminisme", "forme de miroir"]
 ---
 
 <Note>Côté concept. Pour le détail d'implémentation (les trois couches Implémentation · Méta · Méta-méta), voir [Pour moi → EL17](/steps/internals/el17-red-backlog).</Note>
@@ -18,18 +18,18 @@ EL17 est ce tri. `RedBacklog(graph)` lit les arêtes `constrains`/`seeds` du Bes
 
 Trois garanties qu'il tient :
 
-1. **L'ordre est l'architecture, pas un caprice.** Le tri suit les arêtes du graphe. Si product contraint entity, l'idée de product **précède** celle d'entity dans le backlog. L'app-builder (S64) ouvre ses `/goal` exactement dans cet ordre.
+1. **L'ordre est l'architecture, pas un caprice.** Le tri suit les arêtes du graphe. Si product contraint entity, l'idée de product **précède** celle d'entity dans la file de travail. L'app-builder (S64) ouvre ses `/goal` exactement dans cet ordre.
 2. **Les niveaux NoEmit contraignent sans apparaître.** Les rungs `journey`/`view` (NoEmit, EL05) n'émettent pas d'idée — mais ils **contraignent** les rungs plus bas. Ils apparaissent donc dans les **`anchors_above`** de chaque idée qu'ils contraignent (le compound rendu visible), jamais dans la liste elle-même.
 3. **Chaque idée connaît sa forme de miroir — sans qu'on l'écrive.** Chaque item porte sa **forme de miroir attendue** (`LevelMirrorForm`, EL10 : product/journey → Gherkin, invariant → property, operation → fixture). Elle est **annexée** pour guider le `/goal`, mais **jamais écrite** : écrire le miroir reste à vous, via `/goal`.
 
 ## Les idées-clés
 
 <Field name="Tri topologique total et déterministe" type="EL17">
-  `RedBacklog` est un **tri topologique pur** (algorithme de Kahn), avec un départage déterministe par rang de descente → un ordre **total**. Même graphe → même backlog, byte-identique. Jamais un LLM qui ordonne.
+  `RedBacklog` est un **tri topologique pur** (algorithme de Kahn), avec un départage déterministe par rang de descente → un ordre **total**. Même graphe → même file de travail, byte-identique. Jamais un LLM qui ordonne.
 </Field>
 
 <Field name="Un cycle est refusé (BESOIN_CYCLE)" type="EL17">
-  Si les arêtes des rungs émetteurs forment un **cycle**, il n'existe aucun ordre total : le backlog est **refusé** avec `BESOIN_CYCLE` — jamais un ordre arbitraire (le déterminisme serait perdu). La verticale §23 est acyclique par construction ; un cycle = un graphe malformé.
+  Si les arêtes des rungs émetteurs forment un **cycle**, il n'existe aucun ordre total : la file de travail est **refusé** avec `BESOIN_CYCLE` — jamais un ordre arbitraire (le déterminisme serait perdu). La verticale §23 est acyclique par construction ; un cycle = un graphe malformé.
 </Field>
 
 <Field name="Les refs résolvent @version (ou portent une OpenQuestion)" type="bootstrap §6">
@@ -46,4 +46,4 @@ Depuis l'écran **`/red-backlog`** du Workbench : vous façonnez le graphe déj�
 
 ## Le hand-off (S64)
 
-Le RedBacklog est l'**entrée exacte** de l'app-builder : `RedBacklog(graph)` → l'ordre topologique → **S64** (« capturez votre idée ») → **S65** (`/grill`) → **S66** (`/goal`, ouverts **dans l'ordre du backlog**) → **S67**. Au lieu d'un prompt plat, S64 reçoit un besoin **déjà descendu niveau par niveau, ordonné architecturalement**, où chaque idée porte sa forme de miroir attendue et ses ancres.
+Le RedBacklog est l'**entrée exacte** de l'app-builder : `RedBacklog(graph)` → l'ordre topologique → **S64** (« capturez votre idée ») → **S65** (`/grill`) → **S66** (`/goal`, ouverts **dans l'ordre de la file de travail**) → **S67**. Au lieu d'un prompt plat, S64 reçoit un besoin **déjà descendu niveau par niveau, ordonné architecturalement**, où chaque idée porte sa forme de miroir attendue et ses ancres.

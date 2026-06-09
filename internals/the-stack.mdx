@@ -5,10 +5,10 @@ keywords: ["aidos", "krd", "frozen stack", "pile gelée", "Go", "Postgres", "Nex
 ---
 
 <Info>
-  Page de fondation, côté **Pour moi**. Elle décrit la **pile gelée** — la topologie figée d'outils sur laquelle tout le harness s'attache. Pour la frontière vérité/code que cette pile enforce, voir [le mur et le cliquet](/internals/the-wall-and-ratchet) ; pour la carte des répertoires, voir [la structure du dépôt](/internals/repo-structure).
+  Page de fondation, côté **Pour moi**. Elle décrit la **pile gelée** — la topologie figée d'outils sur laquelle tout le harnais s'attache. Pour la frontière vérité/code que cette pile enforce, voir [le mur et le cliquet](/internals/the-wall-and-ratchet) ; pour la carte des répertoires, voir [la structure du dépôt](/internals/repo-structure).
 </Info>
 
-La pile d'AIDOS est **gelée maintenant**, pas adaptative. On a mappé une fois les gagnants de bench du Tome (les outils qui ont remporté chaque comparaison par niveau KRD) sur les trois piliers du dépôt — **back = Go · base = Postgres · front = Next** — et on a enregistré ce tableau comme topologie fixe. Le motif est mécanique : un harness complet (le mur, les sensors, les cert-runners, le version-DAG, les emitters) a besoin d'une **topologie fixe** où s'accrocher. Chaque hook, MCP server, générateur et check de complétude est écrit contre des slots **nommés** ; une pile mouvante voudrait dire un harness perpétuellement réécrit qui n'atteint jamais une phase stable. On échange de la variété requise (Ashby) contre une fondation **constructible et enforceable** — un compromis assumé.
+La pile d'AIDOS est **gelée maintenant**, pas adaptative. On a mappé une fois les gagnants de bench du Tome (les outils qui ont remporté chaque comparaison par niveau KRD) sur les trois piliers du dépôt — **back = Go · base = Postgres · front = Next** — et on a enregistré ce tableau comme topologie fixe. Le motif est mécanique : un harnais complet (le mur, les sensors, les cert-runners, le version-DAG, les emitters) a besoin d'une **topologie fixe** où s'accrocher. Chaque hook, MCP server, générateur et check de complétude est écrit contre des slots **nommés** ; une pile mouvante voudrait dire un harnais perpétuellement réécrit qui n'atteint jamais une phase stable. On échange de la variété requise (Ashby) contre une fondation **constructible et enforceable** — un compromis assumé.
 
 ## Mandatory vs replaceable
 
@@ -16,7 +16,7 @@ Chaque slot porte un statut. Les deux ne se traitent pas pareil :
 
 <Columns cols={2}>
   <Card title="mandatory" icon="lock">
-    Le minimum n'est **jamais** substitué — le harness en dépend structurellement. Remplacer un slot mandatory, c'est redessiner le harness, pas éditer un slot.
+    Le minimum n'est **jamais** substitué — le harnais en dépend structurellement. Remplacer un slot mandatory, c'est redessiner le harnais, pas éditer un slot.
   </Card>
   <Card title="replaceable" icon="unlock">
     Un step peut échanger l'outil pour une **raison documentée** (un nouvel ADR), mais **dans** le même rôle, jamais sous le minimum. Le slot (le rôle) reste en place.
@@ -105,7 +105,7 @@ Il y a aussi **deux mémoires** dans le monde AIDOS, et les confondre breacherai
 
 ## Pourquoi cette pile est dure à inverser
 
-Les slots gelés sont câblés dans le mur, les cert-runners, les emitters, la surface MCP et la boucle par step. Ré-ouvrir la pile à la pleine adaptivité plus tard voudrait dire ré-dériver le harness contre une cible mouvante, pas flipper un flag. C'est le prix assumé d'un OS dont la valeur même est d'enforcer une méthode qu'il doit lui-même pouvoir épingler.
+Les slots gelés sont câblés dans le mur, les cert-runners, les emitters, la surface MCP et la boucle par step. Ré-ouvrir la pile à la pleine adaptivité plus tard voudrait dire ré-dériver le harnais contre une cible mouvante, pas flipper un flag. C'est le prix assumé d'un OS dont la valeur même est d'enforcer une méthode qu'il doit lui-même pouvoir épingler.
 
 <Columns cols={2}>
   <Card title="La structure du dépôt" icon="folder-tree" href="/internals/repo-structure">

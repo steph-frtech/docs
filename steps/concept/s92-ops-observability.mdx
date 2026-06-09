@@ -1,7 +1,7 @@
 ---
 title: "S92 · Opérer votre app au quotidien — logs, traces, taux d'erreur"
-description: "S92 donne à chaque app émise son panneau d'exploitation : les logs, les traces de requêtes, les événements d'erreur, et un dashboard de latence (p50/p95/p99) et de taux d'erreur — pour que vous opériez votre app au jour le jour. L'app est instrumentée OpenTelemetry ; ses signaux alimentent un panneau d'ops PAR APP. C'est distinct de « la télémétrie comme senseur du noyau » : l'observabilité d'exploitation n'écrit AUCUNE vérité — elle rend, elle n'apprend pas. Un secret qu'une app aurait loggué par mégarde est redacté avant d'être affiché."
-keywords: ["aidos", "krd", "S92", "observabilité", "exploitation", "logs", "traces", "OpenTelemetry", "OTel", "latence", "p50", "p95", "p99", "taux d'erreur", "error tracking", "dashboard", "ops", "SigNoz", "GlitchTip", "DP17", "ADR 0043", "EPIC 9", "déterminisme", "le mur"]
+description: "S92 donne à chaque app émise son panneau d'exploitation : les logs, les traces de requêtes, les événements d'erreur, et un tableau de bord de latence (p50/p95/p99) et de taux d'erreur — pour que vous opériez votre app au jour le jour. L'app est instrumentée OpenTelemetry ; ses signaux alimentent un panneau d'ops PAR APP. C'est distinct de « la télémétrie comme senseur du noyau » : l'observabilité d'exploitation n'écrit AUCUNE vérité — elle rend, elle n'apprend pas. Un secret qu'une app aurait loggué par mégarde est redacté avant d'être affiché."
+keywords: ["aidos", "krd", "S92", "observabilité", "exploitation", "logs", "traces", "OpenTelemetry", "OTel", "latence", "p50", "p95", "p99", "taux d'erreur", "error tracking", "tableau de bord", "ops", "SigNoz", "GlitchTip", "DP17", "ADR 0043", "EPIC 9", "déterminisme", "le mur"]
 ---
 
 <Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S92](/steps/internals/s92-ops-observability).</Note>
@@ -34,11 +34,11 @@ AIDOS a **deux** usages de la télémétrie, et il ne faut **jamais** les confon
 - **Le senseur du noyau (E12, le RealityMirror).** Quand la production *contredit* le noyau — un incident récurrent, un budget dépassé — c'est un signal qui peut faire **apprendre** AIDOS : il devient une *idée* candidate, qui devra acquérir son miroir et passer un `/goal` avant de toucher le noyau. C'est le **seul** chemin de la réalité vers la vérité.
 - **L'observabilité d'exploitation (S92).** C'est l'inverse : un panneau que **vous** lisez pour opérer votre app. Voir une latence n'est **pas** une décision de vérité. S92 **rend**, il n'**apprend** pas — il n'écrit **aucune vérité**.
 
-Cette frontière est le cœur de S92 : un dashboard d'exploitation n'est jamais une porte vers le noyau.
+Cette frontière est le cœur de S92 : un tableau de bord d'exploitation n'est jamais une porte vers le noyau.
 
 ## Ce que l'écran vous montre
 
-Le panneau **« Observabilité d'exploitation »** du Workbench vous laisse **émettre** des signaux OTel (pour voir le panneau réagir) et **construire** le dashboard — depuis l'écran, exécutable. Vous y lisez le nombre de requêtes, le taux d'erreur, la latence par percentile, le fil de logs et le fil d'erreurs. Le panneau affiche aussi, explicitement, qu'il **n'a écrit aucune vérité** (`wroteKernel: false`).
+Le panneau **« Observabilité d'exploitation »** du Workbench vous laisse **émettre** des signaux OTel (pour voir le panneau réagir) et **construire** le tableau de bord — depuis l'écran, exécutable. Vous y lisez le nombre de requêtes, le taux d'erreur, la latence par percentile, le fil de logs et le fil d'erreurs. Le panneau affiche aussi, explicitement, qu'il **n'a écrit aucune vérité** (`wroteKernel: false`).
 
 ## Ce que S92 ne fait pas
 

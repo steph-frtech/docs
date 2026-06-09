@@ -23,7 +23,7 @@ Le jumeau front : `parseDoc` + `proposeEdit`, mêmes refus (`ERR_FREE_CODE`, `ER
 
 ### Le MCP — `back/mcp/dsl-editor` (ADR 0009)
 
-Trois outils **purs** (une op = un outil) : `dsl_kinds` (les quatre kinds éditables), `dsl_parse` (forme typée → AST preview, n'écrit rien), `dsl_propose` (parse + ChangeSet DRAFT). **Pas d'outil `apply`** : appliquer le DRAFT est le commit-gate de S20, le gel reste le flux `/goal` (le mur).
+Trois outils **purs** (une op = un outil) : `dsl_kinds` (les quatre kinds éditables), `dsl_parse` (forme typée → AST aperçu, n'écrit rien), `dsl_propose` (parse + ChangeSet DRAFT). **Pas d'outil `apply`** : appliquer le DRAFT est le commit-gate de S20, le gel reste le flux `/goal` (le mur).
 
 ### La route Workbench — `/dsl-editor`
 

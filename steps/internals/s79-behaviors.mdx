@@ -31,11 +31,11 @@ Les sept gestes sont des **fonctions pures, totales** d'une `Library` value :
 
 ### Le MCP `back/mcp/behaviors` (ADR 0009)
 
-Sept outils purs, un par geste : `behaviors_browse`, `behaviors_search`, `behaviors_tag`, `behaviors_publish`, `behaviors_soft_delete`, `behaviors_comment`, `behaviors_attach` (preview OU land selon `land`). Le serveur est **sans état** : l'appelant passe les records du projet (l'état matérialisé) ; chaque outil est une fonction pure de l'état + l'entrée. `attach` atterrit via `changeset.Apply` (un calcul de valeur), jamais une écriture DB.
+Sept outils purs, un par geste : `behaviors_browse`, `behaviors_search`, `behaviors_tag`, `behaviors_publish`, `behaviors_soft_delete`, `behaviors_comment`, `behaviors_attach` (aperçu OU land selon `land`). Le serveur est **sans état** : l'appelant passe les records du projet (l'état matérialisé) ; chaque outil est une fonction pure de l'état + l'entrée. `attach` atterrit via `changeset.Apply` (un calcul de valeur), jamais une écriture DB.
 
 ### La route Workbench `/behaviors`
 
-Action-capable (ui-completeness, §7) : deux contrôles liés au moteur réel et exécutables depuis l'écran — **SEARCH** (le matcher déterministe) et **ATTACH** (preview + land). Server Actions sur le twin TS pur `lib/behaviors.ts` (qui importe le `propose` de `lib/behavior-expander`, lui-même sur l'UNIQUE `expand`). Thème ADR 0010, bilingue ADR 0011. Câblée dans la nav `WorkbenchHeader`.
+Action-capable (ui-completeness, §7) : deux contrôles liés au moteur réel et exécutables depuis l'écran — **SEARCH** (le matcher déterministe) et **ATTACH** (aperçu + land). Server Actions sur le twin TS pur `lib/behaviors.ts` (qui importe le `propose` de `lib/behavior-expander`, lui-même sur l'UNIQUE `expand`). Thème ADR 0010, bilingue ADR 0011. Câblée dans la nav `WorkbenchHeader`.
 
 ### Les miroirs (tous GREEN)
 

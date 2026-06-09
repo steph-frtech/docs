@@ -8,7 +8,7 @@ keywords: ["aidos", "krd", "EL16", "back/runtime/besoin/emit_ideas.go", "emit-id
 
 ## Implémentation
 
-EL16 livre l'**émetteur déterministe** `EmitIdeas(graph) → []Idea` (`back/runtime/besoin/emit_ideas.go`) + son outil MCP `besoin_emit_ideas` (dans `back/mcp/besoin-intake/`). C'est la **projection batch** d'un BesoinGraph en backlog d'Ideas candidates. Là où EL15 capture **par rung à la descente**, EL16 projette **le graphe entier d'un coup**. Le mapping est **gouverné par la table close `LevelToProposes` (EL05)** — une fonction pure, jamais un LLM.
+EL16 livre l'**émetteur déterministe** `EmitIdeas(graph) → []Idea` (`back/runtime/besoin/emit_ideas.go`) + son outil MCP `besoin_emit_ideas` (dans `back/mcp/besoin-intake/`). C'est la **projection batch** d'un BesoinGraph en file de travail d'Ideas candidates. Là où EL15 capture **par rung à la descente**, EL16 projette **le graphe entier d'un coup**. Le mapping est **gouverné par la table close `LevelToProposes` (EL05)** — une fonction pure, jamais un LLM.
 
 ### La règle (jamais un cast silencieux)
 
@@ -53,7 +53,7 @@ Les trois réutilisent `projectNode`, donc une Idea émise est **byte-identique*
 
 > *La garantie de niveau 3 qu'EL16 ajoute, et ce qu'elle ne touche jamais.*
 
-EL16 est un **cliquet additif** (CLAUDE.md §5 : un nouvel artefact AJOUTE une garde, n'en RETIRE jamais). Il ajoute la porte de **projection** du besoin vers le backlog — la dernière marche de la *montée du besoin* avant le hand-off vers l'app-builder (S64). Il **ne touche pas** au contrat des neuf phases ; il **n'altère** ni la grammaire (EL02), ni la table (EL05), ni la gate (EL07) — il les **lit**.
+EL16 est un **cliquet additif** (CLAUDE.md §5 : un nouvel artefact AJOUTE une garde, n'en RETIRE jamais). Il ajoute la porte de **projection** du besoin vers la file de travail — la dernière marche de la *montée du besoin* avant le hand-off vers l'app-builder (S64). Il **ne touche pas** au contrat des neuf phases ; il **n'altère** ni la grammaire (EL02), ni la table (EL05), ni la gate (EL07) — il les **lit**.
 
 La garantie qu'il scelle : **rien ne devient code en passant**. Le seul chemin du besoin vers le noyau reste `EmitIdeas` → `idea-intake` (provenance humaine) → S64 (`/grill`) → S66 (`/goal`). La promotion est **toujours** écrire le miroir via `/goal`, jamais une écriture noyau directe — et le miroir Godog + la property + le Testcontainers (kernel refusé via GRANT) prouvent que `HasMirror` reste false et que l'écriture noyau est toujours refusée.
 
@@ -66,5 +66,5 @@ La garantie qu'il scelle : **rien ne devient code en passant**. Le seul chemin d
 
 ### Dépendances avant (OpenQuestions, non bloquantes)
 
-- **Hand-off S64** (app-builder) : le backlog émis est l'entrée de S64 ; l'ordre topologique du backlog est déjà calculé ici (l'ordre de descente). S64 ouvrira les goals dans cet ordre.
+- **Hand-off S64** (app-builder) : la file de travail émis est l'entrée de S64 ; l'ordre topologique de la file de travail est déjà calculé ici (l'ordre de descente). S64 ouvrira les goals dans cet ordre.
 - **Linear** : l'issue de suivi EL16 est best-effort (le MCP Linear demande une ré-authentification OAuth) — notée OpenQuestion, ne bloque pas l'étape.

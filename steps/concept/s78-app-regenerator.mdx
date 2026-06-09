@@ -1,7 +1,7 @@
 ---
 title: "S78 · « Régénérer mon app » — tout le code de votre app, ré-émis en un clic, byte-stable"
 description: "S78 vous donne le bouton « Régénérer mon app » : une action liée au Kernel de votre projet qui exécute les émetteurs déterministes pour TOUTES les sources de votre app — entités, relations, operations (synchrones ET asynchrones), controls, blobs — vers la cible d'émission, en UNE passe. Elle vous dit ce qui change (un fichier PÉRIMÉ parce que sa source a bougé, un fichier NOUVEAU, un fichier INCHANGÉ) en comparant les empreintes de source. Et surtout : elle est byte-stable (le même projet rend toujours les MÊMES octets) et elle REFUSE de régénérer si un fichier généré a été édité à la main — pour ne jamais écraser silencieusement votre modification. C'est l'action que la prévisualisation et le déploiement (E10) réutilisent pour ré-projeter votre app depuis une phase stable. Le mur tient : régénérer n'écrit aucune vérité — le code émis est une projection régénérable."
-keywords: ["aidos", "krd", "S78", "régénérer", "regenerate", "régénération", "regeneration", "Régénérer mon app", "Regenerate my app", "project-scopé", "project-scoped", "émetteur", "emitter", "déterministe", "byte-stable", "byte-identique", "byte-identical", "source-hash", "empreinte de source", "projection périmée", "stale", "hand-edit", "édité à la main", "GEN_FILE_HAND_EDITED", "drift", "preview", "deploy", "E10", "phase stable", "le mur", "projection", "non-destruction", "S74", "EPIC 6"]
+keywords: ["aidos", "krd", "S78", "régénérer", "regenerate", "régénération", "regeneration", "Régénérer mon app", "Regenerate my app", "project-scopé", "project-scoped", "émetteur", "emitter", "déterministe", "byte-stable", "byte-identique", "byte-identical", "source-hash", "empreinte de source", "projection périmée", "stale", "hand-edit", "édité à la main", "GEN_FILE_HAND_EDITED", "dérive", "aperçu", "deploy", "E10", "phase stable", "le mur", "projection", "non-destruction", "S74", "EPIC 6"]
 ---
 
 <Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S78](/steps/internals/s78-app-regenerator).</Note>
@@ -57,4 +57,4 @@ Régénérer **n'écrit aucune vérité**. Le code émis (`gen/`) est une **proj
 
 ## En résumé
 
-<Check>S78 vous donne **« Régénérer mon app »** : tout le code de votre projet ré-émis en un geste, **byte-stable**, avec le détail de ce qui change — et un **refus net** si un fichier généré a été touché à la main. C'est la régénération sur laquelle s'appuient la preview et le déploiement.</Check>
+<Check>S78 vous donne **« Régénérer mon app »** : tout le code de votre projet ré-émis en un geste, **byte-stable**, avec le détail de ce qui change — et un **refus net** si un fichier généré a été touché à la main. C'est la régénération sur laquelle s'appuient l'aperçu et le déploiement.</Check>
