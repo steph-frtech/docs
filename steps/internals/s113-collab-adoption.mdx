@@ -1,0 +1,47 @@
+---
+title: "S113 · Substrat de collaboration + échelle d'adoption — internals"
+description: "Le détail d'implémentation de S113 : le moteur pur back/runtime/collab composant la porte d'adhésion (S62), la provenance identifiée, les commentaires/invites content-adressés, le feed déterministe, la présence sans écrasement avec verrou optimiste, et la projection per-projet de l'échelle d'adoption (S47) ; son twin TS lib/collab ; le serveur MCP aidos-collab (six outils) ; la route Workbench /collab action-capable et son e2e Playwright. Avec les trois couches Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "S113", "internals", "collab", "membership", "adoption", "provenance", "présence", "verrou", "feed", "content-address", "MCP", "Playwright", "déterminisme", "le mur", "EPIC 3", "§82.5"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S113](/steps/concept/s113-collab-adoption).</Note>
+
+## Implémentation
+
+S113 n'invente **aucun mécanisme de vérité** : c'est une **composition** de deux moteurs déjà verts — la porte d'adhésion (`membership.Authorize`, S62) et l'échelle d'adoption (`adoption.Plan`, S47) — autour d'une provenance estampillée et d'une présence content-adressée.
+
+**Le moteur pur (`back/runtime/collab/collab.go`).** Tout est fonction pure totale, sans horloge, sans rng, sans I/O, sans LLM :
+
+- `Authorize(actor, act) → Decision` : refuse d'abord un acteur **non identifié** (`UNIDENTIFIED_ACTOR` — la provenance n'est jamais un placeholder), puis délègue à `membership.Authorize` pour l'op requise par l'acte (`read` pour comment/share ; `administer` pour invite/approve). Un membre sans autorité administer est donc refusé `ROLE_FORBIDDEN` pour `approve` — **un membre sans authority ne peut approuver**. `CanApprove` est la porte nommée S110.
+- `Actor.Comment / Actor.Invite / Actor.Record` : autorisent puis produisent un enregistrement **content-adressé** (`records.Hash` du corps canonicalisé) estampillé avec `actor.Identity` — l'auteur/inviteur/acteur est **le vrai user**, jamais un placeholder. Idempotents : même entrée ⇒ même id.
+- `Feed([]FeedEntry)` : projection déterministe (tri stable par `Seq` puis `id`) — pas d'horloge, l'ordre vient d'un numéro de séquence porté par l'appelant.
+- La **présence** : `Canvas.Join(actor)` retourne un **nouveau** canvas (jamais de mutation) où la présence est **ajoutée** puis dédupliquée/triée — un second `Join` n'écrase jamais le premier. `Canvas.ClaimLock` est un **verrou optimiste** : un acteur présent réclame le verrou ; s'il est déjà tenu par un autre, la demande est **refusée** (`ROLE_FORBIDDEN`, severity warning) — jamais volé en silence ; `ReleaseLock` le libère.
+- L'**échelle per-projet** : `StageFor(projectID, capabilities)` enveloppe `adoption.Plan` (S47) pour calculer le `current` et le `next` du projet ; `CanAdvance` retourne vrai **seulement** si la prochaine dent n'a aucun gap (« done is computed »), sinon un `STAGE_GATE_UNMET` nommant les capacités manquantes.
+
+**Le twin TS (`front/web/lib/collab.ts`).** Réplique exacte, content-adressée à l'identique (`createHash('sha256')` sur le corps canonicalisé, mêmes clés triées que `records.Canonicalize`), réutilisant `lib/membership.authorize`. Le panneau re-rejoue ce twin côté client.
+
+**Le serveur MCP (`back/mcp/collab/main.go`, `aidos-collab`).** Six outils, un par op backend (ADR 0009) : `collab_authorize`, `collab_comment`, `collab_invite`, `collab_feed`, `collab_presence`, `collab_stage`. Chacun est une fonction pure de son entrée ; le juge est l'autorité d'adhésion + l'échelle pure, jamais le LLM.
+
+**La route Workbench (`front/web/app/collab/page.tsx`, `/collab`).** Action-capable (ui-completeness, §7) : chaque op a un contrôle **atteignable ET exécutable** depuis l'écran — l'identité actrice (provenance), approuver, commenter, inviter, présence (join/claim/release), l'échelle (cases à cocher des capacités + avancer), et le feed d'activité. Thématisée (ADR 0010), bilingue (ADR 0011).
+
+## Les mirroirs (red → green)
+
+- **Godog** (`back/tests/runtime/collab.feature` + `collab_bdd_test.go`) : un viewer/editor ne peut approuver (`ROLE_FORBIDDEN`), un owner oui, un non-membre `NOT_A_MEMBER` ; un commentaire est enregistré avec le vrai user ; un acte sans identité résolue est refusé `UNIDENTIFIED_ACTOR`.
+- **Fixture** (`collab_fixture_test.go`) : deux utilisateurs présents sans écrasement ; le verrou concurrent n'est jamais volé ; l'échelle n'avance que quand la porte est atteinte ; le palier surface current + next.
+- **Property / rapid** (`collab_property_test.go`) + **fast-check** (`lib/collab.test.ts`) : reproductibilité (même entrée ⇒ même sortie), content-addressing idempotent, provenance jamais placeholder, join qui ne perd aucune présence, échelle gatée.
+- **MCP** (`back/mcp/collab/main_test.go`) : les done-criteria tiennent à la porte MCP.
+- **Playwright** (`tests/e2e/collab.spec.ts`) : chaque contrôle s'exécute à l'écran.
+
+## Méta
+
+**Pourquoi composer plutôt que recoder ?** Le substrat de collaboration aurait pu réintroduire sa propre notion d'« autorité » et de « palier ». Il ne le fait pas : il **réutilise** la porte d'adhésion (S62) et l'échelle (S47) comme moteurs autoritatifs. C'est la discipline anti-réinvention (ADR 0007) appliquée au plan social — la collaboration n'est qu'**une nouvelle façade** sur des vérités déjà prouvées, ce qui garantit qu'elle ne peut pas **diverger** d'elles (un membre ne peut jamais approuver via /collab ce qu'il ne pourrait approuver via la porte d'autorité).
+
+**Pourquoi la présence est content-adressée et sans horloge ?** Parce que le déterminisme-first (§6/§8) interdit qu'un comportement dépende de `time.Now()` ou de l'ordre d'arrivée réseau. Le `Seq` du feed et l'ensemble de présence trié rendent la collaboration **rejouable** : même séquence d'actes ⇒ même état, ce que le miroir de reproductibilité épingle. La concurrence (verrou optimiste) est la même idée que l'anti-overwrite de S110 (head content-adressé), descendue d'un cran — sur le canvas plutôt que sur la vérité.
+
+**Pourquoi « done is computed » pour l'échelle ?** Parce qu'un projet ne doit pas pouvoir **se déclarer** plus avancé qu'il ne l'est (anti-Goodhart, §8). L'avance est dérivée des capacités réellement vivantes ; la porte du palier est une **condition calculée**, jamais une affirmation. C'est la même règle que le `Stop:goal-check` du noyau, projetée sur l'adoption.
+
+## Méta-méta
+
+S113 illustre que **la gouvernance est une lentille, pas une couche**. Le mur (§2) ne s'épaissit pas quand l'équipe grandit : il reste exactement le même prédicat (`membership.Authorize`), et S113 ne fait que l'**invoquer** depuis plus d'endroits, en y attachant la provenance. Le plan social ne crée aucune nouvelle porte de vérité — la seule porte reste `idée → miroir → /goal → approbation`, et « approuver » dans /collab est précisément cette porte (S110), pas une seconde.
+
+La leçon méta-méta : **multiplier les surfaces d'accès à une vérité ne doit jamais multiplier les façons de l'écrire**. Chaque nouvelle façade (cockpit, MCP, feed, présence) est un **lecteur/autorisateur** de plus, et **zéro écrivain** de plus. C'est ce qui permet à AIDOS de devenir collaboratif sans devenir corruptible : la vérité reste à un seul endroit, derrière une seule porte, et tout le reste — la présence, le feed, l'échelle — n'est qu'une **projection déterministe** de ce qui est déjà prouvé. La collaboration est ainsi un **gain de visibilité sans perte de garantie**.

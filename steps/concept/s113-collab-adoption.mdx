@@ -1,0 +1,54 @@
+---
+title: "S113 · Substrat de collaboration + échelle d'adoption — provenance identifiée, présence sans écrasement, le prochain cliquet"
+description: "S113 ouvre le plan social du projet : adhésion, partage et invitations, provenance identifiée (« qui a voulu quoi » avec de vrais users), commentaires sur les idées/miroirs/changesets, un feed d'activité, et une présence temps réel où deux personnes éditent le même canvas sans s'écraser. Chaque acte passe la porte d'autorité (un membre sans authority ne peut approuver) et porte le vrai user, jamais un placeholder. Et le projet surface son palier d'adoption courant et la prochaine dent à atteindre — l'échelle n'avance que quand la porte du palier est franchie."
+keywords: ["aidos", "krd", "S113", "collaboration", "adhésion", "partage", "invitation", "provenance", "commentaire", "feed", "présence", "édition concurrente", "canvas", "verrou", "adoption", "AdoptionStage", "échelle", "palier", "§82.5", "done is computed", "le mur", "EPIC 3", "auth"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S113](/steps/internals/s113-collab-adoption).</Note>
+
+## En une phrase
+
+S113 transforme un projet AIDOS d'un **atelier solitaire** en un **espace d'équipe** : on s'y invite, on y commente, on y voit qui est là en temps réel — chaque geste portant **le vrai nom** de qui l'a fait — et le projet sait **dire où il en est** sur l'échelle d'adoption et **quelle est la prochaine dent** à atteindre.
+
+## Le problème que S113 résout
+
+Jusqu'ici, un projet était utilisable seul. Mais développer une app avec AIDOS est un travail **collectif**, et le collectif fait apparaître trois questions :
+
+1. **Qui a voulu quoi ?** Si deux personnes proposent, commentent, approuvent, il faut savoir **qui** — un vrai utilisateur résolu, jamais un « placeholder » anonyme. La provenance n'est pas décorative : c'est la traçabilité de la vérité.
+2. **Que se passe-t-il quand deux personnes éditent le même écran en même temps ?** Sur un canvas partagé (la modélisation d'entité, un miroir), la naïveté serait que la seconde écrase la première. AIDOS l'interdit : **on se voit, on ne s'écrase pas**.
+3. **Où en est mon projet, et que dois-je faire pour progresser ?** L'adoption d'AIDOS n'est pas tout-ou-rien : c'est une **échelle** (d'abord des tests + mutation, puis une cellule, puis kernel + miroir, puis contexte + mémoire, puis évolution + diversité, jusqu'à la fédération). Le projet doit **surfacer son palier courant** et **la plus petite dent qui clique ensuite**.
+
+## La provenance, jamais un placeholder
+
+Chaque acte social — commenter une idée, partager le projet, inviter un membre, approuver un changeset — est **estampillé** avec l'identité résolue de celui qui l'a fait. Un acte tenté sans identité réelle (un champ vide, un faux « anonyme ») est **refusé** : pas de provenance fantôme. C'est « qui a voulu quoi » avec de **vrais users**.
+
+## Un membre sans autorité ne peut approuver
+
+Tout acte passe d'abord la **porte d'adhésion** déjà construite : un non-membre est refusé ; un membre dont le rôle est trop bas pour l'acte est refusé. En particulier, **approuver** un changeset (la décision d'équipe sur une vérité) exige l'autorité d'administration — un *viewer* ou un *editor* ne peut pas approuver, **seul un owner** le peut. La collaboration n'affaiblit jamais le mur : elle s'y appuie.
+
+## La présence, sans écrasement
+
+Sur un canvas partagé, **deux utilisateurs présents se voient mutuellement** — l'arrivée du second **ajoute** sa présence, elle ne remplace jamais le premier. Et quand l'un veut éditer, il **réclame** un verrou d'édition explicite : si quelqu'un le tient déjà, la demande de l'autre est **poliment refusée**, jamais le verrou n'est volé en silence. Le détenteur le relâche, et le suivant peut le prendre. Personne n'écrase personne.
+
+## Le feed d'activité
+
+Toutes ces actions s'inscrivent dans un **feed d'activité** ordonné : qui a fait quoi, dans quel ordre. Chaque ligne porte le **vrai acteur** ; le feed donne à l'équipe la mémoire vivante du projet.
+
+## L'échelle d'adoption, surfacée par projet
+
+Le projet affiche son **palier d'adoption courant** (`T0 → T4`, du socle « tests + mutation » jusqu'à « évolution + diversité » et la fédération) et **la prochaine dent** : la plus petite capacité à installer pour avancer. Et — c'est la règle d'or — **l'échelle n'avance que quand la porte du palier est atteinte**. On ne « déclare » pas qu'on a progressé : c'est **calculé** à partir des capacités réellement vivantes du projet (« done is computed »). Tant qu'il manque une capacité requise, l'avance est refusée, en nommant exactement ce qui manque.
+
+## Ce que vous voyez à l'écran
+
+Le panneau `/collab` du Workbench rend tout cela **exécutable d'un clic** :
+
+1. **L'identité actrice** : choisissez qui agit et son rôle — c'est la provenance de chaque geste.
+2. **Approuver** : tentez d'approuver un changeset ; un viewer/editor est refusé, un owner passe.
+3. **Commenter** : commentez une idée/miroir/changeset — la ligne enregistrée porte **votre** nom.
+4. **Inviter / partager** : invitez un membre (réservé à l'owner).
+5. **Présence** : rejoignez le canvas comme alice, puis comme bob — **les deux** apparaissent ; réclamez le verrou, voyez qu'il n'est pas volé.
+6. **L'échelle** : cochez les capacités vivantes du projet, voyez son palier courant et sa prochaine dent, et constatez qu'avancer **n'est permis que** quand la porte est franchie.
+
+## Le mur, toujours
+
+Le cockpit **n'écrit aucune vérité**. Commentaires, partages, invitations, feed, présence vivent **sous la ligne**, dans leur propre zone. La seule action qui *touche* une vérité — approuver un changeset — reste le chemin **propose → ChangeSet → approbation** (S110) ; S113 ne fait qu'**autoriser** l'acte et **enregistrer la provenance**. Tout est calculé **déterministe**, jamais par un LLM : le juge est la règle d'adhésion et l'échelle pure, jamais un agent.
