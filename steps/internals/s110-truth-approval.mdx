@@ -1,0 +1,52 @@
+---
+title: "S110 · Approbation vérité multi-humains + concurrence — internals"
+description: "Le détail d'implémentation de S110 : le moteur pur back/kernel/truthapproval composant authority.Decide (S63), changeset (S20) et un optimistic-lock content-adressé sur le head ; son twin TS lib/truth-approval ; le serveur MCP aidos-truth-approval (trois outils) ; la route Workbench /truth-approval action-capable et son e2e Playwright. Avec les trois couches Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "S110", "internals", "truthapproval", "authority", "changeset", "merge-semantic", "optimistic-lock", "head", "anti-overwrite", "override", "provenance", "MCP", "Playwright", "déterminisme", "le mur", "EPIC 3"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S110](/steps/concept/s110-truth-approval).</Note>
+
+## Implémentation
+
+S110 n'introduit **aucun mécanisme de vérité nouveau** : c'est une **composition** de trois moteurs déjà verts — la porte d'autorité (`authority.Decide`, S63), l'enveloppe `changeset` (S20) et la sémantique de fusion (`merge`, S25) — autour d'un **verrou optimiste adressé par contenu** sur le head.
+
+**Le moteur pur (`back/kernel/truthapproval/truthapproval.go`).** Deux fonctions load-bearing :
+
+- `Propose(graph, proposal) → Decision` : ouvre l'enveloppe DRAFT (`changeset.Open`, content-addressed) et exécute la porte `authority.Decide`. Un veto → `blocked`/`VETOED` ; aucune approbation → `blocked`/`MISSING_AUTHORITY_APPROVAL` ; partielle → `escalated` ; toutes → admis (DRAFT prêt). `Propose` **ne bouge pas le head** (proposer n'écrit jamais).
+- `Approve(graph, proposal, liveHead, appliedAt, override) → Decision` : la passe en deux temps. (1) la porte ; (2) le **verrou optimiste** — si `proposal.Head != liveHead` → `stale_head`, head inchangé, `StaleAgainst = liveHead` (le membre re-rejoue ses miroirs). Sinon `changeset.Apply` (gate de complétude) et `NewHead = envelope.ID`. Un `override` **complet** (`by` + `reason` + `adr`, `IsRecorded()`) convertit un blocage en écriture admise et **porte sa provenance** ; un override incomplet est ignoré (le blocage tient — pas de bypass silencieux).
+
+Deux helpers de batch : `ApplyConcurrent(graph, startHead, proposals, appliedAt)` applique en ordre soumis contre un head **mobile** (le premier admis+frais bouge le head, les suivants au même head deviennent `stale_head`) ; `AppliedCount` (≤ 1 pour des proposals même-head même-cible) et `StaleProposals` (les acteurs à re-rejouer) projettent le résultat. `Provenance` rend les paires triées « qui a voulu quoi » (§8).
+
+Tout est **PUR** : pas de DB, pas d'horloge (`appliedAt` est un argument), pas de rng, pas d'I/O, pas de LLM. Le paquet **n'écrit rien** au kernel/mirrors/fitness (le mur) : il **décide** et **renvoie l'enveloppe** que la CLI appliquerait.
+
+**Le twin pur (`front/web/lib/truth-approval.ts`).** Le miroir TS du moteur : `decide`, `propose`, `approve`, `applyConcurrent`, `appliedCount`, `staleProposals`, `provenance`. L'`envelopeId` est un FNV-1a déterministe sur le corps canonique (le Go détient la vérité SHA-256 ; le twin a juste besoin d'ids distincts/stables). Mêmes lois, mêmes verdicts.
+
+**Le serveur MCP (`back/mcp/truth-approval/main.go`, ADR 0009).** Trois outils déférant au moteur Go pur :
+- `truth_propose` — `truthapproval.Propose` (porte, sans bouger le head) ;
+- `truth_approve` — `truthapproval.Approve` (porte + verrou optimiste + override) ;
+- `truth_apply_concurrent` — `truthapproval.ApplyConcurrent` (batch, au plus une atterrit).
+
+L'`applied_at` est une constante fixe côté serveur pour préserver la pureté. Aucun outil n'écrit une vérité.
+
+**La route Workbench (`front/web/app/truth-approval/`).** `page.tsx` (thème ADR 0010, bilingue ADR 0011) + `TruthApprovalPanel.tsx` action-capable, ajoutée à la nav `WorkbenchHeader`. Trois contrôles, chacun lié à une Server Action exécutant le twin pur : la porte (`gate-submit` avec modes + `override-toggle`), la concurrence (`concurrent-submit`), la résolution (`reland-submit`).
+
+**Les miroirs.**
+- `back/kernel/truthapproval/truthapproval_fixture_test.go` — **fixtures (critère §S110)** : un veto bloque ; un override enregistré atterrit avec provenance ; un override sans ADR est refusé ; partielle escalade ; **deux propositions concurrentes — au plus une atterrit, l'autre `stale_head`** ; le stale re-rejoue contre le nouveau head et atterrit.
+- `back/kernel/truthapproval/truthapproval_property_test.go` (rapid) — **reproductibilité** (même entrée ⇒ même verdict) ; **le mur** (jamais d'atterrissage sans admission ∧ head frais) ; **anti-overwrite §9** (au plus une écriture concurrente atterrit) ; **anti-Goodhart** (un veto bloque sauf override enregistré).
+- `front/web/lib/truth-approval.test.ts` (Vitest + fast-check, 12 tests) — les mêmes lois côté twin.
+- `back/mcp/truth-approval/main_test.go` (Go, 6 tests) — les mêmes lois à la frontière MCP.
+- `tests/e2e/truth-approval.spec.ts` (Playwright, 4 tests) — **le critère §S110 prouvé devant l'écran** : un veto bloque puis un override atterrit avec son ADR ; deux propositions concurrentes → exactement une atterrit ; le conflit résolu en re-rejouant contre le nouveau head.
+
+## Méta
+
+**Pourquoi deux fonctions (`Propose` / `Approve`) et non une.** Parce que le critère distingue deux moments : **proposer** (au-dessus du mur, sans rien écrire) et **approuver+appliquer** (qui bouge le head). Séparer rend le mur explicite : `Propose` ne peut jamais, par construction, bouger le head — un propose qui écrirait serait un bug visible. C'est la traduction directe de « propose → ChangeSet → approbation ».
+
+**Pourquoi le head est une adresse de contenu.** Un verrou pessimiste (locker la ligne) coûterait une session DB et sérialiserait les écritures. Le **verrou optimiste sur l'adresse de contenu** est plus fidèle à AIDOS : le head **est** le hash de la phase ; il change **ssi** une vérité a bougé. Comparer `proposal.Head` à `liveHead` est donc une **détection de conflit exacte et gratuite** — pas une heuristique de chevauchement de diff textuel.
+
+**Pourquoi l'override porte un ADR.** Parce que §8 l'exige : « un override n'est pas une édition, c'est une décision enregistrée (changeset + ADR + provenance) ». `IsRecorded()` est le gardien : un override partiel est traité comme **pas d'override**, le blocage tient. Le passage en force est ainsi **traçable et opposable**, jamais furtif.
+
+**Pourquoi re-rejouer les miroirs (et pas un merge textuel).** Le conflit refusé renvoie le membre vers `merge.MergeSemantic` (S25) : c'est **le miroir qui décide** la fusion, jamais le diff de texte. Deux écritures textuellement disjointes peuvent rester un conflit sémantique ; deux écritures qui se chevauchent textuellement peuvent fusionner proprement. S110 délègue cette décision au moteur déjà construit — il ne la ré-implémente pas.
+
+## Méta-méta
+
+**Le déterminisme se compose, le mur se compose, l'anti-overwrite se compose.** `Approve` est pur parce que `authority.Decide`, `changeset.Apply` et la comparaison de head le sont chacun. La preuve de reproductibilité tient **mécaniquement** par héritage. Le mur tient à la couture parce qu'aucune des parts n'écrit. Et l'anti-overwrite §9 — « au plus une écriture concurrente atterrit » — est une **propriété**, pas un test d'exemple : la mirror rapid l'asserte pour **tout** batch de 2 à 6 propositions sur le même head, jamais juste pour le cas Alice/Bob. C'est la garantie NIVEAU 3 « rien ne casse silencieusement ce qui précède » rendue **exécutable et universelle** : le juge qui refuse une écriture concurrente est une comparaison d'adresses de contenu, jamais un agent qui estime si « ça a l'air d'un conflit ».

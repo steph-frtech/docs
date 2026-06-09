@@ -1,0 +1,54 @@
+---
+title: "S110 · Approbation vérité multi-humains — propose → ChangeSet → approbation, sans last-write-wins"
+description: "S110 fait de toute écriture-vérité passant par le cockpit une décision d'équipe gouvernée : elle passe propose → ChangeSet → approbation, gatée par l'AuthorityGraph lié (qui approuve, qui peut opposer un veto, vers qui escalader) au bon périmètre de vérité ; un passage en force (override) est une décision enregistrée avec sa provenance et son ADR, jamais un contournement silencieux. Et quand deux membres écrivent en même temps, un verrou optimiste adressé par contenu garantit qu'aucune écriture n'en écrase une autre : la seconde est refusée, jamais la dernière ne gagne."
+keywords: ["aidos", "krd", "S110", "approbation", "vérité", "AuthorityGraph", "veto", "escalation", "override", "provenance", "ChangeSet", "concurrence", "optimistic-lock", "head", "last-write-wins", "anti-overwrite", "merge-semantic", "le mur", "EPIC 3", "auth", "§8", "§13.8", "§44", "§122"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S110](/steps/internals/s110-truth-approval).</Note>
+
+## En une phrase
+
+S110 fait de chaque **écriture-vérité** déclenchée depuis le cockpit une **décision d'équipe gouvernée** : la bonne personne doit l'approuver (et la bonne personne peut s'y opposer), et si deux personnes écrivent en même temps, **aucune n'écrase l'autre** — la seconde est poliment refusée.
+
+## Le problème que S110 résout
+
+Une vérité dans AIDOS (un miroir, une opération, une politique) n'appartient pas à une seule personne : c'est un bien d'équipe. Deux risques apparaissent dès que plusieurs humains travaillent sur le même Kernel :
+
+1. **Qui a le droit d'admettre cette vérité ?** Sur un sujet réglementaire, le juridique doit pouvoir **bloquer** ; sur un sujet produit, le product owner doit **approuver**. « L'humain » abstrait ne suffit plus — il faut un **propriétaire d'autorité explicite**.
+2. **Que se passe-t-il si deux personnes appliquent en même temps ?** Sans garde-fou, la dernière écriture gagne et **écrase silencieusement** la première. C'est exactement ce qu'AIDOS interdit (l'anti-overwrite).
+
+S110 répond aux deux d'un coup, **sans rien réinventer** : il **compose** la porte d'autorité déjà construite (qui approuve / veto / escalade), l'enveloppe ChangeSet déjà construite (le seul moyen légal de bouger une vérité), et un **verrou optimiste** adressé par contenu.
+
+## La porte d'autorité
+
+Chaque écriture-vérité est rattachée à un **AuthorityGraph** : un petit graphe qui dit, pour un domaine et un type de vérité, **qui approuve**, **qui peut opposer un veto**, et **vers qui escalader** en cas de désaccord. La règle est simple et sans surprise :
+
+- un **veto domine** : si la personne habilitée s'oppose, l'écriture est bloquée, quel que soit le nombre d'approbations ;
+- **aucune approbation** → bloqué ;
+- une approbation **partielle** → escaladé vers l'arbitre désigné ;
+- **toutes** les approbations requises → admis.
+
+Et si quelqu'un doit **passer en force** (un correctif d'incident où le juridique a donné son accord de vive voix) ? Ce n'est **jamais un contournement silencieux** : c'est un **override enregistré** qui porte **qui** l'a décidé, **pourquoi**, et **quel ADR** le justifie. Un override sans ces trois éléments est refusé.
+
+## La concurrence, sans last-write-wins
+
+Imaginez Alice et Bob qui modifient tous deux la même opération `createOrder`, en partant du **même état** du Kernel (le même « head »). Tous deux ont l'approbation requise. Que se passe-t-il ?
+
+- **Alice applique en premier.** Sa dent atterrit, et le head **bouge** (il pointe désormais sur sa nouvelle enveloppe).
+- **Bob applique ensuite.** Mais Bob référence encore l'**ancien** head — celui d'avant Alice. AIDOS **refuse** : son écriture est marquée « head périmé ». **Jamais** la dernière écriture ne gagne.
+
+Le head est une **adresse de contenu** : il change dès qu'une vérité bouge. C'est ce qui rend la détection de conflit **mécanique** — pas besoin de deviner si les deux changements se chevauchent, le head le dit.
+
+Que fait Bob alors ? Il **re-rejoue ses miroirs** contre le nouveau head : c'est le moteur de fusion sémantique (déjà construit) qui décide si sa modification est encore cohérente. Si oui, il ré-applique, et **sa** dent atterrit à son tour. Le conflit est résolu **en re-rejouant les miroirs**, jamais en écrasant.
+
+## Ce que vous voyez à l'écran
+
+Le panneau `/truth-approval` du Workbench rend tout cela **exécutable d'un clic** :
+
+1. **La porte** : choisissez un scénario (approbation complète, veto présent, approbation partielle), cochez ou non un override, et approuvez. Vous voyez le verdict : appliqué, bloqué (avec sa raison), escaladé — et, si override, sa provenance et son ADR.
+2. **La concurrence** : lancez deux propositions concurrentes sur le même head. Vous voyez **exactement une** atterrir, l'autre refusée « head périmé », et le membre à re-rejouer désigné.
+3. **La résolution** : re-rejouez les miroirs contre le nouveau head — la seconde écriture atterrit à son tour.
+
+## Le mur, toujours
+
+Le cockpit **n'écrit aucune vérité**. Il **décide l'admission** et **renvoie l'enveloppe** que la CLI `aidos` (seule habilitée) appliquerait. La décision, le veto, l'override, le refus de conflit : tout est calculé **déterministe**, jamais par un LLM. C'est la même garantie qu'ailleurs dans AIDOS — le juge est la règle et l'adresse de contenu, jamais un agent.
