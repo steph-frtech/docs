@@ -461,7 +461,9 @@
               "steps/concept/fk04-facet-completeness",
               "steps/internals/fk04-facet-completeness",
               "steps/concept/fk05-proof-type",
-              "steps/internals/fk05-proof-type"
+              "steps/internals/fk05-proof-type",
+              "steps/concept/fk06-derive-doc",
+              "steps/internals/fk06-derive-doc"
             ]
           }
         ]

@@ -1,0 +1,48 @@
+---
+title: "FK06 · La dérivation de s9 (internals)"
+description: "Implémentation, Méta et Méta-méta de FK06 : l'émetteur pur DeriveDoc(kernel) → s9 — la moitié basse du doc-miroir dérivée des ASTs (operations, controls, actions : entités, événements, policies, liaisons, surface d'erreurs), structurée et canonicalisée pour la comparaison structurelle de FK07. Même kernel → s9 byte-identique."
+keywords: ["aidos", "krd", "FK06", "derivedoc", "DeriveDoc", "s9", "s2", "doc-miroir", "lexique", "concepts", "behaviors", "erreurs", "fonction pure", "byte-identique", "canonicalize", "FKE-1.3", "déterminisme", "rapid", "fast-check"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord interne. Pour la version sans code, voir [Pour les futurs utilisateurs → FK06](/steps/concept/fk06-derive-doc).</Note>
+
+## Implémentation
+
+FK06 est l'émetteur **pur** `DeriveDoc(kernel) → s9` (KRD FKE-1.3 décision (a)) — la **moitié basse** du doc-miroir, le doc DÉRIVÉ du code. Tout le cœur est une fonction pure, sans I/O, sans horloge, sans rng, sans LLM — `back/runtime/generators/derivedoc/`.
+
+**L'entrée — `Kernel`.** Un bundle d'ASTs lus en lecture seule : `Operations []operation.Operation`, `Controls []control.Control`, `Actions []action.Action` (les sources S10/S11/§24 déjà construites), plus le `KernelID` qui apparie s9 à son s2.
+
+**La sortie — `S9`.** Trois sections, chacune un **ensemble trié + dédupliqué** :
+
+- `Concepts []string` — le lexique, préfixé par nature : `operation:`, `control:`, `action:`, `entity:`, `event:`, `policy:`. Extrait des noms d'op/control/action, des `Entity` des steps `read`/`mutate`, des `Policy` des steps `authorize`, des `Emits`, et de l'`Invoke` des actions.
+- `Behaviors []Behavior` — `{ID, Description}` : un par opération (`operation:<name>`), un par liaison `binding:<control>-><action>-><invoke>` (résolue control → action → opération), un par événement émis (`emit:<op>:<event>`). L'`ID` est la clé comparable ; la `Description` (prose FR) est **advisory** côté FK07.
+- `Errors []string` — la surface d'erreurs : `operation:<name>:ErrAuthorizationDenied` (dérivée d'un step `authorize`), `control:<name>:ErrOrphanTrigger` (le garde-fou du bouton).
+
+**La canonicalisation — le cœur du déterminisme.** `DeriveDoc` retourne aussi `Bytes` et `Hash` : la `S9` est `json.Marshal`ée puis passée dans `records.Canonicalize` (clés d'objet triées récursivement, sans espace insignifiant — le même encodage que le truth-store), et `records.Hash` (SHA-256) en donne l'adresse de contenu. **Même kernel → mêmes octets** ∧ **même hash**.
+
+**Le piège résolu — l'invariance d'ordre.** Une collision de noms (deux opérations « createOrder » de corps différents, ou deux actions de même nom) ne doit pas laisser l'ordre du slice d'entrée fuir dans s9. Deux règles **totales, indépendantes de l'ordre** :
+
+- les behaviors sont collectés dans une `map[ID]description` qui, en cas de collision, **garde la description lexicographiquement la plus petite** (jamais « premier/dernier arrivé ») ;
+- l'index `actByName` garde, en cas de collision, l'action de `(Invoke, On.Control)` minimal.
+
+Les sections finales sont rebâties triées. C'est ce qui fait passer la property « invariant sous réordonnancement ».
+
+**Le jumeau TypeScript.** `front/web/lib/derivedoc.ts` reflète l'émetteur Go pour le Workbench (la Server Action `deriveAction`), avec sa propre property fast-check. Le Go reste **autoritatif** ; le jumeau le mirroite.
+
+**Les artefacts.** MCP `aidos-derivedoc` (outil `derive_doc`, ADR 0009) ; route Workbench `/derive-doc` (action-capable, ADR 0010/0011) ; e2e Playwright `tests/e2e/derive-doc.spec.ts`.
+
+## Méta
+
+**Pourquoi un émetteur, et pas un agent.** La doc dérivée est exactement le genre de capacité que le mandat **determinism-first** (CLAUDE.md §6/§8) réserve au **code** : parser des ASTs, extraire un lexique, énumérer des comportements, sérialiser canoniquement — autant de fonctions pures. Un LLM produirait un texte différent à chaque appel, **rendant la comparaison de FK07 impossible**. s9 est donc un *calcul*, et son miroir de reproductibilité (rapid en Go, fast-check en TS : même kernel → octets identiques) est la garde anti-régression.
+
+**Le doc-miroir, pas l'égalité de prose.** s9 n'est pas « la doc » : c'est la **structure** que FK07 comparera, ensemble par ensemble, à la structure de s2. La divergence **structurelle** (un concept absent, un comportement non documenté, une erreur non couverte) sera bloquante ; la divergence de **prose** restera advisory (le LLM signale, n'arbitre jamais). FK06 ne fait que **produire** la moitié dérivée, proprement comparable.
+
+**Le mur.** `DeriveDoc` **lit** des ASTs et **n'écrit rien** : s9 est une projection sous la ligne d'eau, régénérable, matérialisée par le runner de FK07, jamais une vérité. Additif (anti-overwrite §9) : un nouvel artefact, aucun contrat antérieur déplacé.
+
+## Méta-méta
+
+**Le squelette 1-pour-1.** FK06 instancie, pour la **facette fonctionnelle**, la paire « doc humaine (s2) ↔ doc dérivée (s9) » de l'anatomie 1-pour-1 de KRD (FKE-1.3). Le code n'est pas seulement *testé* : il est *documenté par lui-même*, et cette auto-documentation est **prouvable**. C'est l'extension du principe « tout comportement est prouvé en BDD avant d'exister » au plan documentaire — la doc cesse d'être un commentaire, elle devient un **miroir**.
+
+**Le juge reste un calcul (§8).** En posant s9 comme un artefact byte-identique, FK06 garantit que le juge de FK07 sera **déterministe** : ce n'est pas l'agent qui décidera si « la doc est à jour », c'est une comparaison d'ensembles. AIDOS pousse ici sa règle anti-Goodhart jusque dans la documentation : *done est calculé, jamais déclaré*. Une doc « à jour » devient une propriété vérifiable, pas une affirmation.
+
+**La trajectoire.** FK06 prépare FK07 (les doc-miroirs : la comparaison structurelle s2↔s9 + s1↔s10, et le data-miroir s3↔s7). En isolant la **dérivation** (pure, ici) de la **comparaison** (FK07), AIDOS sépare la production de l'arbitrage — chacun déterministe, chacun testable seul. C'est la même discipline que partout : un émetteur pur en bas, un juge pur au-dessus, l'humain qui possède la vérité, l'agent qui possède l'implémentation.

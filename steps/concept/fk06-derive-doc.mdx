@@ -1,0 +1,50 @@
+---
+title: "FK06 · La doc dérivée du code (s9) : prouver que la doc dit la vérité"
+description: "FK06 fabrique, à partir du code lui-même, la moitié basse d'un « doc-miroir » : un document DÉRIVÉ — la liste des concepts, des comportements et des erreurs que le code expose réellement. Cette moitié dérivée (s9) sera, à l'étape suivante, comparée à la doc écrite par l'humain (s2) pour détecter ce qui manque ou diverge. s9 est un CALCUL pur : le même code donne toujours, octet pour octet, le même s9 — jamais un LLM ne l'écrit."
+keywords: ["aidos", "krd", "FK06", "doc-miroir", "s9", "s2", "doc dérivée", "DeriveDoc", "lexique", "concepts", "behaviors", "erreurs", "fonction pure", "byte-identique", "FKE-1.3", "déterminisme"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK06](/steps/internals/fk06-derive-doc).</Note>
+
+## En une phrase
+
+FK06 lit le **code** d'une cellule (ses opérations, ses boutons, ses actions, ses événements, ses erreurs) et en **dérive un document** — appelé **s9** — qui énumère, de façon structurée et triée, **les concepts, les comportements et les erreurs** que ce code expose vraiment. C'est la moitié **basse** d'un miroir de documentation ; la moitié **haute** (s2) est la doc écrite par l'humain.
+
+## Le problème que FK06 résout
+
+Une documentation, ça **ment** — pas par malice, mais par dérive : le code change, la doc reste. On lit « le bouton de paiement déclenche la commande » alors que, depuis trois semaines, il déclenche un remboursement. La doc et le code ont **divergé**, et rien ne l'a signalé.
+
+AIDOS refuse cette dérive. Sa réponse : ne **jamais** comparer deux proses (un humain ne peut pas relire mot à mot), mais comparer **deux structures**. Pour cela il faut, d'un côté, la doc **écrite** par l'humain (s2), et de l'autre une doc **dérivée du code** (s9) — toutes deux réduites à des **ensembles comparables** : quels concepts ? quels comportements ? quelles erreurs ? FK06 fabrique la seconde.
+
+## Ce que s9 contient
+
+À partir des ASTs du kernel (le code-source structuré qu'AIDOS conserve), `DeriveDoc` produit trois sections, chacune **triée** et **dédupliquée** :
+
+- **Les concepts (le lexique)** — tous les termes nommés à travers les couches, préfixés par leur nature : `operation:createOrder`, `control:checkout-button`, `action:checkout-submit`, `entity:Order`, `event:OrderCreated`, `policy:canCheckout`. C'est l'ensemble que l'étape suivante comparera, terme à terme, au lexique de la doc humaine.
+- **Les comportements (behaviors)** — un par opération, un par **liaison** bouton → action → opération, un par événement émis. Exemple : *« le contrôle "checkout-button" déclenche l'action "checkout-submit" qui invoque l'opération "createOrder" »*.
+- **Les erreurs** — la surface d'erreurs que le code garantit : l'autorisation refusée d'une opération (`ErrAuthorizationDenied`), le garde-fou du bouton orphelin (`ErrOrphanTrigger`).
+
+## La règle d'or : un calcul, jamais un LLM
+
+s9 est une **fonction pure** du code. Cela veut dire :
+
+- **Même kernel → même s9, octet pour octet.** On peut le dériver mille fois, on obtient exactement les mêmes octets. C'est le critère de réussite de l'étape.
+- **L'ordre d'entrée n'a aucune influence.** Que les opérations soient listées dans un ordre ou dans l'autre, s9 est identique — l'émetteur **trie**, il ne recopie pas l'ordre.
+- **Aucun LLM n'écrit s9.** Un modèle de langage produirait deux fois deux textes légèrement différents : impossible de comparer. Ici, le doc dérivé est un **artefact reproductible**, comme une signature.
+
+Cette pureté est ce qui rendra, à l'étape suivante (FK07), la comparaison **fiable** : si s9 changeait à chaque exécution, aucune divergence ne serait détectable.
+
+## Ce que vous voyez à l'écran
+
+Le panneau **« La dérivation déterministe de s9 »** du Workbench vous laisse :
+
+1. choisir un **kernel** (par exemple la tranche de paiement `checkout-slice`),
+2. cliquer **DÉRIVER S9**.
+
+L'écran affiche aussitôt le s9 structuré — les concepts du lexique, les comportements énumérés, les erreurs couvertes — ainsi que ses **octets canoniques** (le texte exact qui sera comparé). Un badge confirme que la dérivation, lancée **deux fois**, a produit des octets **identiques** : la preuve de déterminisme, sous vos yeux.
+
+L'écran **dérive** et **affiche** — il **n'écrit aucune vérité** : s9 est une **projection** régénérable, jamais une donnée du noyau (le mur).
+
+## Pourquoi ça compte
+
+FK06 transforme une bonne intention (« gardons la doc à jour ») en un **calcul vérifiable**. Le code devient sa propre source de vérité documentaire : la liste de ce qu'il fait n'est plus *écrite à la main*, elle est *dérivée*. À l'étape suivante, il suffira de poser cette moitié dérivée à côté de la moitié écrite par l'humain pour voir, sans relire une seule phrase, **ce qui a divergé** — un concept oublié, un comportement non documenté, une erreur passée sous silence.
