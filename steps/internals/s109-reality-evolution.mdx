@@ -1,0 +1,43 @@
+---
+title: "S109 · Cockpit réalité & évolution — internals"
+description: "Le détail d'implémentation du cockpit S109 : la composition pure des trois moteurs déjà construits (S106 realityingest, S107 learn, S108 projectevolve) en une fonction closeReality, son twin TS, le serveur MCP aidos-reality-evolution, la route Workbench /reality-evolution action-capable et son e2e Playwright. Avec les trois couches Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "S109", "internals", "cockpit", "closeReality", "realityingest", "learn", "projectevolve", "MCP", "reality-evolution", "Playwright", "déterminisme", "le mur", "EPIC 12", "E12"]
+---
+
+<Note>Côté « Pour moi » — le journal de construction complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S109](/steps/concept/s109-reality-evolution).</Note>
+
+## Implémentation
+
+S109 n'introduit **aucun mécanisme de vérité nouveau** : c'est un **cockpit** qui **compose** trois moteurs déjà construits et déjà prouvés.
+
+**Le twin pur (`front/web/lib/reality-evolution.ts`).** La fonction load-bearing est `closeReality(report, healthy)` : elle appelle `ingest` (S106) ; si une divergence est trouvée, elle appelle `closeLoop` (S107) — qui attache le miroir approuvé par l'humain, bump le hash de `createOrder` et amorce le red wave ciblé. Le résultat porte `redWaveAppeared` (le booléen du critère §S109) et `redWaveCount`. Un rapport sain → `phase: "no_divergence"` (rien ingéré, rien appris). Deux helpers de plus surfacent l'archive QD : `cockpitElites(mirror, variants)` (projette `niches` de S108 en lignes par niche) et `promoteElite(variantId, authority)` (délègue à `promote` de S108).
+
+**Le serveur MCP (`back/mcp/reality-evolution/main.go`, ADR 0009).** Trois outils déférant aux moteurs Go purs :
+- `close_reality` — compose `realityingest.Ingest` + `learn.Close` ; l'incident remis à `learn.Close` est reconstruit déterministe via `reality.Observe` à partir du record de divergence.
+- `cockpit_elites` — `projectevolve.Niches`, ordre byte-stable.
+- `promote_elite` — `projectevolve.Promote` (gate à trois conditions).
+
+Chaque sortie porte `WroteKernel=false` ; le `fitness` schema n'est jamais nommé.
+
+**La route Workbench (`front/web/app/reality-evolution/`).** `page.tsx` (thème ADR 0010, bilingue ADR 0011) + `CockpitPanel.tsx` action-capable : un contrôle `close-reality` (avec toggle `healthy`) qui exécute le parcours canonique, et l'archive QD avec un toggle `authority-<niche>` + bouton `promote-<niche>` par niche. Les Server Actions (`actions.ts`) exécutent les twins purs et renvoient des valeurs.
+
+**Les miroirs.**
+- `lib/reality-evolution.test.ts` (Vitest + fast-check, 10 tests) — le parcours canonique se termine sur un red wave apparu ; un rapport sain n'apprend rien ; déterminisme (même rapport ⇒ JSON byte-identique) ; le mur tient pour n'importe quel rapport ; le mirror-breaker n'est jamais une élite ; une promotion n'écrit aucune vérité.
+- `back/mcp/reality-evolution/main_test.go` (Go, 5 tests) — les mêmes lois à la frontière MCP.
+- `tests/e2e/reality-evolution.spec.ts` (Playwright, 4 tests) — **le critère §S109 prouvé devant l'écran** : ingérer un incident → approuver le miroir appris → le red wave apparaît ; rapport sain → no-divergence ; archive QD (mirror-breaker absent, promotion refusée sans autorité puis proposée avec).
+
+## Méta
+
+**Pourquoi un cockpit qui ne fait que composer ?** Parce que la **complétude** de la boucle externe n'est pas la somme de trois écrans isolés : c'est leur **enchaînement** vécu par l'humain. S109 matérialise l'enchaînement « la réalité enseigne → vous approuvez → le travail apparaît » comme **une** capacité exécutable, là où S106/S107/S108 prouvaient chacun **un** maillon. Le cockpit est l'endroit où la **ui-completeness** (CLAUDE.md §7) devient « tout se fait par écran » pour la boucle de réalité entière.
+
+**Pourquoi `closeReality` est une fonction unique.** Le critère de l'étape est un parcours (« ingérer → approuver → voir »). En faire une seule fonction pure rend l'e2e capable de piloter **un** contrôle et d'observer **un** résultat composite — la preuve suit le critère mot pour mot, sans coutures où un état pourrait diverger.
+
+**Le mur, encore.** Composer trois moteurs ne dilue pas le mur : chaque moteur écrit déjà `WroteKernel/WritesTruth=false`, et le cockpit re-assert le refus à la couture. La composition ne peut pas **fabriquer** une écriture de vérité que ses composants refusent — le mur est compositionnel.
+
+## Méta-méta
+
+**Le déterminisme se compose.** Trois fonctions pures composées restent une fonction pure : `closeReality` n'a ni horloge, ni rng, ni I/O, ni LLM. La preuve de reproductibilité (même entrée ⇒ même sortie) tient **mécaniquement** parce qu'elle tient pour chaque maillon — le cockpit hérite du déterminisme de ses parts. C'est la garantie NIVEAU 3 « le juge est le miroir, jamais un LLM » étendue à la boucle externe entière : aucun agent ne juge si « le red wave a l'air bon », un compteur le dit.
+
+**Anti-Goodhart compositionnel.** L'archive QD du cockpit ne peut pas réintroduire le mirror-breaker que S108 a tué : `cockpitElites` lit `niches`, qui culle d'abord. Une couche d'affichage ne peut pas **annuler** un invariant de la couche en dessous — l'anti-Goodhart est porté par la fonction, pas par l'écran.
+
+**Ce que S109 enseigne à l'OS sur lui-même.** Un cockpit est une **projection** d'un graphe de capacités déjà vraies. Quand AIDOS construira plus tard d'autres cockpits (fédération, gouvernance), il rejouera ce motif : composer des moteurs purs prouvés, re-asserter le mur à la couture, et faire de l'enchaînement vécu une capacité exécutable — sans jamais déplacer la frontière où l'humain décide.

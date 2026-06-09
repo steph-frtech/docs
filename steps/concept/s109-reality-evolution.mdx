@@ -1,0 +1,43 @@
+---
+title: "S109 · Cockpit réalité & évolution — un seul écran pour la boucle externe et l'archive QD"
+description: "S109 réunit en UN cockpit par projet tout ce que la réalité de production renvoie à votre Kernel : l'ingestion d'un incident en idée draft (S106), la porte d'approbation /learn qui transforme un incident approuvé en nouvelle dent et fait apparaître un red wave ciblé (S107), et l'archive Quality-Diversity de vos élites d'implémentation (S108). Tout est exécutable depuis l'écran : ingérer un incident, approuver le miroir appris, voir le red wave apparaître, promouvoir une élite — sans qu'une ligne de vérité ne soit jamais écrite par la machine."
+keywords: ["aidos", "krd", "S109", "cockpit", "réalité", "évolution", "incident", "RealityMirror", "/learn", "red wave", "miroir appris", "Quality-Diversity", "QD", "élite", "promotion", "anti-Goodhart", "le mur", "EPIC 12", "E12", "§67", "§64", "§66"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S109](/steps/internals/s109-reality-evolution).</Note>
+
+## En une phrase
+
+S109 est le **tableau de bord** où la **production de votre app** parle à votre Kernel : un incident y devient une idée, votre approbation y devient une **nouvelle dent** (un red wave apparaît), et vos meilleures implémentations y attendent votre feu vert — le tout sur **un seul écran**, sans qu'aucune vérité ne soit jamais écrite à votre place.
+
+## Le problème que S109 résout
+
+Aux étapes précédentes, AIDOS a construit trois moteurs séparés : l'**ingestion** d'un incident (S106), la **porte /learn** qui referme la boucle externe (S107), et la **boucle médiane QD** qui cherche de meilleures implémentations (S108). Chacun avait son écran, sa mécanique, sa preuve.
+
+Mais quand votre app tourne en production et qu'un incident arrive, vous ne voulez pas naviguer entre trois panneaux. Vous voulez **un seul endroit** où voir la réalité entrer, l'approuver, et regarder le travail à faire apparaître. S109 est ce **cockpit** : il ne réinvente rien — il **compose** les trois moteurs en une seule surface action-capable, par projet.
+
+## Le parcours, d'un bout à l'autre
+
+Le cœur du cockpit est **un parcours en trois temps**, déclenché d'un clic :
+
+1. **Ingérer un incident.** La production de votre app émet de la télémétrie ; une divergence (« createOrder échoue 30 % du temps sur rupture de stock ») devient un **RealityMirror** project-scopé et une **idée draft** dont le texte est rendu par un template déterministe — jamais un résumé inventé.
+2. **Approuver le miroir appris.** Vous (l'humain) avez grillé cette idée puis gelé un **nouveau miroir** au /goal (« out-of-stock-during-checkout »). Le cockpit l'**attache** : l'adresse de contenu de l'opération `createOrder` **change** mécaniquement.
+3. **Voir le red wave apparaître.** Ce changement d'adresse déclenche un **red wave ciblé** (les miroirs d'abord) : la worklist mécanique de ce qu'il reste à faire. « Les faits ont changé » est résolu **mécaniquement**, pas par discussion.
+
+C'est exactement le critère de réussite de l'étape : **ingérer un incident, approuver le miroir appris, voir le red wave apparaître.**
+
+## L'archive QD de vos élites, au même endroit
+
+Sous la boucle externe, le cockpit affiche aussi vos **niches Quality-Diversity** (S108) : pour une vérité **déjà gelée**, une élite **verte** par niche (rapide / pas cher / simple). Vous pouvez en **promouvoir** une — mais seulement avec votre **autorité**, et même alors ce n'est qu'une **proposition** que votre /goal gèle.
+
+La variante qui casse le miroir n'apparaît **jamais** comme une élite, **même** si son score est le plus haut : c'est l'**anti-Goodhart**. Le juge est le miroir, jamais le score.
+
+## Le mur tient partout
+
+Tout ce que le cockpit fait au-dessus de la ligne est une **valeur**, pas une écriture. L'ingestion produit une idée draft ; l'approbation attache un miroir que **vous** avez rédigé au /goal ; la promotion est une proposition. La machine n'écrit **aucune vérité** — l'arête directe « réalité → Kernel » est **toujours refusée**, et rien n'apprend sa propre fitness. C'est vous qui décidez ; le cockpit ne fait que **rendre le travail visible et exécutable**.
+
+## Ce que ça vous apporte
+
+- **Un seul écran** pour la boucle de réalité de votre projet : ingestion, approbation, red wave, élites.
+- La preuve, faite devant vous, que **les faits qui changent** deviennent du travail **mécaniquement** — pas un débat.
+- La garantie que **rien n'est écrit à votre place** : la réalité enseigne, vous décidez.
