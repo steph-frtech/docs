@@ -477,7 +477,9 @@
               "steps/concept/fk12-caused-by",
               "steps/internals/fk12-caused-by",
               "steps/concept/fk13-why-tree",
-              "steps/internals/fk13-why-tree"
+              "steps/internals/fk13-why-tree",
+              "steps/concept/fk14-lexicon",
+              "steps/internals/fk14-lexicon"
             ]
           }
         ]

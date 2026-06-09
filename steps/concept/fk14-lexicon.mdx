@@ -1,0 +1,46 @@
+---
+title: "FK14 · Le Lexicon Kernel et le linter inter-couches : un mot, partout pareil"
+description: "FK14 ajoute le Lexicon Kernel : un concept est NOMMÉ à travers les 16 couches (humain, BDD, code, test, DB, API, event, log, metric, MCP, skill, agent, doc, CI, policy, memory) comme une source unique, et un linter PUR détecte un symbole hors lexique, couche par couche. Renommer une table hors lexique → rouge. Le juge est une vérification d'appartenance ensembliste, jamais un prompt. Le fork de stockage (record-kind vs kind:layer) est tranché ici : un lexique vit dans un kernel.link content-adressé."
+keywords: ["aidos", "krd", "FK14", "Lexicon Kernel", "langage ubiquitaire", "16 couches", "linter", "drift de langue", "RENAMED", "UNKNOWN_SYMBOL", "UNKNOWN_LAYER", "déterminisme", "content-adressé", "kernel.link", "fork de stockage", "FKE-21"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK14](/steps/internals/fk14-lexicon).</Note>
+
+## En une phrase
+
+FK14 donne à AIDOS le **Lexicon Kernel** : un concept (par exemple *ReturnRequest*) est **nommé une seule fois**, puis **reconnaissable à l'identique dans toutes les couches** — du nom humain jusqu'à la table, l'API, la métrique, l'agent, la policy. Un **linter pur** détecte alors tout symbole qui **dérive** hors de ce lexique, couche par couche.
+
+## Le problème : un même concept porté par seize noms
+
+Un concept ne vit pas seulement dans le code. *ReturnRequest* apparaît :
+
+- côté **humain** : « demande de retour » ;
+- côté **BDD** : `create_return_request` ;
+- côté **code** : `createReturnRequest` ;
+- côté **test** : `create_return_request_should_create_pending_return` ;
+- côté **DB** : la table `return_requests` ;
+- côté **API** : `POST /return-requests` ;
+- côté **event** : `ReturnRequestCreated` ;
+- … et de même côté **log, metric, MCP, skill, agent, doc, CI, policy, memory**.
+
+Ce sont les **16 couches** du langage ubiquitaire (FKE-21). Le danger : qu'un développeur renomme la table en `orders_returns` « juste côté DB », et que le concept se mette à porter **deux noms**. Le langage se fissure ; plus personne ne sait que la table, le code et la métrique parlent du même objet.
+
+## La solution : une source unique + un linter
+
+Le **Lexicon Kernel** est cette source unique. Il **lie** le concept à son symbole **légal** dans chaque couche. Une fois ce lexique posé, le **linter** vérifie, pour chaque symbole réellement observé (un nom de table, une fonction, une métrique) :
+
+1. la couche est-elle l'une des **16** ? Sinon → `UNKNOWN_LAYER` ;
+2. le lexique fige-t-il un symbole pour ce concept dans cette couche ? Sinon → `UNKNOWN_SYMBOL` (le concept n'y est pas nommé — pas un laissez-passer) ;
+3. le symbole observé **égale-t-il** celui du lexique ? Sinon → `RENAMED` (le symbole a **dérivé**).
+
+Aucun drift = **vert**. Un seul symbole hors lexique = **rouge**. C'est exactement le critère de FK14 : **renommer une table hors lexique → rouge**.
+
+## Le drift de langue, vérifiable par calcul
+
+Le point KRD essentiel : cette vérification n'est **pas** une affaire de jugement. Ce n'est pas un agent qui « estime » si deux noms se ressemblent. C'est une **comparaison d'appartenance** : le symbole observé est-il, oui ou non, celui que le lexique fige pour cette couche ? Une **égalité de chaînes** sur un ensemble clos de couches. Le **juge est le code**, jamais un prompt — et le même `(lexique, symboles)` donne toujours les mêmes drifts (déterminisme).
+
+## Pourquoi c'est utile pour vous
+
+Quand vous construisez une app avec AIDOS, le Lexicon Kernel garde votre **langage cohérent de bout en bout**. Vous nommez un concept une fois ; AIDOS vous alerte dès qu'une couche commence à l'appeler autrement. Plus de table fantôme renommée, plus de métrique orpheline : le mot reste **le même mot, partout**. Et comme le lexique est une **source content-adressée**, le renommer crée une **nouvelle version** (jamais une mutation silencieuse) — l'historique du langage est conservé.
+
+<Note>Le linter **lit** et **signale** ; il n'écrit aucune vérité. Figer ou mettre à jour un lexique passe par la seule porte légale : idée → miroir → /goal → approbation humaine. Le mur est intact.</Note>
