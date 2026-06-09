@@ -1,0 +1,44 @@
+---
+title: "S106 · Boucle de réalité — votre production devient un senseur"
+description: "S106 ferme la boucle externe : votre app DÉPLOYÉE émet de l'OpenTelemetry, et quand la production diverge d'un miroir (par exemple 30 % de vos createOrder échouent sur une rupture de stock — un cas qu'aucune fixture ne couvrait), AIDOS en fait un record RealityMirror project-scopé (provenance=incident) → une idée draft. Le texte de l'idée est une projection déterministe (un template sur le record de divergence), jamais un résumé LLM ; seul votre grilling ultérieur est jugement. La réalité n'écrit JAMAIS de vérité directement — la seule porte reste idée → miroir → /goal → approbation."
+keywords: ["aidos", "krd", "S106", "boucle de réalité", "RealityMirror", "incident", "télémétrie", "OpenTelemetry", "telemetry-reader", "divergence", "provenance incident", "idée draft", "template déterministe", "production senseur", "EPIC 12", "E12", "§67", "§117", "le mur"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S106](/steps/internals/s106-reality-ingest).</Note>
+
+## En une phrase
+
+S106 transforme **votre production en senseur** : quand votre app déployée diverge d'un miroir, la divergence devient un **record de réalité** project-scopé puis une **idée draft** dont le texte est **écrit par un template déterministe** — jamais par un LLM — et que **vous** grillerez ensuite.
+
+## Le problème que S106 résout
+
+Un Kernel est toujours **incomplet par omission** (§67) : il couvre ce que vous avez pensé à spécifier, jamais ce que vous n'avez pas anticipé. Le monde réel, lui, ne s'excuse pas. Un jour, 30 % de vos `createOrder` échouent parce qu'un article passe en rupture de stock **entre** l'ajout au panier et le paiement — un cas qu'**aucune fixture** ne couvrait. Votre app ment au miroir : le miroir dit « createOrder réussit », la production dit « 30 % échouent ».
+
+Sans S106, ce signal se perd dans des logs que personne ne relie au Kernel. Avec S106, la **production devient une source de vérité candidate** : le `telemetry-reader` lit l'OpenTelemetry que votre app émet, et la divergence remonte mécaniquement jusqu'à la porte d'entrée des idées.
+
+## La divergence est détectée par du code, pas par un LLM
+
+S106 **compare** la télémétrie à la **promesse** du miroir : un taux d'erreur observé, un p99 observé, contre la barre que le miroir promettait. C'est une comparaison numérique **déterministe** — même rapport + même promesse ⇒ même verdict. Aucun « agent qui regarde si la prod a l'air cassée » : la détection est un calcul, reproductible.
+
+Quand la production est **dans** la promesse du miroir, il ne se passe rien : la réalité n'invente jamais une vérité depuis une app saine.
+
+## Le texte de l'idée est écrit par un template, jamais résumé par un LLM
+
+C'est le cœur de S106. Quand une divergence est détectée, l'idée draft qu'elle produit porte un **texte** qui nomme le gap : le miroir, l'opération, l'observé vs l'attendu, le trafic. Ce texte est rendu par un **template fixe** sur le record de divergence — **même record ⇒ texte byte-identique**. Pas de résumé, pas de génération, pas de jugement.
+
+Pourquoi ? Parce qu'un résumé LLM serait **non reproductible** et pourrait **inventer** une cause qui n'est pas dans les faits. Le seul jugement légitime, c'est **le vôtre**, plus tard, quand vous grillerez l'idée (S107). Jusque-là, AIDOS ne fait que **rapporter les faits**, mot pour mot.
+
+## La réalité n'écrit jamais de vérité directement
+
+Une divergence, aussi récurrente soit-elle, ne **déclare** pas une vérité. Juger que le monde a raison contre le Kernel est une **décision de vérité**, au-dessus du mur, qui vous appartient. S106 produit une **idée draft** (provenance=incident) — pas un miroir, pas une dent. L'arête directe Réalité → Kernel est **toujours refusée** (`REALITY_CANNOT_DECLARE_TRUTH`). La seule porte reste : **idée → miroir → /goal → approbation**.
+
+## Les gestes exécutables
+
+Depuis l'écran `/reality-ingest` (loi `ui-completeness`), vous pouvez :
+
+1. **Ingérer la divergence** : le rapport out-of-stock (createOrder échoue 30 %) devient un RealityMirror project-scopé (provenance=incident) et une idée draft dont vous lisez le texte template ;
+2. **Basculer « rapport sain »** : un rapport dans la promesse → aucune divergence, aucune idée (la réalité n'invente rien).
+
+## Pourquoi c'est important pour vous
+
+Votre app déployée **vous apprend** ce que vous n'aviez pas prévu — sans qu'un agent ne s'interpose pour deviner la cause. Vous recevez des **faits reproductibles** (« voici exactement ce qui a divergé »), scopés à votre projet, prêts à être grillés. C'est la boucle qui referme AIDOS sur le monde réel : la prod sent, AIDOS rapporte, **vous** décidez.
