@@ -457,7 +457,9 @@
               "steps/concept/fk02-facets",
               "steps/internals/fk02-facets",
               "steps/concept/fk03-grid",
-              "steps/internals/fk03-grid"
+              "steps/internals/fk03-grid",
+              "steps/concept/fk04-facet-completeness",
+              "steps/internals/fk04-facet-completeness"
             ]
           }
         ]

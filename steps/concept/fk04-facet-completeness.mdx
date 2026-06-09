@@ -1,0 +1,61 @@
+---
+title: "FK04 · La complétude facet-aware : une preuve manquante de N'IMPORTE QUELLE facette est un monstre"
+description: "FK04 généralise « le monstre » à toutes les facettes. La loi de complétude ne se contente plus de « chaque vérité a son test fonctionnel » : pour CHAQUE facette qu'une vérité instancie — sécurité, perf, migration, invariant, architecture — une paire de preuve VIVANTE doit exister. Une preuve manquante ou morte sur N'IMPORTE QUELLE facette est un monstre, exactement comme un test manquant : une faille sécurité, une régression perf, une migration qui perd des données, un invariant non prouvé sont des monstres. L'expérience (X) est la seule exception : sa preuve manquante informe, elle ne bloque pas. Et c'est additif : un kernel qui n'instancie que le fonctionnel passe toujours."
+keywords: ["aidos", "krd", "FK04", "complétude", "completeness", "monstre", "monster", "facette", "facet", "paire de preuve", "sécurité", "perf", "migration", "invariant", "FKE-1.3", "soft", "expérience", "additif", "miroir vivant"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK04](/steps/internals/fk04-facet-completeness).</Note>
+
+## En une phrase
+
+FK04 dit qu'une vérité n'est **complète** que si **chacune de ses facettes** porte sa **preuve vivante** : pas seulement « ça marche » (le fonctionnel), mais aussi « c'est sûr », « c'est viable », « la migration ne perd rien », « l'invariant est prouvé »… selon ce que la vérité **instancie**. Une preuve qui manque sur **n'importe quelle** facette est un **monstre** — au même titre qu'un test fonctionnel manquant.
+
+## Le problème que FK04 résout
+
+Jusqu'ici, la loi de complétude d'AIDOS (le **monstre**, posé à l'étape S12) disait : *toute vérité doit avoir un miroir vivant*. Mais « un miroir » de **quoi** ?
+
+Prenons une opération de paiement. Elle a un test fonctionnel qui passe : « payer un panier valide crée une commande ». La loi S12 est satisfaite — pas de monstre. Et pourtant :
+
+- personne n'a prouvé qu'elle est **sûre** (pas d'injection, autorisation respectée) ;
+- personne n'a prouvé qu'elle tient son **budget** (latence, coût) ;
+- personne n'a prouvé que sa **migration** de schéma ne **perd** aucune commande existante ;
+- personne n'a prouvé son **invariant** (« le total payé = la somme des lignes, toujours »).
+
+Une faille de sécurité non prouvée, une régression de perf non prouvée, une migration qui perd des données, un invariant jamais vérifié — **ce sont des monstres**, aussi dangereux qu'un test fonctionnel manquant. Mais S12 ne les voyait pas, parce qu'elle ne regardait qu'**une** dimension de la preuve.
+
+FK04 corrige ça : la complétude devient **facet-aware**.
+
+## La règle
+
+[FK02](/steps/concept/fk02-facets) a posé les huit facettes — les huit **natures de vérité** : **F** fonctionnel · **I** invariants · **S** sécurité · **B** budgets · **R** fiabilité · **V** évolutivité · **M** maintenabilité · **X** expérience. Une vérité **instancie** seulement les facettes qui la concernent (une fonction de tri pure instancie F + I + M, pas la sécurité ni la migration).
+
+FK04 ajoute : **pour chaque facette qu'une vérité instancie, une paire de preuve vivante doit exister.**
+
+- **Paire manquante** = la vérité dit « j'ai une dimension sécurité » mais aucun miroir ne la prouve → **monstre**.
+- **Paire divergente** = un miroir prétend prouver la sécurité, mais il est **mort** ou ne **s'exécute pas** (de la prose, pas un test qui court) → **monstre** aussi. La preuve doit *courir*, pas juste être affichée.
+
+## L'exception douce : l'expérience (X)
+
+Une facette est traitée différemment : **X (expérience/usabilité)**. Sa preuve manquante est **consultative** — elle **informe** (« cette vérité n'a pas de preuve d'usabilité »), mais elle ne fait **jamais** virer le verdict au rouge. C'est volontaire : sur-contraindre l'expérience serait l'**erreur symétrique** (bloquer pour rien). X éclaire la décision, il ne la prend pas.
+
+## Pourquoi c'est sans danger pour l'existant (additif)
+
+FK04 **n'invalide aucun kernel conforme existant**. Une vérité qui n'instancie que le **fonctionnel** (un « kernel effondré » légal — le plus petit cliquet qui clique), avec son test fonctionnel vivant, **passe** exactement comme avant. FK04 ne réclame une preuve que pour les facettes **réellement instanciées** : il n'invente jamais une exigence sur une facette absente. C'est une extension qui **ajoute** des monstres possibles, sans jamais en fabriquer un sur du code déjà sain.
+
+## Ce que vous voyez à l'écran
+
+Le panneau **/facet-completeness** du Workbench vous laisse éprouver la loi :
+
+1. Une **coupe de démo** affiche deux vérités et les facettes que chacune instancie (par ex. l'opération `op-checkout` instancie fonctionnel + sécurité + budget).
+2. Vous cliquez **Exécuter la loi** : avec la coupe conforme, le verdict est **COMPLET**.
+3. Vous **fault-injectez** : vous choisissez une facette dont vous **retirez** la preuve (par ex. la sécurité de `op-checkout`). Vous relancez : le verdict vire au **MONSTRE**, et le panneau nomme la cellule fautive (`op-checkout × sécurité`).
+4. La facette **X** d'une vérité, sans preuve, apparaît dans la zone **consultatif** — jamais dans les monstres.
+
+## Ce que FK04 vous garantit
+
+- **La complétude couvre toutes les dimensions.** Une vérité « complète » l'est sur **chaque** facette qu'elle porte, pas seulement sur le fonctionnel.
+- **Les vrais risques deviennent des monstres.** Une faille sécu, une régression perf, une migration qui perd, un invariant non prouvé bloquent — comme un test manquant.
+- **L'usabilité informe sans tyranniser.** X reste doux.
+- **L'existant est préservé.** Additif : aucun kernel sain n'est cassé.
+
+<Note>FK04 généralise « le monstre » à la grille de [FK03](/steps/concept/fk03-grid) : chaque **cellule occupée** (niveau × facette) doit porter sa preuve vivante. La suite de la piste câblera, facette par facette, les miroirs qui fournissent ces preuves (sécurité, budget, migration…).</Note>
