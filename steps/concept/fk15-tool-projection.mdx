@@ -1,0 +1,52 @@
+---
+title: "FK15 · Les projections d'outillage : CLAUDE.md n'est plus écrit à la main"
+description: "FK15 émet CLAUDE.md / AGENTS.md / .cursorrules / memory-bank depuis les kernels (policy, memory, style, architecture, agent-profile). Les fichiers d'outillage ne sont plus la vérité : ce sont des vues DÉRIVÉES, hash-protégées. Mêmes kernels → mêmes fichiers byte-identiques ; un hand-edit est détecté par le source-hash. Le juge est un rendu déterministe + une comparaison d'octets, jamais un prompt."
+keywords: ["aidos", "krd", "FK15", "projections d'outillage", "CLAUDE.md", "AGENTS.md", ".cursorrules", "memory-bank", "vue dérivée", "hash-protégé", "source-hash", "hand-edit", "déterminisme", "FKE-20"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK15](/steps/internals/fk15-tool-projection).</Note>
+
+## En une phrase
+
+FK15 fait des fichiers que lit un agent IA — `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, le *memory-bank* — des **vues dérivées**, **émises** depuis les kernels, jamais écrites à la main. Comme un type TS ou une table SQL sont projetés depuis l'AST d'entité, ces fichiers sont projetés depuis des **sources de kernel** ; les éditer à la main est **détecté**.
+
+## Le problème : le contrat de l'agent dérive en silence
+
+Un agent IA se comporte selon ce qu'il lit dans `CLAUDE.md` (les règles, le mur, l'anti-overwrite), dans `AGENTS.md` (les personas), dans `.cursorrules`, dans le *memory-bank* (les cicatrices, les décisions). Mais ces fichiers sont aujourd'hui **écrits à la main**. Rien n'empêche quelqu'un d'éditer « juste une ligne » du mur, et que le contrat se mette à **mentir** : le fichier dit une chose, la vérité du projet en dit une autre. Le langage de l'agent se fissure exactement comme une table renommée hors lexique (FK14).
+
+## La solution : une source unique + une projection hash-protégée
+
+FK15 pose que la **vérité**, ce sont les **sources de kernel** — pas les fichiers :
+
+- une **policy** (une règle à respecter : le mur, l'anti-overwrite) ;
+- une **memory** (un fait durable : une cicatrice, une discipline de report) ;
+- un **style** (une convention : les tabs de Biome) ;
+- une **architecture** (un invariant : les cinq sous-systèmes) ;
+- un **agent-profile** (un persona : le step-executor).
+
+Chaque fichier d'outillage est alors une **projection** de ces sources :
+
+- `CLAUDE.md` ← policies + architecture + style ;
+- `AGENTS.md` ← agent-profiles ;
+- `.cursorrules` ← policies + style ;
+- `memory-bank.md` ← memories.
+
+Et parce qu'ils sont **dérivés**, ils sont **hash-protégés** : chaque fichier porte, en pied de page, le **source-hash** des kernels dont il est la projection.
+
+## Le hand-edit, détecté par le calcul
+
+Le point KRD : on **ne fait pas confiance** au fichier sur parole. Ré-émettre les mêmes kernels donne **exactement les mêmes octets** (byte-identiques). Donc, si quelqu'un édite le corps à la main :
+
+- le **source-hash** dans le marqueur reste valide (il n'a pas touché les kernels) ;
+- mais les **octets** ne sont plus ceux de la projection ;
+- donc le fichier est détecté comme **HAND_EDITED** — rouge.
+
+Trois verdicts clos couvrent les écarts : `HAND_EDITED` (édité à la main sous un marqueur valide), `MISSING_MARKER` (aucun marqueur AIDOS), `STALE_HASH` (les kernels ont changé, le fichier n'a pas été ré-émis). Le **juge est le code** — un rendu déterministe + une comparaison d'octets — jamais un prompt.
+
+## Ce que ça change pour vous
+
+Vous n'éditez plus `CLAUDE.md` à la main : vous éditez les **sources de kernel** (par idée → miroir → /goal), et le fichier est **ré-émis**. Vous gagnez la garantie qu'un contrat d'agent ne peut plus dériver en douce — toute édition manuelle saute aux yeux. Et comme les fichiers sont des **vues**, ils ne **doublent** jamais la vérité : `CLAUDE.md` ne porte pas le persona du step-executor (ça, c'est `AGENTS.md`) — aucun double-typage.
+
+## Le mur, intact
+
+Le panneau `/tool-projection` **émet** et **détecte le drift** ; il n'écrit **aucune vérité**. Figer ou mettre à jour un *ToolingKernel* passe par **idée → miroir → /goal → approbation humaine** (le rôle CLI `aidos`, jamais l'agent). FK15 ouvre une vue, pas une porte d'écriture.

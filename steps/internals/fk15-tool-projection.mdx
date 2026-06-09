@@ -1,0 +1,55 @@
+---
+title: "FK15 · Les projections d'outillage (internals)"
+description: "Implémentation, Méta et Méta-méta de FK15 part (a) : CLAUDE.md / AGENTS.md / .cursorrules / memory-bank émis depuis les kernels. ToolingKernel{Project, Sources[]} sur 5 kinds clos (policy/memory/style/architecture/agent-profile) ; Emit(k, target) est une fonction pure déterministe (mêmes kernels → fichiers byte-identiques) ; DetectDrift(k, target, onDisk) → HAND_EDITED / MISSING_MARKER / STALE_HASH via le source-hash (SHA-256 du body canonique). Fork de stockage : un ToolingKernel vit dans un kernel.link content-adressé (link_kind:tooling), pas un nouveau record-kind. Aucun LLM ; le mur intact."
+keywords: ["aidos", "krd", "FK15", "projections d'outillage", "CLAUDE.md", "AGENTS.md", ".cursorrules", "memory-bank", "ToolingKernel", "Emit", "DetectDrift", "source-hash", "HAND_EDITED", "STALE_HASH", "fork de stockage", "kernel.link", "content-adressé", "déterminisme", "rapid", "fast-check", "le mur", "FKE-20"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord interne. Pour la version sans code, voir [Pour les futurs utilisateurs → FK15](/steps/concept/fk15-tool-projection).</Note>
+
+## Implémentation
+
+FK15 part (a) est l'**émetteur de projections d'outillage** — `back/kernel/toolproject/`. Fonctions pures, zéro I/O, zéro horloge, zéro rng, **zéro LLM**.
+
+**Les 5 kinds de source.** `SourceKind` est un ensemble **clos** : `policy, memory, style, architecture, agent-profile`. `SourceKinds()` les rend dans l'ordre canonique (le contrat de tri du body sérialisé) ; `IsKnownKind` garde l'appartenance.
+
+**Les 4 cibles.** `Target` est clos : `CLAUDE.md, AGENTS.md, .cursorrules, memory-bank.md`. `Targets()` les rend dans l'ordre canonique.
+
+**Les types.** `Source{Kind, ID, Title, Body}` — une déclaration de kernel (le `ID` est le slug stable, le nom-lexique de la règle/du fait). `ToolingKernel{Project string, Sources []Source}` — la **source** ; les fichiers en sont les projections.
+
+**L'émission — `Emit(k, t) (string, error)`.** Chaque cible ne rend **que** les kinds dont elle est la vue : `CLAUDE.md` = policies + architecture + style ; `AGENTS.md` = agent-profiles ; `.cursorrules` = policies + style ; `memory-bank.md` = memories — aucun double-typage. Les sources sont rendues **triées par ID** (`sortedSourcesOfKind`), pour que les octets soient **indépendants de l'ordre du slice** d'entrée (même kernel ⇒ même fichier). `EmitAll(k)` rend les quatre, clés par cible. Chaque fichier porte en pied le **marqueur de protection** : `<!-- AIDOS-TOOLING-SOURCE-HASH: <hash> — DO NOT EDIT… -->`.
+
+**Le source-hash — `SourceHash(k)`.** C'est le SHA-256 hex de `records.Canonicalize(SerializeBody(k))` — donc indépendant de l'ordre des sources (le même kernel logique ⇒ le même hash). Un hand-edit change les **octets du fichier** mais pas le **source-hash** : c'est le levier de la détection.
+
+**La détection — `DetectDrift(k, t, onDisk) (*Drift, error)`.** Pure, totale :
+1. si `onDisk == Emit(k, t)` ⇒ `nil` (le fichier est la projection exacte) ;
+2. sinon, si le fichier ne porte **aucun** marqueur AIDOS ⇒ `MISSING_MARKER` ;
+3. sinon, si le hash du marqueur ≠ le source-hash courant ⇒ `STALE_HASH` (kernels changés, fichier non ré-émis) ;
+4. sinon (le marqueur colle au source-hash courant mais les octets diffèrent) ⇒ `HAND_EDITED` — le corps a été édité à la main sous un marqueur valide.
+
+**`Validate`** refuse un projet vide (`ErrNoProject`), une source d'un kind hors des cinq (`ErrUnknownKind`), un ID vide (`ErrEmptyID`) — mais **n'exige pas** tous les kinds (un projet peut ne déclarer que des policies).
+
+**Le stockage content-adressé.** `SerializeBody` émet les sources comme une **liste ordonnée** (ordre clos des kinds, puis ID), pour que l'adresse soit indépendante de l'ordre d'entrée. `Record(k)` réutilise `records.NewRecord(KindLink, body)` : `id == version == Hash(Canonicalize(body))`. Une source changée ⇒ une **nouvelle version**, jamais une mutation en place (§12). `ParseBody` est l'inverse exact.
+
+**Le jumeau TS** (`front/web/lib/tool-projection.ts`) projette les **mêmes** 5 kinds, les **mêmes** 4 cibles, les **mêmes** 3 drifts, le **même** rendu déterministe — pour que le panneau `/tool-projection` émette exactement comme `toolproject.Emit`. (Le source-hash TS est un FNV-1a auto-cohérent pour l'UI ; le hash *autoritaire* inter-langues est le SHA-256 Go — l'adresse de contenu du record.)
+
+**Le MCP** `aidos-tool-projection` (`back/mcp/tool-projection/`, ADR 0009) expose cinq outils **purs, write-nothing** : `emit`, `emit_all`, `detect_drift`, `validate`, `serialize`. Chaque erreur est mappée sur son `BlockReason` clos (`NO_PROJECT` / `UNKNOWN_KIND` / `EMPTY_ID` / `UNKNOWN_TARGET`).
+
+**Les miroirs.** Property (rapid, `back/kernel/toolproject`) : déterminisme (mêmes kernels → fichiers byte-identiques, le critère de done), order-independence, *drift ⇔ hand-edit*, round-trip content-adressé, le source-hash pilote le marqueur. Fixture : les quatre cibles portent leurs kinds, l'injection de faute (hand-edit → `HAND_EDITED`), `MISSING_MARKER`, `STALE_HASH`, le round-trip. Le jumeau TS rejoue les mêmes invariants en fast-check (Vitest). Playwright e2e (`tests/e2e/tool-projection.spec.ts`) : émettre CLAUDE.md (le mur + le source-hash + le marqueur), AGENTS.md (le persona, pas le mur), vérifier propre (vert), vérifier hand-édité (`HAND_EDITED`, rouge).
+
+## Le fork de stockage — la même décision que FK14
+
+Comme `lexicon` (FK14), `why_tree` (FK13) et `caused_by` (FK12), un *ToolingKernel* **ne crée pas** un huitième record-kind : il **vit dans** un `kernel.link` content-adressé dont le body JSONB porte `{"kind":"link","link_kind":"tooling","project":…,"sources":[…]}`. Les sept KRDCore kinds restent **clos** ; l'expressivité croît par **données**, pas par **schéma**. La migration `kernel_tooling_projection_baseline.sql` est une baseline de documentation : table idempotente, mur ré-affirmé (SELECT-only pour `aidos_agent`), aucun nouveau door d'écriture.
+
+## Méta
+
+FK15 incarne le **déterminisme d'abord** (§8) : une projection (rendu, hash, diff) est *par nature* une fonction pure — exactement ce qui **doit** être code, jamais un « agent qui rédige CLAUDE.md ». Le juge est un **rendu déterministe + une comparaison d'octets** ; le miroir de reproductibilité (mêmes kernels → fichiers byte-identiques) le prouve. Émettre `CLAUDE.md` par un LLM serait une **faille de déterminisme** qui bloque l'étape — un émetteur pur le rend authoritatif.
+
+C'est la **même anatomie 1-pour-1** que les autres émetteurs (Go structs, DDL, types TS depuis l'AST d'entité) appliquée à l'outillage : la doc-outil est une **projection** d'une source de kernel, pas une vérité parallèle. La **protection par hash** généralise « ne pas hand-éditer les fichiers générés » (§9) à un prédicat exécutable : le drift n'est pas une politique d'honneur, c'est un `DetectDrift` qui rougit.
+
+Le **mur** est intact : l'émetteur **lit** des kernels et **rend** des fichiers / **signale** des drifts ; il n'écrit aucune vérité. Figer/mettre à jour un *ToolingKernel* passe par idée → miroir → /goal → approbation humaine.
+
+## Méta-méta
+
+FK15 referme une boucle d'**auto-cohérence** saisissante : le `CLAUDE.md` qui régit l'agent qui code AIDOS devient lui-même une **projection kernelisée** — la discipline que le système impose au système codé, il se l'applique à lui-même (FKE-23, fractalité). Le contrat de l'agent cesse d'être un texte de confiance pour devenir une **vérité content-adressée** : il a une adresse, une version, un historique append-only ; l'éditer est un événement tracé (un nouveau record via /goal), jamais une dérive silencieuse.
+
+Et le choix du fork de stockage est méta-méta : plutôt qu'un record-kind par type de vue dérivée, AIDOS **réutilise** `kernel.link` + `link_kind` — l'anti-explosion (§1.3) appliquée au stockage, à l'identique de FK12/FK13/FK14. Le système ne s'agrandit pas par catégories ; il s'approfondit par données sur un substrat clos.

@@ -479,7 +479,9 @@
               "steps/concept/fk13-why-tree",
               "steps/internals/fk13-why-tree",
               "steps/concept/fk14-lexicon",
-              "steps/internals/fk14-lexicon"
+              "steps/internals/fk14-lexicon",
+              "steps/concept/fk15-tool-projection",
+              "steps/internals/fk15-tool-projection"
             ]
           }
         ]
