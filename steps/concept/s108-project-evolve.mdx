@@ -1,0 +1,53 @@
+---
+title: "S108 · Boucle médiane — chercher une meilleure implémentation d'une vérité fixe"
+description: "S108 généralise la boucle médiane (/evolve + Quality-Diversity) à VOS projets : depuis un miroir que VOUS avez gelé, AIDOS génère des variantes d'implémentation qui ne peuvent écrire QUE des branches, des rapports et des idées (jamais le Kernel) ; le miroir déterministe + un property test TUENT les variantes qui cassent la vérité ; les élites Pareto (rapide / pas cher / simple) survivent dans des niches QD ; et la promotion d'une élite verte exige VOTRE approbation (∧ out-of-sample vert). L'évolution explore, elle ne gouverne pas — la promotion est une PROPOSITION que votre /goal gèle."
+keywords: ["aidos", "krd", "S108", "boucle médiane", "/evolve", "quality-diversity", "QD", "MAP-Elites", "niche", "élite Pareto", "EvolutionSandbox", "miroir fixe", "variante", "out-of-sample", "promotion gatée", "autorité", "anti-Goodhart", "le mur", "EPIC 12", "E12", "§64", "§66"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S108](/steps/internals/s108-project-evolve).</Note>
+
+## En une phrase
+
+S108 laisse AIDOS **chercher une meilleure implémentation** d'une vérité que **vous** avez déjà gelée : il propose des variantes, le **miroir** tue celles qui cassent la vérité, les meilleures survivent par **niche**, et **vous seul** pouvez promouvoir une survivante.
+
+## Le problème que S108 résout
+
+Une vérité gelée — « createOrder réussit » — peut être implémentée de **mille façons** : une plus rapide, une moins chère, une plus simple. Vous n'avez ni le temps ni l'envie de les écrire toutes à la main. Mais vous ne voulez **surtout pas** qu'un agent « optimise » votre code en cassant discrètement ce que le comportement **est**.
+
+S108 résout exactement ça : il **explore** l'espace des implémentations possibles d'une vérité **fixe**, sous une contrainte stricte — toute variante qui casse le miroir est **tuée**. La vérité ne bouge pas ; seule l'implémentation cherche à s'améliorer.
+
+## Le miroir est le juge, jamais un score
+
+Le cœur de S108, c'est l'**anti-Goodhart** : une variante n'est jamais retenue parce qu'elle a un « bon score ». Elle est d'abord passée au **miroir déterministe** (le même que le vôtre). Si elle casse la vérité, elle est **tuée** — **quel que soit** son score de backtest. Une variante qui serait 10 % plus rapide mais qui rate un cas du miroir ne survit pas une seconde.
+
+C'est une comparaison binaire, reproductible : même implémentation + même miroir ⇒ même verdict. Aucun « agent qui juge si la variante a l'air bonne » : le juge est le **miroir**, pas un LLM.
+
+## Les survivantes vivent par niche (Pareto, pas un champion unique)
+
+Parmi les variantes qui **passent** le miroir, S108 ne garde pas « la meilleure » au sens absolu. Il garde **une élite par niche** : la plus rapide dans la niche « rapide », la moins chère dans la niche « pas cher », etc. C'est la **Quality-Diversity** (MAP-Elites) — un front de Pareto, une **diversité** de bonnes implémentations, pas un champion unique qui écraserait tout.
+
+Ainsi vous gardez le choix : selon le contexte, vous préférerez l'implémentation rapide ou l'implémentation simple — les deux ont survécu, chacune dans sa niche.
+
+## Out-of-sample, jamais in-sample
+
+Une variante peut être excellente sur les données qu'on lui a montrées et **catastrophique** ailleurs (du sur-apprentissage). S108 ne promeut une variante que si elle tient **out-of-sample** — sur des données qu'elle n'a pas vues. C'est le **seul signal honnête** : une performance in-sample ne prouve rien.
+
+## La promotion exige votre approbation
+
+Une élite verte, out-of-sample verte, reste une **proposition**. La rendre vraie — la geler comme nouvelle implémentation de référence — est une **décision** qui vous appartient. S108 ne franchit jamais cette porte : la promotion exige l'**approbation de l'autorité**, et même alors elle ne fait que **proposer**. Le gel passe par votre **/goal**.
+
+## La sandbox ne peut écrire aucune vérité
+
+Toute la boucle tourne dans la **quarantaine** S42 : elle peut écrire **uniquement** des branches d'évolution, des rapports et des idées proposées. Elle ne peut **jamais** toucher le Kernel, les miroirs, l'autorité ou la fitness. « L'évolution explore, elle ne gouverne pas. »
+
+## Les gestes exécutables
+
+Depuis l'écran `/project-evolve` (loi `ui-completeness`), vous pouvez :
+
+1. **Voir les niches Pareto** : les élites survivantes, une par niche, depuis le miroir fixe ;
+2. **Casser le miroir d'une variante** : elle bascule dans la liste « tuées » et disparaît des élites — **même avec le meilleur score** ;
+3. **Accorder l'autorité puis promouvoir** une élite verte : sans autorité, refusé ; avec autorité, une **PROPOSITION** (qui n'écrit **aucune** vérité).
+
+## Ce que S108 vous garantit
+
+> Vous gelez **quoi** doit être vrai ; AIDOS cherche **comment** mieux le faire — sans jamais changer le quoi, sans jamais promouvoir sans vous.
