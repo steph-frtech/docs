@@ -1,0 +1,43 @@
+---
+title: "S105 · Pour moi — l'assembleur cockpit : composer les deux ratchets + le red wave en un snapshot"
+description: "Pour moi : l'implémentation de S105 — back/runtime/cockpit (AssembleSnapshot : compose cell.Partition (ratchet comportemental par cellule) + archfitness.Measure/Ratchet (ratchet structurel) + le red wave fan-out en UN CockpitSnapshot déterministe ; un graphe de cellules, des contrats, deux ratchets, stabilité locale vs globale), le MCP federation-cockpit (assemble_snapshot), le twin TS lib/federation-cockpit + la route action-capable /federation-cockpit, et les miroirs (fixture 3 scénarios, rapid 2 props, fast-check 4/4, Playwright 4/4). Plus Méta et Méta-méta."
+keywords: ["aidos", "krd", "S105", "cockpit", "AssembleSnapshot", "CockpitSnapshot", "CellRatchets", "cell.Partition", "archfitness.Measure", "archfitness.Ratchet", "FanOutSpec", "globallyStable", "shippableCells", "red wave", "deux ratchets", "rapid", "fast-check", "Playwright", "MCP", "EPIC 11", "§50", "§43", "déterminisme"]
+---
+
+<Note>Côté « Pour moi » — le détail complet. Pour la vue produit, voir [Pour les futurs utilisateurs → S105](/steps/concept/s105-federation-cockpit).</Note>
+
+## Implémentation
+
+S105 ajoute l'**assembleur cockpit** : `back/runtime/cockpit` (sous-système Runtime — le cockpit de fédération, KRD §50). C'est de la **composition pure** ; il **réutilise verbatim** les moteurs autoritaires déjà construits et n'invente **aucune** logique de vérité, et il **n'écrit rien** (le mur) : le `CockpitSnapshot` est rendu comme VALEUR.
+
+**Une fonction pure : `AssembleSnapshot(p cell.Project, depGraph archfitness.DepGraph, baseline archfitness.StructuralMetric, fed cell.Federation, wave FanOutSpec) → (CockpitSnapshot, error)`**. Elle compose trois moteurs :
+
+1. **`cell.Partition(p)` (S100)** — découpe le Kernel du projet en sous-Kernels par cellule, chacun avec son **ratchet comportemental** ; `cell.Ships(c)` décide du shipping (vert ⇒ ship). Un nœud sans cellule / de type inconnu est **refusé** (erreur remontée).
+2. **`archfitness.Measure(depGraph)` + `archfitness.Ratchet(baseline, candidate)` (S102)** — le **ratchet structurel** : mesure la coupe candidate (violations de frontière, cycles inter-cellules via Tarjan, arcs inter-BC, complexité max) et la cliquette contre la baseline. HELD ssi chaque métrique est non-croissante ; sinon BROKEN avec un `BlockReason` actionnable.
+3. **Le red wave fan-out (§51)** — `FanOutSpec{PolicyWaveID, Cells []CellViolation}` : une cellule **réddennée** (`Violates = true`) ne ship pas et reçoit une file d'une ligne estampillée du wave id ; une voisine contractée qui ne viole pas reste sur son propre ratchet comportemental et **ship**.
+
+Le résultat est un **`CockpitSnapshot`** : `Cells []CellRatchets` (chaque cellule avec ses deux ratchets — `Behavioural`, `Reddened`, `Queue`, `Ships`), `Contracts []ContractEdge` (les arêtes du graphe, canonicalisées a≤b), `Structural archfitness.RatchetVerdict`, `ShippableCells` (la stabilité **locale**), `ReddenedCells` (la portée du red wave), et **`GloballyStable`** — calculé : *toutes* les cellules shippent **∧** le ratchet structurel tient. Chaque liste est **triée** avant d'être rendue (même entrée ⇒ snapshot byte-identique).
+
+**Le done-criterion §50 (`cockpit_fixture_test.go`)** : deux cellules (order + payment), un contrat honoré, un red wave transverse qui rougit **seulement** payment → `order` montre une coupe locale verte et **SHIP** (`ShippableCells == [order]`) pendant que `payment` est encore rouge ; `GloballyStable == false` mais le ratchet structurel **tient** (HELD). Un troisième scénario : une régression structurelle (un nouvel arc inter-cellule non contracté) casse le second ratchet et rend la fédération non-globalement-stable **même avec les cellules comportementales vertes**.
+
+**Le MCP `aidos-federation-cockpit`** (`back/mcp/federation-cockpit`, ADR 0009 — chaque op backend = un outil) expose `assemble_snapshot`. Read-only (le mur) ; stdio ; pur, déterministe.
+
+**Le twin TS `lib/federation-cockpit.ts`** reproduit `AssembleSnapshot` pour l'écran en réutilisant les twins `cell-federation.ts` (S100) et `arch-fitness.ts` (S102) — le Go est l'autorité. La route **action-capable** `/federation-cockpit` (`CockpitPanel.tsx` + Server Actions) porte UN contrôle « assembler » avec deux toggles (« faire déferler le red wave », « casser la structure ») liés au twin pur. Thème ADR 0010, bilingue fr/en ADR 0011.
+
+**Les miroirs.** `cockpit_fixture_test.go` (3 scénarios, le done-criterion §50) + `cockpit_property_test.go` (rapid, 2 props : déterminisme ; une cellule réddennée ne ship jamais ∧ une verte non-réddennée ship toujours ∧ globally-stable ssi tout-ship ∧ structural-held) ; côté front `lib/federation-cockpit.test.ts` (fast-check, 4/4) + `tests/e2e/federation-cockpit.spec.ts` (Playwright, 4/4 — dont le done-criterion exécuté depuis l'écran). `go build ./...` + `go test` verts.
+
+## Méta
+
+**Pourquoi un cockpit, et pas une nouvelle vérité ?** S105 est délibérément **sans vérité** : il ne fait que **composer** ce que S100/S101/S102/S103 ont déjà rendu autoritaire. C'est le principe d'**accrétion additive** (§9) — on n'écrit pas un quatrième moteur, on **assemble** les trois existants en une vue. Le cockpit est une **projection**, pas une source ; il vit dans le Runtime (qui orchestre), pas dans le Kernel (qui détient la vérité).
+
+**Les deux ratchets ne sont pas le même objet.** Le comportemental est **par cellule** (un cliquet local, fractal §43) ; le structurel est **sur la coupe entière** (un cliquet global, §47). Les rendre côte à côte est le geste central de S105 : il permet de distinguer une fédération « en flux mais saine » (une cellule rouge, le reste qui ship — `GloballyStable=false`, structural `HELD`) d'un système « structurellement pourri » (structural `BROKEN`). Sans cette distinction, l'architecte ne sait pas s'il doit **attendre une cellule** ou **réparer l'architecture**.
+
+**Déterminisme-first.** Tout le cockpit est une fonction pure (§6/§8) : partition, mesure, ratchet, fan-out, tri — aucun LLM, aucune horloge, aucun rng. La métrique structurelle est un algorithme de graphe (Tarjan SCC, dédup d'arêtes, max) ; le ratchet est une comparaison d'entiers ; le red wave est un name-match. Le miroir de reproductibilité (rapid + fast-check) épingle : même entrée ⇒ snapshot byte-identique. Un « agent qui résume l'état de la fédération » serait un **gap de déterminisme** — l'état est **calculé**, jamais raconté.
+
+## Méta-méta
+
+**Le cockpit incarne « done is computed, never declared » à l'échelle de la fédération.** `GloballyStable` n'est pas une case que l'architecte coche : c'est le ET de deux gates non-gameable (toutes les cellules shippent ∧ le ratchet structurel tient). On ne peut pas **déclarer** une fédération stable ; on ne peut que la **rendre** stable jusqu'à ce que le calcul le dise. C'est la généralisation du §8 (« le juge est déterministe ») du goal unique à la **fédération entière**.
+
+**Le fractal §43 rendu observable.** AIDOS affirme que la grandeur est fractale : une cellule est un mini-AIDOS, la fédération est un AIDOS de cellules, et la même boucle (red → green → stable) tient à chaque échelle. S105 est la **preuve visible** de cette affirmation : on voit une cellule shipper sa coupe verte localement pendant que la fédération globale est en flux — exactement comme une dent verte dans un projet aux autres dents rouges. Le cockpit ne crée pas le fractal ; il le **montre**, et ce faisant il rend l'affirmation §43 **falsifiable** (si une cellule verte ne pouvait pas shipper indépendamment, le done-criterion rougirait).
+
+**La Context-Map est le seul vrai travail humain (§46), le cockpit en est le miroir.** Concevoir quelles cellules existent et comment elles se parlent est irréductiblement humain ; tout le reste (partition, mesure, fan-out) est mécanique. S105 sépare nettement les deux : il **n'édite** pas la Context-Map (ça, c'est S101, via ChangeSet), il la **reflète**. Le cockpit est une lecture ; la conception reste au-dessus du mur.
