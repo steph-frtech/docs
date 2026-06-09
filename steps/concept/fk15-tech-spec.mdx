@@ -1,0 +1,47 @@
+---
+title: "FK15 (b) · La Fiche de Spécification Technique & la Suite de Tests Techniques : deux projections assemblées"
+description: "FK15 part (b) ajoute les DEUX projections techniques d'un kernel (FKE-20.1) : la Fiche de Spécification Technique (Contrat F5 + Modèle F4 + la pile OSI si réseau + specs des facettes S/B/R/V/M + ADR liés) et la Suite de Tests Techniques (N4/N5 + tests par couche OSI + tests des facettes). Ce ne sont pas des rangées du squelette : ce sont des VUES qui assemblent des déclarations qui existent déjà. Zéro nouvelle vérité ; mêmes kernels → mêmes fichiers byte-identiques ; un hand-edit détecté. Le juge est un rendu déterministe + une comparaison d'ensembles, jamais un prompt."
+keywords: ["aidos", "krd", "FK15", "spécification technique", "tests techniques", "fiche technique", "projection assemblée", "FKE-20.1", "OSI", "facettes", "S1 B1 R1 V1 M1", "zéro nouvelle vérité", "byte-identique", "hash-protégée", "déterminisme", "Contrat F5", "Modèle F4"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK15 (b)](/steps/internals/fk15-tech-spec).</Note>
+
+## En une phrase
+
+FK15 part (b) donne à AIDOS **deux fiches techniques par kernel**, **générées et non écrites** : une **Fiche de Spécification Technique** (ce que le kernel garantit, côté technique) et une **Suite de Tests Techniques** (ce qui le prouve). Elles n'ajoutent **aucune vérité** : ce sont des **vues** qui **assemblent** des déclarations déjà présentes.
+
+## Le problème : la « spec technique » qu'on réécrit à la main
+
+Tout projet veut, à un moment, sa **fiche technique** : « voici le contrat de cette API, son modèle de données, ses garanties de sécurité et de perf, les ADR qui l'expliquent ». Et sa **suite de tests** : « voici les tests unitaires, d'intégration, d'infra, de sécurité, de perf, de chaos, d'architecture ».
+
+Le piège classique : on **réécrit** ces documents à la main. Ils **divergent** du code dès le lendemain. Pire, on est tenté d'y **re-déclarer** des choses (le contrat, les budgets) — c'est du **double-typage** : la même vérité existe à deux endroits, qui se contredisent.
+
+## La solution : assembler, ne pas re-déclarer
+
+KRD tranche (FKE-20.1) : le clivage **fonctionnel ↔ technique** n'ajoute **aucune rangée** au squelette. Le « technique » est déjà porté par la **moitié basse** de chaque facette (Modèle, Contrat, code, tests N4) et par les **facettes non-fonctionnelles** (sécurité S, budgets B, fiabilité R, évolutivité V, maintenabilité M). Une « spécification technique » n'est donc **pas un slot** : c'est une **VUE** qui assemble des déclarations qui **existent déjà**.
+
+AIDOS rend cette vue « à chaque fois » comme **deux projections déterministes** :
+
+- **La Fiche de Spécification Technique** = `Contrat (F5) + Modèle (F4) + la pile OSI (si réseau) + specs des facettes S1/B1/R1/V1/M1 + ADR liés`.
+- **La Suite de Tests Techniques** = `tests unitaires/intégration (N4) + infra (N5) + tests par couche OSI (contrat d'interface, allowlist, auth, schéma) + tests des facettes (sécu/perf/chaos/arch S3/B3/R3/M3)` — distincte des scénarios d'acceptance métier (N0).
+
+## Les deux axes : la pile OSI et les facettes qualité
+
+L'assemblage est **rangé sur deux axes**.
+
+- **La pile de communication (OSI)** — pour les kernels **en réseau** (API, MCP, connecteur). L'OSI est à l'**arête** ce que l'anatomie est au **nœud** : **L7 application** (le schéma API / le schéma d'outil MCP), **L6 présentation** (sérialisation, redaction, allowlist), **L5 session** (auth/OAuth), **L4 transport** (HTTP/gRPC). Une **fonction pure n'a aucune couche OSI** ; une API a la pile complète.
+- **Les facettes qualité** (S/B/R/V/M) — orthogonales à l'OSI : ce que l'arête doit garantir (sûre, rapide, résiliente, durable, maintenable).
+
+## Zéro nouvelle vérité : le cœur de l'étape
+
+Le critère **load-bearing** de FK15 : la fiche **assemble exactement les déclarations techniques existantes** — **zéro nouvelle vérité**. AIDOS le **prouve** : il extrait l'ensemble des références (refs) qui **apparaissent réellement** dans les octets produits, et le compare à l'ensemble des refs **déclarées** dans le kernel. **Égalité** = aucune **fabrication** (rien d'inventé) et aucune **perte** (rien d'oublié). Une projection qui nommerait un élément absent du kernel serait un **monstre** (une vérité que le kernel n'a jamais déclarée) — et l'étape bloquerait.
+
+## Hash-protégées, jamais hand-éditées
+
+Comme les projections d'outillage (FK15 part a) et le lexique (FK14), les deux fiches sont **content-adressées** et **hash-protégées** : chaque fichier porte le **source-hash** du kernel dont il est l'assemblage. Un **hand-edit** change les octets sans changer le source-hash — il est **détecté** (`HAND_EDITED`). Mêmes kernels → **mêmes fichiers byte-identiques**.
+
+## Pourquoi c'est utile pour vous
+
+Quand vous construisez une app avec AIDOS, vous obtenez sa **fiche technique** et sa **suite de tests** **gratuitement et toujours à jour** : elles sont **régénérées** à partir du kernel, jamais maintenues à la main. Vous ne pouvez pas les faire mentir (un hand-edit est rouge), et elles ne peuvent pas **inventer** une garantie que vous n'avez pas déclarée (zéro nouvelle vérité). La fiche **lit** votre kernel et l'**assemble** — elle n'écrit aucune vérité.
+
+<Note>L'assembleur **lit** et **rend** ; il n'écrit aucune vérité. Figer une projection passe par la seule porte légale : idée → miroir → /goal → approbation humaine. Le mur est intact.</Note>

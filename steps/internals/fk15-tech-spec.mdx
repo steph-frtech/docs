@@ -1,0 +1,52 @@
+---
+title: "FK15 (b) · La Fiche de Spécification Technique & la Suite de Tests Techniques (internals)"
+description: "Implémentation, Méta et Méta-méta de FK15 part (b) : les deux projections assemblées (FKE-20.1). Assemble(TechKernel, Projection) → fichier byte-stable + source-hash ; AssembledRefs == DeclaredRefs (zéro nouvelle vérité) ; DetectDrift → HAND_EDITED / MISSING_MARKER / STALE_HASH. Rangé sur deux axes (OSI L7→L4, facettes S→M). Stockage : un techspec vit dans un kernel.link content-adressé (link_kind:techspec), pas un nouveau record-kind. MCP aidos-tech-spec (6 outils purs), jumeau TS, route /tech-spec, e2e. Aucun LLM ; le mur intact."
+keywords: ["aidos", "krd", "FK15", "techspec", "projection assemblée", "FKE-20.1", "Assemble", "AssembledRefs", "DeclaredRefs", "zéro nouvelle vérité", "OSI", "facettes", "DetectDrift", "HAND_EDITED", "kernel.link", "content-adressé", "déterminisme", "rapid", "fast-check", "le mur"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord interne. Pour la version sans code, voir [Pour les futurs utilisateurs → FK15 (b)](/steps/concept/fk15-tech-spec).</Note>
+
+## Implémentation
+
+FK15 part (b) est l'**assembleur des deux projections techniques** — `back/runtime/generators/techspec/`. Fonctions pures, zéro I/O, zéro horloge, zéro rng, **zéro LLM**.
+
+**Les axes clos.** Quatre `OSILayer` (`L7-application, L6-presentation, L5-session, L4-transport` — L1-L3 sont fournies par l'infra) ; cinq `SpecFacet` techniques (`S, B, R, V, M` — F est au-dessus de la ligne, X est soft) ; sept `TestKind` (`N4-unit, N4-integration, N5-infra, S3-security, B3-perf, R3-chaos, M3-arch`) ; deux `Projection` (`fiche-specification-technique, suite-tests-techniques`). Chaque ensemble est **clos** et porte son **ordre canonique** (clé de tri) ; une valeur hors de l'ensemble est **refusée**.
+
+**Les types.** `Decl{Ref, Title, Body}` est une **déclaration déjà existante** assemblée **verbatim** (l'assembleur n'en **invente** jamais). `TechKernel{KernelID, Networked, Contract, Model, OSI[], Facets[], ADRs[], TestGroups[]}` est le bundle d'entrée — uniquement des éléments **déjà déclarés** (Contrat F5, Modèle F4, specs des facettes, ADR, tests N4/N5). `OSISpec{Layer, Specs[], Tests[]}`, `FacetSpec{Facet, Specs[], Tests[]}`, `TestGroup{Kind, Tests[]}`.
+
+**L'assembleur — `Assemble(k, p) (string, error)`.** Il rend **une** projection, rangée par axe :
+- la **Fiche** = `Contrat (F5) → Modèle (F4) → pile OSI (si réseau, L7→L4) → specs des facettes (S→M) → ADR liés` ;
+- la **Suite** = `tests N4/N5 → tests par couche OSI (si réseau) → tests des facettes (S→M)` — elle ne porte **pas** la spec du Contrat (pas de double-typage).
+`AssembleAll(k)` rend **les deux**. Chaque fichier porte un **pied de page de protection** (`AIDOS-TECHSPEC-SOURCE-HASH: …`). Même kernel ⇒ fichier **byte-identique**.
+
+**Zéro nouvelle vérité — `AssembledRefs(k)` vs `DeclaredRefs(k)`.** `DeclaredRefs` est l'ensemble trié de **toutes** les refs déclarées dans le kernel. `AssembledRefs` extrait les refs qui **apparaissent réellement** dans les octets rendus (un parse des tokens `` (`ref`) ``). Le critère load-bearing est l'**égalité ensembliste** : `AssembledRefs == DeclaredRefs` — aucune **fabrication** (assemblé ⊆ déclaré), aucune **perte** (déclaré ⊆ assemblé). `AssembledRefs` est calculé **à partir des octets** produits (pas re-dérivé de l'entrée) : il **témoigne** vraiment du fichier.
+
+**La détection de drift — `DetectDrift(k, p, onDisk) *Drift`.** Pur : `nil` (assemblage exact), `MISSING_MARKER`, `STALE_HASH`, ou `HAND_EDITED` (le marqueur colle au source-hash courant mais les octets diffèrent — le corps a été édité à la main). Une **comparaison d'octets** + une **égalité de hashes**, jamais un prompt.
+
+**L'ordre total des déclarations.** Le tri se fait par `declLess` = `(Ref, puis Title, puis Body)` — **pas** par `Ref` seul. Deux `Decl` qui **collisionnent** sur `Ref` avec des corps différents seraient sinon ordonnées par l'ordre d'entrée du caller (fuite d'ordre, rupture de la byte-identité). L'ordre total rend les octets **indépendants de l'ordre d'entrée** (la property `input-order invariance` le prouve).
+
+**Le stockage content-adressé.** `SerializeBody` émet toutes les listes dans l'ordre stable, body `{"kind":"link","link_kind":"techspec",…}`. `Record(k)` réutilise `records.NewRecord(KindLink, body)` : `id == version == Hash(Canonicalize(body))`. Une déclaration renommée ⇒ une **nouvelle version** (§12). `ParseBody` est l'inverse.
+
+**Le jumeau TS** (`front/web/lib/tech-spec.ts`) projette les **mêmes** axes, les **mêmes** deux projections, le **même** ordre total, le **même** zéro-nouvelle-vérité — pour que le panneau `/tech-spec` assemble exactement comme `techspec.Assemble`. Une seule source, aucune dérive.
+
+**Le MCP** `aidos-tech-spec` (`back/mcp/tech-spec/`, ADR 0009) expose **six** outils **purs, write-nothing** : `assemble`, `assemble_all`, `declared_refs`, `assembled_refs` (le témoin du zéro-nouvelle-vérité), `detect_drift`, `validate`. Chaque erreur est mappée sur son code de `BlockReason` clos (`NO_KERNEL_ID` / `UNKNOWN_OSI_LAYER` / `UNKNOWN_FACET` / `UNKNOWN_TEST_KIND` / `EMPTY_REF` / `OSI_ON_PURE_FUNCTION`).
+
+**Les miroirs.** Fixture `techspec_fixture_test.go` (un CheckoutAPI en réseau exerçant chaque section ; le rangement par axe ; le zéro-nouvelle-vérité ; la byte-identité ; l'invariance d'ordre ; la **fault-injection** « hand-edit → HAND_EDITED » ; les drifts missing/stale ; OSI-sur-fonction-pure refusé ; le round-trip content-adressé). Property `techspec_property_test.go` (rapid, 5 props : déterminisme ; invariance d'ordre = le « mêmes kernels → mêmes fichiers byte-identiques » robuste ; zéro-nouvelle-vérité ; drift ⇔ hand-edit ; round-trip). Le jumeau TS porte le miroir de reproductibilité `tech-spec.test.ts` (fast-check, mêmes invariants). E2e Playwright `tech-spec.spec.ts` (5/5) : la Fiche assemble Contrat+OSI avec zéro-nouvelle-vérité ; la Suite porte les tests sans le Contrat ; une fonction pure n'a aucune section OSI ; le fichier propre est vert ; le hand-edit est rouge — exécutés depuis l'écran.
+
+## Le fork de stockage — la même décision que FK14
+
+Comme le lexique (FK14) et les projections d'outillage (FK15 part a), un techspec **chevauche** un `kernel.link` content-adressé, body `link_kind:"techspec"`, **sans nouveau record-kind**. Les sept kinds KRDCore restent **clos** (anti-explosion, §1.3) ; un techspec est une **liaison** sur des déclarations existantes — un **lien** par nature ; il réutilise la **même** table `kernel.link` que les six kinds S17, `caused_by` (FK12), `why_tree` (FK13), `lexicon` (FK14) et `tooling` (FK15 a). La migration `kernel_techspec_baseline.sql` est une **baseline documentaire** : aucune nouvelle table, aucun CHECK DB (la forme est gardée en **code** : `techspec.Validate`). Le mur GRANT est ré-affirmé (SELECT-only), aucune nouvelle porte d'écriture.
+
+## Méta
+
+FK15 part (b) incarne le **déterminisme d'abord** (§8) : assembler une projection est **transformer/rendre** ; vérifier le zéro-nouvelle-vérité est une **comparaison d'ensembles** ; détecter un hand-edit est une **comparaison d'octets** — exactement ce qui *doit* être code, jamais un agent. Un « agent qui rédige la spec technique » serait une **faille de déterminisme** qui bloque l'étape (et un risque de **monstre** : une garantie inventée). Ici le juge est pur ; le miroir de reproductibilité (même kernel → mêmes octets) le prouve.
+
+Le point KRD profond est le **zéro double-typage**. La spec technique n'est **pas** une rangée du squelette : l'y ajouter dupliquerait le Contrat + les facettes + l'arête (perte du 1-pour-1). Comme **projection assemblée**, elle donne l'artefact lisible **sans re-déclarer aucune vérité**. La property `AssembledRefs == DeclaredRefs` est la **garantie exécutable** de cette discipline : la vue ne peut ni inventer ni perdre.
+
+Le **mur** est intact : l'assembleur **lit** des déclarations et **rend** des fichiers ; il n'écrit aucune vérité. Figer une projection passe par idée → miroir → /goal → approbation humaine — comme tout au-dessus de la ligne de flottaison.
+
+## Méta-méta
+
+FK15 (a) et (b) referment ensemble la boucle **« le kernel se projette vers tout »** (FKE-20) : le code, les tests, la doc, le schéma API, **et** les fichiers d'outillage de l'agent (CLAUDE.md…) **et** les deux fiches techniques. Rien de ce qui est **dérivable** n'est **écrit** : tout est **régénéré**, hash-protégé, jamais hand-édité. AIDOS construit des systèmes dont la documentation technique est *prouvée* fidèle au kernel — et AIDOS lui-même obéit à cette règle (un techspec est un kernel comme les autres, sur `kernel.link`, gardé par le même mur, prouvé par les mêmes formes de miroir). La même anatomie à travers les plans (FKE-23, fractalité) : le système qui code suit la discipline qu'il impose au système codé.
+
+L'**OSI complète la symétrie nœud/arête** : le nœud a son anatomie (Spec/Modèle/Contrat/Comportement/…), l'arête (un lien `contracts_with`, un connecteur) a sa **pile OSI**. FK15 (b) est le premier endroit où cette symétrie devient un **artefact lisible** — la Fiche range l'arête couche par couche, exactement comme l'anatomie range le nœud. Et le choix du fork de stockage (réutiliser `kernel.link` + un `link_kind` plutôt qu'ouvrir un record-kind) est lui-même méta-méta : l'expressivité croît par **données** (le body JSONB), pas par **schéma** — l'anti-explosion (§1.3) appliquée au stockage, la même décision que FK14.

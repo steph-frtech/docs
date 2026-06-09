@@ -481,7 +481,9 @@
               "steps/concept/fk14-lexicon",
               "steps/internals/fk14-lexicon",
               "steps/concept/fk15-tool-projection",
-              "steps/internals/fk15-tool-projection"
+              "steps/internals/fk15-tool-projection",
+              "steps/concept/fk15-tech-spec",
+              "steps/internals/fk15-tech-spec"
             ]
           }
         ]
