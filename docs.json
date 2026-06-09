@@ -469,7 +469,9 @@
               "steps/concept/fk08-facet-wire",
               "steps/internals/fk08-facet-wire",
               "steps/concept/fk09-conscience",
-              "steps/internals/fk09-conscience"
+              "steps/internals/fk09-conscience",
+              "steps/concept/fk10-autonomy",
+              "steps/internals/fk10-autonomy"
             ]
           }
         ]

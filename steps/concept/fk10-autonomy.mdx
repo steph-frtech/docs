@@ -1,0 +1,62 @@
+---
+title: "FK10 · L'autonomie A0-A8 : un niveau déclaré, gagné par preuve"
+description: "FK10 ajoute le 6ᵉ axe de la couche agent d'AIDOS : autonomy_level ∈ A0..A8, un ensemble fermé déclaré par l'agent. L'enforcement est fail-closed — une action au-dessus du niveau déclaré est refusée avec un BlockReason actionnable. A8 n'est jamais permis sur une action critique (merge, deploy, écriture-vérité irréversible). Et la montée d'un cran n'est jamais déclarée : elle est CALCULÉE depuis l'historique des runs de l'agent (N runs verts E4+ sans incident). Le niveau d'autonomie se mérite, il ne s'auto-octroie pas."
+keywords: ["aidos", "krd", "FK10", "autonomie", "autonomy_level", "A0-A8", "couche agent", "CoucheAgent", "fail-closed", "BlockReason", "AGENT_AUTONOMY_EXCEEDED", "action critique", "merge", "montée", "promotion", "historique", "AgentRun", "E4", "fonction pure", "FKE-11", "FKE-34"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK10](/steps/internals/fk10-autonomy).</Note>
+
+## En une phrase
+
+FK10 donne à chaque agent d'AIDOS un **niveau d'autonomie** — un cran sur une échelle fermée de **A0** (proposer seulement) à **A8** (pleinement autonome). Ce niveau est **déclaré** dans la couche gouvernée, **appliqué fail-closed** (une action qui exige plus que le niveau déclaré est **refusée**), et **monté par preuve** : un agent ne s'octroie jamais un cran supérieur — il le **gagne** quand son historique de runs le justifie.
+
+## Le problème que FK10 résout
+
+Un agent qui code n'est pas une autorité — c'est une **couche gouvernée** (FKE-11). Mais « gouvernée » à quel degré ? Un agent fraîchement déclaré devrait pouvoir **proposer** un miroir, pas **fusionner** une branche en production. Sans un axe d'autonomie explicite, on a deux mauvais choix : tout interdire (l'agent est inutile) ou tout permettre (l'agent peut tout casser). 
+
+FK10 ajoute le cran manquant : une **échelle d'autonomie** déclarée, qui dit *à quel point* cet agent peut agir seul — du simple « il propose » au « il fusionne », et qui **monte avec la confiance gagnée**, jamais avec la confiance affichée.
+
+## L'échelle fermée A0..A8
+
+L'échelle a **neuf barreaux**, du plus confiné au plus autonome :
+
+- **A0** — proposer seulement (lire / proposer, le défaut structurel du mur)
+- **A1** — une seule écriture sous la ligne, à faible risque
+- **A2** — plusieurs écritures dans son périmètre
+- **A3** — opérations sous la ligne (archive / projections)
+- **A4** — runs qui proposent des miroirs
+- **A5** — runs inter-cellules
+- **A6** — merge / intégration (une action **critique**)
+- **A7** — release / deploy (une action **critique**)
+- **A8** — pleinement autonome
+
+L'ensemble est **fermé** : un niveau hors de A0..A8 est invalide (fail-closed). Les barreaux sont **déclarés**, jamais appris, jamais découverts à l'exécution.
+
+## La règle dure : A8 jamais sur une action critique
+
+Une **action critique** — un merge, un deploy, une écriture-vérité irréversible — n'admet **jamais** A8. Même un agent déclaré A8 est ramené au plafond **A7** pour une telle action : une action critique exige **toujours** une escalade humaine. Ce n'est pas un réglage que l'on peut ajuster — c'est une garantie structurelle (FKE-11/34). La pleine autonomie existe pour le travail réversible, jamais pour le geste qu'on ne peut pas défaire.
+
+## L'enforcement : fail-closed
+
+Quand un agent tente une action, AIDOS compare le **niveau requis** par l'action au **niveau déclaré** de l'agent. Si requis ≤ déclaré, l'action est **admise**. Si requis > déclaré, elle est **refusée** — avec un **BlockReason** actionnable (`AGENT_AUTONOMY_EXCEEDED`) qui nomme la porte de sortie. Un agent **A1** qui tente un **merge** (qui exige A6) est refusé net. Le niveau déclaré est lu comme un **plafond**, jamais comme un droit que l'agent peut élargir lui-même.
+
+Le BlockReason n'est pas une prison : il vous dit **comment** monter — gagner la promotion par l'historique, puis geler le nouveau niveau via /goal.
+
+## La montée par preuve, jamais déclarée
+
+C'est le cœur de FK10. Un agent ne dit **jamais** « je suis maintenant A2 ». La montée d'un cran est une **fonction pure de l'historique** : on regarde les **N derniers runs** de l'agent (par défaut **3**) ; si **tous** sont **verts**, à un niveau de preuve **≥ E4** (sécurité/régression), et **sans incident**, alors — et seulement alors — l'agent **a gagné** le cran suivant. Un seul run non-vert, sous-E4, ou avec incident dans la fenêtre **retient** la montée.
+
+Le niveau est **calculé** depuis le record, jamais affirmé. C'est la même discipline anti-Goodhart que partout dans AIDOS : *« done » est calculé, jamais déclaré*. Et la montée calculée n'est qu'une **proposition** : le nouveau niveau n'est **figé** qu'au-dessus de la ligne, via idée → miroir → /goal → approbation. Le mur tient.
+
+## Ce que vous voyez à l'écran
+
+La route **`/autonomy`** rend tout ça **exécutable**. Deux contrôles :
+
+- **ENFORCER** : choisissez une action et son niveau requis ; l'écran applique fail-closed. Un agent **A1** tentant un merge est **REFUSÉ** avec `AGENT_AUTONOMY_EXCEEDED` et sa porte de sortie. Un agent **A6** fusionne. Une action critique **A8** est toujours refusée.
+- **CALCULER LA MONTÉE** : choisissez un historique. Trois runs verts E4+ sans incident montent **A1 → A2** ; un incident, un run sous E4, ou un run non-vert **retient** la montée.
+
+Le verdict et le niveau sont **déterministes** : même entrée → même résultat. L'écran **applique** et **calcule** ; il n'écrit aucune vérité.
+
+## Pourquoi c'est important
+
+FK10 fait de l'autonomie une **propriété mesurée**, pas un curseur de confiance. Un agent commence confiné, et **grandit avec sa preuve** — exactement comme un nouvel équipier à qui l'on confie plus à mesure qu'il fait ses preuves, jamais sur sa seule parole. C'est ce qui rendra le **cockpit** (l'étape suivante) honnête : le niveau d'autonomie affiché par chaque agent est un fait gagné, pas une déclaration.

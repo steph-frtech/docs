@@ -1,0 +1,44 @@
+---
+title: "FK10 · L'autonomie A0-A8 (internals)"
+description: "Implémentation, Méta et Méta-méta de FK10 : autonomy_level ∈ A0..A8, le 6ᵉ axe de la couche agent. Enforce(declared, action) est le gate fail-closed (requis > déclaré → AGENT_AUTONOMY_EXCEEDED ; A8 jamais sur action critique, plafond A7) ; PromotionFromHistory(current, history, policy) est la montée pure (current+1 ssi N derniers runs verts E4+ sans incident, jamais au-delà de A8). Le niveau est CALCULÉ, jamais déclaré ; même entrée → même verdict / même niveau."
+keywords: ["aidos", "krd", "FK10", "autonomie", "autonomy_level", "A0-A8", "Enforce", "PromotionFromHistory", "fail-closed", "AGENT_AUTONOMY_EXCEEDED", "action critique", "CriticalCeiling", "AgentRun", "RunOutcome", "E4", "fonction pure", "déterminisme", "rapid", "fast-check", "FKE-11", "FKE-34", "le mur"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord interne. Pour la version sans code, voir [Pour les futurs utilisateurs → FK10](/steps/concept/fk10-autonomy).</Note>
+
+## Implémentation
+
+FK10 est le **6ᵉ axe de la couche agent** — `back/kernel/autonomy/`. Trois fonctions pures, zéro I/O, zéro horloge, zéro rng, zéro LLM.
+
+**L'échelle fermée.** `Level int` (`A0=0 … A8=8`) — un `int` pour que l'ordre soit un compare numérique direct, mais l'ensemble fermé est ré-asserté par `IsKnownLevel` (`l ≥ 0 && l ≤ 8`). `Levels()` retourne les neuf barreaux en ordre canonique (déclaré, jamais dérivé d'une itération de map). `String()` rend `A<n>` ou `A?` hors plage (fail-closed, jamais un barreau inventé). `Validate(declared)` garde la forme.
+
+**Le gate fail-closed — `Enforce(declared Level, action Action) Decision`.** `Action{Name, Required Level, Critical bool}` ; `Decision{Allowed, BlockReason}`. Quatre conditions, dans l'ordre : (1) `declared` ET `action.Required` doivent être des barreaux valides (sinon REFUSÉ, fail-closed) ; (2) pour une action **critique**, `Required > CriticalCeiling` (A7) → REFUSÉ — A8 ne gouverne **jamais** une action critique ; (3) le **déclaré effectif** d'une action critique est plafonné à A7 (même un agent déclaré A8 est ramené à A7 : escalade humaine obligatoire) ; (4) `Required > effectiveDeclared` → REFUSÉ. Tout refus porte le `BlockReason` `AGENT_AUTONOMY_EXCEEDED`. Le niveau déclaré est lu comme un **plafond**, jamais comme un droit que l'agent élargit.
+
+**La montée pure — `PromotionFromHistory(current Level, history []RunOutcome, policy PromotionPolicy) Level`.** `RunOutcome{Green, Evidence prooftype.ELevel, Incident}` est la projection autonomie-pertinente d'un `agentrun.AgentRun` (via `OutcomeOf` : `Green` dérivé du `Result == green` clos ; l'evidence + l'incident vivent à côté du run, hors de son hash). `PromotionPolicy{MinGreenRuns, MinEvidence}` est la barre **déclarée** au-dessus de la ligne (`DefaultPolicy = {3, E4}`, FKE-34). L'algorithme : si `current` invalide ou `≥ A8`, retourne `current` inchangé (pas de montée au-delà du sommet) ; sinon il inspecte les **N derniers** runs (la fenêtre) ; la montée vaut `current+1` **ssi** chaque run de la fenêtre est `Green ∧ Evidence ≥ MinEvidence ∧ ¬Incident` ; un seul run non-vert / sous-E4 / avec incident **retient** la montée. Un historique plus court que la fenêtre ne promeut jamais (record insuffisant).
+
+**Le BlockReason.** `AGENT_AUTONOMY_EXCEEDED` est ajouté à l'enum clos `back/runtime/blockreason/` (extension additive `refine`, jamais une suppression) — son `how_to_fix` nomme les trois portes : rester sous le niveau déclaré, gagner la montée par l'historique, geler le niveau via /goal. Le mur ne devient jamais une prison (KRD §44.5).
+
+**Les jumeaux et les portes.** Le jumeau TS `front/web/lib/autonomy.ts` (Go autoritatif) miroite `enforce` + `promotionFromHistory` (mêmes gardes, même barre par défaut). Le MCP `aidos-autonomy` (`back/mcp/autonomy/`, ADR 0009) expose `enforce` (un niveau + une action → la Decision) et `promote` (un niveau + un historique → le niveau gagné) — write-nothing. La route `/autonomy` est action-capable (deux contrôles ENFORCER + CALCULER LA MONTÉE liés aux fonctions pures), thème ADR 0010, bilingue ADR 0011.
+
+## Méta
+
+**Pourquoi un `int` ordonné mais un ensemble fermé.** L'autonomie est intrinsèquement **ordinale** — A6 ≥ A1 a un sens (un cran plus haut autorise plus). Un `int` rend `requis ≤ déclaré` trivialement déterministe. Mais l'**ensemble** reste fermé (`IsKnownLevel`) : on ne fabrique jamais un A9, un A-1 n'est pas un « niveau négatif », c'est un fail-closed. C'est la discipline des ensembles clos d'AIDOS (comme les `Provider`/`LayerKind` de S52) appliquée à un axe ordonné.
+
+**Pourquoi A8 jamais sur critique (le cœur de l'étape).** FKE-11/34 : « A8 jamais sur action critique ». La pleine autonomie est légitime pour le travail **réversible** ; un merge/deploy/écriture-vérité irréversible exige **toujours** une escalade humaine. `Enforce` encode ça **structurellement** (le plafond `CriticalCeiling = A7`, ré-appliqué même au déclaré A8), pas comme un réglage. C'est l'asymétrie qui empêche un agent « de confiance » de devenir une autorité par la porte de derrière.
+
+**Pourquoi la montée est calculée, jamais déclarée (le cœur²).** FKE-34 done-criterion : « la promotion est une fonction pure de l'historique ; jamais déclarée ». C'est la discipline anti-Goodhart (§8) : *« done » est calculé, jamais déclaré*. Un agent qui pourrait dire « je suis A6 » contournerait tout le mur. `PromotionFromHistory` ne lit **jamais** la confiance de l'agent — uniquement le **record** (runs verts, evidence E4+, zéro incident). Et la montée calculée n'est qu'une **proposition** : le niveau n'est figé qu'au-dessus de la ligne via idée → miroir → /goal → approbation.
+
+**Pourquoi determinism-first.** Comparer (`requis ≤ déclaré`), inspecter une fenêtre d'historique, plafonner — ce sont des fonctions pures, donc elles DOIVENT être du code autoritaire (§6). Le LLM n'entre nulle part : ni pour juger qu'un run « mérite » la montée (c'est l'algorithme), ni pour décider qu'une action est critique (c'est déclaré sur l'`Action`). Un agent qui ferait ce qu'une fonction pure peut faire serait un **gap de déterminisme**.
+
+**Le mur.** Le verdict et le niveau proposé sont des **projections** sous la ligne : `Enforce` et `PromotionFromHistory` n'écrivent rien dans kernel/mirrors/fitness. Additif (anti-overwrite §9) : FK10 ajoute un axe à la couche agent et un code BlockReason `refine`, ne touche aucun contrat antérieur (il **lit** l'historique `agentrun` et le `prooftype.ELevel` de FK05).
+
+## Méta-méta
+
+**Les miroirs (la preuve avant le code).**
+
+- `autonomy_property_test.go` (rapid) — la **reproductibilité** + les invariants : `Enforce` est **fail-closed et monotone** (requis ≤ déclaré admet, sinon refuse, ∀ paire de barreaux, avec `AGENT_AUTONOMY_EXCEEDED`) ; **A8 jamais sur critique** (une action critique requérant A8 est toujours refusée, même pour un déclaré A8) ; l'échelle est **fermée** (un niveau hors A0..A8 est fail-closed) ; la **montée est une fonction pure de l'historique** (fenêtre toute-verte E4+ sans incident de ≥ N ⇒ `current+1`, jamais au-delà de A8 ; tout run non-vert / sous-E4 / avec incident retient ; reproductible) ; un historique plus court que la fenêtre ne promeut jamais.
+- `autonomy_fixture_test.go` — les cas nommés (le done-criterion FK10) : **un A1 tentant un merge est refusé** (A6 critique, `AGENT_AUTONOMY_EXCEEDED`, how_to_fix non vide) ; un A6 fusionne, un A7 deploie (le plafond critique) ; A8 jamais sur critique ; la **montée gagnée depuis l'historique** (3 runs verts E4+ → A1→A2 ; un incident / un sous-E4 / un run non-vert dans la fenêtre la retient).
+- `autonomy.test.ts` (fast-check/Vitest) — le jumeau : 5 tests verts (A1→merge refusé ; fail-closed monotone ∀ paire ; A8 jamais sur critique ; montée = fonction pure de l'historique ; échelle fermée).
+- `tests/e2e/autonomy.spec.ts` (Playwright) — 5 tests : l'échelle + les deux contrôles s'affichent ; **un A1 tentant un merge est REFUSÉ** (`AGENT_AUTONOMY_EXCEEDED` + porte de sortie) ; un A6 fusionne ; A8 sur critique refusé ; la montée est pure (3 runs propres → A1→A2 ; un incident la retient).
+
+**Ce que FK10 prépare.** FK11 (le cockpit AI Lab) affichera le niveau d'autonomie **gagné** de chaque agent comme un fait, à côté de la conscience live (FK09) : un agent confiné qui grandit avec sa preuve, jamais sur sa parole. FK10 fournit exactement la forme dont le cockpit a besoin — un niveau déclaré, un enforcement fail-closed, et une montée déterministe que le mur gèle.
