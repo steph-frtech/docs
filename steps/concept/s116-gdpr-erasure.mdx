@@ -1,0 +1,54 @@
+---
+title: "S116 · Vos droits sur vos données — export & suppression (le droit à l'oubli, vraiment tenu)"
+description: "Comment AIDOS tient le droit à l'oubli alors que sa mémoire est append-only (rien n'est jamais détruit). Deux plans : votre compte AIDOS (suppression dure du compte + toutes les données de ses projets) et les utilisateurs de l'app que VOUS construisez (export + suppression de leurs données). La tension réelle « mémoire append-only vs droit à l'effacement » est résolue par crypto-shredding + tombstone : on détruit la CLÉ, pas la structure — la PII devient irrécupérable, le hash de phase reste valide, et la décision est enregistrée."
+keywords: ["aidos", "krd", "S116", "GDPR", "RGPD", "export", "suppression", "droit à l'oubli", "crypto-shredding", "tombstone", "append-only", "PII", "compte", "app émise", "Art. 17", "Art. 20"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — le concept. Pour les internals, voir [Pour moi → S116](/steps/internals/s116-gdpr-erasure).</Note>
+
+## Ce que S116 vous apporte
+
+S116 vous donne, et donne aux utilisateurs de l'app que vous construisez, **deux droits concrets sur les données personnelles** :
+
+- **Export** (RGPD Art. 20) — rendre **toutes** les données d'une personne, d'un coup.
+- **Suppression** (RGPD Art. 17) — rendre la **PII d'une personne irrécupérable**, sur demande.
+
+### La tension réelle (et comment AIDOS la résout)
+
+La mémoire d'AIDOS est **append-only** : rien n'est jamais détruit, chaque phase stable est figée par un **hash** immuable. C'est ce qui garantit que rien de ce que vous avez prouvé vrai ne casse silencieusement. Mais le **droit à l'oubli** exige de *détruire* la donnée personnelle. Deux exigences en apparence incompatibles.
+
+AIDOS les réconcilie par **crypto-shredding + tombstone** :
+
+1. Chaque donnée personnelle vit **chiffrée**, sous une **clé propre à la personne**.
+2. Supprimer = **détruire la clé** et remplacer la donnée chiffrée par un **marqueur « tombstone »** (une pierre tombale, sans aucune PII).
+3. La **structure** de la ligne (sa forme, ses colonnes non-personnelles, sa place dans l'historique) est **préservée verbatim**.
+
+Résultat : la PII est **irrécupérable** (la clé n'existe plus), **et** le **hash de phase reste valide** (la structure n'a pas bougé). L'historique append-only **vérifie encore**. Vous ne choisissez pas entre « mémoire fiable » et « droit à l'oubli » : vous avez les deux.
+
+### Deux plans
+
+| Plan | Qui | Ce qui se passe |
+|---|---|---|
+| **Compte AIDOS** | vous | suppression **dure** de votre compte **+ toutes les données de vos projets** (au-delà du simple archivage du S53) |
+| **App émise** | les utilisateurs de l'app que **vous construisez** | export et suppression de **leurs** données — la promesse « tout PII oubliable » rendue concrète |
+
+## Comment vous l'utilisez
+
+Sur l'écran **`/gdpr-erasure`** (thémé, bilingue) :
+
+1. Choisissez le **plan** (compte AIDOS ou app émise) et la **personne** (et l'app, sur le plan app émise).
+2. **« Exporter toutes les données »** — vous voyez tout ce que la personne a, en clair.
+3. **« Supprimer »** — la PII est crypto-shredée, et l'écran vous montre :
+   - la **décision enregistrée** (jamais une suppression silencieuse) ;
+   - le **hash de phase avant/après**, marqué **INVARIANT** (l'append-only est préservé) ;
+   - le store, où les champs de la personne affichent désormais **« shredé »**.
+4. **« Une requête renvoie-t-elle encore la PII ? »** — la réponse est **IRRÉCUPÉRABLE** : aucune requête ne la renvoie, **cross-projet et cross-plan**.
+
+## Ce que cela garantit
+
+- **Tout est rendu** à l'export ; **rien n'est récupérable** après suppression — pas même par une requête d'un autre projet ou de l'autre plan.
+- **L'append-only tient** : aucune ligne n'est détruite, aucun hash de phase n'est invalidé.
+- **La suppression est une décision enregistrée** (qui, quoi, quand), jamais une édition cachée.
+- **La sélection est déterministe** : ce qui est exporté est exactement ce qui est effacé — pas de surprise, pas de fuite.
+
+<Note>S116 résout une vraie tension, c'est pourquoi il a été **grillé d'abord** : la décision « crypto-shredding + tombstone » est tracée dans l'ADR 0050.</Note>

@@ -1,0 +1,60 @@
+---
+title: "S116 · GDPR export & erasure (internals) — Implémentation · Méta · Méta-méta"
+description: "Le journal d'implémentation de S116 : l'effacement GDPR sur un truth-store append-only, réconcilié par crypto-shredding + tombstone. Le cœur est back/runtime/erasure (autorité Go) — sélection = requête déterministe scopée, export Art. 20, erase Art. 17 (clé détruite, ciphertext → tombstone, structure préservée), hash de phase INVARIANT, décision enregistrée content-adressée. Twin TS byte-identique (id de décision + hash de phase égaux Go↔TS), MCP aidos-erasure, route /gdpr-erasure action-capable, e2e Playwright. ADR 0050."
+keywords: ["aidos", "krd", "S116", "GDPR", "crypto-shredding", "tombstone", "append-only", "PhaseDigest", "ErasureDecision", "PiiCipher", "requête scopée", "déterminisme", "rapid", "fast-check", "le mur", "twin", "MCP", "ADR 0050"]
+---
+
+<Note>Côté « Pour moi » — l'implémentation complète. Pour le concept, voir [Pour les futurs utilisateurs → S116](/steps/concept/s116-gdpr-erasure).</Note>
+
+## Implémentation
+
+S116 ajoute un paquet d'autorité Go **`back/runtime/erasure`** qui réconcilie mécaniquement la tension réelle **« truth-store append-only vs droit à l'effacement »** par **crypto-shredding + tombstone**, sur **deux plans** (compte AIDOS / app émise).
+
+### Le modèle
+
+- **`PiiCipher{path, ciphertext, keyId, plaintext?}`** — un champ PII **chiffré au repos** sous une clé par-sujet (`keyId`). Le **plaintext n'est jamais persisté** ; il ne sert qu'à piloter l'export. `Shredded()` ⇔ `keyId == "" ∧ ciphertext == Tombstone`.
+- **`Cell{plan, subject, project, app?, rowId, structure, pii[]}`** — une ligne porteuse de PII : son plan (`account|app`), son sujet, son scope (projet/app), sa position append-only (`rowId`), sa **projection structurelle non-PII** (`structure`), et ses champs PII.
+- **`Scope{plan, subject, project?, app?}`** — le narrowing de sélection.
+
+### Les fonctions (toutes pures, totales, déterministes)
+
+- **`Select(scope, cells)`** — la **requête déterministe scopée** (CLAUDE.md §6) : un filtre pur par `(plan, subject, project?, app?)`, en ordre canonique `(project, app, rowId)`. **Export et erasure consomment la même `Select`** ⇒ « ce qui est exporté == ce qui est effacé » (property `ExportReachEqualsEraseReach`).
+- **`Export(scope, cells)`** (Art. 20) — rend **chaque champ PII en plaintext**, en ordre canonique. Une cellule shredée n'exporte **rien** (irrécupérable, honnête).
+- **`Erase(scope, cells, whenRef)`** (Art. 17) — pour chaque cellule sélectionnée : (a) collecte les `keyId` (les clés **détruites**), (b) **`shredCell`** réécrit chaque ciphertext en `Tombstone` et vide le `keyId`. La `structure` est préservée verbatim. Rend une **`ErasureResult{Decision, Tombstoned[]}`**.
+- **`PhaseDigest(cells)` / `PhaseHash(cells)`** — le hash est calculé sur **forme + colonnes non-PII + marqueurs de tombstone par champ PII** (jamais la valeur/ciphertext). Donc **INVARIANT sous le shredding** : `PhaseHash(cells) == PhaseHash(erase(cells))`.
+- **`ApplyErasure(scope, cells)`** — le store post-effacement (sélection shredée en place, ordre append-only conservé, lignes non visées verbatim).
+- **`PiiVisible(subject, cells)`** — « une requête renvoie-t-elle encore la PII ? » : scanne **chaque** cellule, **cross-projet et cross-plan**. Après `ApplyErasure`, `false` pour le sujet effacé.
+
+### La décision enregistrée (§9)
+
+**`ErasureDecision{ID, Plan, Subject, Scope, KeyIDs[], RowIDs[], WhenRef}`** — l'effacement est une **décision content-adressée** (`records.Hash` sur le corps canonique, l'`ID` vidé avant hash), jamais une édition silencieuse. `WhenRef` est une **référence injectée déterministe** (jamais une lecture d'horloge) pour que l'id soit reproductible.
+
+### Le mur (CLAUDE.md §2)
+
+Le paquet **n'écrit aucune vérité** : `Erase` rend une **valeur** ; l'atterrissage des lignes tombstone est une écriture **archive sous la ligne**. La PII **n'entre jamais** dans le kernel. La décision est **ajoutée** (append-only respecté jusque dans l'effacement).
+
+### Le miroir (BDD d'abord, rouge avant le code)
+
+- **`erasure_fixture_test.go`** (N0, acceptance) — les scénarios Godog du done-criteria : export rend toutes les données (compte + app) ; erase shrede la PII, **hash de phase inchangé**, structure préservée, autres sujets intacts (cross-plan), sujet effacé irrécupérable, **décision enregistrée**.
+- **`erasure_property_test.go`** (∀, rapid) — reproductibilité (même entrée → même résultat) ; **après suppression, aucune requête ne renvoie la PII cross-projet/cross-plan** ; hash de phase invariant ; sujet non visé jamais touché ; reach de Select == reach d'Erase.
+
+### Le twin TS (déterminisme cross-langage)
+
+**`front/web/lib/erasure.ts`** est le **byte-twin** de l'autorité Go. Le digest de phase **et l'id de décision** sont **byte-identiques Go↔TS** : l'id reproduit le `records.Canonicalize` Go (clés triées lexicographiquement → `app, key_ids, plan, project, row_ids, subject, when_ref`). Vérifié manuellement (mêmes `phaseHash` et `decisionID` sur la fixture canonique) et verrouillé par **`erasure.test.ts`** (fast-check, 8 tests verts).
+
+### La capacité (MCP, ADR 0009) et l'écran
+
+- **`back/mcp/erasure`** — cinq outils : `erasure_select`, `erasure_export`, `erasure_erase`, `erasure_phase_hash`, `erasure_pii_visible`. Tous **purs, sous la ligne**, déterministes.
+- **`front/web/app/gdpr-erasure`** + **`ErasurePanel`** — route **action-capable** (ui-completeness, §7) : chaque op a un control exécutable depuis l'écran (export, erase, hash avant/après marqué INVARIANT, scan de visibilité), thémé (ADR 0010), bilingue (ADR 0011). **`tests/e2e/gdpr-erasure.spec.ts`** (Playwright, 5 tests verts) prouve que chaque control s'exécute, dont le plan app émise (erase un utilisateur sans toucher le compte — cross-plan).
+
+## Méta
+
+**Pourquoi crypto-shredding + tombstone, et pas un `DELETE` ?** Parce que l'append-only et le droit à l'oubli ne sont incompatibles **que si l'on détruit la ligne**. En rendant **la PII chiffrée et la clé seule destructible**, l'effacement se réduit à **détruire une clé** — une opération qui ne touche **ni la structure ni le hash de phase**. La donnée devient irrécupérable (la clé n'existe plus) sans qu'aucune ligne disparaisse. C'est le même geste KRD que partout : on ne casse pas l'invariant, on **trouve la projection sur laquelle l'invariant et l'exigence coexistent** — ici, la projection structurelle qui hashe des *marqueurs* de PII, pas la PII.
+
+**Pourquoi une seule `Select` pour export ET erase ?** Pour qu'« exporté » et « effacé » soient **prouvablement le même ensemble** (un property dédié). Si l'export voyait plus que l'erasure, une suppression laisserait une fuite ; si l'erasure voyait plus, un export serait incomplet. Une seule requête scopée tue les deux risques d'un coup — et c'est du **code déterministe**, jamais un jugement.
+
+**Pourquoi une décision content-adressée ?** Parce qu'un override (ici, un effacement) **n'est pas une édition, c'est une décision enregistrée** (§9). L'id reproductible (référence `WhenRef` injectée, pas d'horloge) en fait une preuve rejouable.
+
+## Méta-méta
+
+S116 illustre la discipline **determinism-first** à son point le plus délicat : **un droit légal** (l'effacement) traduit **intégralement en fonctions pures** — sélection, export, shredding, digest, id de décision — chacune portant son **miroir de reproductibilité** (rapid + fast-check, ancrés sur une fixture commune, twin byte-identique Go↔TS). Aucun LLM n'entre : il n'y a **rien à générer ni à juger**, seulement à *sélectionner, transformer, hasher* — exactement le territoire où le code fait autorité. La tension « append-only vs effacement » n'est pas tranchée par un avis ; elle est **dissoute par une preuve** (le hash de phase est invariant, prouvé ∀). Et le mur tient jusqu'au bout : effacer une donnée personnelle **n'écrit aucune vérité** — c'est une valeur calculée et une décision ajoutée, jamais une mutation du kernel. Le droit à l'oubli devient ainsi une **dent du cliquet** comme une autre : prouvée avant d'exister, déterministe, append-only, et hors de portée d'écriture de l'agent.

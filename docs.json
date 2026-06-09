@@ -296,6 +296,8 @@
               "steps/internals/s114-billing",
               "steps/concept/s115-first-app-funnel",
               "steps/internals/s115-first-app-funnel",
+              "steps/concept/s116-gdpr-erasure",
+              "steps/internals/s116-gdpr-erasure",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",
