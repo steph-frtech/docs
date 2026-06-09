@@ -1,0 +1,74 @@
+---
+title: "FK16 · La bascule E0-E7 (internals)"
+description: "Implémentation, Méta et Méta-méta de FK16 : la dérivation pure CertToE/KindToE/MirrorE, le re-étiquetage Relabel sans perte, la dépréciation monotone du N (NLifecycle), et la migration expand-contract gated DataTruthScope qui ajoute evidence_level sans rien supprimer."
+keywords: ["aidos", "krd", "FK16", "contracte", "E0-E7", "MirrorE", "CertToE", "KindToE", "Relabel", "NoLoss", "NLifecycle", "deprecated", "expand-contract", "DataTruthScope", "evidence_level", "append-only", "déterminisme", "fonction pure", "FKE-16"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord interne. Pour la version sans code, voir [Pour les futurs utilisateurs → FK16](/steps/concept/fk16-contract).</Note>
+
+## Implémentation
+
+FK16 est l'étape **contract** de la migration E0-E7 (KRD FKE-16) — la **dernière** de la piste FK (elle touche le gelé-prouvé). Tout le cœur est une **fonction pure**, sans I/O, sans horloge, sans LLM — `back/kernel/mirror/contracte/`.
+
+**Le package `contracte` (Go).** Le E qu'un miroir *atteint* se dérive de ce qu'il porte déjà :
+
+- `CertToE(c CertLanguage) ELevel` — la table **close, déclarée** langue → cran d'evidence :
+
+  ```
+  gherkin/xstate/pact/fixture → E3   fast-check/rapid/k6 → E5
+  zod/type-check → E1   snapshot/unit → E2   prose → E0
+  ```
+
+  Totale : une langue inconnue → **E0** (le plancher). Déterministe.
+
+- `KindToE(k TestKind) ELevel` — la **seconde lentille** (la nature de la preuve) :
+
+  ```
+  acceptance/e2e/fixture/contract → E3   property → E5   schema → E1
+  unit/snapshot → E2   meter → E6
+  ```
+
+- `MirrorE(k, c) ELevel` — le E **réellement atteint** : `MAX(CertToE(c), KindToE(k))`, **sauf** qu'un cert **non exécutable** (`prose`, via `IsExecutable()`) renvoie **E0** quelle que soit la nature (KRD §805 : une preuve qui ne tourne pas n'est pas de l'evidence). C'est la fonction faisant autorité — aucun LLM ne décide d'un cran.
+
+**Le cycle de vie du N.** `NLifecycle ∈ {active, deprecated}`. `Deprecate(_) → deprecated` est **monotone + idempotent** : toujours `deprecated`, jamais de retour à `active`, jamais de suppression.
+
+**Le re-étiquetage.**
+
+- `RelabelOne(MirrorIn) MirrorTag` — dérive le E, **préserve le N verbatim**, marque `deprecated`.
+- `Relabel([]MirrorIn) []MirrorTag` — la bascule du corpus : ordre préservé, octets stables.
+- `NoLoss(corpus, tags) bool` — le témoin **calculé** « zéro perte » : un tag par miroir, mêmes ids dans l'ordre, chaque tag gardant son N et `deprecated`. La bascule n'est légale que si `NoLoss` tient.
+- `EHistogram(tags)` — le compte par cran E0..E7 (le read-model du panneau).
+
+**La migration (`back/migrations/mirror_evidence_level_contract.sql`).** Expand-contract, idempotente, append-only :
+
+- `ADD COLUMN IF NOT EXISTS evidence_level TEXT NOT NULL DEFAULT 'E0'` + CHECK `E0..E7` ;
+- `ADD COLUMN IF NOT EXISTS n_lifecycle TEXT NOT NULL DEFAULT 'active'` + CHECK `active|deprecated` ;
+- un **BACKFILL** : la **même** dérivation que `MirrorE`, écrite en SQL (CASE prose→E0, sinon `GREATEST(CertToE, KindToE)`), stampe chaque ligne `evidence_level = 'E'||rang` et `n_lifecycle = 'deprecated'` ;
+- elle ne **droppe** aucune colonne (`test_kind`/`cert_language` survivent), ne **supprime** aucune ligne. Le mur reste : `aidos_agent` garde `SELECT` seul.
+
+**La preuve de parité (Testcontainers).** `contracte_db_test.go` applique les baselines + la migration sur un vrai Postgres jetable, sème un corpus représentatif (chaque `test_kind`, prose incluse), et **prouve que le backfill `evidence_level` == `MirrorE(test_kind, cert_language)` pour CHAQUE ligne** — la parité octet-pour-octet entre le SQL et la fonction Go. Elle vérifie aussi que le N n'est jamais droppé (les colonnes survivent, `n_lifecycle = deprecated`).
+
+**Le miroir, la MCP, le jumeau.**
+
+- Miroir reproductibilité (rapid) : `MirrorE` déterministe + totale, prose toujours E0, `Relabel` sans perte, `Deprecate` monotone.
+- Fixture (state→cmd→events) : un corpus N-typé → la commande `Relabel` → événements (zéro perte, E exact, histogramme exact).
+- MCP `aidos-prooftype-contract` (ADR 0009) : `mirror_e`, `relabel`, `histogram` — pures, n'écrivent rien.
+- Jumeau TS `front/web/lib/contracte.ts` + son miroir fast-check `contracte.test.ts` ; l'écran `/proof-levels` rend E0-E7 + le bouton « Basculer », e2e Playwright.
+
+## Méta
+
+**Pourquoi déduire le E plutôt que le re-saisir ?** Parce que le E qu'un miroir atteint **est déjà entièrement déterminé** par la langue et la nature qu'il porte. Le re-saisir serait du double-typage (une source qui peut diverger). FK16 en fait une **vue dérivée** : `evidence_level` est un **cache prouvé** de `MirrorE`, exactement comme `truth_level` (FK01) est un cache de sa transition. La parité-mirror (le backfill == la fonction) interdit la dérive.
+
+**Pourquoi déprécier au lieu de remplacer ?** Parce que le N est de la **provenance** : il dit *à quelle hauteur du V* le comportement a été prouvé. L'effacer perdrait l'histoire. Le cycle de vie sépare l'**autorité** (qui passe à E) de l'**existence** (le N reste). C'est l'anti-overwrite (§9) appliqué à une étiquette : on **déprécie**, on ne détruit pas.
+
+**Pourquoi en dernier ?** Parce que la bascule touche **tout le corpus déjà certifié**. Tant qu'un lecteur lit encore N, la basculer briserait sa lecture. FK05 (expand) garantit que tout le monde sait *déjà* lire E avant que FK16 ne déplace l'autorité — c'est l'ordre expand-puis-contract qui rend la bascule sûre.
+
+**Pourquoi gated DataTruthScope ?** Parce que le backfill **écrit sur des données historiques**. Ce n'est pas un changement de forme bénin : c'est un `HistoricalImpact`. Le garde-fou exige qu'il soit classé tel et approuvé comme un *expand non destructif* — la preuve qu'il ne perd rien est un pré-requis à l'application, pas une promesse a posteriori.
+
+## Méta-méta
+
+**Le juge reste un calcul.** Rien dans FK16 n'est un jugement : `MirrorE` est une table, `NoLoss` est un set-diff, le backfill est le même calcul en SQL. La bascule la plus délicate du build — toucher le gelé-prouvé — est **entièrement déterministe**. Le risque maximal (perdre une preuve en migrant) est neutralisé par une propriété *calculée* (zéro perte) doublée d'une *parité* (SQL == Go) prouvée sur un vrai Postgres. C'est la doctrine §8 — « le juge est déterministe » — poussée jusqu'à la migration de schéma.
+
+**Le ratchet ne recule pas.** `Deprecate` monotone, `ADD COLUMN`/backfill append-only, aucun `DROP`, aucun `DELETE` : la bascule **n'enlève jamais un cran de garantie**, elle n'en ajoute que. C'est la méta-loi (§5) — un nouvel artefact AJOUTE un garde-fou, n'en RETIRE jamais — appliquée à l'évolution du schéma de vérité lui-même.
+
+**La boucle se referme.** FK01 a posé le niveau de vérité comme cache prouvé d'une transition pure ; FK05 a posé l'échelle E à côté de N ; FK16 bascule l'autorité vers E sans rien détruire. Le système de coordonnées de la vérité (niveau × facette × evidence) est désormais *entièrement* E-typé, *entièrement* dérivé, *entièrement* réversible en lecture (le N survit) — et le mur n'a pas bougé d'un pouce.

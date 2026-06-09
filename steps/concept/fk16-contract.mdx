@@ -1,0 +1,69 @@
+---
+title: "FK16 · La bascule E0-E7 : N déprécié, jamais supprimé"
+description: "FK16 est la DERNIÈRE étape de la piste FK : la bascule du schéma vers E0-E7. Là où FK05 avait posé l'échelle E À CÔTÉ des étiquettes N (l'expand), FK16 fait basculer le corpus, les panneaux et les docs vers E — l'autorité de typage passe à E. L'ancien N n'est PAS supprimé : il est DÉPRÉCIÉ par cycle de vie (append-only), conservé pour la provenance. Zéro perte : chaque miroir N porte désormais son E."
+keywords: ["aidos", "krd", "FK16", "E0-E7", "N0-N5", "bascule", "contract", "expand-contract", "déprécié", "lifecycle", "append-only", "zéro perte", "evidence_level", "DataTruthScope", "FKE-16", "miroir", "fonction pure"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK16](/steps/internals/fk16-contract).</Note>
+
+## En une phrase
+
+FK16 **fait basculer** AIDOS de l'échelle de preuve **N0-N5** vers l'échelle **E0-E7** : chaque miroir reçoit le niveau d'evidence **E** que prouve réellement le test qu'il exécute, et son ancienne étiquette **N** est **dépréciée** — jamais effacée.
+
+## Pourquoi une « bascule » en dernier ?
+
+FK05 (« l'expand ») avait posé la table N→E **à côté** des niveaux N existants, sans rien casser : on pouvait lire le E dérivé d'un miroir tout en gardant le N comme source. C'était délibérément **compatible avec le build en cours**.
+
+FK16 est l'autre moitié : le **contract**. C'est la bascule sèche — le corpus de miroirs, la colonne `cert_language`, les panneaux (`/proof-levels`) et les docs passent à **E0-E7**, et l'**autorité de typage** passe de N à E. Parce qu'elle touche le **gelé-prouvé** (tout le corpus déjà certifié), elle est **strictement la dernière** étape de la piste.
+
+C'est le motif classique **expand-contract** : on ajoute le nouveau (E) à côté de l'ancien (N) — *expand* —, puis, une fois que tout le monde sait lire le nouveau, on bascule l'autorité — *contract* — **sans jamais détruire l'ancien**.
+
+## La règle d'or : déprécier, jamais supprimer
+
+La discipline AIDOS interdit de détruire une vérité (anti-overwrite). FK16 ne fait donc **pas** disparaître le N :
+
+- l'étiquette N reste **inscrite** sur chaque miroir, **consultable** pour la provenance ;
+- son **cycle de vie** passe de `active` à `deprecated` : elle n'est plus la *source* du typage, mais elle n'est jamais *effacée* ;
+- la transition est **monotone** : une fois dépréciée, elle le reste ; elle ne revient jamais à `active`, on ne supprime jamais une colonne, on ne détruit jamais une ligne.
+
+C'est « **N déprécié via lifecycle, jamais supprimé (append-only)** ».
+
+## Comment le E de chaque miroir est-il choisi ?
+
+Pas par un jugement, pas par un LLM : par une **table fixe, déclarée**. Le E qu'un miroir **atteint** se déduit de deux choses qu'il porte déjà :
+
+- la **langue** dans laquelle il est écrit (`cert_language` : gherkin, rapid, pact, unit…) ;
+- la **nature** de la preuve (`test_kind` : acceptance, property, contract, unit…).
+
+On prend le **plus haut** des deux crans — **sauf** qu'un miroir **non exécutable** (de la prose, un juge-LLM seul) atteint **E0** quoi qu'il arrive : une preuve qui ne tourne pas n'est **pas** une preuve. Quelques exemples :
+
+| Miroir | E atteint |
+|---|---|
+| un parcours en gherkin (acceptance) | **E3** contrat / intégration |
+| un invariant ∀ en rapid (property) | **E5** fuzz / mutation |
+| un test unitaire | **E2** unitaire |
+| un méter k6 (runtime) | **E6** runtime / monitoring |
+| de la prose | **E0** aucune |
+
+## Zéro perte
+
+C'est le critère central : **chaque miroir N porte son E**. La bascule :
+
+1. parcourt tout le corpus,
+2. dérive le E de chaque miroir,
+3. conserve son N et le marque `deprecated`,
+4. ne perd **aucun** miroir, n'efface **aucun** N.
+
+Un témoin **« zéro perte »** est *calculé* (jamais déclaré) : il vérifie qu'il y a bien un E par miroir, dans le même ordre, chacun gardant son N. La bascule n'est légale **que** si ce témoin tient.
+
+## Et la base de données ?
+
+Le vrai basculement du schéma est une **migration Postgres expand-contract** : elle **ajoute** une colonne `evidence_level` (E0..E7) **à côté** des colonnes existantes, **remplit** chaque ligne par la même dérivation déterministe, et passe le cycle de vie N à `deprecated`. Elle ne **droppe** aucune colonne, ne **supprime** aucune ligne. Parce qu'elle **touche des données historiques**, elle est **gardée par DataTruthScope** : le moteur de migration doit la classer « impact historique » et l'approuver comme un *expand non destructif* avant de l'appliquer.
+
+## Ce que vous voyez à l'écran
+
+Le panneau `/proof-levels` **rend désormais E0-E7** : l'échelle des huit crans, et un bouton **« Basculer vers E0-E7 »** qui re-étiquette un corpus d'exemple sous vos yeux — chaque miroir gagne son E, garde son N (marqué `deprecated`), et le témoin « zéro perte » s'affiche. L'ancienne échelle N0-N5 reste **consultable** (repliée), pour la provenance.
+
+## Le mur, intact
+
+L'écran ne fait que **dériver et afficher** — il n'écrit **aucune vérité**. Le vrai basculement du schéma passe par la migration gardée, appliquée par le rôle privilégié via un ChangeSet approuvé. Le N reste verbatim ; l'autorité passe à E sans jamais rien détruire.
