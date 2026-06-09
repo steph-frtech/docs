@@ -1,0 +1,54 @@
+---
+title: "FK05 · L'expand E0-E7 (internals)"
+description: "Implémentation, Méta et Méta-méta de FK05 : la table N0-N5 → E0-E7 comme fonction pure et totale, le double-étiquetage additif, et les types de preuve ajoutés E4 (sécurité), E6 (runtime+rollback), E7 (formel) au contrat de chaque kernel."
+keywords: ["aidos", "krd", "FK05", "prooftype", "E0-E7", "N0-N5", "MapNToE", "ContractFor", "Tag", "double-étiquetage", "FKE-16", "expand-contract", "déterminisme", "fonction pure", "facette", "E4", "E6", "E7"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord interne. Pour la version sans code, voir [Pour les futurs utilisateurs → FK05](/steps/concept/fk05-proof-type).</Note>
+
+## Implémentation
+
+FK05 est l'étape **expand** de la migration E0-E7 (KRD FKE-16). Tout le cœur est une **fonction pure**, sans I/O, sans horloge, sans LLM — `back/kernel/mirror/prooftype/`.
+
+**Le package `prooftype` (Go).** Trois types fermés et trois fonctions pures :
+
+- `NLevel ∈ {N0..N5}` — l'étiquette héritée (les six niveaux du V).
+- `ELevel ∈ {E0..E7}` — l'échelle d'evidence (FKE-16).
+- `MapNToE(n) []ELevel` — la table **close, déclarée** (jamais apprise, §8) :
+
+  ```
+  N0 → E3   N1 → E5   N2 → E3   N3 → E3   N4 → E1,E2   N5 → E3,E4
+  ```
+
+  Totale : un N inconnu → l'ensemble **vide** (pas de panique). Déterministe : la tranche retournée est une **copie triée** — même N → octets identiques.
+
+- `FacetEvidence(f) []ELevel` — la table **facette → E ajouté** : `S→E4`, `R→E6`, `I→E5`, `B→E5`, `V→E6`, `M→E1`. F et X → vide (X est soft §13.6, jamais un E dur).
+
+- `ContractFor(k KernelProof) EvidenceContract` — la composition : `Required = MapNToE(N) ∪ Σ FacetEvidence(f) ∪ (E7 ssi RequiresFormal)`, trié, dédupliqué. Order-independent (les facettes sont parcourues dans l'ordre canonique FK02, pas dans l'ordre d'entrée).
+
+- `Tag(k) EvidenceTag` — le **double-étiquetage additif** : `{N: k.NLevel, E: ContractFor(k)}`. Le N est **copié verbatim** — aucune mutation. C'est la garantie « zéro miroir N existant modifié ».
+
+**Les miroirs (BDD-first, rouge → vert).**
+
+- `prooftype_fixture_test.go` — 9 cas = les critères de done : mapping exact pour chaque N ; N inconnu → vide ; E4 **seulement** via S ; E6 via R/V ; E7 **seulement** via le bouchon formel ; X n'ajoute aucun E ; Tag préserve le N verbatim ; le contrat affiche l'union complète E-typée ; déterminisme + order-independence.
+- `prooftype_property_test.go` (rapid) — 4 invariants : `MapNToE` totale & déterministe (triée, réelle ⇒ non-vide) ; `ContractFor` déterministe & order-independent (Required trié, dédupliqué) ; le double-label additif (`Tag.N == in.N` toujours) ; les types ajoutés **gatés** (E4 ⇔ S, E6 ⇔ R∨V, E7 ⇔ formel).
+
+**Le MCP `aidos-prooftype`** (ADR 0009) — deux outils purs, write-nothing : `map_n_to_e` (un N → son ensemble E) et `tag` (un KernelProof → l'EvidenceTag double-étiquetée). `main_test.go` vert (fault-injection sur chaque gate).
+
+**Le jumeau TS + l'écran.** `front/web/lib/prooftype.ts` reproduit la fonction pure (le Go reste l'autorité) ; `lib/prooftype.test.ts` (fast-check, 5/5) est le **miroir de reproductibilité** (même entrée → même sortie). La route `/proof-type` (thème ADR 0010, bilingue ADR 0011) est **action-capable** : le contrôle **Étiqueter le kernel** est lié à `tagAction` (Server Action), qui exécute le vrai jumeau pur. L'e2e Playwright `tests/e2e/proof-type.spec.ts` (4/4) prouve : la table de mapping s'affiche ; étiqueter un N4 affiche son evidence E-typée (E1, E2) ; E4 n'apparaît que via S ; E7 n'apparaît que via le bouchon formel.
+
+## Méta
+
+**Pourquoi une fonction pure, et pas un agent.** Mapper un N vers un E est une **transformation déterministe sur une table close** — exactement le genre de chose que le mandat *determinism-first* (CLAUDE.md §6/§8) exige en code, jamais en LLM. La table est **déclarée** (les poids/correspondances sont posés au-dessus du mur, §8), authoritative, et porte son **miroir de reproductibilité**. Un « agent qui devine le niveau de preuve » serait une faille de déterminisme bloquante.
+
+**Pourquoi additif, et pas une bascule.** Le build S53→S117 écrit des miroirs **N-typés** *maintenant*. Une bascule sèche au milieu casserait les miroirs en cours. FK05 applique donc le motif **expand-contract** d'Atlas/des migrations : on **ajoute** l'étiquette E à côté du N (expand, compatible), et la bascule du schéma (`mirrors`/`cert_language`/panneaux) est repoussée à **FK16**, en tout dernier, *quand le gelé-prouvé peut être ré-étiqueté sans perte*. C'est l'anti-overwrite (§9) appliqué à une migration de vocabulaire.
+
+**Pourquoi les types ajoutés passent par les facettes.** E4/E6/E7 ne sont pas des « hauteurs du V » — ce sont des **natures d'evidence** orthogonales, exactement comme les facettes [FK02](/steps/internals/fk02-facets) sont orthogonales aux niveaux. Faire dériver E4 de la facette **S**, E6 de **R/V**, E7 du bouchon formel, c'est réutiliser l'axe des facettes plutôt que d'inventer un troisième axe. La sécurité (E4) **est** ce que la facette S prouve ; le rollback (E6) **est** ce que R/V prouvent. La cohérence est structurelle, pas plaquée.
+
+## Méta-méta
+
+**Le mur tient.** `prooftype` n'écrit **rien** au-dessus de la ligne de flottaison : il **lit** un N (posé par S06 à la porte légale) et un ensemble de facettes (posé par FK02) et **dérive** le contrat. Le E dérivé est un **cache prouvé par la fonction** — exactement comme `truthlevel` stocke un niveau prouvé par `Compute` et vérifié par un miroir de parité. Aucune nouvelle porte vers le kernel : la bascule du schéma reste gouvernée par un changeset à FK16.
+
+**« Done is computed » s'étend.** Avant FK05, « ce kernel est prouvé » était un mot. Après, c'est un **contrat d'evidence calculé** : `Required` est une fonction totale de (N, facettes, bouchon formel), jamais déclaré à la main. Le harnais peut désormais **comparer** l'evidence *attendue* (E-typée) à l'evidence *observée* (les runners) — c'est la réconciliation que la conscience (FK09) agrégera. FK05 fournit le **vocabulaire typé** sur lequel cette réconciliation s'appuiera, sans encore l'exécuter.
+
+**Le méta-modèle ne grossit pas.** FK05 n'ajoute **aucun** méta-type : N et E sont des *valeurs* d'un même axe « niveau de preuve », et les types ajoutés sont des *valeurs* de l'axe « facette » déjà posé. La discipline KRD (un seul méta-type, la couche ; un seul axe orthogonal, la facette) reste intacte — FK05 ne fait qu'**enrichir le vocabulaire**, par une table pure, additive et réversible.

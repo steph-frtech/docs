@@ -1,0 +1,81 @@
+---
+title: "FK05 · L'expand E0-E7 : du « test » à l'« evidence » typée"
+description: "FK05 traduit les six niveaux de preuve N0-N5 d'AIDOS vers une échelle plus riche, E0-E7, qui nomme explicitement la sécurité (E4), le runtime + rollback (E6) et la preuve formelle (E7). C'est une table de correspondance DÉCLARÉE (une fonction pure, jamais devinée), posée À CÔTÉ des étiquettes N existantes — sans en modifier aucune. C'est l'étape « expand » : elle ajoute, elle ne casse rien ; la bascule du schéma viendra en dernier (FK16)."
+keywords: ["aidos", "krd", "FK05", "E0-E7", "N0-N5", "evidence", "preuve", "sécurité", "E4", "runtime", "rollback", "E6", "formel", "E7", "gosec", "gitleaks", "expand-contract", "FKE-16", "double-étiquetage", "fonction pure"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK05](/steps/internals/fk05-proof-type).</Note>
+
+## En une phrase
+
+FK05 dit qu'un niveau de preuve **N** (parcours, invariant, workflow, contrat, unitaire, infra) correspond, **par une table fixe**, à un ou plusieurs niveaux d'**evidence E** (de E0 « aucune » à E7 « formelle ») — et il **ajoute** au contrat de preuve trois types que les N seuls ne nommaient pas : **E4** la sécurité, **E6** le runtime + rollback, **E7** le formel.
+
+## Le problème que FK05 résout
+
+AIDOS prouvait les comportements sur **six niveaux** (la « table N0-N5 », posée tôt dans le build) :
+
+- **N0** intention / parcours,
+- **N1** métier / invariant ∀,
+- **N2** fonctionnel / workflow,
+- **N3** contrat / port,
+- **N4** code / unitaire,
+- **N5** infra / adaptateur.
+
+Cette échelle dit *à quelle hauteur du V* on prouve. Mais elle ne dit pas *quelle nature de preuve* : un test de sécurité, un benchmark, une preuve de rollback, une preuve formelle ne sont pas des « niveaux du V » — ce sont des **types d'evidence**. KRD (FKE-16) remplace donc le mot « test » par le mot **evidence** et déploie une échelle de huit crans :
+
+| Cran | Evidence |
+|---|---|
+| **E0** | aucune |
+| **E1** | syntaxe / typecheck / lint |
+| **E2** | tests unitaires |
+| **E3** | contrat / intégration |
+| **E4** | **sécurité / régression** (gosec, gitleaks, evals anti-injection) |
+| **E5** | fuzz / mutation / benchmark / evals |
+| **E6** | **runtime / monitoring / rollback** |
+| **E7** | **preuve formelle / quasi-formelle** |
+
+Les trois crans en gras — **E4, E6, E7** — n'avaient **pas de nom** dans l'échelle N. FK05 les ajoute au contrat de preuve de chaque kernel.
+
+## La règle
+
+FK05 fait deux choses, toutes deux **additives** (rien d'existant n'est modifié) :
+
+**1. La table de correspondance N → E, déclarée.** C'est une fonction **pure** : même niveau N → toujours le même ensemble E. La table est *close* (on ne l'invente pas au cas par cas, aucun LLM ne la décide) :
+
+- N0 parcours, N2 workflow, N3 contrat → **E3** (intégration / contrat),
+- N1 invariant ∀ → **E5** (property / mutation),
+- N4 unitaire → **E1 + E2** (lint + tests unitaires),
+- N5 infra → **E3 + E4** (contrat + sécurité).
+
+**2. Les types ajoutés, atteints par les facettes.** E4, E6 et E7 ne tombent pas du niveau N : un kernel les **gagne** quand il instancie la bonne [facette](/steps/concept/fk02-facets) (FK02) :
+
+- la facette **S** (sécurité) ajoute **E4** — c'est là que vivent gosec, gitleaks, les evals anti-prompt-injection ;
+- la facette **R** (fiabilité) ou **V** (évolutivité) ajoute **E6** — l'observation runtime, le monitoring, le rollback prouvé ;
+- un invariant **catastrophique et inéchantillonnable** (le rare « bouchon formel », T2) ajoute **E7** — la preuve formelle.
+
+La facette **X** (expérience), soft, n'ajoute **aucun** E dur : elle informe, elle ne contraint pas.
+
+## Le double-étiquetage : ajouter sans casser
+
+Le point délicat : le build d'AIDOS écrit, en ce moment même, des miroirs **étiquetés N**. On ne peut pas basculer brutalement vers E au milieu de la route — on casserait tout.
+
+FK05 applique donc le motif **expand-contract** :
+
+- **expand** (cette étape) : on pose l'étiquette **E à côté** de l'étiquette N, sur le même enregistrement. Le N est **préservé verbatim** — *zéro miroir N existant n'est modifié*. Le E est **dérivé** du N par la table pure. Un kernel **affiche** désormais son evidence E-typée, sans rien perdre.
+- **contract** (plus tard, à l'étape FK16 — en tout dernier) : on bascule le schéma vers E ; le N est **déprécié** par cycle de vie, **jamais supprimé** (append-only).
+
+## Ce que vous voyez à l'écran
+
+Le panneau **« L'expand E0-E7 »** du Workbench vous laisse **étiqueter un kernel** :
+
+1. choisissez son niveau **N** (l'étiquette héritée),
+2. cochez les **facettes** qu'il instancie,
+3. cochez, si besoin, le **bouchon formel**.
+
+L'écran calcule le **contrat E-typé** : l'evidence de base (du niveau N), l'evidence **ajoutée** par les facettes (E4 par S, E6 par R/V…), et E7 si le bouchon est mis. Le **N reste affiché tel quel** à côté du E dérivé — vous voyez le double-étiquetage en action. La table de correspondance complète est affichée au-dessus, en lecture seule.
+
+C'est une **fonction pure** : la même entrée donne toujours le même contrat. L'écran **dérive** et **affiche** — il **n'écrit aucune vérité** (le mur).
+
+## Pourquoi ça compte
+
+Sans FK05, dire « ce kernel est prouvé » restait ambigu : prouvé **comment** ? FK05 rend la réponse **typée** et **calculée** : un kernel de paiement qui instancie la sécurité **doit** porter E4 (les scans, les evals d'injection) ; un kernel qui touche au runtime **doit** porter E6 (le rollback prouvé). La preuve cesse d'être un mot — elle devient un **contrat d'evidence** vérifiable, le même pour tout AIDOS.
