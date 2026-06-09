@@ -1,0 +1,39 @@
+---
+title: "FK11 · L'AI Lab : le cockpit trialogue (internals)"
+description: "Implémentation, Méta et Méta-méta de FK11 : le cockpit /ai-lab comme COMPOSITION pure de la conscience FK09. back/runtime/ailab (autoritatif) + front/web/lib/ai-lab (jumeau). ProposeSlot (GAUCHE, refus au mur), BuildCockpit (CENTRE, voyants + tier par source), ScopeForPair (clic → scope gauche+droite), ApplyCardValidation (DROITE, fix_below_wall flippe 🔴→🟢 par re-réconciliation, sinon ouvre un /goal). Deux modes = un réglage de zoom. MCP aidos-ai-lab (4 outils). Tout pur ; même entrée → même sortie ; le mur intact."
+keywords: ["aidos", "krd", "FK11", "AI Lab", "cockpit", "trialogue", "ailab", "ProposeSlot", "BuildCockpit", "ScopeForPair", "ApplyCardValidation", "PairTier", "voyant", "le mur", "WallRefusal", "AI_LAB_DIRECT_TRUTH_WRITE", "decision card", "red wave", "promotion gate", "conscience", "FK09", "déterminisme", "rapid", "fast-check", "MCP", "FKE-38"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord interne. Pour la version sans code, voir [Pour les futurs utilisateurs → FK11](/steps/concept/fk11-ai-lab).</Note>
+
+## Implémentation
+
+FK11 n'ajoute **aucun nouveau juge** : le cockpit est une **composition pure** de la conscience FK09. Le cœur déterministe est `back/runtime/ailab/` (autoritatif) et son jumeau `front/web/lib/ai-lab.ts` (le Workbench). Zéro I/O, zéro horloge, zéro rng, zéro LLM.
+
+**GAUCHE — `ProposeSlot(node, message) → SlotResult`.** Une porte à deux issues. Si le message demande une **écriture-vérité directe** (`IsTruthWriteRequest` — un matcher déclaré sur un ensemble fermé de tournures : « écris le kernel », « modifie le miroir », « freeze »…), elle renvoie un `WallRefusal{code: AI_LAB_DIRECT_TRUTH_WRITE, how_to_fix:[…]}` — jamais un slot. Sinon elle renvoie un `ProposedSlot{status:"proposed", voyant:amber}` dont l'`id` est **content-adressé** (`records.Hash(node.ID|facet|intent)[:8]`) — donc idempotent. Le chat **propose**, il n'écrit jamais (le mur §2).
+
+**CENTRE — `BuildCockpit(report, mode, gate) → CockpitState`.** Projette le `ConsciousnessReport` de FK09 en cases navigables. Pour chaque `PairVerdict` : le **voyant** (`VoyantFor` : green→🟢, advisory→🟡, red→🔴) et le **tier de mur** (`PairTier(source)` — voici comment le mur est **dessiné** : les juges `runner | completeness | facet | semantic_diff` adressent une vérité *au-dessus* de la ligne → `above` ; tout autre source — `sensor | reality_mirror | ledger` — lit une preuve *en-dessous* → `below`, marqué `read_only`). Les cases sont triées par clé de paire (ordre stable). À droite, la `red_wave` (les clés des paires rouges, triées), le `blast` (par carte), et la `gate` (le niveau d'autonomie FK10).
+
+**Le clic — `ScopeForPair(report, pairKey) → (PairScope, ok)`.** Résout une clé de paire en scope déterministe : le `ChatFacet`/`ChatPair` (GAUCHE) et les `CardIDs` qui adressent la paire (DROITE, triés). Même `(report, pairKey)` → même scope. Le chat est **scopé au nœud**, jamais nourri du kernel entier (le ContextRouter est un algorithme, pas un prompt, §8).
+
+**DROITE — `ApplyCardValidation(report, cardID, option) → CardValidation`.** Le geste-charnière. Si l'option est *sous le mur* (`fix_below_wall`), on reconstruit les verdicts du rapport en **flippant** la paire adressée de `red` à `green`, puis on **re-réconcilie** via `conscience.Reconcile` — le verdict global et les cartes restantes se recalculent par le **même agrégateur** FK09. Si l'option est *au-dessus du mur* (`change_above_wall`, `block`…), `Applied=false`, `OpenedGoal=true`, et le **rapport est inchangé** (aucune vérité écrite depuis le cockpit). Le flip 🔴→🟢 est le critère-phare de l'étape.
+
+**Deux modes.** `mode ∈ {conversational, navigational}` est porté par `CockpitState.Mode` — un **réglage d'affichage**, jamais une vérité différente (le même écran à un zoom différent, FKE-38).
+
+**Le MCP — `back/mcp/ai-lab/` (`aidos-ai-lab`, ADR 0009).** Quatre outils purs, write-nothing : `build_cockpit`, `propose_slot`, `scope_pair`, `validate_card`. Ils reconstruisent le `ConsciousnessReport` (même schéma d'entrée que le MCP conscience) puis appellent le cœur `ailab`. Transport stdio.
+
+**L'UI — `front/web/app/ai-lab/`.** La route `/ai-lab` (thème ADR 0010, bilingue 0011) rend le trialogue en trois `<section>` : `pane-left` (chat → `proposed-slot` / `wall-refusal`), `pane-center` (les `pair-cell` cliquables avec voyant + tier), `pane-right` (red wave + promotion gate + decision cards avec options). Chaque op a son contrôle lié à une Server Action (ui-completeness, §7) ; un e2e Playwright prouve chaque chemin.
+
+## Méta
+
+**Pourquoi un cockpit *composé*, pas un nouvel organe ?** Le Tome refuse « le second agent qui valide » comme preuve (§8). Si l'AI Lab *jugeait*, il serait ce second agent. Il ne juge pas : il **lit** les verdicts sourcés de FK09 et les **dispose** sur trois zones. Le cockpit est une **projection**, jamais une vérité — c'est ce qui le rend légitime au-dessus du mur.
+
+**Pourquoi le tier de mur dérive du *source* du verdict ?** Le mur n'est pas une propriété du nœud affiché mais du **juge qui parle** : un verdict de runner/complétude parle d'une vérité (above, propose-only) ; un verdict de senseur/réalité parle d'une preuve observée (below, read-only). Cette dérivation est **pure et totale** — le mur est *dessiné* par calcul, jamais peint à la main, donc impossible à contourner par inadvertance.
+
+**Pourquoi re-réconcilier après un flip, au lieu de muter la case ?** Parce que le verdict global et le jeu de cartes sont des **conséquences** de l'ensemble des paires, pas de la case isolée. Re-passer par `Reconcile` garantit que tout l'écran reste **cohérent et déterministe** : flipper une paire peut faire disparaître une carte, repasser le kernel d'`drift` à `aligned` — et c'est l'agrégateur unique qui le décide, pas le cockpit.
+
+## Méta-méta
+
+**Le déterminisme comme garde du cockpit.** Le critère de done « écarts affichés = déterministes » n'est pas cosmétique : c'est la garantie que **deux personnes voyant le même kernel voient le même écran**. Aucune partie du cockpit n'appelle un LLM — les écarts viennent de SemanticDiff/blast (FK09), le scope d'un calcul, le flip d'une re-réconciliation. Le miroir de reproductibilité (`ailab_property_test.go` + `ai-lab.test.ts`) fixe cette propriété : même entrée → sortie byte-identique. C'est la généralisation de la règle « le juge est un calcul » à la *surface de pilotage* elle-même.
+
+**Le mur, jusque dans l'UI.** FK11 montre que le mur n'est pas qu'une règle Postgres + un hook : il se **dessine** et se **fait respecter** jusque dans l'écran. Le chat refuse ; le bas est en lecture seule ; une option au-dessus du mur ouvre un /goal au lieu d'écrire. La discipline KRD n'a pas de zone aveugle — *tout se fait par écran*, mais l'écran respecte le mur exactement comme le reste de l'OS.

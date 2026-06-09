@@ -471,7 +471,9 @@
               "steps/concept/fk09-conscience",
               "steps/internals/fk09-conscience",
               "steps/concept/fk10-autonomy",
-              "steps/internals/fk10-autonomy"
+              "steps/internals/fk10-autonomy",
+              "steps/concept/fk11-ai-lab",
+              "steps/internals/fk11-ai-lab"
             ]
           }
         ]
