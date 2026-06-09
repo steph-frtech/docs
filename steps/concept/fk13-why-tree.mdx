@@ -1,0 +1,54 @@
+---
+title: "FK13 · Le WhyTree et le geste /why : le 5-pourquoi, redressé"
+description: "FK13 ajoute le geste /why : depuis un symptôme rouge, il construit un WhyTree — un arbre de causes content-adressé et provenancé. Il remonte caused_by (FK12) vers les causes candidates, n'admet QUE les causes REPRODUITES (anti-confabulation : une cause qu'on ne sait pas faire échouer est rejetée), et se termine OBLIGATOIREMENT en un miroir d'anti-récurrence (racine → /learn → miroir → vague de rouge). Un WhyTree sans miroir terminal est REFUSÉ (WHYTREE_NO_MIRROR). Le juge est le booléen de reproduction, jamais un prompt."
+keywords: ["aidos", "krd", "FK13", "WhyTree", "/why", "5-pourquoi", "cause racine", "anti-confabulation", "reproduction", "miroir d'anti-récurrence", "/learn", "/diagnose", "vague de rouge", "caused_by", "symptôme", "déterminisme", "WHYTREE_NO_MIRROR", "incident", "FKE-35.1"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK13](/steps/internals/fk13-why-tree).</Note>
+
+## En une phrase
+
+FK13 donne à AIDOS le geste **`/why`** : depuis un **symptôme rouge**, il construit un **WhyTree** — l'arbre des **pourquoi** redressé — qui remonte les causes, **ne garde que celles qu'on sait reproduire**, et **finit toujours par un miroir** qui empêche le symptôme de revenir.
+
+## Le 5-pourquoi, mais sans la confabulation
+
+Le « 5-pourquoi » classique consiste à demander « pourquoi ? » cinq fois de suite jusqu'à la cause racine. Son défaut : à chaque « pourquoi ? », on peut **inventer** une cause plausible mais fausse. Une enquête qui se raconte une belle histoire est pire que pas d'enquête — elle ferme le dossier sur la mauvaise cause.
+
+FK13 **redresse** le 5-pourquoi avec deux garde-fous que le geste impose, mécaniquement :
+
+1. **Chaque cause doit être REPRODUITE.** Une cause candidate n'entre dans l'arbre que si on a su la **faire échouer à la demande** (un re-run déterministe rougit dessus). Une cause qu'on ne sait pas reproduire est **rejetée** — pas reléguée, pas « notée comme incertaine » : refusée. C'est l'**anti-confabulation** : AIDOS n'admet jamais une cause qu'il ne peut pas démontrer.
+2. **L'arbre doit FINIR par un miroir.** La cause racine ne clôt pas l'enquête en prose ; elle se transforme en un **miroir d'anti-récurrence** (via `/learn`). Un WhyTree sans ce miroir terminal est **refusé** (`WHYTREE_NO_MIRROR`). Tant qu'il n'y a pas de miroir, le symptôme peut revenir — donc l'enquête n'est pas finie.
+
+## La remontée s'appuie sur caused_by (FK12)
+
+Le squelette de l'arbre, c'est la **remontée caused_by** que FK12 a construite : depuis le symptôme, on suit les arêtes causales vers le haut, du plus proche au plus lointain, de façon **déterministe** (même symptôme + même graphe → même arbre) et **sans jamais boucler** (un cycle est refusé, sans arbre partiel). FK13 prend cette remontée et la **filtre par la reproduction**, puis la **clôt par un miroir**.
+
+La cause **racine** est la plus profonde des causes reproduites — c'est elle que `/learn` transforme en miroir. Un symptôme **sans cause amont** (une feuille) est **sa propre racine** : il faut quand même un miroir terminal qui le reflète.
+
+## La boucle complète : incident → arbre → miroir → vague de rouge
+
+FK13 est l'**extension** de deux gestes existants, `/diagnose` (qui produit désormais un WhyTree) et `/learn` (qui reçoit la racine). La boucle de bout en bout :
+
+1. Un **incident** (une divergence en production) ou un **miroir rouge** lève un symptôme.
+2. `/why` **remonte** caused_by vers les causes candidates.
+3. Chaque cause est **reproduite** (ou rejetée).
+4. La **racine** est la cause reproduite la plus profonde.
+5. `/learn` **fige** un **miroir d'anti-récurrence** sur la racine (par idée → miroir → /goal → approbation humaine).
+6. Ce miroir **bumpe** le hash de la racine et déclenche une **vague de rouge ciblée** — la liste de travail pour réparer.
+
+Le **mur** reste intact : `/why` **ne grave aucune vérité**. Il construit l'arbre et propose ; figer le miroir terminal passe **toujours** par le rituel idée → miroir → /goal → approbation. Il n'y a **pas de raccourci** du symptôme vers le noyau.
+
+## Ce que vous voyez à l'écran
+
+La route **`/why-tree`** rend tout ça **exécutable**. Choisissez un scénario et lancez **`/why`** :
+
+- **Incident → arbre → miroir racine** — depuis `checkout-accept`, l'arbre liste les causes reproduites (`createOrder`, `Order`, `authzPolicy`, `add_total_col`), désigne la racine `add_total_col`, et affiche le **miroir terminal d'anti-récurrence** (racine → /learn → vague de rouge).
+- **Sans miroir terminal** — le même incident **sans** miroir : **REFUSÉ** avec `WHYTREE_NO_MIRROR`.
+- **Cause non reproduite** — une cause qu'on n'a pas su reproduire : **REFUSÉ** (anti-confabulation).
+- **Cycle caused_by** — `Order ↔ createOrder` : **REFUSÉ** avec `CAUSED_BY_CYCLE`, aucun arbre partiel.
+
+Le corps content-adressé de l'arbre est affiché — changer une cause ou le miroir terminal change l'identifiant de l'arbre (jamais une mutation en place).
+
+## Pourquoi c'est important
+
+FK13 transforme le diagnostic d'une **histoire** en une **preuve**. Là où le 5-pourquoi classique peut se tromper de cause avec assurance, le WhyTree **refuse** ce qu'il ne sait pas reproduire et **n'admet de clôture** que quand un miroir garantit que le symptôme ne reviendra pas. C'est la causalité au service d'AIDOS, dans le bon sens : **du symptôme vers une racine prouvée, et de la racine vers un miroir qui tient**.

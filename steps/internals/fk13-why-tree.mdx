@@ -1,0 +1,51 @@
+---
+title: "FK13 · Le WhyTree et le geste /why (internals)"
+description: "Implémentation, Méta et Méta-méta de FK13 : le WhyTree, le 5-pourquoi redressé. Build(Input) remonte caused_by (FK12) via causedby.Trace (déterministe, cycle-refusant), n'admet une cause QUE si elle porte une Reproduction positive (anti-confabulation, sinon ErrCauseNotReproduced), calcule la racine (la cause reproduite la plus profonde), et EXIGE un miroir terminal qui la reflète (sinon ErrNoTerminalMirror / WHYTREE_NO_MIRROR). SerializeBody/ParseBody/Record content-adressés via records.NewRecord. Le juge est le booléen de reproduction ; le LLM n'entre nulle part ; le mur intact (figer le miroir passe par /learn → /goal)."
+keywords: ["aidos", "krd", "FK13", "WhyTree", "/why", "Build", "Reproduction", "anti-confabulation", "TerminalMirror", "WHYTREE_NO_MIRROR", "ErrCauseNotReproduced", "cause racine", "caused_by", "Trace", "/learn", "/diagnose", "content-adressé", "déterminisme", "rapid", "fast-check", "le mur", "FKE-35.1", "FK12"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord interne. Pour la version sans code, voir [Pour les futurs utilisateurs → FK13](/steps/concept/fk13-why-tree).</Note>
+
+## Implémentation
+
+FK13 est le geste **`/why`** + le **WhyTree** — `back/kernel/whytree/`. Fonctions pures, zéro I/O, zéro horloge, zéro rng, **zéro LLM**. Il se construit **par-dessus** la remontée caused_by de FK12 (`back/kernel/causedby`), étend `/diagnose` (qui produit désormais un WhyTree) et `/learn` (qui reçoit la racine).
+
+**Les types.** `ProvenanceKind` (ensemble clos `incident`/`mirror`/`human` — qui a levé le symptôme, provenancé). `Reproduction{CauseID, Reproduced bool, Detail}` — le verdict d'**anti-confabulation** : `Reproduced` est le booléen **autoritaire** (un re-run déterministe a rougi sur cette cause). `TerminalMirror{MirrorID, ReflectsRootCause}` — le miroir d'anti-récurrence **obligatoire** (racine → /learn → miroir), figé par l'humain au /goal ; Build ne vérifie **que** sa présence + qu'il reflète la racine (l'assertion est l'humain — anti-circularité §8). `CauseNode{CauseID, Depth, Reproduced}` et `WhyTree{Symptom, Provenance, Causes, RootCause, Terminal}`.
+
+**Le constructeur — `Build(in Input) (WhyTree, error)`.** Cinq temps :
+1. **Provenance** dans l'ensemble clos (sinon `ErrUnknownProvenance`).
+2. **Remontée caused_by** via `causedby.Trace(symptom, edges)` — déterministe, **cycle-refusante** : un cycle propage `ErrCycle` (réexporté), **sans arbre partiel**.
+3. **Garde de reproduction** : pour **chaque** cause candidate sur la remontée, on exige une `Reproduction` **positive** indexée par id. Une cause sans entrée, ou avec `Reproduced=false`, ⇒ `ErrCauseNotReproduced` — la cause est **refusée**, pas silencieusement écartée (un WhyTree doit être *entièrement* reproductible).
+4. **Racine** = la cause reproduite la plus profonde (`deepest` : Depth max, ties par id desc) ; un symptôme **feuille** (aucune cause) est **sa propre racine**.
+5. **Miroir terminal obligatoire** : `MirrorID` non vide (sinon `ErrNoTerminalMirror` → code `WHYTREE_NO_MIRROR`) **et** `ReflectsRootCause == root` (sinon `ErrTerminalMismatch`).
+
+`traceDepths` recalcule la distance BFS de chaque cause (la même que `causedby.Trace` trie), pour que chaque `CauseNode` porte son `Depth` — en **réutilisant** la validation FK12 (une arête malformée est ignorée à l'identique, aucune dérive).
+
+**Le round-trip content-adressé.** `SerializeBody(t)` rend un corps `kernel.link` `{"kind":"link","link_kind":"why_tree","symptom":…,"provenance":…,"causes":[…],"root_cause":…,"terminal_mirror":{…}}` (les causes triées nearest-first pour rendre l'adresse indépendante de l'ordre d'entrée) ; `Record(t)` passe par `records.NewRecord(KindLink, body)` ⇒ `id == version == Hash(Canonicalize(body))`. `ParseBody` est l'inverse. Changer une cause **ou** le miroir terminal ⇒ une **version différente** (un nouvel arbre, jamais une mutation — KRD §12).
+
+**La migration.** `back/migrations/kernel_whytree_baseline.sql` — **aucune nouvelle table** : le WhyTree est une rangée `kernel.link` (`link_kind:"why_tree"`), réutilisant la table S17/FK12. La garde de reproduction + le miroir obligatoire sont en **code** (Build), pas par un CHECK SQL. Documentation + l'index `body->>'link_kind'` (déjà créé par FK12). Mur inchangé : SELECT-only pour l'agent.
+
+**Les portes.** Le jumeau TS `front/web/lib/why-tree.ts` **réutilise** `trace` de `caused-by.ts` (Go autoritatif) et miroite `build`/`serializeBody` (mêmes refus, mêmes codes). Le MCP `aidos-why-tree` (`back/mcp/why-tree/`, ADR 0009) expose **trois** outils write-nothing : `build`, `serialize`, `kinds` — `build` mappe l'erreur sur le code clos (`WHYTREE_NO_MIRROR` / `WHYTREE_CAUSE_NOT_REPRODUCED` / `WHYTREE_TERMINAL_MISMATCH` / `CAUSED_BY_CYCLE` / `UNKNOWN_PROVENANCE`). La route `/why-tree` est action-capable (choisir un scénario → LANCER /why lié à `build`), thème ADR 0010, bilingue ADR 0011.
+
+## Méta
+
+**Pourquoi la reproduction est le juge, pas le LLM.** Le « pourquoi » hors-graphe est le seul endroit où un LLM *pourrait* proposer une cause (la génération irréductible). FK13 le **gate** strictement : une cause proposée n'entre dans l'arbre **que** si elle porte une `Reproduction` positive. Le **code** (le booléen `Reproduced`) est autoritaire ; le LLM **défère**. C'est l'anti-confabulation rendue mécanique — l'erreur du 5-pourquoi classique (inventer une cause plausible) est **structurellement** impossible : pas de preuve de reproduction, pas d'entrée dans l'arbre. C'est l'application directe du mandat determinism-first (§6) : un agent qui déciderait de la cause sans la reproduire serait un **gap de déterminisme**, exactement comme un monstre ou une capacité headless.
+
+**Pourquoi la terminaison en miroir est obligatoire.** Une racine racontée en prose ne ferme pas la boucle — le symptôme peut revenir. FK13 **exige** que la racine devienne un **miroir d'anti-récurrence** (via /learn) : tant qu'il n'y a pas de miroir, `Build` refuse (`WHYTREE_NO_MIRROR`). C'est la version « causalité » de la loi de complétude : un WhyTree sans miroir terminal est un **vœu**, pas une enquête close. Le miroir reflète la **racine** (vérifié par `ErrTerminalMismatch`) — pas un nœud arbitraire.
+
+**Pourquoi réutiliser `causedby.Trace` plutôt que re-marcher.** La remontée déterministe + le refus de cycle sont **exactement** FK12. Les re-coder forkerait deux algorithmes (l'ordre, la détection de cycle) ⇒ dérive garantie. FK13 **appelle** `Trace` et ne fait qu'**ajouter** la garde de reproduction et la clôture en miroir. `traceDepths` réutilise la **même** validation d'arête (`causedby.Validate`) pour ne pas diverger sur ce qui compte comme « malformé ».
+
+**Pourquoi le mur tient.** `Build` est une projection sous la ligne : elle n'écrit **rien** dans kernel/mirrors/fitness. Figer le miroir terminal d'anti-récurrence passe par idée → miroir → **/learn** → /goal → approbation humaine (le rôle CLI aidos) — l'agent n'a aucun GRANT. La route `/why-tree` construit l'arbre et **propose** ; elle ne grave aucune vérité. Il n'y a **pas de raccourci** du symptôme au noyau.
+
+**Pourquoi une provenance close.** Un symptôme vient d'un **incident** (réalité), d'un **miroir** rouge (certification), ou d'un **humain** (défaut reporté). Cette provenance **voyage** dans le corps de l'arbre — le WhyTree se reconstruit jusqu'à sa racine **et** son origine. Une provenance hors ensemble est refusée (`UNKNOWN_PROVENANCE`) — pas de cast silencieux.
+
+## Méta-méta
+
+**Les miroirs (la preuve avant le code).**
+
+- `whytree_property_test.go` (rapid) — la **reproductibilité** + les invariants FK13 : **Build déterministe** (même input → même arbre ou même erreur) ; la **garde de reproduction** (retirer la reproduction d'une cause atteignable ⇒ refus — jamais un arbre avec une cause non prouvée) ; **toute cause admise est reproduite** ; le **refus sans-miroir** (MirrorID vide ⇒ jamais un succès) ; le **round-trip content-adressé** (même arbre → même version ; miroir changé → version différente) ; **cycle refusé** ; totalité.
+- `whytree_fixture_test.go` — les cas nommés (le done-criterion FKE-35.1) : l'arbre **enraciné à la cause reproduite la plus profonde** (`add_total_col`), l'ordre nearest-first ; **WHYTREE_NO_MIRROR** (pas de miroir terminal) ; **anti-confabulation** (une cause `Reproduced=false` refusée ; une cause sans preuve refusée) ; la **feuille = sa propre racine** ; le miroir terminal qui **doit refléter la racine** ; le **cycle refusé** ; la provenance inconnue refusée ; le **round-trip** (changer le miroir ⇒ nouvelle version).
+- `why-tree.test.ts` (fast-check/Vitest) — le jumeau : 12 tests verts (la fixture worked-example + les trois refus + les propriétés : Build déterministe via `serializeBody`, garde de reproduction, miroir vide jamais bâti, toute cause admise reproduite).
+- `tests/e2e/why-tree.spec.ts` (Playwright) — 4 tests : l'**incident → arbre → racine `add_total_col` → miroir terminal** (root → /learn → vague de rouge, corps content-adressé affiché) ; **WHYTREE_NO_MIRROR** refusé ; **anti-confabulation** (cause non reproduite refusée) ; **CAUSED_BY_CYCLE** refusé sans arbre partiel.
+
+**Ce que FK13 referme.** FK13 est la pièce **causalité** de la boucle de loopback : incident/miroir rouge → `/why` (WhyTree) → racine **reproduite** → `/learn` fige un **miroir d'anti-récurrence** → **vague de rouge ciblée** (la worklist, via le bump de hash S22/S107). Il consomme FK12 (la remontée caused_by) et alimente `/learn` — sans jamais franchir le mur. Le 5-pourquoi cesse d'être une histoire et devient une **preuve** : du symptôme à une racine démontrée, et de la racine à un miroir qui tient.

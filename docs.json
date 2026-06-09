@@ -475,7 +475,9 @@
               "steps/concept/fk11-ai-lab",
               "steps/internals/fk11-ai-lab",
               "steps/concept/fk12-caused-by",
-              "steps/internals/fk12-caused-by"
+              "steps/internals/fk12-caused-by",
+              "steps/concept/fk13-why-tree",
+              "steps/internals/fk13-why-tree"
             ]
           }
         ]
