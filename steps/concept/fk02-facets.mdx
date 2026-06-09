@@ -1,0 +1,76 @@
+---
+title: "FK02 · Déclarer, pour chaque kernel, par quelles lentilles on regarde sa vérité"
+description: "FK02 donne à chaque kernel de votre projet un ensemble de FACETTES — les lentilles intrinsèques sous lesquelles on le juge : fonctionnel (F), invariants (I), sécurité (S), budgets/perf (B), fiabilité (R), évolutivité/migration (V), maintenabilité & architecture (M), expérience (X). Cet ensemble est EFFONDRABLE : un kernel ne déclare que les facettes qui correspondent à sa nature. La fonctionnelle (F) est toujours présente — l'incompressible. Et une facette déclarée doit porter sa paire de preuve, sinon c'est un monstre (une faille de sécurité, une régression de perf, une migration qui perd, comptent autant qu'un test fonctionnel manquant)."
+keywords: ["aidos", "krd", "FK02", "facette", "facet", "lentille", "fonctionnel", "invariants", "sécurité", "budgets", "fiabilité", "évolutivité", "maintenabilité", "expérience", "FKE-1.3", "effondrable", "incompressible", "monstre", "octuor"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK02](/steps/internals/fk02-facets).</Note>
+
+## En une phrase
+
+FK02 attribue à **chaque kernel** un ensemble de **facettes** — les **lentilles** sous lesquelles on regarde sa vérité (fonctionnel, sécurité, performance, fiabilité…) — en ne gardant que **celles qui comptent pour ce kernel**, avec **la fonctionnelle toujours présente** et **chaque facette déclarée prouvée**.
+
+## Le problème que FK02 résout
+
+Un kernel n'a pas qu'une seule sorte de vérité. Une fonction de tri doit être **correcte** (fonctionnel) ET **vraie sur toutes les entrées** (invariants) ET **bien structurée** (maintenabilité). Un endpoint qui manipule des données personnelles doit en plus être **sûr** (sécurité), **rapide** (budgets), **résilient** (fiabilité), **migrable** (évolutivité) et **utilisable** (expérience).
+
+Sans FK02, trois choses tournent mal :
+
+1. **La sécurité (ou la perf, ou la migration) devient une note de bas de page.** « On verra la sécurité plus tard. » Non — la sécurité est une **colonne entière**, parallèle au fonctionnel, avec sa propre paire de preuve. La diluer, c'est la perdre.
+2. **On taxe une fonction de trois lignes comme un endpoint critique.** Si chaque kernel devait porter les huit facettes, une simple fonction pure croulerait sous une preuve ×8 inutile. C'est l'erreur symétrique.
+3. **Une facette déclarée mais non prouvée passe inaperçue.** Quelqu'un dit « ce kernel gère la sécurité » mais aucun test de sécurité n'existe. La promesse ment.
+
+FK02 répond avec une règle simple : **on instancie une facette seulement si le kernel porte cette nature de vérité — mais alors on la prouve.**
+
+## Les 8 facettes (l'octuor)
+
+FK02 reprend les huit lentilles canoniques de KRD (FKE-1.3), **les mêmes mots partout** :
+
+| Lettre | Facette | La question qu'elle pose | Le mot |
+|---|---|---|---|
+| **F** | fonctionnel | est-ce correct **sur l'exemple** ? | correct |
+| **I** | invariants ∀ | est-ce vrai **partout** (pas qu'un exemple) ? | vrai-partout |
+| **S** | sécurité | est-ce **sûr** (scans, policy, injection) ? | sûr |
+| **B** | budgets / perf | est-ce **viable** (budgets de perf/coût) ? | viable |
+| **R** | fiabilité / résilience | est-ce **résilient** (panne, failover, restore) ? | résilient |
+| **V** | évolutivité / migration | est-ce **durable** (migration sans perte) ? | durable |
+| **M** | maintenabilité & architecture | est-ce **sain** (structure prouvée) ? | sain |
+| **X** | expérience / utilisabilité | est-ce **utilisable** ? | utilisable |
+
+L'octuor : **correct · vrai-partout · sûr · viable · résilient · durable · sain · utilisable.**
+
+## Les deux règles d'or
+
+### F est toujours présente (l'incompressible)
+
+Tout kernel, même le plus petit, **porte la facette fonctionnelle** : son intention (s1, même une ligne) **plus sa paire de preuve** (ce qui est déclaré ↔ ce qui est prouvé). C'est le minimum incompressible — « le plus petit cliquet qui clique ». Jamais de vérité sans preuve ; jamais de taxe ×10 sur une fonction de trois lignes.
+
+### Une facette déclarée sans sa paire de preuve = un monstre
+
+Si un kernel **déclare** qu'il gère la sécurité (ou la perf, ou la migration) mais ne porte **pas la paire de preuve** correspondante, c'est un **monstre** — au même titre qu'un test fonctionnel manquant. Une faille de sécurité non reflétée, une régression de perf non mesurée, une migration qui perd de la donnée : **tous des monstres**.
+
+<Note>**L'exception molle : X (expérience).** L'expérience ne se prouve pas comme un contrat de paiement (§13.6). Sa paire manquante reste **advisory** : elle **informe** la décision, elle ne la **bloque** pas. Modéliser X en facette force à la rendre explicite et mesurée — sans la sur-contraindre comme un invariant dur.</Note>
+
+## Les facettes s'effondrent (anti-explosion)
+
+Un kernel n'instancie **que** les facettes de sa nature :
+
+- une **fonction pure de tri** porte **F + I + M** (correcte, vraie partout, bien structurée) — pas S/B/R/V/X ;
+- un **endpoint PII user-facing** porte **les huit** (il touche à tout) ;
+- un **kernel-vue déclaratif** peut n'avoir que **F + X** (+ un M minimal).
+
+On n'instancie **jamais une facette vide**. C'est l'effondrement : la même règle anti-explosion que le kernel effondré.
+
+## Ce que vous voyez dans le Workbench
+
+Le panneau **/facets** affiche l'octuor des huit lentilles (X marquée « soft »), puis un contrôle **Filtrer par facette** : choisissez une facette et le panneau **valide** chaque kernel et n'affiche que ceux qui **instancient** cette lentille — chacun avec :
+
+- ses **facettes déclarées** (les lettres) ;
+- un **badge de validité** 🟢 (légal) ou 🔴 (monstre — pas de fonctionnelle, facette vide, ou paire de preuve manquante) ;
+- une **signature content-adressée** (mêmes facettes → même empreinte, quel que soit l'ordre de déclaration).
+
+La validation est **pure** : mêmes facettes → même verdict. Et elle est **read-only** — elle ne pose aucune facette à la main (le mur).
+
+## Pourquoi c'est important
+
+FK02 transforme « la sécurité, la perf, la fiabilité » de **bonnes intentions implicites** en **colonnes explicites, déclarées et prouvées** — chacune avec son propre miroir. C'est la base des étapes suivantes : la grille niveau × facette (FK03), la complétude qui chasse les monstres de **toutes** les facettes (FK04), et la conscience qui compare **toutes les paires instanciées** (FK09).

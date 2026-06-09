@@ -453,7 +453,9 @@
               "steps/concept/el19-wizard",
               "steps/internals/el19-wizard",
               "steps/concept/fk01-truth-level",
-              "steps/internals/fk01-truth-level"
+              "steps/internals/fk01-truth-level",
+              "steps/concept/fk02-facets",
+              "steps/internals/fk02-facets"
             ]
           }
         ]
