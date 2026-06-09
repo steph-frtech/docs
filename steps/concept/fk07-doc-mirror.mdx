@@ -1,0 +1,58 @@
+---
+title: "FK07 · Le doc-miroir : comparer la doc humaine et la doc dérivée du code"
+description: "FK07 met face à face la doc ÉCRITE par l'humain (s2) et la doc DÉRIVÉE du code (s9, FK06), et calcule leur différence STRUCTURELLE — quels concepts, comportements et erreurs sont présents d'un côté et absents de l'autre. Une divergence de structure BLOQUE (rouge) ; un simple écart de PROSE est advisory (un signal, jamais un verdict). Le juge est un CALCUL : le LLM peut signaler la prose, il n'arbitre jamais. Le data-miroir s3↔s7 (les formes de données) est déclaré sur le même moteur."
+keywords: ["aidos", "krd", "FK07", "doc-miroir", "data-miroir", "s2", "s9", "s3", "s7", "comparaison structurelle", "divergence", "prose advisory", "le juge est un calcul", "fonction pure", "FKE-1.3", "déterminisme"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK07](/steps/internals/fk07-doc-mirror).</Note>
+
+## En une phrase
+
+FK07 pose la doc **écrite par l'humain** (s2) à côté de la doc **dérivée du code** (s9, fabriquée à l'étape FK06), et calcule **ce qui diverge** : un concept documenté que le code n'expose pas, un comportement exposé par le code que la doc n'a jamais décrit, une erreur couverte d'un seul côté. Cette différence de **structure** bloque ; un écart de **prose** ne fait que prévenir.
+
+## Le problème que FK07 résout
+
+À l'étape précédente (FK06), AIDOS a appris à **dériver** une doc depuis le code (s9). Mais une doc dérivée, seule, ne sert à rien : elle ne dit que ce que le code dit déjà. Sa valeur n'apparaît qu'en la **comparant** à ce que l'humain, lui, a écrit (s2). C'est là que se révèle le **mensonge** d'une documentation : non pas dans une phrase, mais dans un **écart** — quelque chose que la doc affirme et que le code ne fait plus, ou que le code fait et que personne n'a documenté.
+
+Le piège serait de demander à un LLM « ces deux textes disent-ils la même chose ? ». Ce serait remplacer une dérive (doc vs code) par une autre (le jugement flou d'un modèle, jamais deux fois le même). AIDOS refuse. Le juge doit être un **calcul** : reproductible, explicable, identique à chaque exécution.
+
+## Deux plans, un seul juge
+
+FK07 compare les deux docs sur **deux plans**, et **un seul** des deux décide :
+
+- **Le plan structurel — le JUGE.** Trois ensembles de chaque côté : les **concepts**, les **comportements** (par identifiant) et les **erreurs**. FK07 calcule la **différence symétrique** : ce qui est dans l'un et pas dans l'autre. Toute divergence structurelle **bloque** (verdict rouge). C'est une simple opération sur des ensembles : déterministe, **même paire → même verdict**.
+- **Le plan de la prose — ADVISORY.** Le texte libre qui décrit chaque comportement. Si la formulation a dérivé (même comportement, phrase réécrite), FK07 émet un **signal consultatif** — il le **montre**, il ne bloque pas. Un LLM, ailleurs, *pourrait* signaler ce drift ; ici, **il n'arbitre jamais**. Éditer seulement la prose laisse le verdict **vert**.
+
+C'est la traduction directe d'une règle fondatrice d'AIDOS : *le juge est un calcul* (§8). Le structurel tranche ; la prose informe.
+
+## De quel côté manque-t-il ?
+
+Quand une divergence structurelle apparaît, FK07 dit **de quel côté** l'élément manque :
+
+- **absent du code** — l'humain documente un concept/comportement/erreur que le code n'expose pas : la **doc est en avance** (une capacité promise mais absente).
+- **absent de la doc** — le code expose quelque chose que l'humain n'a jamais documenté : la **doc est en retard** (une capacité non documentée).
+
+Les deux sont des divergences, donc rouges : la doc et le code doivent se **correspondre exactement** sur la structure.
+
+## Le data-miroir (s3 ↔ s7), déclaré
+
+La même mécanique vaut pour la **forme des données** : une doc humaine des entités et de leurs champs (s3) face à la forme dérivée du code (s7). FK07 **déclare** ce data-miroir en réutilisant **exactement** le moteur structurel — un champ documenté mais absent du code (ou l'inverse) est une divergence bloquante. L'émetteur réel de s7 appartient à une étape ultérieure (le plan entités/migrations) ; en attendant, le data-miroir tourne sur les ensembles qu'on lui fournit, donc il est **réel et prouvé** dès maintenant.
+
+## Ce que vous voyez à l'écran
+
+Le panneau **« Le doc-miroir : comparaison structurelle s2↔s9 »** du Workbench vous laisse :
+
+1. choisir un **scénario**,
+2. cliquer **COMPARER**.
+
+Trois scénarios illustrent les trois issues :
+
+- **aligned** — la doc humaine décrit exactement le code → **VERT**, aucune divergence.
+- **behavior retiré du code** — le code n'émet plus un événement, mais la doc le décrit encore → **ROUGE** (absent du code).
+- **prose seule éditée** — on réécrit le texte d'un comportement sans toucher sa structure → **VERT**, avec un **advisory** de prose.
+
+Un badge confirme que le verdict, calculé **deux fois**, est **identique** : la preuve de déterminisme. L'écran **compare** et **affiche** — il **n'écrit aucune vérité** : le rapport est une **projection** (le mur).
+
+## Pourquoi ça compte
+
+FK07 transforme « est-ce que la doc dit la vérité ? » d'une question de **lecture** (lente, faillible, subjective) en une question de **calcul** (instantané, reproductible, explicable). On ne relit plus une phrase : on regarde un **ensemble de divergences**. Et parce que la prose ne bloque jamais, on ne paie pas le confort d'un faux verrou : la structure est gardée durement, la formulation reste libre d'évoluer — un signal, pas une sanction.

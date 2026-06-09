@@ -1,0 +1,51 @@
+---
+title: "FK07 · Le doc-miroir & le data-miroir (internals)"
+description: "Implémentation, Méta et Méta-méta de FK07 : la comparaison structurelle ensembliste Compare(s2, s9) (concepts/behaviors/erreurs) — divergence structurelle BLOQUANTE, prose ADVISORY (le LLM signale, n'arbitre jamais) ; le data-miroir s3↔s7 déclaré sur le même moteur. Le juge est un calcul ; même paire → même verdict ; le rapport est une projection content-adressée."
+keywords: ["aidos", "krd", "FK07", "docmirror", "doc-miroir", "data-miroir", "Compare", "DataMirror", "s2", "s9", "s3", "s7", "comparaison structurelle", "différence symétrique", "prose advisory", "le juge est un calcul", "fonction pure", "byte-identique", "FKE-1.3", "déterminisme", "rapid", "fast-check"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord interne. Pour la version sans code, voir [Pour les futurs utilisateurs → FK07](/steps/concept/fk07-doc-mirror).</Note>
+
+## Implémentation
+
+FK07 est le **comparateur pur** du doc-miroir (KRD FKE-1.3 décision (a)) — `back/kernel/mirror/docmirror/`. Il met face à face la moitié **haute** écrite par l'humain (`HumanDoc` = s2/s1) et la moitié **basse** dérivée du code (`derivedoc.S9` = s9/s10, FK06), et calcule leur divergence. Aucun I/O, aucune horloge, aucun rng, aucun LLM dans le cœur.
+
+**L'entrée.** `Compare(human HumanDoc, derived derivedoc.S9) Report`. `HumanDoc` porte exactement les trois mêmes sections énumérables que s9 (`Concepts []string`, `Behaviors []derivedoc.Behavior`, `Errors []string`) plus le `KernelID` d'appariement — c'est ce qui rend la comparaison une **différence d'ensembles** et non un diff de texte.
+
+**Le calcul — deux plans.**
+
+- **Structurel (le juge, bloquant).** Trois `diffSet` : pour `concepts`, `errors`, et les **IDs** de comportements (`behaviorIDs`). Chaque `diffSet` rend la **différence symétrique** : présent côté humain et absent côté code → `SideCodeMissing` (la doc est en avance) ; présent côté code et absent côté humain → `SideHumanMissing` (la doc est en retard). Chaque côté est mis en `map[string]struct{}` (donc trié/dédupliqué implicitement) avant le diff → indépendance à l'ordre d'entrée.
+- **Prose (advisory, jamais bloquant).** `proseDrift` compare les descriptions **uniquement** des comportements présents **des deux côtés** (mêmes IDs) : un texte différent produit une `Divergence{Plane: PlaneProse}`. Un comportement présent d'un seul côté relève du structurel (les IDs), pas de la prose — un advisory ne porte donc QUE sur le wording.
+
+**L'appariement.** `PairingMismatch = human.KernelID != derived.KernelID`. Comparer deux docs qui prétendent des kernels différents est une erreur structurelle en soi (jamais vert).
+
+**Le verdict.** `red` ssi `PairingMismatch ∨ len(StructuralDivergences) > 0`. La prose **n'entre jamais** dans le verdict — c'est la garantie « éditer la prose seule → advisory ».
+
+**La sortie content-adressée.** Les deux listes de divergences sont triées par un ordre total déterministe (`sortDivergences` : section → key → side → plane). Le `Report` est marshalé puis `records.Canonicalize`'d → `Bytes`, et `records.Hash(Bytes)` → `Hash` : parité avec le truth-store, surface de byte-identité.
+
+**Le data-miroir (s3 ↔ s7), déclaré.** `DataMirror(kernelID, s3, s7 []string) Report` réutilise **le même `diffSet`** sur des ensembles entité/champ préfixés (`entity:Order`, `field:Order.total`). L'émetteur réel de s7 appartient au plan entités/migrations ; jusque-là le comparateur tourne sur les ensembles fournis — réel et prouvé dès maintenant (honnête : c'est une déclaration, pas un mock).
+
+**Les jumeaux et les portes.** Le jumeau TS `front/web/lib/docmirror.ts` (Go autoritatif) miroite `compare` + `dataMirror` pour le Workbench. Le MCP `aidos-docmirror` (`back/mcp/docmirror/`, ADR 0009) expose deux outils — `doc_mirror` (s2 + s9, ou un kernel à dériver à la volée via FK06) et `data_mirror` — write-nothing. La route `/doc-mirror` est action-capable (contrôle COMPARER lié à `compare`).
+
+## Méta
+
+**Pourquoi structurel + prose, et pas un LLM-juge.** C'est l'application littérale de §8 « le juge est un calcul » et du mandat *determinism-first* (§6). Comparer deux docs est exactement le genre de tâche qu'on serait tenté de confier à un LLM (« disent-ils la même chose ? ») — et c'est précisément interdit : un LLM rendrait deux verdicts différents pour la même paire, ruinant la reproductibilité. La structure (ensembles → différence symétrique) est une **fonction pure totale** : elle DOIT être du code, et elle est **autoritaire**. La prose, irréductiblement floue, est isolée sur le plan **advisory** : elle informe, elle ne bloque pas — le LLM y est la **exception gatée** (il peut *signaler* un drift de wording), jamais l'arbitre.
+
+**Pourquoi la prose ne bloque pas (l'erreur symétrique, §13.4).** Bloquer sur la prose serait sur-contraindre : toute reformulation deviendrait une « régression », ce qui pousserait à figer le texte ou à mentir au juge. En gardant la prose advisory, FK07 garde **durement** ce qui est vérifiable (la structure) et **librement** ce qui ne l'est pas (le wording) — sans faux verrou.
+
+**Le critère « done » est calculé.** Les done-criteria de l'étape (retirer un behavior du code → rouge ; éditer la prose seule → advisory ; même paire → même verdict) sont tous des **propriétés** du comparateur, prouvées par les miroirs, pas déclarées. Le verdict ne lit jamais la confiance de l'agent.
+
+**Le mur.** Le `Report` est une **projection** sous la ligne de flottaison : un doc-miroir rouge est un **signal** que le runner remonte ; agir dessus passe par idée → miroir → /goal. Aucun écran, aucun MCP n'écrit le kernel/mirrors/fitness. Additif (anti-overwrite §9) : FK07 ajoute un comparateur, ne touche aucun contrat antérieur (il **lit** s9 de FK06 verbatim).
+
+## Méta-méta
+
+**Les miroirs (la preuve avant le code).**
+
+- `docmirror_property_test.go` (rapid) — la **reproductibilité** : même paire → même `Verdict`/`Hash`/`Bytes`, ET invariance sous **réordonnancement** des deux côtés (le comparateur canonicalise, il ne recopie pas l'ordre) ; plus deux propriétés ciblées : la prose seule ne bloque JAMAIS (verdict vert, aucune fuite dans le structurel) et une divergence structurelle est TOUJOURS rouge.
+- `docmirror_fixture_test.go` — la **fault-injection** nommée : sur la tranche checkout, retirer l'`emit` du code rougit le doc-miroir (`emit:createOrder:OrderCreated` / `code_missing`) ; éditer la seule prose d'un behavior reste vert + advisory ; un mismatch d'appariement est rouge ; le data-miroir s3↔s7 (aligné = vert, champ manquant = rouge) ; le kernel vide s'apparie vert.
+- `docmirror.test.ts` (fast-check/Vitest) — le jumeau : 5 tests verts (aligné, behavior retiré, prose advisory, mismatch, data-miroir).
+- `tests/e2e/doc-mirror.spec.ts` (Playwright) — 4 tests : le contrôle s'affiche ; aligné → vert + déterministe ; behavior retiré → rouge + la divergence `code_missing` visible ; prose éditée → vert + advisory.
+
+**Le cliquet généralisé.** FK07 est la pièce qui rend le doc-miroir **exécutable** : c'est le sens « comparaison » de la loi de complétude appliquée au couple s2↔s9. Dans le système de coordonnées FKE (niveau × facette), c'est la paire de **preuve documentaire** de la facette fonctionnelle, lue comme une divergence ensembliste plutôt qu'un test de chemin.
+
+**Ce que FK07 prépare.** FK09 (la conscience) composera ce verdict — sourcé, déterministe — avec les autres juges existants, paire par paire, sans ajouter de nouveau juge. FK07 lui fournit donc un verdict **agrégeable** (vert/rouge + divergences typées), exactement la forme dont l'agrégateur a besoin.

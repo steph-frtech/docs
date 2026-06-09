@@ -463,7 +463,9 @@
               "steps/concept/fk05-proof-type",
               "steps/internals/fk05-proof-type",
               "steps/concept/fk06-derive-doc",
-              "steps/internals/fk06-derive-doc"
+              "steps/internals/fk06-derive-doc",
+              "steps/concept/fk07-doc-mirror",
+              "steps/internals/fk07-doc-mirror"
             ]
           }
         ]
