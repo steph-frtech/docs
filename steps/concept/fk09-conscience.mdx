@@ -1,0 +1,49 @@
+---
+title: "FK09 · La conscience : réconcilier sans inventer de juge"
+description: "FK09 est la conscience d'AIDOS : un AGRÉGATEUR DÉTERMINISTE qui compose les verdicts des juges qui EXISTENT DÉJÀ — le runner de miroirs, la complétude, les facettes S/R/V/M/X, le SemanticDiff, le RealityMirror, les senseurs, le ledger — en un seul rapport par kernel, et produit une decision card par divergence. Aucun nouveau juge n'est créé : la conscience LIT des verdicts sourcés et les ROUTE. Une divergence produit sa carte actionnable ; la facette molle X ne bloque jamais. Le juge reste un calcul."
+keywords: ["aidos", "krd", "FK09", "conscience", "réconciliation", "agrégateur déterministe", "decision card", "consciousness report", "drift", "verdict sourcé", "aucun nouveau juge", "runner", "complétude", "SemanticDiff", "RealityMirror", "senseur", "ledger", "blast radius", "advisory", "FKE-6.3", "FKE-31"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK09](/steps/internals/fk09-conscience).</Note>
+
+## En une phrase
+
+FK09 est la **conscience** d'AIDOS : elle prend tous les verdicts que les juges d'AIDOS ont **déjà** rendus — le test passe-t-il ? la complétude tient-elle ? la sécurité est-elle prouvée ? le contrat a-t-il dérivé ? la réalité concorde-t-elle ? — et les **réconcilie** en **un seul rapport par kernel**, paire par paire, sur toutes les facettes. Quand une paire diverge, elle produit une **decision card** : une carte actionnable qui vous dit l'écart, le risque, et vos options. Et elle n'invente **jamais** un verdict de son cru.
+
+## Le problème que FK09 résout
+
+Au fil des étapes, AIDOS a accumulé beaucoup de juges : le runner qui exécute les miroirs, la loi de complétude qui chasse les monstres, le SemanticDiff qui classe un changement, le RealityMirror qui compare la prod à la spec, les senseurs (scans, budgets), le ledger d'audit, et les cinq colonnes de facettes de FK08. Chacun rend son verdict **dans son coin**. Pour savoir si une vérité est **alignée** — voulu = construit = prouvé = autorisé — il fallait lire dix tableaux de bord séparés.
+
+FK09 unifie cela en **un organe nommé** : la conscience. Un seul rapport, une seule réponse — **aligné** ou **drift** — et, pour chaque écart, **une carte** qui dit quoi faire.
+
+## La règle qui fait toute la finesse : aucun nouveau juge
+
+La tentation serait de faire de la conscience un **super-juge** : un organe qui ré-examine tout et tranche. AIDOS refuse **catégoriquement**. Pourquoi ? Parce qu'un juge actif qui valide le travail des autres juges serait exactement **« le second agent qui valide »** que la méthode KRD refuse comme preuve : deux agents qui se relisent ne prouvent rien, ils se rassurent.
+
+Alors la conscience est un **AGRÉGATEUR**, pas un juge. Elle ne ré-examine rien. Elle **lit** les verdicts que les juges existants ont rendus et les **route** dans un rapport. Chaque ligne du rapport **porte le nom du juge** qui l'a produite. Si un verdict n'a pas de source connue, il est **écarté** — la conscience n'invente jamais un verdict. C'est une fonction de composition, pure et déterministe.
+
+## La paire est l'unité
+
+La conscience compare **paire par paire**. Une paire, c'est un « déclaré ↔ prouvé » : le contrat (s2) et son reflet dans le code (s9), la facette Sécurité déclarée et le verdict du scan, la complétude attendue et les monstres trouvés. Chaque verdict d'entrée devient une **paire réconciliée** dans le rapport, avec son juge, sa facette, son verdict (vert / rouge / advisory).
+
+Le verdict global suit une règle simple :
+
+- **Aligné** : toutes les paires **dures** sont vertes. Aucun drift bloquant.
+- **Drift** : au moins une paire dure est rouge.
+- La facette **molle X** (l'Expérience) ne fait **jamais** basculer le verdict global — même cassée, elle reste **advisory** (§13.6).
+
+## La decision card : ce que vous faites de l'écart
+
+Quand une paire diverge, la conscience produit une **decision card** (§FKE-31) — la carte actionnable. Elle contient : l'**écart** observé (« le code accepte 31 jours ; le contrat dit 30 »), le **juge** qui l'a détecté, la **classe de drift** (sémantique ? sécurité ? doc ?), le **blast radius** (l'ampleur de l'impact), et surtout vos **options** : corriger sous le mur, changer la vérité au-dessus, demander une décision humaine, bloquer, garder expérimental, déprécier. Une **recommandation** par défaut est mise en avant.
+
+La carte est **content-adressée** : le même écart produit toujours la même carte (même identifiant). Et une divergence sur la facette molle X produit une carte **advisory** — elle vous informe, elle ne bloque jamais.
+
+Surtout : **agir sur une carte ne change jamais une vérité en douce.** La carte est une **proposition**. Choisir « changer au-dessus » ouvre le chemin légal — idée → miroir → /goal → décision humaine. La conscience **montre** l'écart et **propose** ; elle ne décide pas à votre place.
+
+## Ce que vous voyez à l'écran
+
+La route **`/conscience`** rend tout ça **exécutable** : choisissez un scénario (tout aligné, drift du runner, casser la Sécurité, casser l'Expérience), cliquez **RÉCONCILIER**, et vous voyez le rapport se composer — les paires réconciliées avec leur juge, le verdict global aligné/drift, et les decision cards. « Tout aligné » : aucune carte. « Drift du runner » : la paire s2↔s9 rouge **et sa decision card** avec ses options. « Casser S » : la colonne Sécurité rougit, une carte de blocage apparaît. « Casser X » : tout reste **aligné**, avec une carte **advisory** ambre. Le rapport est **déterministe** : relancé deux fois, il est identique.
+
+## Pourquoi c'est important
+
+FK09 est l'organe qui **referme la symétrie** d'AIDOS : pour la première fois, *un seul* rapport répond à la question « cette vérité est-elle alignée ? » en composant **tout** ce qu'AIDOS prouve déjà — sans jamais ajouter un juge de plus, sans jamais cacher un écart. C'est la fondation du **cockpit** (l'étape suivante), où chaque paire portera son voyant 🟢/🔴/🟡 en direct et chaque divergence sa carte à valider.

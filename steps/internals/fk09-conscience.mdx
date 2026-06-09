@@ -1,0 +1,48 @@
+---
+title: "FK09 · La conscience (internals)"
+description: "Implémentation, Méta et Méta-méta de FK09 : Reconcile(Input) → ConsciousnessReport — l'agrégateur déterministe qui compose les verdicts des juges EXISTANTS (runner, complétude, facettes FK08, SemanticDiff, RealityMirror, senseurs, ledger) en un rapport par kernel + les decision cards (§FKE-31). Aucun nouveau juge : il lit des verdicts sourcés et les route. Une divergence produit sa carte content-adressée ; X reste advisory ; même entrée → même rapport."
+keywords: ["aidos", "krd", "FK09", "conscience", "Reconcile", "ConsciousnessReport", "DecisionCard", "PairVerdict", "SourcedVerdict", "agrégateur déterministe", "aucun nouveau juge", "drift", "advisory", "content-adressé", "blast radius", "FKE-6.3", "FKE-31", "FKE-30", "déterminisme", "rapid", "fast-check"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord interne. Pour la version sans code, voir [Pour les futurs utilisateurs → FK09](/steps/concept/fk09-conscience).</Note>
+
+## Implémentation
+
+FK09 est l'**agrégateur pur** `Reconcile(Input) → ConsciousnessReport` — `back/runtime/conscience/`. Il compose les verdicts des juges qui existent déjà ; il n'ajoute aucun juge. Aucun I/O, aucune horloge, aucun rng, aucun LLM dans le cœur.
+
+**L'entrée.** `Input{KernelID, Skeleton *facetwire.SkeletonReport, Verdicts []SourcedVerdict}`. Deux canaux : (a) le **skeleton FK08** lu DIRECTEMENT (les cinq colonnes S/R/V/M/X), pour ne pas re-typer les facettes côté caller ; (b) les **verdicts sourcés** des autres juges. Un `SourcedVerdict{Source, Facet, Pair, Verdict, Drift, Detail, Blast}` est l'unité que la conscience compose — chaque champ vient d'un juge source.
+
+**La source close.** `Source` est un ensemble clos : `runner · completeness · facet · semantic_diff · reality_mirror · sensor · ledger`. `knownSources` est la garde anti-fabrication : un verdict d'une source inconnue est **écarté** (jamais inventé dans le rapport). La conscience n'est elle-même **jamais** une `Source` — elle n'ajoute aucun jugement.
+
+**Le calcul — `Reconcile`.** Trois passes. (1) Compose le skeleton FK08 : chaque colonne propre → une `PairVerdict{Source: facet, Verdict: green, Pair: "skeleton"}` ; chaque divergence de colonne dure → une paire `red` (drift = la classe de la facette) ; les divergences de la colonne molle X → des paires `advisory`. (2) Compose les verdicts sourcés verbatim ; une source inconnue est sautée ; un `red` sur la facette molle X est **rétrogradé en advisory** (§13.6 — X ne cliquette jamais dur, même via un verdict externe). (3) Trie les paires (`sortPairs` : source déclarée → facette → pair → verdict), compte vert/rouge/advisory, et émet **une decision card par divergence**. Verdict global = `drift` ssi une paire **dure** est rouge ; sinon `aligned`.
+
+**La decision card — `cardFor` + `routeOptions` (§FKE-31).** Chaque divergence (rouge OU advisory) produit une `DecisionCard{ID, Source, Facet, Pair, Drift, Detail, Blast, Options, Recommendation, Advisory}`. L'**ID est content-adressé** (`records.Hash` sur le gap canonique, préfixe `DC-`) : le même écart → la même carte, jamais une séquence ni une horloge. `routeOptions` est la table §FKE-30 → §FKE-31 (pure, jamais un LLM) : un `security_drift` recommande `block` ; un `semantic`/`contract` route vers `ask_user_decision` ; un manque de preuve (`evidence_gap`/`test_gap`/`incompleteness`) vers `fix_below_wall` ; une divergence **advisory** (X) recommande `keep_experimental` — elle informe, ne bloque jamais.
+
+**Le content-addressing du rapport.** `ConsciousnessReport` est marshalé puis `records.Canonicalize`'d → `Bytes`, et `records.Hash(Bytes)` → `Hash` : parité avec le truth-store, byte-identité prouvée par la propriété.
+
+**Les jumeaux et les portes.** Le jumeau TS `front/web/lib/conscience.ts` (Go autoritatif) miroite `reconcile` (l'ID de carte est un hash FNV-1a déterministe, suffisant pour la byte-identité côté front). Le MCP `aidos-conscience` (`back/mcp/conscience/`, ADR 0009) expose `reconcile` (le rapport complet) et `decision_cards` (juste les cartes) — write-nothing. La route `/conscience` est action-capable (contrôle RÉCONCILIER lié à `reconcile`), thème ADR 0010, bilingue ADR 0011.
+
+## Méta
+
+**Pourquoi un agrégateur et pas un juge (le cœur de l'étape).** C'est la décision actée au grill du 2026-06-07 (FKE-6.3, ADR 0044) : la conscience est un **AGRÉGATEUR DÉTERMINISTE**, jamais un organe-évaluateur actif. Un juge qui valide les autres juges serait « le second agent qui valide » que §8 de la méthode refuse comme preuve. Donc `Reconcile` ne ré-juge **rien** : il copie chaque verdict verbatim de sa source, et chaque ligne du rapport porte son juge. La garde `knownSources` rend cette discipline **vérifiable** — un verdict orphelin (sans source) ne peut pas entrer.
+
+**Pourquoi déterministe, pourquoi pur.** C'est le mandat *determinism-first* (§6) : composer / router / hacher / trier sont des fonctions pures, donc DOIVENT être du code, autoritaire. Le LLM n'entre nulle part dans la conscience — ni pour classer un drift (table §FKE-30 close), ni pour choisir une option (table `routeOptions` close), ni pour décider (c'est l'humain, via la carte). La conscience est **entièrement** déterministe : même entrée → même rapport, byte-identique.
+
+**Pourquoi X est advisory ici aussi (§13.6 / §13.4).** La même asymétrie que FK07 (prose advisory) et FK08 (colonne X molle) remonte au niveau de l'agrégat : une divergence sur l'Expérience produit une carte qui **informe**, et le verdict global reste **aligné**. Bloquer sur l'UX serait l'erreur symétrique (sur-contrainte). FK09 garde **durement** S/R/V/M/F/I et **souplement** X — et même un `red` externe sur X est rétrogradé, pour qu'aucun caller ne puisse contourner la règle.
+
+**Le critère « done » est calculé.** Les done-criteria (mêmes verdicts d'entrée → même rapport ; le rapport ne contient que des verdicts sourcés ; une divergence produit sa decision card) sont des **propriétés** de `Reconcile`, prouvées par les miroirs, jamais déclarées. Le verdict ne lit pas la confiance de l'agent (§8).
+
+**Le mur.** Le rapport et les cartes sont des **projections** sous la ligne de flottaison : une carte est un **signal**, agir dessus passe par idée → miroir → /goal → décision humaine (les options de la carte y mènent). Aucun écran, aucun MCP n'écrit le kernel/mirrors/fitness. Additif (anti-overwrite §9) : FK09 ajoute un agrégateur, ne touche aucun contrat antérieur (il **lit** FK08 et les verdicts des juges existants).
+
+## Méta-méta
+
+**Les miroirs (la preuve avant le code).**
+
+- `conscience_property_test.go` (rapid) — la **reproductibilité** : même entrée → même rapport (verdict, bytes, hash, cartes) ; **invariance sous réordonnancement** des verdicts d'entrée (le rapport est trié, byte-identique) ; le rapport ne contient **que des sources connues** (anti-fabrication) ; **X ne drifte jamais** (un rapport dont les seules divergences sont sur X reste aligné, aucune paire X n'est rouge dur) ; **une divergence ⇒ exactement une carte** (rouge OU advisory).
+- `conscience_fixture_test.go` — les cas nommés : tout aligné → aucune carte ; **une divergence du runner produit sa carte** (sourcée, ID content-adressé, écart verbatim, options + recommandation) ; un verdict de source inconnue est écarté ; casser la colonne S via le skeleton → paire rouge S + carte sécurité (reco `block`) ; casser X → carte advisory + kernel **aligné** ; un `red` externe sur X rétrogradé en advisory ; kernel vide → aligné, sans carte, mais avec hash ; même gap → même ID de carte.
+- `conscience.test.ts` (fast-check/Vitest) — le jumeau : 5 tests verts (aligné → aucune carte ; une divergence → sa carte FKE-31 ; casser S → carte sécurité, casser X → reste aligné + advisory ; déterminisme même entrée → même rapport ; rapport sourcé-seulement + X ne drifte jamais).
+- `tests/e2e/conscience.spec.ts` (Playwright) — 5 tests : le contrôle s'affiche ; tout aligné → ALIGNÉ + aucune carte + déterministe ; **une divergence produit sa decision card actionnable** (paire runner rouge + carte avec options + blast) ; casser S → drift + carte sécurité ; casser X → reste aligné + carte advisory.
+
+**La symétrie refermée.** FK09 est l'organe qui transforme les verdicts épars (runner, complétude, FK08, SemanticDiff, RealityMirror, senseurs, ledger) en **un** rapport de réconciliation par kernel — l'unification que FKE-6.3 réclame. La conscience compare les paires **dans** une cellule (axe facette) ; le red wave propage **le long** de la verticale ; FK09 fournit la première moitié — l'agrégat par cellule — sans jamais ajouter de juge.
+
+**Ce que FK09 prépare.** FK11 (le cockpit AI Lab) consommera `ConsciousnessReport` en direct : chaque paire portera son voyant 🟢/🔴/🟡, chaque divergence sa decision card à droite, et valider une carte ouvrira le ChangeSet — la conscience **live**. FK09 lui donne exactement la forme dont le cockpit a besoin : un rapport déterministe, sourcé, content-adressé, avec ses cartes actionnables.
