@@ -1,0 +1,47 @@
+---
+title: "S117 · La surface CLI complète + votre Release v0 honnête"
+description: "AIDOS complète la surface de sa CLI : goal, grill, spike, harvest, trim, init deviennent de vraies sous-commandes, routées sur la passerelle (le mur s'applique pareil au terminal et à l'API). Et le pack de release devient PAR COMPTE : un inventaire honnête de ce qui EXISTE vraiment dans votre truth-store live — vos projets (avec leur statut démo-vs-réel), la surface CLI/Workbench, l'index docs, l'inventaire de tests, les limites connues honnêtes (Doltgres beta, async best-effort, quotas du plan) — qui vous conseille la prochaine tier d'adoption. Il assemble et conseille ; il n'installe rien, ne livre rien."
+keywords: ["aidos", "krd", "S117", "CLI", "aidos goal", "aidos grill", "aidos spike", "aidos harvest", "aidos trim", "aidos init", "passerelle", "release v0", "adoption", "T0 T4", "limites honnêtes", "démo vs réel", "le mur"]
+---
+
+<Note>Côté « Pour les futurs utilisateurs » — le concept. Pour les internals, voir [Pour moi → S117](/steps/internals/s117-cli-release).</Note>
+
+## Ce que S117 vous apporte
+
+S117 termine deux choses que les étapes précédentes avaient promises mais laissées en attente.
+
+### 1. La CLI `aidos` est complète
+
+Jusqu'ici, la CLI portait cinq verbes cœur (`check`, `impact`, `stable`, `diff`, `explain`). S117 ajoute les six gestes que vous connaissez du Workbench, **comme de vraies sous-commandes** :
+
+| Commande | Ce qu'elle fait | Routée vers |
+|---|---|---|
+| `aidos goal` | promeut une idée en vérité via son miroir | la porte ChangeSet (`changeset_open`) |
+| `aidos grill` | challenge l'intention d'une idée | `idea_grill` |
+| `aidos spike` | entre la zone /spike (cliquet OFF) | `idea_spike` |
+| `aidos harvest` | moissonne un spike en candidat-vérité | `idea_harvest` |
+| `aidos trim` | propose une réduction de la dette du noyau (ne supprime rien) | `idea_capture` |
+| `aidos init` | initialise un nouveau projet | `project_create` |
+
+Le point important : **ces verbes passent par la passerelle**, la même que l'API HTTP. Le mur s'applique donc **à l'identique** au terminal et à l'API. `aidos goal` n'écrit jamais de vérité directement — il **ouvre la porte ChangeSet** (le seul chemin légal par lequel la vérité bouge). Et si quelqu'un essaie d'écrire de la vérité en direct, la CLI le **refuse** avec le même message actionnable que l'API : « ouvrez une idée, dérivez son miroir, ouvrez un /goal ».
+
+### 2. Votre Release v0, par compte et honnête
+
+Le pack de release (introduit à S47 pour UN projet) devient un inventaire **par compte**. Quand vous l'assemblez, il énumère **honnêtement ce qui existe vraiment** dans votre truth-store live :
+
+- **vos projets**, chacun avec son **statut démo-vs-réel** (une app qui tourne vs une tranche jouable) — pour ne jamais confondre une démo avec du réel livré ;
+- la **surface CLI complétée** (les 5 verbes cœur + les 6 verbes passerelle) ;
+- les **routes Workbench**, l'**index docs**, l'**inventaire de tests** (vos miroirs vivants), le **changelog** ;
+- les **limites connues honnêtes** : les caveats du plan que vous devez connaître — Doltgres en beta (fallback Postgres), opérations async best-effort, quotas de votre plan.
+
+Puis il **conseille la prochaine tier d'adoption** (le plus petit cliquet qui clique : T0 → T1 → T2 → T3 → T4).
+
+## Le geste, sur l'écran
+
+La route Workbench **`/account-release`** rend ce pack. Vous choisissez un compte, vous cliquez **« Assembler le pack »**, et l'inventaire s'affiche : projets + statuts, surface CLI, limites honnêtes, et la prochaine tier conseillée.
+
+<Note>**Il assemble et conseille — il n'installe rien.** Le pack est un instantané en lecture seule. Activer une capacité (passer à la tier suivante) passe toujours par la porte `idée → miroir → /goal → approbation humaine`. Jamais une écriture directe depuis l'écran.</Note>
+
+## Pourquoi « honnête » est le mot-clé
+
+Un pack de release qui inventerait une capacité, un projet ou une absence de limite serait pire qu'inutile : il vous mentirait. S117 garantit le contraire — **chaque ligne du pack trace vers une entrée réelle de votre truth-store**. Un compte vide donne un pack vide-mais-valide ; un projet démo est marqué démo ; une limite n'est listée que si elle existe. C'est la règle d'honnêteté d'AIDOS, appliquée au pack que vous montrez au monde.

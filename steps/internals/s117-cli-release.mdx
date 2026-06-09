@@ -1,0 +1,64 @@
+---
+title: "S117 · CLI complète + Release v0 par compte (internals) — Implémentation · Méta · Méta-méta"
+description: "Le journal d'implémentation de S117 : les six verbes de surface (goal/grill/spike/harvest/trim/init) câblés comme de vraies sous-commandes routées sur la passerelle S58 (back/cmd/aidos/gateway.go) — le mur du gateway appliqué à l'identique au terminal ; et back/runtime/adoption/accountrelease, la généralisation par compte du pack de release S47 (inventaire honnête content-adressé + prochaine tier d'adoption). Twin TS lib/account-release.ts, MCP aidos-release, route /account-release action-capable, e2e Playwright."
+keywords: ["aidos", "krd", "S117", "CLI", "passerelle", "gateway", "RouteDecision", "changeset_open", "AccountReleasePack", "adoption", "content-addressed", "déterminisme", "rapid", "fast-check", "le mur", "twin", "MCP"]
+---
+
+<Note>Côté « Pour moi » — l'implémentation complète. Pour le concept, voir [Pour les futurs utilisateurs → S117](/steps/concept/s117-cli-release).</Note>
+
+## Implémentation
+
+S117 complète **deux surfaces** laissées partielles par les étapes antérieures, sans réécrire aucun artefact existant (anti-overwrite §9).
+
+### 1. Les six verbes de surface CLI, routés sur la passerelle
+
+CLAUDE.md promet une CLI `aidos` portant `goal/grill/spike/harvest/trim/init`. S117 les câble comme **de vraies sous-commandes**, dans le paquet propre de la CLI (`back/cmd/aidos/`) :
+
+- **`contract.go`** — un registre séparé `gatewayContracts` (les six verbes), distinct des cinq verbes cœur (`Contracts()` renvoie toujours exactement les cinq — le miroir S03 `/cli` est inchangé). `lookup` cherche dans les deux registres.
+- **`gateway.go`** — la table FERMÉE `verbToTool` mappe chaque verbe vers l'outil que la passerelle expose :
+
+  | verbe | outil passerelle | disposition |
+  |---|---|---|
+  | `goal` | `changeset_open` | below-the-line (la porte ChangeSet — le seul chemin légal de la vérité) |
+  | `grill` | `idea_grill` | below-the-line |
+  | `spike` | `idea_spike` | below-the-line |
+  | `harvest` | `idea_harvest` | below-the-line |
+  | `trim` | `idea_capture` | below-the-line (/trim PROPOSE via une idée ; il ne supprime rien) |
+  | `init` | `project_create` | below-the-line |
+
+  Chaque verbe exécute le **même `gateway.Route`** (back/runtime/gateway) que l'arête HTTP S58, sur un scope CLI déterministe, et rend la `RouteDecision`. Le mur du gateway s'applique donc à l'identique : un tool below-the-line **route**, un truth-write est **refusé** avec le BlockReason pointant vers le ChangeSet. Une tentative `aidos kernel-write` (verbe forgé, hors registre) est routée vers le namespace truth-zone fenced → refusée → la CLI rend le refus verbatim (jamais exécuté en silence).
+
+- **`main.go`** — le dispatcher branche les verbes-passerelle et les verbes-truth-write avant le rendu de contrat ; le help liste une section « Passerelle (S117) ».
+
+> **Déterminisme-first.** `runGatewayVerb` est une fonction pure de `(verbe, args, stdout) → code de sortie` : la décision est `gateway.Route`, pur routage zéro LLM. Le miroir `gateway_verbs_test.go` pin le rouge→vert de chaque verbe + l'invariant de reproductibilité.
+
+### 2. `accountrelease` — le pack de release par compte
+
+`back/runtime/adoption/accountrelease` **généralise** le pack S47 (`back/runtime/adoption/release`, un seul projet) à un **compte multi-projets**. `Assemble(view AccountView, now int64) AccountReleasePack` :
+
+- inventorie **honnêtement** ce que la `AccountView` contient : `Projects` (chacun avec son `ProjectStatus` **`real|demo`**), `CLISurface`, `WorkbenchRoutes`, `Docs`, `Mirrors` (l'inventaire de tests), `Changesets` (le changelog), `DeclaredLimits` (les limites honnêtes — Doltgres beta, async best-effort, quotas du plan) ;
+- **n'invente jamais** un projet, une commande, une limite ou un flag démo-vs-réel absent de la vue (un compte vide → pack vide-mais-valide) ;
+- conseille la prochaine tier via `adoption.Plan(view.Capabilities)` (la source unique du gating — S47, jamais dupliquée) ;
+- **content-adresse** le pack : `id = Hash(Canonicalize(body))` en RÉUTILISANT le schéma S01/S02 (`records.Canonicalize + records.Hash`), `id` et `assembled_at` EXCLUS du corps hashé (deux assemblages du même compte à des instants différents partagent l'id).
+
+Pur, total, sans I/O ; l'horloge est PASSÉE EN PARAMÈTRE. Miroirs : `accountrelease_fixture_test.go` (acceptance — énumère honnêtement, conseille la tier, content-adressé, n'invente rien) + `accountrelease_property_test.go` (rapid ∀ — `same (view, now) ⇒ même pack`, id indépendant de `assembled_at`, vue jamais mutée, chaque entrée trace vers la vue).
+
+### Le twin TS, le MCP, l'écran
+
+- **Twin** `front/web/lib/account-release.ts` — `assemble` pur (mêmes tris, même règle d'honnêteté, id-synthétique déterministe indépendant de `assembledAt` et de l'ordre d'entrée). fast-check `lib/account-release.test.ts` (7 propriétés).
+- **MCP `aidos-release`** (`back/mcp/release`, ADR 0009) — 3 outils below-the-line : `release_assemble`, `release_adoption_plan`, `release_cli_surface` (liste les 5 cœur + 6 passerelle). `main_test.go` vert.
+- **Route `/account-release`** (action-capable, thème ADR 0010, bilingue ADR 0011) — `AccountReleasePanel` BIND le bouton « Assembler le pack » à l'opération assemble (re-rejoue le twin), rend projets+statuts, surface CLI, limites honnêtes, prochaine tier. **Assemble-only — aucun affordance install/ship/publish.** Lien nav + messages fr/en. e2e `tests/e2e/account-release.spec.ts` (6 tests verts vs serveur dev live).
+
+## Méta
+
+S117 est une étape de **complétude de surface**, pas d'invention de capacité — et c'est délibéré. Elle illustre deux principes structurants d'AIDOS :
+
+1. **Une capacité a UNE porte, peu importe la surface.** `aidos goal` au terminal et `POST /goal` à l'API ne sont pas deux implémentations du mur : ce sont deux **arêtes** sur le **même** `gateway.Route`. Ajouter une surface (la CLI) ne peut donc pas élargir ce qu'un appelant peut faire — le mur est *server-side*, encodé en données dans le registre fermé du gateway. C'est la garantie anti-Goodhart appliquée à la topologie : on ne contourne pas le mur en changeant de porte d'entrée.
+
+2. **Le pack de release est un projecteur, pas un auteur.** `Assemble` est une fonction pure qui ne fait que *refléter* le truth-store. Sa valeur tient entièrement à son honnêteté : il trace, il ne fabrique pas. La règle « assemble, never author » est le pendant, côté sortie, de la règle « le mur, never write » côté entrée — les deux disent qu'AIDOS ne ment ni en écrivant ni en montrant.
+
+## Méta-méta
+
+Au niveau méta-méta, S117 ferme une **dette de cohérence** entre le concept (CLAUDE.md décrit une CLF complète et un pack d'adoption par compte) et l'implémentation (cinq verbes, un pack mono-projet). Le faire **sans réécriture** — registres séparés, paquet additif, twin nouveau — est l'application directe de l'anti-overwrite (§9) : on **ajoute** une surface et une généralisation, on ne **remplace** ni le miroir S03 ni le pack S47.
+
+C'est aussi un cas-école de **déterminisme-first** sur le plan du toolchain qui code AIDOS : tout ce que S117 introduit (le routage des verbes, l'assemblage du pack, le content-addressing, le tri canonique, le conseil de tier) est une **fonction pure** ; aucun agent/LLM n'entre dans la boucle. Les deux miroirs de reproductibilité (rapid côté Go, fast-check côté TS) pinnent l'invariant `même entrée → même sortie`. Une étape qui « complète une surface » est exactement le genre d'étape où la tentation serait de laisser un agent « deviner » la liste des verbes ou « rédiger » l'inventaire — S117 prouve que c'est, de bout en bout, du code.
