@@ -1,0 +1,52 @@
+---
+title: "S112 · Jardinage du KernelDebt — surfacer la dette, proposer sans rien supprimer"
+description: "S112 jardine la dette du noyau PAR PROJET : il surface les cinq pourritures qui s'accumulent dans la tranche d'une application — miroir orphelin, fixture périmée, mutant survivant, liveness morte (une preuve déclarée morte qui ne tourne plus jamais), et contrainte à faible valeur (une cellule trop chère qui ne justifie pas sa valeur). Puis /trim PROPOSE des réductions — il ne supprime rien : accepter une proposition ouvre une idée → miroir → /goal → approbation humaine. Le scan est isolé par projet, et tout passe par la seule porte."
+keywords: ["aidos", "krd", "S112", "KernelDebt", "dette du noyau", "/trim", "jardinage", "miroir orphelin", "fixture périmée", "mutant survivant", "liveness morte", "contrainte à faible valeur", "§82.4", "le mur", "idée→miroir→goal", "déterminisme", "par projet"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → S112](/steps/internals/s112-kernel-garden).</Note>
+
+## En une phrase
+
+S112 **jardine** la dette qui s'accumule dans le noyau de **chaque projet** : il la **nomme**, la **classe**, et **propose** de la réduire — mais il **ne supprime jamais rien**. Agir passe par la seule porte : **idée → miroir → /goal → approbation humaine**.
+
+## Le problème que S112 résout
+
+Un truth-store vivant **rouille**. Des miroirs finissent par refléter une vérité qui a disparu (des **orphelins**) ; des fixtures restent épinglées sur une version que la tête a dépassée (des **périmées**) ; des mutants survivent à un miroir censé les tuer ; des preuves sont déclarées **mortes** mais traînent toujours ; des contraintes coûtent cher sans plus rien protéger. Laissée seule, cette rouille gonfle la surface de vérité, ralentit chaque build et masque les vraies dettes.
+
+S41 avait déjà posé un premier `/trim` qui surface **trois** de ces pourritures. S112 **complète le jardin** : il ajoute les deux qui manquaient — la **liveness morte** et la **contrainte à faible valeur** — et il rend le jardinage **par projet**, pour que chaque application trie sa propre dette sans voir celle des autres.
+
+## Les cinq pourritures
+
+| Pourriture | Ce que c'est |
+|---|---|
+| **Miroir orphelin** | un miroir qui ne reflète plus aucune vérité vivante (un monstre de la loi de complétude). |
+| **Fixture périmée** | une fixture épinglée sur une version que la tête vivante a dépassée. |
+| **Mutant survivant** | une mutation restée en vie face à un miroir qui aurait dû la tuer. |
+| **Liveness morte** *(ajout S112)* | un miroir déclaré **mort** qui épingle encore une vérité **vivante** : une preuve qui ne tourne jamais — donc ne casse jamais. |
+| **Contrainte à faible valeur** *(ajout S112)* | une cellule au-dessus de son budget de harnais **sans** ValueCase justifiée : « plus une contrainte coûte cher, plus elle doit justifier sa valeur » (§66.3). |
+
+## /trim propose — il ne supprime rien
+
+C'est la garantie centrale de S112, et elle ne plie jamais. `/trim` **suggère**. Chaque proposition est l'**ouverture d'une idée**, jamais une suppression. Accepter une proposition ne retire rien du noyau : cela **ouvre une idée** qui devra, comme toute vérité, traverser la chaîne complète **idée → miroir → /goal → approbation humaine**.
+
+<Note>Aucune dette n'est jamais supprimée automatiquement. Le jardinier montre la rouille et propose un geste ; c'est l'humain qui décide, et il décide par la même porte que pour toute vérité. Le mur tient (CLAUDE.md §2).</Note>
+
+## Par projet — chacun trie sa propre dette
+
+Le jardinage est **scopé par projet** (§82.4). Quand vous jardinez le projet *checkout*, vous ne voyez **que** la dette de *checkout* — jamais celle de *billing*. Chaque application possède sa propre tranche du truth-store, et le `/trim` la tend isolément.
+
+## Ce que vous faites à l'écran
+
+Le panneau **Jardin du noyau** rend le geste exécutable :
+
+1. **Choisir un projet** → le scan se scope à sa tranche.
+2. **Jardiner** → le registre liste les cinq pourritures, classées par sévérité, chacune avec sa raison en langage clair.
+3. **Accepter** une proposition → une idée s'ouvre (jamais une suppression), et l'écran montre la porte qu'elle empruntera.
+
+## Ce que S112 ne fait pas
+
+- Il **n'écrit aucune vérité** — le cockpit est en lecture seule sur le noyau.
+- Il **ne supprime, ne compresse, ne désépingle rien** automatiquement.
+- Il **ne réévalue pas** la règle d'économie §66.3 : il **consomme** le verdict de S51 (le juge déterministe), il ne le ré-invente pas.
+- Il **n'invente jamais** une dette ni une cible : chaque item pointe vers un vrai miroir ou une vraie cellule de l'instantané.

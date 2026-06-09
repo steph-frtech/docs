@@ -288,6 +288,8 @@
               "steps/internals/s110-truth-approval",
               "steps/concept/s111-cost-meter",
               "steps/internals/s111-cost-meter",
+              "steps/concept/s112-kernel-garden",
+              "steps/internals/s112-kernel-garden",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",

@@ -1,0 +1,61 @@
+---
+title: "S112 · Jardinage du KernelDebt + /trim par projet — internals"
+description: "Internals de S112 : le package garden (back/runtime/debt/garden) compose le diagnostic KernelDebt de S41 (trois pourritures) et y ajoute les deux §82.4 manquantes — liveness morte et contrainte à faible valeur — en consommant economics.Evaluate (S51) pour la seconde. Le tout scopé par projet. Tend est pur, total, déterministe et lecture seule ; SuggestGardenTrim mappe chaque item sur un open_idea_* ; AcceptProposal projette l'ouverture d'une idée (jamais une suppression). Mirrors fixture + property (rapid), MCP aidos-kernel-garden, twin TS, route /kernel-garden, e2e Playwright."
+keywords: ["aidos", "krd", "S112", "garden", "KernelDebt", "/trim", "liveness morte", "contrainte à faible valeur", "economics.Evaluate", "§82.4", "§66.3", "rapid", "MCP", "twin", "le mur", "déterminisme", "internals"]
+---
+
+<Note>Pour la vue concept (sans code), voir [Pour les futurs utilisateurs → S112](/steps/concept/s112-kernel-garden).</Note>
+
+## Implémentation
+
+Le cœur de S112 est le package **`back/runtime/debt/garden`** : une fonction **pure, totale, déterministe et en lecture seule** qui jardine **la tranche d'UN projet** du truth-store.
+
+### `Tend(p ProjectSnapshot, now int64) Garden`
+
+`Tend` ne ré-invente rien. Il **compose** :
+
+1. il appelle **`debt.Scan` de S41** (le diagnostic autoritatif) pour les **trois** pourritures de base — miroir orphelin, fixture périmée, mutant survivant — et tague chaque item du projet ;
+2. il ajoute les **deux détecteurs §82.4** manquants ;
+3. il **classe** le tout (sévérité haute → basse, puis kind, cible, id) pour un rapport rejouable.
+
+```
+Tend = tag(debt.Scan) ⊎ deadLiveness ⊎ lowValueConstraints  → rank → Garden{projectRef, items}
+```
+
+### Les deux ajouts
+
+- **`deadLiveness`** — un miroir dont la `Liveness == dead` qui reflète **encore une vérité vivante**. C'est **distinct** d'un orphelin : l'orphelin ne reflète **rien** de vivant (S41 le compte déjà) ; la liveness morte reflète une vérité vivante mais sa **preuve** est morte. On ne compte que les miroirs morts sur vérité **vivante**, pour que chaque rouille tombe sous **exactement un** kind.
+- **`lowValueConstraints`** — pour chaque `CellBudget` (budget déclaré + coût mesuré + ValueCase optionnelle), on appelle **`economics.Evaluate` de S51** (le juge §66.3). On surface **uniquement** les cellules `over_budget_flagged` — coûteuses **sans** ValueCase `justified`. Une cellule `within_budget` ou `over_budget_justified` n'est **pas** de la dette (elle a gagné sa place). Le garden **défère** à S51 ; il ne ré-implémente jamais le verdict.
+
+### `SuggestGardenTrim(g Garden) GardenTrimPlan`
+
+Mappe chaque `GardenItem` sur une `GardenSuggestion` dont l'action est un **`open_idea_*`** (table close, cinq actions — une par kind), et dont `Requires` est **toujours** `idea → mirror → /goal → human approval`. Il **ne supprime rien**, n'ouvre aucun ChangeSet.
+
+### `AcceptProposal(s) OpenIdea`
+
+La projection de l'**acceptation** : `OpensIdea: true`, `Deletes: false`, `Door: TheDoor`. C'est le critère §S112 rendu concret — accepter une proposition **ouvre une idée**, jamais une suppression.
+
+### Les miroirs (écrits rouges en premier)
+
+- **Fixture** (`garden_fixture_test.go`) : la liveness morte est surfacée ; la contrainte à faible valeur est surfacée ; une contrainte justifiée n'est **pas** de la dette ; le scan est **scopé par projet** (proj-A ne voit pas proj-B) ; `/trim` suggère sans supprimer et accepter ouvre une idée ; un projet propre rend un jardin vide. L'instantané reste **lecture seule** de bout en bout.
+- **Property** (`garden_property_test.go`, rapid) : déterminisme (même entrée → sortie byte-identique, `now` n'affecte pas la classification) ; aucun kind/action inventé ; lecture seule ; scoping projet ; accepter ouvre **toujours** une idée et ne supprime **jamais** ; et le **fil consume-economics** — une cellule est `low_value_constraint` **ssi** `economics.Evaluate` la flague.
+
+### Les artefacts de la verticale
+
+- **MCP `aidos-kernel-garden`** (`back/mcp/kernel-garden`, ADR 0009) : trois outils — `garden_tend_project`, `garden_suggest_trim`, `garden_accept_proposal` — chacun déférant au moteur Go pur. `main_test.go` : 6 tests verts.
+- **Twin TS** (`front/web/lib/kernel-garden.ts` + `.test.ts`, Vitest + fast-check) : les mêmes lois que le miroir Go, bâti sur `lib/economics.ts` (le twin S51).
+- **Route `/kernel-garden`** (thème ADR 0010, bilingue ADR 0011) : sélecteur de projet + jardinage + acceptation, chacun lié à une Server Action exécutant le twin pur. `tests/e2e/kernel-garden.spec.ts` (Playwright) prouve chaque contrôle.
+
+## Méta
+
+**Pourquoi un nouveau package plutôt qu'étendre `debt` ?** Parce que la règle anti-overwrite (CLAUDE.md §9) interdit de réécrire un artefact antérieur. `debt.Scan` (S41) reste **autoritatif et intouché** ; `garden` le **consomme**. C'est le même geste de composition que tout le reste de la verticale : S112 ne re-dérive ni la notion de monstre (S06/S12 via S41), ni le verdict §66.3 (S51) — il les **branche**. Chaque pourriture est ainsi comptée **une seule fois**, sous **exactement un** kind, et la frontière entre orphelin et liveness morte est tracée explicitement (orphelin = ne reflète rien de vivant ; liveness morte = preuve morte sur vérité vivante).
+
+**Pourquoi le scoping par projet est une frontière, pas un filtre cosmétique.** Le `ProjectSnapshot` **est** l'unité de jardinage : on ne tend jamais un truth-store global puis on filtre — on reçoit déjà la tranche d'un projet. Le test pin la non-fuite (proj-A ne surface jamais un item proj-B), aligné sur l'isolation RLS de S55 : chaque application trie **sa** dette, jamais celle d'une autre.
+
+**Le déterminisme comme mandat, pas comme confort.** Tout S112 est du **code pur** : détection, classement, mapping debt-kind → open_idea_*, projection de l'acceptation. Aucun LLM n'entre — ni pour juger la dette, ni pour proposer, ni pour décider d'accepter. Le verdict d'économie est **consommé** d'un évaluateur déterministe (S51), jamais estimé. La reproducibility mirror (rapid + fast-check) épingle « même entrée → même jardin ». Un agent qui ferait ce qu'une fonction peut faire serait une **lacune de déterminisme** qui bloque l'étape.
+
+## Méta-méta
+
+S112 est le **jardinier** du noyau, et un jardinier qui pourrait arracher serait un danger. La garantie inviolable — `/trim` **propose, ne supprime jamais** — est ce qui rend le geste sûr à répéter indéfiniment. Elle généralise le principe AIDOS : **l'humain possède la vérité, l'agent possède l'implémentation, le harnais tient le mur**. Surfacer la dette est une capacité **sous la ligne** (lecture seule, advisory) ; **agir** sur elle est une écriture-vérité qui ne peut passer que par `idée → miroir → /goal → approbation`.
+
+C'est aussi une réponse directe à Goodhart (§8). Une boucle qui pourrait **se nettoyer elle-même** finirait par supprimer les contraintes qui la gênent — exactement le miroir qu'elle aurait dû satisfaire. En refusant la suppression automatique et en routant chaque réduction par la porte humaine, S112 garde la **fitness intacte** : la dette est nommée par le code, mais sa **résolution** reste un choix humain enregistré (ChangeSet + ADR + provenance). Le jardin se montre ; il ne se taille jamais tout seul.
