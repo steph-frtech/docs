@@ -278,6 +278,8 @@
               "steps/internals/s105-federation-cockpit",
               "steps/concept/s106-reality-ingest",
               "steps/internals/s106-reality-ingest",
+              "steps/concept/s107-learn",
+              "steps/internals/s107-learn",
               "steps/concept/ba01-knobs-gouvernes",
               "steps/internals/ba01-knobs-gouvernes",
               "steps/concept/ba02-agent-implementation",
