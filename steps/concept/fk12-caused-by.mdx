@@ -1,0 +1,53 @@
+---
+title: "FK12 · Le lien caused_by : la causalité, redressée dans le bon sens"
+description: "FK12 ajoute le SEPTIÈME type de lien versionné d'AIDOS : caused_by, l'arête causale ARRIÈRE — l'inverse de la vague de rouge (impacts, S22). Là où la vague de rouge descend (changer A rougit B), caused_by remonte : depuis un symptôme rouge, elle énumère ses causes candidates (la plus proche d'abord). La remontée est déterministe — même graphe + même symptôme donnent toujours la même chaîne de causes — et un cycle est REFUSÉ (une chaîne de causes ne peut pas boucler). C'est le substrat sur lequel le WhyTree (FK13, le 5-pourquoi redressé) se construira."
+keywords: ["aidos", "krd", "FK12", "caused_by", "causalité", "lien", "arête causale", "vague de rouge", "red wave", "impacts", "remontée", "cause racine", "WhyTree", "5-pourquoi", "symptôme", "déterminisme", "cycle refusé", "versionné", "S17", "S22", "FKE-35.1"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → FK12](/steps/internals/fk12-caused-by).</Note>
+
+## En une phrase
+
+FK12 donne à AIDOS une **arête qui remonte la causalité** : `A caused_by B` veut dire « la rougeur de A peut avoir pour cause B ». C'est le miroir inversé de la **vague de rouge** — au lieu de propager une casse *vers l'aval*, `caused_by` permet de **remonter** d'un symptôme rouge vers ses **causes candidates**, de façon déterministe et sans jamais boucler.
+
+## Le problème que FK12 résout
+
+AIDOS sait déjà propager une casse **vers l'avant** : la **vague de rouge** (S22) part d'un changement de noyau et rougit tout ce qui en dépend (api/db/types/operation/action/bouton). C'est le sens *« si je change ceci, qu'est-ce que je casse ? »*.
+
+Mais quand un miroir part au rouge en production, on a besoin du sens **inverse** : *« ce symptôme rouge, **d'où** vient-il ? »*. Sans une arête dédiée, remonter la cause se fait à la main, à tâtons, et chacun le fait différemment. FK12 ajoute l'arête manquante — la **causalité arrière** — pour que la remontée soit un **calcul reproductible**, pas une enquête au doigt mouillé.
+
+## Le septième lien, à côté des six autres
+
+AIDOS versionne déjà **six** types de liens (KRD §41) : projects_to, derives_from, contracts_with, triggers, binds, mirrors. FK12 en ajoute un **septième**, sans toucher aux six : **`caused_by`**. C'est **additif** — l'anatomie des liens grandit d'un cran, rien n'est réécrit.
+
+Comme tous les liens d'AIDOS, `caused_by` **épingle ses extrémités par version** (id@version) : une cause n'est jamais « le composant X » en général, c'est « X à sa version v2 ». La chaîne de causes est donc **content-adressée** et **rejouable** — et changer la version épinglée d'une cause produit une **nouvelle** arête (un nouvel enregistrement), jamais une mutation en place.
+
+## La remontée déterministe
+
+Depuis un **symptôme** (le nœud rouge), AIDOS suit toutes les arêtes `caused_by` vers le haut et collecte les **causes candidates**. Le résultat — la **chaîne de causes** — est ordonné **du plus proche au plus lointain** (distance de saut croissante, puis par identifiant pour départager). 
+
+La propriété clé : **même graphe + même symptôme → toujours la même chaîne**. Aucune part de hasard, aucun LLM qui « devine » — c'est une marche de graphe pure. C'est exactement ce qu'il faut pour qu'un diagnostic soit **reproductible** : deux personnes (ou deux runs) qui partent du même symptôme obtiennent la même liste de causes candidates.
+
+Un **symptôme racine** — une feuille du graphe `caused_by` — n'a **aucune** cause en amont : la remontée s'arrête honnêtement, elle n'invente pas une cause de plus.
+
+## Le cycle est refusé
+
+Une chaîne de causes ne peut **pas** boucler. Si remonter `caused_by` depuis le symptôme ramène à un nœud déjà sur le chemin (`A caused_by B caused_by A`), c'est une **contradiction** : ni A ni B ne peut être la cause antérieure de l'autre. AIDOS **refuse** ce cas (`CAUSED_BY_CYCLE`) — il ne casse pas le cycle en silence pour rendre une chaîne partielle. Un graphe causal honnête est **acyclique** ; un cycle est un signal d'erreur, pas une réponse à moitié.
+
+Un cycle ailleurs dans le graphe (inaccessible depuis le symptôme) n'empoisonne pas une remontée par ailleurs saine : seul le sous-graphe **atteignable** depuis le symptôme est jugé.
+
+## Ce que vous voyez à l'écran
+
+La route **`/caused-by`** rend tout ça **exécutable**. Choisissez un graphe causal et lancez la **remontée** :
+
+- **La chaîne checkout** — depuis le symptôme `checkout-accept`, la remontée énumère ses causes candidates dans l'ordre : `createOrder`, puis `Order` et `authzPolicy`, puis la migration `add_total_col`. La plus proche d'abord.
+- **Une cause racine** — depuis la migration `add_total_col` (une feuille), aucune cause en amont.
+- **Une variante cyclique** — `Order ↔ createOrder` : la remontée est **REFUSÉE** avec `CAUSED_BY_CYCLE`.
+
+Le corps content-adressé de la première arête est affiché, pour rendre concret le « versionné » : changer la version épinglée de la cause change l'identifiant de l'arête.
+
+L'écran **remonte** et **affiche** ; il n'écrit aucune vérité. Figer une arête `caused_by` passe par idée → miroir → /goal → approbation humaine.
+
+## Pourquoi c'est important
+
+FK12 redresse la causalité dans le **bon sens** pour le diagnostic. La vague de rouge répond à *« qu'est-ce que je casse ? »* ; `caused_by` répond à *« pourquoi est-ce cassé ? »*. C'est la moitié manquante de l'anatomie causale d'AIDOS — et c'est le **substrat** sur lequel l'étape suivante (le **WhyTree**, FK13) construira le **5-pourquoi redressé** : un arbre de causes qui remonte, déterministe, et qui se **termine obligatoirement en miroir** (pas de raccourci vers le noyau).

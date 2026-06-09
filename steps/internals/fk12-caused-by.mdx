@@ -1,0 +1,52 @@
+---
+title: "FK12 · Le lien caused_by (internals)"
+description: "Implémentation, Méta et Méta-méta de FK12 : caused_by, le 7ᵉ type de lien versionné (additif aux six §41), l'inverse de la vague de rouge (S22). Edge{From: symptôme, To: cause} épinglé id@version ; Validate refuse l'arête non épinglée et l'auto-arête ; Trace(symptom, edges) est la remontée pure (BFS distance-croissante, tri canonique), DÉTERMINISTE (même graphe+symptôme → même chaîne), TOTALE et CYCLE-REFUSANTE (DFS white/grey/black sur le sous-graphe atteignable → ErrCycle). Round-trip content-adressé via SerializeEdgeBody/ParseEdgeBody. Le mur intact ; le LLM n'entre nulle part."
+keywords: ["aidos", "krd", "FK12", "caused_by", "Edge", "Trace", "CauseChain", "remontée", "BFS", "cycle", "ErrCycle", "DFS", "white-grey-black", "déterminisme", "content-adressé", "round-trip", "links", "Resolve", "redwave", "rapid", "fast-check", "WhyTree", "FKE-35.1", "S17", "S22", "le mur"]
+---
+
+<Note>Côté « Pour moi » — le journal de bord interne. Pour la version sans code, voir [Pour les futurs utilisateurs → FK12](/steps/concept/fk12-caused-by).</Note>
+
+## Implémentation
+
+FK12 est le **7ᵉ type de lien versionné** — `back/kernel/causedby/`. Fonctions pures, zéro I/O, zéro horloge, zéro rng, zéro LLM. Additif aux six kinds §41 (S17 `back/kernel/links`), inverse de la vague de rouge (S22 `back/runtime/redwave`).
+
+**Le kind et l'arête.** `Kind links.Kind = "caused_by"` — le septième discriminant, à côté des six (projects_to/derives_from/contracts_with/triggers/binds/mirrors). `Edge{From, To links.Ref}` : `From` est le **symptôme/effet** (le nœud rouge), `To` la **cause candidate** (le nœud antérieur). `AsLink()` rend l'`Edge` comme un `links.Link` avec le kind caused_by, pour **réutiliser** tout le substrat §41 (les refs épinglées, le corps content-adressé) sans le forker.
+
+**La validation — `Validate(e Edge) error`.** Trois gardes : `From` épinglé id@version (sinon `ErrUnpinnedFrom`), `To` épinglé (sinon `ErrUnpinnedTo` — une cause non épinglée ne se résout jamais, c'est un monstre), et `From.ID != To.ID` (sinon `ErrSelfCause` — un nœud ne se cause pas lui-même). Pure ; une arête qui échoue à Validate n'est jamais passée à Trace.
+
+**La remontée — `Trace(symptom string, edges []Edge) (CauseChain, error)`.** L'algorithme, en deux temps :
+1. **Détection de cycle d'abord** (DFS coloriée white/grey/black) sur le **sous-graphe atteignable** depuis le symptôme. Réentrer un nœud **grey** (sur le chemin courant) est un back-edge ⇒ `ErrCycle`. On la lance **avant** de construire la moindre chaîne, pour qu'un cycle soit **refusé** sans réponse partielle. Un cycle inaccessible depuis le symptôme ne colorie jamais ⇒ n'empoisonne pas la remontée.
+2. **BFS déterministe** : depuis le symptôme (distance 0), chaque cause atteignable est enregistrée à sa **plus courte** distance de saut. La `CauseChain{Symptom, Causes}` finale est triée `(distance asc, id asc)` — le symptôme n'y figure jamais (il ne se cause pas lui-même).
+
+Une arête malformée (Validate ≠ nil) est **ignorée** (totalité — Trace ne panique jamais), le reste du graphe est tout de même tracé. L'adjacence préserve l'ordre des arêtes données (l'ordre de visitation déterministe).
+
+**Le round-trip versionné.** `SerializeEdgeBody(e)` rend un corps `kernel.link` canonique `{"kind":"link","link_kind":"caused_by","from":…,"to":…}` ; `records.NewRecord(KindLink, body)` donne `id == version == Hash(Canonicalize(body))`. `ParseEdgeBody` est l'inverse (récupère l'`Edge`). Changer la version épinglée de la cause ⇒ un **hash différent** ⇒ une nouvelle version (un nouvel enregistrement, jamais une mutation — KRD §12).
+
+**La migration.** `back/migrations/kernel_causedby_baseline.sql` — **aucune nouvelle table** : caused_by réutilise `kernel.link` (S17), le kind clos est gardé en **code** (Validate), pas par un CHECK SQL (les refs restent du JSONB pour que l'arête périmée/absente reste inspectable, §41–§42). Migration de documentation + un index sur `body->>'link_kind'` pour la lecture du sous-graphe. Le mur inchangé : SELECT-only pour l'agent.
+
+**Les portes.** Le jumeau TS `front/web/lib/caused-by.ts` (Go autoritatif) miroite `validate`/`trace`/`serializeEdgeBody` (mêmes gardes, même ordre, même refus de cycle). Le MCP `aidos-caused-by` (`back/mcp/caused-by/`, ADR 0009) expose **quatre** outils write-nothing : `validate`, `trace`, `serialize`, `kinds`. La route `/caused-by` est action-capable (choisir un graphe → REMONTER LA CHAÎNE lié à `trace`), thème ADR 0010, bilingue ADR 0011.
+
+## Méta
+
+**Pourquoi réutiliser `links.Link` plutôt qu'un nouveau type.** `caused_by` est un lien versionné comme les six autres — il épingle ses extrémités, il vit dans `kernel.link`, il est content-adressé. Le forker serait dupliquer le substrat §41. `Edge` est donc une vue typée par-dessus `links.Link` (`AsLink()`), avec ses gardes propres (l'auto-arête, refusée par caused_by, n'a pas de sens pour binds/mirrors). C'est l'**anti-overwrite** (§9) : on ajoute un kind, on ne réécrit rien.
+
+**Pourquoi l'inverse de la vague de rouge, et pas un nouveau moteur.** La vague de rouge (`redwave.Impact`) marche **vers l'aval** sur les arêtes de staleness, depuis un bump. FK12 marche **vers l'amont** sur les arêtes `caused_by`, depuis un symptôme. Les deux sont des **marches de graphe pures** — le même esprit (calculé, jamais traqué), le sens opposé. FK12 ne re-déduit pas la staleness (c'est `links.Resolve`, S17, réutilisé partout) ; il introduit une **arête sémantiquement distincte** (la causalité) et sa remontée.
+
+**Pourquoi le cycle est refusé, pas réparé.** Une chaîne de causes qui boucle (`A caused_by B caused_by A`) est une **contradiction logique** : aucun des deux ne précède l'autre. Rendre une chaîne partielle masquerait l'incohérence du graphe. Refuser avec `ErrCycle` la rend **visible** — c'est le done-criterion « cycle refusé ». Le DFS sur le seul sous-graphe **atteignable** garantit qu'un cycle non pertinent (ailleurs) ne bloque pas un diagnostic sain.
+
+**Pourquoi la détection de cycle AVANT le BFS.** Pour ne jamais retourner une chaîne *et* un cycle. La sémantique est binaire : ou le graphe atteignable est acyclique (⇒ une chaîne déterministe), ou il a un cycle (⇒ refus). Ordonner cycle-puis-chaîne rend ce contrat strict.
+
+**Pourquoi determinism-first.** Marcher un graphe, trier une liste, hasher un corps — ce sont des fonctions pures, donc elles DOIVENT être du code autoritaire (§6). Le LLM n'entre **nulle part** dans FK12 : ni pour ordonner les causes (c'est le tri (distance, id)), ni pour décider qu'il y a un cycle (c'est le DFS). La remontée hors-graphe assistée par LLM est l'affaire de FK13 (le WhyTree), et même là, **gatée** par une cause *reproduite ou rejetée*. Un agent qui ferait ce que cette marche fait serait un **gap de déterminisme**.
+
+**Le mur.** `Trace` et `Validate` sont des projections sous la ligne : elles n'écrivent rien dans kernel/mirrors/fitness. Figer une arête `caused_by` passe par le rôle CLI aidos via un ChangeSet approuvé (la table `kernel.link`) — l'agent n'a aucun GRANT. La migration n'ouvre aucune porte d'écriture.
+
+## Méta-méta
+
+**Les miroirs (la preuve avant le code).**
+
+- `causedby_property_test.go` (rapid) — la **reproductibilité** + les invariants : Validate accepte **ssi** épinglé ∧ non-auto-arête ; **Trace déterministe** (même graphe+symptôme → même chaîne ou même erreur) ; la chaîne **ne contient jamais** le symptôme ; sur un graphe acyclique, la chaîne est **exactement** l'ensemble atteignable en amont (oracle indépendant) ; ordonnée et sans doublon ; **cycle refusé** (oracle DFS : cycle atteignable ⇒ ErrCycle) ; **round-trip versionné** (Serialize→NewRecord content-adressé, Parse récupère, version de cause changée ⇒ version d'enregistrement différente) ; totalité (jamais de panic sur un graphe malformé).
+- `causedby_fixture_test.go` — les cas nommés (le done-criterion §17/FKE-35.1) : la **chaîne checkout** ordonnée (`createOrder → Order → authzPolicy → add_total_col`, le plus proche d'abord, ties par id) ; une **feuille** sans cause ; le **cycle refusé** (`ErrCycle`) ; l'auto-arête et la cause non épinglée refusées par Validate.
+- `caused-by.test.ts` (fast-check/Vitest) — le jumeau : 11 tests verts (validate ∀ ; trace déterministe ; chaîne == atteignable, hors symptôme, sans doublon ; cycle refusé ; la fixture worked-example ; le round-trip du corps).
+- `tests/e2e/caused-by.spec.ts` (Playwright) — 3 tests : la **chaîne checkout** remontée et ordonnée (le corps content-adressé affiché) ; la **feuille** sans cause ; le **cycle REFUSÉ** (`CAUSED_BY_CYCLE`, aucune chaîne partielle rendue).
+
+**Ce que FK12 prépare.** FK13 (le geste `/why` + le **WhyTree**) construira l'arbre fishbone content-adressé **par-dessus** la remontée `caused_by` de FK12 : remontée déterministe sur le graphe, LLM **gaté** pour le « pourquoi » hors-graphe **avec cause vérifiée (reproduite ou rejetée)**, et **terminaison obligatoire en miroir** (racine → /learn → miroir d'anti-récurrence). FK12 fournit exactement la pièce dont le WhyTree a besoin : l'arête causale arrière, versionnée, et sa remontée pure et sans boucle.

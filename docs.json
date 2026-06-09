@@ -473,7 +473,9 @@
               "steps/concept/fk10-autonomy",
               "steps/internals/fk10-autonomy",
               "steps/concept/fk11-ai-lab",
-              "steps/internals/fk11-ai-lab"
+              "steps/internals/fk11-ai-lab",
+              "steps/concept/fk12-caused-by",
+              "steps/internals/fk12-caused-by"
             ]
           }
         ]
