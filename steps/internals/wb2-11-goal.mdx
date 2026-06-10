@@ -65,3 +65,7 @@ keywords: ["aidos", "krd", "WB2-11", "internals", "goal.ts", "GoalWizardMachine"
 - `front/web/app/v2/[slug]/page.tsx` — le lien geste `mur → /v2/goal` (ui-completeness).
 - `front/web/messages/{fr,en}.json` — le namespace i18n `v2Goal` + `v2Shell.gestureGoal`.
 - `tests/e2e/v2-goal.spec.ts` — l'e2e Playwright (parcours, mur franchi, refus, aucune écriture, 2).
+
+## Place dans le cliquet KRD
+
+WB2-11 est **le geste qui fait cliqueter** le cliquet — `/goal` est la mécanique même de la dent (§56–§59) : il prend une idée + son miroir et propose la **version gelée** (`k:` content-addressed) + le **ChangeSet DRAFT** (`cs:`) qui, approuvé par l'humain, devient la dent suivante. Mais l'écran reste **au-dessus du mur** : `wroteKernel=false`, l'écriture directe est refusée (`refuseDirectWrite → BlockReason`) ; il **prépare** la dent, il ne la grave pas (seul `aidos` via un ChangeSet approuvé grave). Sa propre construction a cliqueté red → green (`lib/v2/goal.ts` fast-check, `GoalWizardMachine.test.ts`, l'e2e). Il **consomme** l'idée produite par WB2-03 et le miroir (forme attendue EL10), et **laisse** une proposition prête pour l'approbation humaine — l'unique porte vers le kernel.

@@ -64,3 +64,7 @@ keywords: ["aidos", "krd", "WB2-12", "internals", "operations.ts", "frames", "st
 - `front/web/app/v2/grille/GrilleScreen.tsx` — le lien geste `verticale → /v2/operations` (ui-completeness).
 - `front/web/messages/{fr,en}.json` — le namespace i18n `v2Operations` + `v2Grille.gestureOperations`.
 - `tests/e2e/v2-operations.spec.ts` — l'e2e Playwright (rejeu, états/events visibles, refus, aucune écriture, 2).
+
+## Place dans le cliquet KRD
+
+WB2-12 est une **dent du cliquet de l'outil** qui **rejoue** une dent du produit : il prend une fixture Operation (`état → commande → events`, la forme de miroir N2, §S10) déjà gelée et la **déroule** à l'écran, sans rien écrire. Sa construction a cliqueté red → green — le miroir `lib/v2/operations.ts` (fast-check sur `frames`/`stateGraph`/`verdict`, qui **réutilise** l'interpréteur S10 `lib/operation.ts` `run/CREATE_ORDER`) rouge d'abord, puis vert, plus les fixtures XState du curseur et l'e2e de rejeu. Il **consomme** la phase stable de l'interpréteur S10 et **laisse** une phase stable où un workflow est inspectable frame par frame — que WB2-13 (le pipeline branché) consomme à son tour (`frames`/`verdict` réutilisés). Le rejeu est déterministe : même fixture → même suite de frames, à chaque fois.
