@@ -529,7 +529,9 @@
        "steps/concept/wb2-20-conscience",
        "steps/internals/wb2-20-conscience",
        "steps/concept/wb2-21-emetteurs",
-       "steps/internals/wb2-21-emetteurs"
+       "steps/internals/wb2-21-emetteurs",
+       "steps/concept/wb2-22-deploy",
+       "steps/internals/wb2-22-deploy"
       ]
      }
     ]

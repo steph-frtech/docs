@@ -1,0 +1,44 @@
+---
+title: "WB2-22 · Déployer — d'une entité à une vraie app web en ligne (bouton gaté)"
+description: "WB2-22 ajoute au Workbench V2 un écran /v2/deploy : à partir d'une seule source d'entité (la même que /v2/emetteurs émet), AIDOS planifie déterministiquement le déploiement de l'app émise — son empreinte content-adressée, son plan de conteneurisation (postgres + le DDL émis + l'app générique), sa route Traefik (un sous-domaine dérivé de la table → une URL live en https) et un aperçu live de la table back-office. On s'authentifie, on choisit une entité, on déploie, on voit l'URL et l'aperçu ; on re-planifie pour prouver que le plan est reproductible. Surtout : le bouton est gaté (auth + rate-limit) — la parenthèse sécurité d'ADR 0052, fermée : un appelant anonyme se voit refuser le déploiement (fail-closed). Le mur reste intact : déployer est une action sous la ligne (émettre + planifier le conteneur), aucune écriture de vérité ; modifier la source passe par /goal."
+keywords: ["aidos", "krd", "WB2-22", "Workbench V2", "déploiement", "deploy", "app web", "prod", "Traefik", "conteneur", "docker-compose", "URL live", "https", "Let's Encrypt", "sous-domaine", "aperçu live", "bouton gaté", "gate", "auth", "rate-limit", "authentification", "fail-closed", "ADR 0052", "plan reproductible", "déterministe", "mur", "/goal", "/v2/deploy"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-22](/steps/internals/wb2-22-deploy).</Note>
+
+## En une phrase
+
+WB2-22 ajoute **le déploiement** au Workbench V2 : un écran où, à partir d'une **seule** description d'entité, AIDOS planifie une **vraie app web** — sa table, son conteneur, son **adresse en ligne** (https) — et où le bouton qui lance tout cela est **gaté** : sans s'authentifier, on ne déploie pas.
+
+## Le problème que ça résout
+
+WB2-21 a montré qu'à partir d'une entité, AIDOS **émet** son DDL, son Go et son TS. Mais voir des fichiers générés n'est pas voir une **application qui tourne**. WB2-22 ferme la boucle « specs → app web → prod » : il prend l'app émise, la **met en conteneur** (une base Postgres avec le DDL appliqué, plus un serveur générique qui sert la table en back-office), et la **route** derrière Traefik sur un sous-domaine — de sorte qu'on obtient une **URL réelle, en https**, qu'on peut ouvrir.
+
+Le second problème, plus délicat : un bouton public qui « émet du code puis lance un conteneur » est une capacité **puissante** — et dangereuse si n'importe qui peut l'appuyer (coût, sécurité). L'ADR 0052 l'avait laissé comme une **parenthèse ouverte** : « ce bouton doit être gaté avant une vraie exposition ». WB2-22 **ferme cette parenthèse**.
+
+## Ce que l'écran montre
+
+D'abord la **garde de sécurité** : un interrupteur **authentifié / anonyme** et un compteur de **rate-limit** (combien de déploiements dans la fenêtre, et le quota). Puis on choisit une entité d'exemple (la commande `Order`), et on clique **Déployer & voir**.
+
+- **Si l'on est anonyme**, le déploiement est **refusé** : l'écran affiche un message clair (`DEPLOY_GATE_UNAUTHENTICATED`) avec **comment corriger** — s'authentifier d'abord. **Aucun plan n'est calculé**, aucune URL n'apparaît. C'est le principe **fail-closed** : par défaut, on ne déploie pas.
+- **Si l'on est authentifié** (et sous le quota), le déploiement est **planifié** et l'écran montre :
+  - l'**URL live** (par exemple `https://order.sagedesk.fr`) — un lien réel, dérivé du nom de la table ;
+  - le **plan de conteneurisation** : les trois services (la base `postgres`, l'`app` générique, l'ingress `traefik`) ;
+  - l'**aperçu live** de l'app servie : la table back-office, ses colonnes (avec nullabilité et clé primaire) — ce que l'app afficherait.
+
+## Le plan est reproductible
+
+Comme l'émission, la **planification** est une fonction pure : la même entité (avec la même garde) produit **toujours** le même plan — même identifiant de plan, même URL, même empreinte d'app. L'écran le **prouve** : on clique **Re-planifier**, le plan est recalculé seize fois, et un voyant **🟢 vert** confirme qu'il est identique à chaque tour. L'URL n'est pas tirée au sort : elle est **dérivée** de l'app émise, donc stable.
+
+## La parenthèse sécurité, fermée
+
+C'est le cœur de WB2-22. Le bouton **refuse** dans deux cas, dans cet ordre :
+
+1. **Non authentifié** → refus `DEPLOY_GATE_UNAUTHENTICATED`. Un appelant anonyme ne déploie jamais.
+2. **Quota atteint** → refus `DEPLOY_GATE_RATE_LIMITED`. Même authentifié, on ne peut pas déployer en boucle : le rate-limit protège le coût et la machine.
+
+Le quota est **déclaré** (au-dessus de la ligne), jamais appris ; le relever **proposerait** un changement par `/goal`. Et la garde est **déterministe** : elle ne « juge » pas si c'est sûr, elle **vérifie** deux faits (authentifié ? sous le quota ?) et tranche.
+
+## Le mur reste intact
+
+Déployer, ici, c'est **émettre une projection** (les fichiers de l'app) et **planifier son conteneur** : une action **sous la ligne**. Rien de tout cela n'écrit la moindre vérité. Les entités sont des **vérités** ; l'app émise et son plan de déploiement sont des **projections** régénérables. **Modifier** la source ne se fait pas depuis l'écran : ça **propose** un changement, qui repart par `idée → miroir → /goal → décision humaine`.
