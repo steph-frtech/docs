@@ -1,0 +1,48 @@
+---
+title: "WB2-19 · Le WhyTree — d'un symptôme à la cause racine (le 5-pourquoi redressé)"
+description: "WB2-19 ajoute au Workbench V2 un écran /v2/why : depuis un symptôme (un miroir rouge), le WhyTree remonte déterministiquement les arêtes caused_by — l'inverse de la vague de rouge — hop par hop, jusqu'à la cause racine, et l'affiche en arbre fishbone (React Arborist). Chaque cause déjà dans le graphe est reproductible par construction ; une cause hors-graphe proposée par le LLM n'entre que si elle est vérifiée (reproduite — une cause rejetée est élaguée). L'arbre se termine obligatoirement en miroir : un WhyTree sans miroir terminal est refusé. Un cas cyclique est refusé aussi (jamais un arbre partiel). Le mur reste intact : le WhyTree lit le graphe causal, il n'écrit aucune vérité."
+keywords: ["aidos", "krd", "WB2-19", "Workbench V2", "WhyTree", "why", "pourquoi", "5 pourquoi", "cause racine", "symptôme", "caused_by", "causalité", "remontée", "fishbone", "arbre", "React Arborist", "miroir terminal", "anti-récurrence", "reproduite", "rejetée", "hors-graphe", "confabulation", "cycle", "déterministe", "mur", "/v2/why"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-19](/steps/internals/wb2-19-why).</Note>
+
+## En une phrase
+
+WB2-19 ajoute le **WhyTree** à l'AI Lab : depuis un **symptôme** (une spec devenue rouge), on **remonte** les liens de cause `caused_by`, hop par hop, jusqu'à la **cause racine** — le **« 5-pourquoi redressé »**, affiché en arbre dépliable — et l'arbre ne se **ferme** que sur un **miroir** d'anti-récurrence.
+
+## Le problème que ça résout
+
+La **vague de rouge** (WB2-17) descend : un besoin touche une spec existante, qui devient rouge. Mais quand quelque chose **casse** en vrai — un miroir passe au rouge, un incident arrive — il faut faire le **chemin inverse** : remonter du **symptôme** (« le checkout refuse ») vers ce qui l'a **causé** (« createOrder », puis « Order », puis « la migration de colonne »). C'est le **pourquoi**.
+
+Le danger du pourquoi, c'est la **confabulation** : il est facile d'« inventer » une cause qui sonne bien (« c'était la phase de la lune »). WB2-19 interdit cela. Une cause n'entre dans l'arbre **que** si elle est **reproductible** : soit elle est déjà une **arête `caused_by`** versionnée du graphe (reproductible par construction), soit elle a été **vérifiée** (reproduite). Une cause non reproductible est **élaguée**, listée à part, jamais retenue.
+
+## La remontée, hop par hop
+
+L'arbre se lit du **symptôme** (la racine) vers les **causes** (les branches) :
+
+1. On part du **symptôme** — par exemple `checkout-accept`.
+2. On suit chaque lien `caused_by` vers une **cause candidate** — `createOrder`.
+3. On continue depuis chaque cause — `createOrder` est causé par `Order` et `authzPolicy`.
+4. On s'arrête sur les **feuilles** : les causes qui n'ont plus de cause au-dessus — les **causes racine** candidates (`add_total_col`, la migration).
+
+La remontée est **déterministe** : le même symptôme et le même graphe donnent **exactement** le même arbre, dans le même ordre (du plus proche au plus lointain). Aucun aléa.
+
+## La cause hors-graphe (le LLM, gaté)
+
+Parfois la vraie cause n'est **pas** dans le graphe `caused_by` — c'est un fait du monde réel (« le pool de connexions était saturé sous charge »). Là, et là seulement, un assistant peut **proposer** un pourquoi. Mais sa proposition n'a aucun poids tant qu'elle n'est pas **vérifiée** : reproduite, elle est **greffée** dans l'arbre (signalée comme « hors-graphe reproduite ») ; rejetée, elle est **élaguée** et listée comme « non reproduite ». Le LLM formule le texte ; c'est la **vérification** qui décide.
+
+## La terminaison obligatoire en miroir
+
+Un pourquoi sans fin ne sert à rien. Le WhyTree **doit** se clore sur un **miroir d'anti-récurrence** : la cause racine repart vers `/learn`, qui en fait un miroir — la garantie que **ce symptôme ne reviendra pas** sans être détecté. Un WhyTree **sans** miroir terminal est **refusé**. Et un graphe **cyclique** (A causé par B causé par A) est refusé aussi — jamais un arbre partiel.
+
+## Comment ça marche, vu de l'écran
+
+1. Vous choisissez un **symptôme** (un bouton par cas).
+2. L'arbre **monte** : le WhyTree se construit, chaque cause un nœud, du symptôme à la racine. Un résumé compte les nœuds, les feuilles (causes racine), les causes hors-graphe vérifiées, et la profondeur.
+3. Vous **dépliez / repliez** chaque cause (le drill-down du pourquoi).
+4. Le **miroir terminal** est affiché — la terminaison obligatoire. Les causes hors-graphe **élaguées** (non reproduites) sont listées à part, barrées.
+5. Si vous choisissez le cas **sans miroir terminal** ou le cas **cyclique**, l'écran affiche un **refus** — pas d'arbre.
+
+## Le mur reste intact
+
+Construire, déplier ou explorer un WhyTree n'écrit **aucune vérité**. L'écran **lit** le graphe `caused_by` et **propose** une lecture de la causalité. La terminaison en miroir est une **exigence de forme** — promouvoir le miroir d'anti-récurrence passe, comme toujours, par `/learn → idée → miroir → /goal → décision humaine`.
