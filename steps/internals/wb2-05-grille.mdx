@@ -1,0 +1,43 @@
+---
+title: "WB2-05 · Internals — le twin de grille pur, l'écran table cliquable et l'e2e des sommes"
+description: "Internals de WB2-05 : le twin pur lib/v2/grid.ts (liste plate de kernels → matrice niveau × facette, validation totale des coordonnées, comptage des sommes Σ par ligne/colonne/total, cellKernels pour le clic), le miroir de reproductibilité fast-check (déterminisme, conservation Σ = total, couverture exacte, ordre stable, rejet hors jeu clos, 7×8), l'écran /v2/grille (table cliquable, détail de cellule → specs → anatomie), et l'e2e Playwright (7×8, sommes cohérentes, clic → specs, aucune écriture). Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "WB2-05", "internals", "grid.ts", "buildGrid", "validateGrid", "cellKernels", "GRID_LEVELS", "GRID_FACETS", "niveau", "facette", "FKE-1.4", "Σ", "rowTotals", "colTotals", "SOURCE_ORDER", "FACET_LETTERS", "conservation", "couverture", "fast-check", "playwright", "déterminisme", "mur", "/v2/grille", "/v2/verticale", "anatomie"]
+---
+
+<Note>Côté « Pour moi » — l'intérieur. Pour le concept, voir [Pour les futurs utilisateurs → WB2-05](/steps/concept/wb2-05-grille).</Note>
+
+## Implémentation
+
+**Le twin de grille `lib/v2/grid.ts`** — la source unique de la LOGIQUE, PUR (aucun React/DOM, aucun LLM, aucune horloge) :
+
+- Constantes : `GRID_LEVELS` = `SOURCE_ORDER` (les 7 rungs de la verticale §23 — produit → entité ; la transversale `invariant`/`policy` n'a **pas** de ligne dans cette grille des 7 rungs) ; `GRID_FACETS` = `FACET_LETTERS` (les 8 facettes FKE-1.3, ordre canonique F·I·S·B·R·V·M·X).
+- Types : `GridCell` (`level`, `facet`, `count`, `kernelIds` ordonnés) ; `Grid` (`levels`, `facets`, `cells` [niveau][facette], `rowTotals`, `colTotals`, `total`) ; `GridError` (`level_unknown`, `facet_unknown`, `empty_id`) ; `GridResult`.
+- `validateGrid(nodes)` : la liste ordonnée des `GridError`. Rejette : id vide, niveau hors des 7 rungs (`isGridLevel` sur `SOURCE_ORDER`), facette hors jeu clos (réutilise `isFacetLetter` de `lib/v2/idea`). Une coordonnée `invariant` (transversale) est donc `level_unknown` ici — par dessein.
+- `buildGrid(nodes)` : le cœur. Valide ; sinon `{ ok:false, errors }`. Sinon place chaque kernel dans son bucket `[levelIndex][facetIndex]`, **ordonne** les ids de chaque cellule (lexicographique stable), **compte** `rowTotals` (Σ par ligne), `colTotals` (Σ par colonne) et `total` (Σ des lignes). Renvoie `{ ok:true, grid }`. Invariant garanti : `Σ rowTotals = Σ colTotals = total = nb de kernels placés`.
+- `cellKernels(grid, level, facet)` : résout les ids d'une cellule (ce que le clic consomme). Renvoie `[]` pour une cellule vide ou une coordonnée hors grille — **jamais une exception, jamais un lien mort**.
+
+Réutilisation (pas de fork) : le `KernelNode` plat est celui de l'arbre WB2-04 (`lib/v2/kernel-tree`) — la grille est une **autre lecture des mêmes kernels**. Les niveaux viennent de `besoin-grammar`, les facettes de `lib/v2/idea` → `lib/facets`.
+
+**L'écran `app/v2/grille/GridClient.tsx`** (`"use client"`) : `useMemo` appelle `syntheticComposes(240)` (les **mêmes** 240 kernels que l'arbre) → `buildGrid` → la grille. Rend une `<table>` : en-têtes de colonnes = facettes (avec le nom complet en `title`), en-têtes de lignes = niveaux ; chaque cellule est un `<button>` (`v2-grille-cell-<level>-<facet>`, `data-count`) qui sélectionne `{level, facet}` dans le state local. La colonne/ligne Σ (`v2-grille-rowtotal-<level>`, `v2-grille-coltotal-<facet>`, `v2-grille-grandtotal`). Au clic, un bloc détail (`v2-grille-cell-detail`) montre `count` (`v2-grille-cell-count`) puis soit la note de cellule vide (`v2-grille-cell-empty`), soit la liste des specs — chaque spec un `<Link href={/v2/anatomie/${id}}>` (`v2-grille-spec-<id>`).
+
+**L'écran partagé `app/v2/grille/GrilleScreen.tsx`** (Server Component) : rend l'identité canonique du concept depuis le glossaire (`entry("verticale")` → `v2-concept-title` = « Verticale », `v2-concept-def`), le titre/sous-titre/note-du-mur (namespace i18n `v2Grille`, FR + EN), puis `<GridClient/>`. **Deux routes** le rendent : `app/v2/grille/page.tsx` (la route de l'étape) et `app/v2/verticale/page.tsx` (le slug du concept « Verticale », atteint depuis la carte/nav de `/v2`). Les deux sont des **segments statiques** qui priment sur `/v2/[slug]` et **conservent le contrat WB2-02** (le bloc « Verticale » → `v2-concept-title`).
+
+**Le clic résout** vers le stub `/v2/anatomie/[kernel]` (livré à WB2-04, anatomie réelle à WB2-06) — jamais un lien mort.
+
+**Les miroirs** :
+
+- Reproductibilité — `lib/v2/grid.test.ts` (Vitest + fast-check) : **7×8** (7 lignes, 8 colonnes F·I·S·B·R·V·M·X) ; **déterminisme** (même entrée → même sérialisation) ; **conservation** (Σ rowTotals = Σ colTotals = total = `nodes.length`) ; **couverture** (chaque kernel tombe dans exactement une cellule, aucun perdu/dupliqué) ; `count = kernelIds.length`, ids ordonnés stables, `cellKernels` = la cellule ; cellule vide → `[]` ; **rejet** des coordonnées hors jeu clos (niveau/facette inconnu, id vide, `invariant` transversal) ; `syntheticComposes(240)` se compose, Σ conservée. GREEN (8 tests).
+- e2e — `tests/e2e/v2-grille.spec.ts` (Playwright) : la grille rend **7 lignes × 8 colonnes** ; les **sommes sont cohérentes** (Σ rowtotals = Σ coltotals = grandtotal = 240, lu depuis le DOM) ; **clic sur une cellule non vide** (`product × F`) → la liste matérialise exactement `count` specs ; **clic sur une spec** → son anatomie (`/v2/anatomie/<id>`, l'id affiché) ; **garde anti-écriture** (aucune requête POST/PUT/PATCH/DELETE) ; coexistence (`/v2/grille` 200, `/v2/verticale` rend la grille avec `v2-concept-title` = « Verticale », `/` 200). GREEN (2 tests).
+
+## Méta
+
+- **Déterminisme-first.** Composer la grille est une **fonction pure** (`buildGrid`), jamais un agent : placer/ordonner/compter sont du code, autoritatif. La somme Σ n'est pas « estimée » par un LLM — elle est **comptée**. Le miroir fast-check épingle le déterminisme (même entrée → même grille) ; la table HTML n'est que du rendu, elle ne juge rien.
+- **La conservation comme preuve.** L'invariant `Σ lignes = Σ colonnes = total = nb de kernels` n'est pas un test parmi d'autres : c'est la propriété qui prouve qu'**aucune spec n'est perdue ni comptée deux fois**. C'est la version « grille » de la loi de complétude (pas de monstre par double-comptage), vérifiée par property sur des entrées aléatoires.
+- **Réutiliser, ne pas réinventer.** Aucune coordonnée inventée : les niveaux viennent de `SOURCE_ORDER`, les facettes de `FACET_LETTERS`, les kernels du `syntheticComposes` **partagé avec l'arbre** WB2-04. La grille est strictement une autre projection des mêmes données — un seul ensemble de vérités, deux lectures.
+- **Le mur, prouvé.** La grille est une projection de lecture : l'e2e **surveille le réseau** — aucune écriture ne part en cliquant une cellule ou une spec. Le mur (§2) est un invariant vérifié.
+
+## Méta-méta
+
+- **Deux axes, deux natures de couplage.** La verticale **couple** (descendre un niveau, c'est raffiner le même besoin) ; la facette **sépare** (la sécurité d'une opération n'interagit pas avec ses budgets). La grille **dessine cette orthogonalité** : lignes = l'axe couplant, colonnes = l'axe séparant (FKE-1.4). La représentation n'est pas esthétique — elle rend visible une propriété structurelle de la nature des vérités.
+- **Une vérité, plusieurs vues, une seule source.** WB2-04 (arbre) et WB2-05 (grille) consomment **le même** `KernelNode` via le même `syntheticComposes`. Quand le store réel exposera ses kernels, ni l'arbre ni la grille ne changeront — seule la source des `KernelNode` changera. La logique de chaque vue est déjà prouvée, indépendamment de la donnée.
+- **La cellule vide n'est pas une erreur.** `cellKernels` d'une cellule vide rend `[]`, pas une exception : une coordonnée sans vérité est **légale** (le produit n'a peut-être pas encore d'invariant au niveau vue). La grille distingue « rien ici » (légitime) de « lien mort » (interdit) — le clic résout toujours, même vers zéro spec. C'est le même principe que le stub d'anatomie de WB2-04 : on ne produit jamais un lien mort.
