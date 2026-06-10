@@ -1,0 +1,41 @@
+---
+title: "WB2-06 · Internals — le twin d'anatomie pur, l'écran du mur dessiné et l'e2e des voyants"
+description: "Internals de WB2-06 : le twin pur lib/v2/anatomy.ts (six paires-miroir, computeVoyant déterministe declared×proven → green/red/amber, buildAnatomy + validation totale du jeu clos, overall = le pire des six, syntheticPairStates déterministe), le miroir de reproductibilité fast-check (déterminisme, mur dessiné side above/below, six paires ordonnées, table de vérité du voyant exhaustive, rouge ⇒ déclaré∧échec, rejet hors jeu clos), l'écran /v2/anatomie/[kernel] (cartes des six paires, déclaré au-dessus ∧ prouvé en dessous, clic → détail read-only), et l'e2e Playwright (mur dessiné, bas read-only sans écriture, voyants déterministes). Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "WB2-06", "internals", "anatomy.ts", "buildAnatomy", "computeVoyant", "validateAnatomy", "PAIR_KINDS", "MirrorPair", "Voyant", "syntheticPairStates", "paire-miroir", "mur", "déclaré", "prouvé", "above", "below", "voyant", "fast-check", "playwright", "déterminisme", "read-only", "/v2/anatomie"]
+---
+
+<Note>Côté « Pour moi » — l'intérieur. Pour le concept, voir [Pour les futurs utilisateurs → WB2-06](/steps/concept/wb2-06-anatomie).</Note>
+
+## Implémentation
+
+**Le twin d'anatomie `lib/v2/anatomy.ts`** — la source unique de la LOGIQUE, PUR (aucun React/DOM, aucun LLM, aucune horloge) :
+
+- Types d'états : `WallSide` (`above` | `below`) ; `DeclaredState` (`declared` | `absent`, le côté humain au-dessus) ; `ProvenState` (`pass` | `fail` | `pending` | `absent`, le côté machine en dessous) ; `Voyant` (`green` | `red` | `amber`).
+- `PairKind` + `PAIR_KINDS` : le **jeu clos ordonné** des six paires — `spec_doc`, `behavior_results`, `scenarios_tests`, `model_projection`, `contract_code`, `evidence`. `isPairKind` garde le jeu.
+- Types projetés : `PairState` (l'entrée brute : `kind`, `declared`, `proven`) ; `MirrorPair` (`kind`, `declared {side:"above", state}`, `proven {side:"below", state}`, `voyant`) ; `Anatomy` (`kernelId`, `pairs`, `overall`, `counts`) ; `AnatomyError` (`empty_kernel_id`, `pair_kind_unknown`, `duplicate_pair`, `missing_pair`) ; `AnatomyResult`.
+- `computeVoyant(declared, proven)` : **le cœur déterministe**. `declared ∧ pass → green` ; `declared ∧ fail → red` ; **tout le reste → amber**. Pure & totale.
+- `validateAnatomy(kernelId, states)` : la liste ordonnée des `AnatomyError`. Rejette : kernelId vide ; une paire `kind` hors jeu clos ; une paire **dupliquée** ; une paire **manquante** (les six du jeu clos doivent toutes être présentes — 1-pour-1, aucune perdue).
+- `buildAnatomy(kernelId, states)` : valide ; sinon `{ ok:false, errors }`. Sinon, pour chaque paire **dans l'ordre `PAIR_KINDS`**, pose `declared.side = "above"` et `proven.side = "below"` et `computeVoyant`. Compte `counts` par voyant ; `overall` = le pire des six (rouge > ambre > vert). Renvoie `{ ok:true, anatomy }`.
+- `syntheticPairStates(kernelId)` : un état SYNTHÉTIQUE **déterministe** (hash djb2 stable de l'id → un couple `(declared, proven)` par paire, couvrant les trois voyants) — pour peupler l'écran tant que le store de kernels n'expose pas ses voyants réels (OpenQuestion documentée, ne bloque pas).
+
+**L'écran `app/v2/anatomie/[kernel]/AnatomyClient.tsx`** (`"use client"`) : `useMemo` appelle `buildAnatomy(kernelId, syntheticPairStates(kernelId))`. Rend le résumé global (`v2-anatomie-overall`, `data-overall`, comptes `v2-anatomie-count-{green,red,amber}`), puis une grille de cartes : chaque paire est un `<button>` (`v2-anatomie-pair-<kind>`, `data-voyant`, `data-declared`, `data-proven`) avec son voyant (`v2-anatomie-voyant-<kind>`), sa **face déclarée au-dessus** (`v2-anatomie-above-<kind>`), une ligne « le mur », puis sa **face prouvée en dessous** (`v2-anatomie-below-<kind>`). Le clic ouvre/ferme un détail (`v2-anatomie-pair-detail` : `v2-anatomie-detail-declared`, `v2-anatomie-detail-proven`, `v2-anatomie-detail-readonly`).
+
+**La page `app/v2/anatomie/[kernel]/page.tsx`** (Server Component) : lit le `kernel` du params (l'id affiché en `v2-anatomie-kernel-id`, **contrat conservé** depuis le stub WB2-04 et le clic de la grille WB2-05), assemble toutes les chaînes du namespace i18n `v2Anatomie` (FR + EN — faces des six paires, libellés d'état déclaré/prouvé, voyants), rend le titre/sous-titre/note-du-mur (`v2-anatomie-wall-note`), puis `<AnatomyClient/>`. La route remplace le stub de WB2-04 par l'anatomie réelle.
+
+**Les miroirs** :
+
+- Reproductibilité — `lib/v2/anatomy.test.ts` (Vitest + fast-check) : **déterminisme** (même état → même sérialisation) ; **les six paires** (exactement six, ordonnées `PAIR_KINDS`, aucune perdue/dupliquée) ; **le mur dessiné** (déclaré toujours `above`, prouvé toujours `below`) ; **table de vérité du voyant exhaustive** (declared × proven → green/red/amber, déterministe) ; **le rouge n'est porté que par `declared ∧ fail`** ; le compte par voyant somme à 6 et l'overall = le pire des six ; **rejet** (kernelId vide, paire inconnue/dupliquée/manquante) ; synthétique déterministe. GREEN (8 tests).
+- e2e — `tests/e2e/v2-anatomie.spec.ts` (Playwright) : **le mur dessiné** (les six paires visibles, chacune avec sa face au-dessus ∧ en dessous ∧ son voyant ∈ {green,red,amber}) ; le **voyant global** computé ; **action-capable** (clic sur une paire → son détail avec déclaré/prouvé/note read-only) ; **le bas read-only** (aucune requête POST/PUT/PATCH/DELETE) ; **voyants déterministes** (même kernelId → mêmes `data-voyant` au rechargement ; deux kernels différents rendent tous deux six paires). GREEN (2 tests). Non-régression WB2-05 (`v2-grille`) GREEN (2 tests).
+
+## Méta
+
+- **Déterminisme-first.** Le voyant n'est **jamais** computé par un agent : `computeVoyant` est une fonction pure, autoritative, et le miroir fast-check épingle sa **table de vérité exhaustive** (declared × proven → voyant). « Done est computé, jamais déclaré » (§8) prend ici sa forme la plus littérale : le voyant **est** la computation de l'état des deux faces, pas un jugement.
+- **Le mur, dessiné comme une donnée.** `declared.side = "above"` et `proven.side = "below"` ne sont pas du style CSS : ce sont des **invariants du modèle**, vérifiés par property (le mur est toujours dessiné dans le bon sens). L'écran ne fait que rendre une structure déjà prouvée correcte.
+- **Le rouge appartient à la machine.** L'invariant `voyant === "red" ⇒ declared ∧ fail` (vérifié par property) dit que **seul un échec de preuve sous une déclaration** peut allumer le rouge. Aucune face déclarée seule, aucune opinion au-dessus du mur ne produit un rouge — c'est la machine, en dessous, qui décide.
+- **Le bas read-only, prouvé.** L'e2e surveille le réseau : ouvrir l'anatomie, cliquer une paire, lire le détail — **aucune écriture ne part**. Le mur (§2) est un invariant vérifié, pas une promesse.
+
+## Méta-méta
+
+- **Trois lectures, une seule source.** WB2-04 (arbre, composition), WB2-05 (grille, les deux axes) et WB2-06 (anatomie, l'intérieur d'un kernel) consomment des **synthétiseurs déterministes** (`syntheticComposes`, `syntheticPairStates`) qui seront remplacés par le store réel sans toucher aux écrans. Chaque vue prouve sa logique indépendamment de la donnée — le jour où les voyants deviennent réels, seul change *d'où* viennent les `PairState`, pas *comment* l'anatomie se compose.
+- **L'anatomie est le mur fait visible.** Le mur (§2) est le principe le plus fondamental d'AIDOS : l'humain déclare, la machine prouve, on ne confond jamais les deux. WB2-06 en fait une **image littérale** — six paires, une ligne au milieu, déclaré dessus, prouvé dessous. Voir l'anatomie, c'est voir le mur à l'œuvre sur un objet concret.
+- **L'ambre n'est pas un échec.** Trois états seulement (vert/rouge/ambre), mais l'ambre absorbe **tout ce qui n'est ni reflété ni divergent** : déclaré-pas-encore-prouvé, vide des deux côtés, preuve orpheline. C'est le même refus du faux binaire que la cellule vide de la grille (WB2-05) ou le stub résolvant de WB2-04 : on distingue « pas encore » (légitime, ambre) de « ça diverge » (interdit à terme, rouge). Le voyant n'oblige pas à mentir en vert ce qui n'est pas prouvé.

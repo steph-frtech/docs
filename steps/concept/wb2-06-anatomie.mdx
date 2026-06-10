@@ -1,0 +1,59 @@
+---
+title: "WB2-06 · L'anatomie d'un kernel — les six paires-miroir autour du mur"
+description: "WB2-06 ajoute l'écran /v2/anatomie/[kernel] : l'anatomie 1-pour-1 d'un kernel, ses six paires-miroir de part et d'autre du mur (Spec↔Doc · Comportement↔Résultats · Scénarios↔Tests · Modèle↔Projection · Contrat↔Code · Evidence-attendue↔Evidence-observée). Au-dessus du mur on DÉCLARE (l'humain), en dessous la MACHINE PROUVE (read-only). Un voyant 🟢/🔴/🟡 par paire, computé jamais déclaré. L'écran est une projection de lecture : le mur reste intact."
+keywords: ["aidos", "krd", "WB2-06", "Workbench V2", "anatomie", "kernel", "paire-miroir", "mur", "déclaré", "prouvé", "voyant", "🟢", "🔴", "🟡", "Spec", "Doc", "Comportement", "Résultats", "Scénarios", "Tests", "Modèle", "Projection", "Contrat", "Code", "Evidence", "/v2/anatomie", "FKE"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-06](/steps/internals/wb2-06-anatomie).</Note>
+
+## En une phrase
+
+WB2-06 ouvre l'écran `/v2/anatomie/[kernel]` : il **dessine le mur** d'un kernel et place, de part et d'autre, ses **six paires-miroir** — au-dessus ce que l'humain **déclare**, en dessous ce que la machine **prouve** — avec un **voyant 🟢/🔴/🟡** par paire qui dit, d'un coup d'œil, si les deux côtés se reflètent.
+
+## Le problème que WB2-06 résout
+
+Une vérité dans AIDOS n'est pas un texte unique : elle a **deux faces** séparées par le **mur** (§2). Au-dessus, l'**humain déclare** (l'intention, la spec, le contrat). En dessous, la **machine prouve** (le test exécuté, la projection émise, l'évidence observée). Le mur garantit qu'on ne confond jamais *vouloir* et *prouver*.
+
+Mais comment **voir**, pour un kernel donné, si chacune de ses faces déclarées a bien son reflet prouvé ? C'est la question de l'anatomie : poser le kernel sur la table et regarder ses six organes, un par un, des deux côtés du mur.
+
+## Les six paires-miroir
+
+Chaque paire confronte une face **déclarée** (au-dessus) à sa face **prouvée** (en dessous) :
+
+1. **Spec ↔ Doc** — ce qu'on spécifie ↔ ce qui est documenté / rendu.
+2. **Comportement ↔ Résultats** — le behaviour déclaré ↔ les résultats observés.
+3. **Scénarios ↔ Tests** — les scénarios (Gherkin) ↔ les tests qui les exécutent.
+4. **Modèle ↔ Projection** — l'entité / l'AST ↔ la projection émise (Go / DDL / TS).
+5. **Contrat ↔ Code** — le contrat (Pact) ↔ le code qui l'honore.
+6. **Evidence attendue ↔ Evidence observée** — l'évidence qu'on attend ↔ l'évidence vraiment observée.
+
+## Le voyant — computé, jamais déclaré
+
+Pour chaque paire, un voyant résume l'état des deux faces. Il n'est **jamais déclaré par un humain** : il est **computé** par une fonction déterministe (CLAUDE.md §8, « done est computé »).
+
+- **🟢 vert** — le côté déclaré est présent **et** la preuve passe : les deux faces se reflètent.
+- **🔴 rouge** — le côté déclaré est présent **mais** la preuve échoue : une divergence, un *monstre* (déclaré sans preuve qui tient).
+- **🟡 ambre** — tout le reste : déclaré sans preuve encore (en attente / absente), rien des deux côtés (vacuité), ou une preuve orpheline sans déclaration au-dessus. L'ambre dit « pas encore réfléchi ».
+
+Une règle tient toujours : le **rouge n'est porté que par un échec de la machine sous un côté déclaré**. C'est la machine, en dessous du mur, qui décide le rouge — jamais une opinion au-dessus.
+
+## Ce que vous voyez à l'écran
+
+- Un **résumé global** en haut : le compte de voyants verts / rouges / ambres, et le **voyant global** (le pire des six).
+- Les **six paires**, chacune dans sa carte : son titre, son voyant, sa **face déclarée au-dessus** du mur, une ligne « le mur », puis sa **face prouvée en dessous** (read-only).
+- Au **clic sur une paire**, son détail s'ouvre : la face déclarée et la face prouvée, et le rappel que **le bas est read-only** — la machine prouve, on n'écrit rien.
+
+## Le mur, ici aussi
+
+L'anatomie est une **projection de lecture**. En dessous du mur, **tout est read-only** : on regarde ce que la machine a prouvé, on n'agit pas dessus. Aucune écriture kernel/mirrors/fitness. Changer une vérité passe toujours par idée → miroir → /goal.
+
+## Ce que WB2-06 vous permet de faire, concrètement
+
+1. **Ouvrir** l'anatomie d'un kernel (depuis l'arbre /v2/kernels ou une cellule de la grille /v2/grille).
+2. **Lire** ses six paires-miroir de part et d'autre du mur.
+3. **Voir** d'un coup d'œil, par les voyants, où ça se reflète (vert), où ça diverge (rouge), où c'est encore en suspens (ambre).
+4. **Ouvrir** une paire pour le détail de ses deux faces.
+
+## La suite
+
+L'anatomie est la lecture la plus fine du Workbench V2 : après l'arbre (composition, WB2-04) et la grille (les deux axes, WB2-05), elle descend jusqu'à **l'intérieur d'un seul kernel**. Les voyants y sont aujourd'hui synthétiques (déterministes) ; ils refléteront les preuves réelles quand le store de kernels exposera ses états — l'écran, lui, ne changera pas.
