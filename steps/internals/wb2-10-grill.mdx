@@ -1,0 +1,54 @@
+---
+title: "WB2-10 · Internals — le twin de grill pur, la machine XState du wizard et l'e2e du mur"
+description: "Internals de WB2-10 : le twin pur lib/v2/grill.ts (brouillon → diagnostic → affûtage par table déclarée → ADRs candidats → verdict calculé → seed de doc, hash content-addressed, invariants hasMirror=false/wroteKernel=false), la machine XState app/v2/grill/GrillWizardMachine.ts (4 états, transitions, délégation au twin), le client app/v2/grill/GrillWizardClient.tsx, la page Server Component, les miroirs fast-check + fixtures XState + e2e Playwright (parcours complet → intention affûtée amber, aucune écriture-vérité). Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "WB2-10", "internals", "grill.ts", "GrillWizardMachine", "XState", "createActor", "useMachine", "runGrill", "diagnose", "sharpenText", "verdictOf", "grillHash", "SHARPEN_TABLE", "MAX_SCENARIOS", "Given When Then", "ADR candidats", "fast-check", "playwright", "déterminisme", "idempotence", "mur", "ADR 0053"]
+---
+
+<Note>Côté « Pour moi » — l'intérieur. Pour le concept, voir [Pour les futurs utilisateurs → WB2-10](/steps/concept/wb2-10-grill).</Note>
+
+## Implémentation
+
+**Le twin de grill `lib/v2/grill.ts`** — la source unique de la LOGIQUE, PUR (aucun React/DOM, aucun LLM, aucune horloge) :
+
+- Constantes déclarées : `MAX_SCENARIOS = 5` (le mandat A), `MIN_INTENT_LEN = 3`, `SHARPEN_TABLE` (la table d'affûtage `terme ambigu → terme canonique` : `feature→cellule`, `bdd`/`test→miroir`, `goal→/goal`, `wall→mur`, `ratchet→cliquet`…).
+- Types : `Scenario` (`given/when/then`), `GrillDraft` (intent + scenarios), `GrillVerdict` (`sharp | fuzzy | rejected`), `GrillIssue` (`intent_too_short | no_scenario | too_many_scenarios | scenario_incomplete`), `CandidateADR` (slug, title, from, to), `DocSeed` (conceptPath, internalsPath), `SharpenedIntention`, `GrillResult`.
+- `scenarioComplete(s)` : vrai ssi les trois clauses sont non-vides (falsifiable).
+- `diagnose(d)` : la liste ordonnée & stable des `GrillIssue` — l'oracle, total.
+- `verdictOf(issues)` : la grammaire **calcule** le verdict — `intent_too_short`/`too_many_scenarios` → `rejected` ; `no_scenario`/`scenario_incomplete` → `fuzzy` ; sinon `sharp` (§8 : calculé, jamais déclaré).
+- `sharpenText(text)` : remplace chaque terme de `SHARPEN_TABLE` (regex `\b…\b`, insensible à la casse) et renvoie les termes effectivement appliqués (ordre de la table). **Idempotent** : les canoniques ne sont pas eux-mêmes des termes ambigus.
+- `conceptDocPath` / `internalsDocPath` : les deux chemins de doc attendus (le mandat §6), déterministes.
+- `grillHash(intent, scenarios)` : FNV-1a 32 bits hex sur l'intention affûtée + les scénarios canoniques — content-addressed, déterministe.
+- `runGrill(d, stepSlug)` : le cœur. Diagnostique ; si `rejected` → `{ ok:false, issues }`. Sinon affûte l'intention **et** chaque scénario, accumule les termes appliqués (dédupliqués) → un `CandidateADR` par terme distinct (ordre de la table), annexe la `DocSeed`, calcule le verdict (`sharp`/`fuzzy`), content-adresse l'`id`, et pose les invariants du mur : `hasMirror: false`, `wroteKernel: false` (typés littéraux).
+- `syntheticGrillDraft()` / `STEP_SLUG = "wb2-10-grill"` : un brouillon de démonstration (2 termes ambigus, 2 scénarios → nette, 2 ADRs) + le slug d'étape.
+
+**La machine `app/v2/grill/GrillWizardMachine.ts`** (XState v5, `setup().createMachine`) :
+
+- États : `intention → scenarios → revue → affutee` (`GRILL_STEPS`).
+- Événements : `SET_INTENT`, `ADD_SCENARIO` / `REMOVE_SCENARIO` / `PATCH_SCENARIO` (via `assign`), `SUIVANT` / `PRECEDENT`, `AFFUTER`, `RECOMMENCER`.
+- `AFFUTER` (depuis `revue`) : transition gardée `nonRejete` (= `diagnose()` sans `intent_too_short` ni `too_many_scenarios`) vers `affutee` avec l'action `grill` ; sinon reste sur `revue` et expose `context.issues`. **La machine ne juge rien** : `grill` délègue à `runGrill` (le code), `nonRejete` à `diagnose`.
+- `RECOMMENCER` (depuis `affutee`) : action `reset` → brouillon vide.
+
+**Le client `app/v2/grill/GrillWizardClient.tsx`** (`"use client"`) : `useMachine(grillWizardMachine)` ; le stepper rend `GRILL_STEPS` (`data-state`, `data-active`) ; l'étape `scenarios` rend une liste éditable (add/remove + trois champs par scénario, compteur `n / MAX_SCENARIOS`) ; l'étape `affutee` rend l'encart **amber** (`data-verdict`, intention affûtée, verdict, liste d'ADRs `v2-grill-adr-<slug>`, seed de doc, `hasMirror`/`wroteKernel`). Les libellés viennent du namespace i18n `v2Grill` (passés en props depuis le serveur).
+
+**La page `app/v2/grill/page.tsx`** (Server Component) : segment **statique** — `grill` n'est pas un slug du glossaire, donc aucun conflit avec `/v2/[slug]` (le catch-all ne génère ses params que depuis `SLUGS`). Elle rend l'en-tête (eyebrow, titre, sous-titre, note du mur) puis `<GrillWizardClient/>`. Nouveau namespace i18n `v2Grill` (FR + EN).
+
+**Les miroirs** :
+
+- Reproductibilité — `lib/v2/grill.test.ts` (Vitest + fast-check) : déterminisme (même brouillon → même sortie) ; `≤ 5` scénarios (> 5 → `rejected`) ; verdict calculé (nette / floue / rejetée) ; affûtage idempotent ; ADRs candidats (un par terme, ordonnés, dédupliqués) ; le mur (`hasMirror`/`wroteKernel` toujours faux) ; l'empreinte content-adressée ; le brouillon canonique (2 ADRs feature/bdd). GREEN (14 tests).
+- Transitions — `app/v2/grill/GrillWizardMachine.test.ts` (Vitest + `createActor`) : démarrage à `intention` ; parcours complet → `affutee` (nette, ADRs feature/bdd, le mur) ; `AFFUTER` sur brouillon rejeté reste `revue` + issues ; add/remove de scénario + navigation. GREEN (4 tests).
+- e2e — `tests/e2e/v2-grill.spec.ts` (Playwright, contre le build prod) : parcours complet → intention affûtée amber (verdict nette, « cellule »/« miroir », ADRs `adopter-cellule`/`adopter-miroir`, seed de doc, `hasMirror`/`wroteKernel` false) **avec une garde anti-écriture** (aucune requête POST/PUT/PATCH/DELETE) ; déterminisme (même parcours → même empreinte au rechargement). GREEN (2 tests).
+
+## Méta
+
+- **Déterminisme-first.** Affûter une intention est une **fonction pure** (`runGrill`), jamais un agent : diagnostic, affûtage (remplacement par table), dérivation des ADRs, verdict et hash sont du code. XState n'**orchestre** que l'état d'écran ; il **délègue** tout jugement au twin (la garde `nonRejete` appelle `diagnose`, l'action `grill` appelle `runGrill`). Le LLM n'entre nulle part — l'affûtage est un remplacement déclaré, pas une reformulation générée.
+- **Réutiliser, ne pas réinventer.** Le grill réutilise le vocabulaire canonique du glossaire V2 (la cible des remplacements) et le slot wizard gelé (XState + RHF/Zod, ADR 0053) comme **rendu**, pas comme autorité. La grammaire des scénarios (`Given/When/Then`) est la même langue ubiquitaire que les `.feature` Godog du back.
+- **Le mur, prouvé deux fois.** `hasMirror` et `wroteKernel` sont des **littéraux `false`** dans `SharpenedIntention` (impossible à mettre à `true` sans changer le type) ; et l'e2e **surveille le réseau** — aucune écriture ne part.
+- **Idempotence comme invariant.** `sharpenText` est idempotent par construction (les canoniques ne sont pas dans la table des ambigus) — épinglé par une property (`affûter(affûter(x)) === affûter(x)`). Affûter n'est jamais destructeur d'un texte déjà propre.
+- **ui-completeness.** Le seul geste de cet étage (affûter → proposer une intention affûtée) a un contrôle exécutable (« Affûter »), et l'e2e prouve qu'il s'exécute. Aucune capacité headless.
+
+## Méta-méta
+
+- **Le geste EST une machine à états.** `grill-with-docs` n'est pas une checklist : c'est une **machine** (XState) dont les états sont les altitudes de l'affûtage (intention → scénarios → revue → affûtée). Modéliser le geste comme une machine rend ses transitions **testables comme des fixtures** (`état → commande → état`) — la même forme que les fixtures Operation DSL (S10) du runtime. L'outil qui code AIDOS et la méthode qu'il outille partagent la grammaire.
+- **Le mandat A, rendu mécanique.** « Au plus cinq scénarios » n'est pas une consigne molle dans une doc : c'est `MAX_SCENARIOS`, un seuil **déclaré** (jamais appris) que `diagnose` applique et qui force le verdict `rejected`. La règle de méthode devient un invariant de code, prouvé par une property.
+- **Affûter le langage est une décision traçable.** Chaque remplacement de terme émet un **ADR candidat** : on ne change pas le vocabulaire en passant, on **propose** une décision à tracer. C'est §9 (anti-overwrite) appliqué au langage : un terme canonique adopté est une décision enregistrée, pas une réécriture silencieuse.
+- **Content-adresser une intention.** `grillHash` donne à l'intention affûtée une **identité stable** (même brouillon → même empreinte) **avant** tout gel. C'est la même discipline que le kernel (la version est l'empreinte) appliquée un cran plus haut, au-dessus du mur : une intention grillée est déjà référençable, donc déjà traçable jusqu'à sa promotion `/goal`.

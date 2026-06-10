@@ -1,0 +1,51 @@
+---
+title: "WB2-10 · Le geste /grill — affûter une intention avant le kernel"
+description: "WB2-10 ajoute l'écran /v2/grill : le geste grill-with-docs (CLAUDE.md §6 phase 1) conduit comme un wizard guidé (XState + formulaire validé). Avant qu'une intention n'approche le kernel, on la grille : on borne ses scénarios (au plus cinq, mandat A), on affûte le langage (les termes ambigus deviennent les termes canoniques KRD), on prépare les deux pages de doc. La sortie est une intention affûtée + des ADRs candidats, avec un verdict calculé (nette ou floue). L'écran PROPOSE ; il n'écrit aucune vérité (le mur intact). La promotion reste idée → miroir → /goal."
+keywords: ["aidos", "krd", "WB2-10", "Workbench V2", "grill", "grill-with-docs", "intention", "affûtage", "scénarios", "Gherkin", "Given When Then", "≤ 5 scénarios", "mandat A", "ADR candidats", "langage canonique", "verdict", "nette", "floue", "wizard", "XState", "mur", "/goal", "/v2/grill", "ADR 0053"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-10](/steps/internals/wb2-10-grill).</Note>
+
+## En une phrase
+
+WB2-10 ouvre l'écran `/v2/grill` : un **wizard** qui vous fait **affûter une intention** — étape par étape — avant qu'elle n'approche le kernel, et la transforme en une **intention affûtée** assortie d'**ADRs candidats**.
+
+## Le problème que WB2-10 résout
+
+Une intention naît souvent floue, et formulée dans le mauvais vocabulaire (« je veux une *feature* prouvée en *bdd* »). Avant d'en faire une vérité, il faut la **griller** : la mettre à l'épreuve. Deux exigences se posent. D'abord, une intention doit tenir en **au plus cinq scénarios** (le mandat A : une behaviour se prouve en `Given / When / Then`, et une intention qui en réclame plus de cinq est trop grosse — il faut la découper). Ensuite, elle doit parler la **langue ubiquitaire** : un « feature » est une **cellule**, un « bdd » est un **miroir**, un « wall » est le **mur**. WB2-10 fait les deux d'un coup, et sans écrire la moindre vérité.
+
+## Ce que vous voyez à l'écran
+
+Un wizard en quatre étapes, avec un **fil d'étapes** (le stepper) qui montre où vous en êtes :
+
+1. **L'intention** — vous écrivez l'intention brute (« Conduire le grill comme une feature affûtée en bdd »).
+2. **Les scénarios** — vous ajoutez jusqu'à **cinq** scénarios `Given / When / Then`. Un compteur affiche `n / 5`. Au-delà de cinq, le grill refuse.
+3. **La revue** — un récapitulatif de l'intention et des scénarios ; un clic sur « Affûter ».
+4. **L'intention affûtée** — un encart **amber** : l'intention dont les termes ambigus ont été **remplacés** par les canoniques, le **verdict** (nette ou floue), la liste des **ADRs candidats** (un par terme affûté), les deux chemins de **doc** à écrire, et — noir sur blanc — qu'elle **n'a pas de miroir** et **n'a écrit aucune vérité**.
+
+Vous pouvez revenir en arrière, retirer un scénario, et « recommencer » pour affûter une autre intention.
+
+## Le verdict, calculé — jamais déclaré
+
+Le grill **calcule** son verdict, il ne le devine pas :
+
+- une intention vide, ou **plus de cinq** scénarios → **rejetée** (hors grammaire — pas de sortie) ;
+- une intention sans scénario, ou un scénario incomplet (un `Given/When/Then` manquant) → **floue** (pas encore falsifiable) ;
+- une intention avec un à cinq scénarios complets → **nette** (falsifiable).
+
+C'est une règle déclarée, la même à chaque fois : le même brouillon donne toujours le même verdict.
+
+## L'affûtage du langage, déterministe
+
+Affûter n'est **pas** reformuler. C'est un **remplacement** de termes selon une table déclarée (« feature » → « cellule », « test »/« bdd » → « miroir », « goal » → « /goal »…). Chaque terme remplacé devient un **ADR candidat** : « Adopter le terme canonique “cellule” (au lieu de “feature”) » — une décision à **tracer**, jamais un ADR déjà écrit. L'opération est **idempotente** : affûter deux fois donne le même résultat qu'affûter une fois.
+
+## Le mur, intact
+
+Affûter une intention **n'écrit jamais** une vérité (ni kernel, ni mirrors, ni fitness). L'écran **propose**. C'est la règle du mur (§2) : la sortie attend `idée → miroir → /goal`.
+
+## Comment savoir que c'est juste
+
+- Le **parcours complet** du wizard aboutit à une **intention affûtée** (amber, verdict nette) — prouvé par un e2e Playwright qui remplit chaque étape et clique « Affûter ».
+- Les **ADRs candidats** correspondent exactement aux termes affûtés — l'e2e vérifie « cellule » et « miroir ».
+- **Aucune écriture-vérité** n'est émise pendant le parcours — l'e2e surveille les requêtes et exige qu'aucune écriture ne parte.
+- Le grill est **déterministe** : la même intention produit toujours la même empreinte, au rechargement comme la première fois.
