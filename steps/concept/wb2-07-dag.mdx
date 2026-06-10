@@ -1,0 +1,64 @@
+---
+title: "WB2-07 · Le DAG de versions — branches, merges, identité = hash"
+description: "WB2-07 ajoute l'écran /v2/dag : le DAG de versions (S24) où l'espace des versions est un graphe, pas une ligne. Les nœuds sont des versions (phases stables, identité = hash content-addressé), les arêtes sont des ChangeSets. Le DAG est append-only : une ligne abandonnée n'est jamais détruite. La ligne de flottaison (§124) stratifie en deux bandes — above = vérité humaine, below = évolutionnaire. Rendu en React Flow, navigable (pan/zoom), chaque version cliquable. Projection de lecture : le mur reste intact."
+keywords: ["aidos", "krd", "WB2-07", "Workbench V2", "DAG", "version", "ChangeSet", "branch", "checkout", "rebranch", "append-only", "content-addressé", "hash", "ligne de flottaison", "above", "below", "stepping-stone", "React Flow", "pan", "zoom", "/v2/dag", "S24"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-07](/steps/internals/wb2-07-dag).</Note>
+
+## En une phrase
+
+WB2-07 ouvre l'écran `/v2/dag` : il **dessine l'espace des versions comme un graphe** (un DAG, pas une ligne), où chaque **nœud est une version** identifiée par son **hash**, chaque **arête est un ChangeSet**, et où **rien n'est jamais détruit** — une ligne abandonnée reste là, comme un tremplin (*stepping-stone*) pour plus tard.
+
+## Le problème que WB2-07 résout
+
+L'histoire d'un projet n'est pas une ligne droite. On ouvre une **branche** pour explorer une variante de vérité, on **revient sur un ancêtre** pour repartir autrement, on **rebranche** une nouvelle ligne depuis ce point. Si l'historique était une simple pile, revenir en arrière **écraserait** ce qui suit — et on perdrait la variante explorée.
+
+AIDOS refuse cet effacement : l'espace des versions est un **DAG append-only** (S24, KRD §120-§125). Chaque mouvement **ajoute**, jamais ne supprime. La ligne qu'on abandonne **reste dans le graphe** — elle pourra resservir. WB2-07 rend ce graphe **visible et navigable**.
+
+## Les nœuds, les arêtes, l'identité
+
+- Un **nœud** = une **version** (une phase stable). Son **identité est son hash** : le même corps (libellé, parents, strate) produit toujours le même identifiant (*content-addressing*). On ne numérote pas les versions ; on les **adresse par leur contenu**.
+- Une **arête** = un **ChangeSet** : la transaction qui mène d'une version à une autre.
+- Un nœud peut avoir **plusieurs parents** (c'est un DAG, pas un arbre) — d'où les **merges**.
+
+## Append-only : la ligne abandonnée n'est jamais détruite
+
+C'est le cœur de S24. Trois mouvements, tous **append-only** :
+
+- **Brancher** — ouvrir une ligne **alternative** de vérité depuis une phase stable.
+- **Revenir sur un ancêtre** (*checkout*) — ramener la **tête** sur une version antérieure. C'est un mouvement **arrière** : seule la tête bouge, la ligne abandonnée **reste intacte** dans le graphe.
+- **Rebrancher** — depuis cet ancêtre re-pointé, ouvrir une **nouvelle** ligne (la branche d'une branche). L'ancienne ligne **n'est jamais détruite**.
+
+Visuellement : la **tête courante** est mise en avant, la **ligne abandonnée** reste dessinée (en sourdine, pas effacée) — pour qu'on **voie** que rien n'a disparu.
+
+## La ligne de flottaison — deux bandes
+
+Le graphe est stratifié par la **ligne de flottaison** (§124), dessinée en **deux bandes** :
+
+- **above** — les branches de **vérité humaine** (ce que l'humain a déclaré, au-dessus du mur).
+- **below** — les branches **évolutionnaires** (les variantes explorées par la machine, en dessous).
+
+On distingue ainsi, d'un coup d'œil, ce qui est **truth** de ce qui est **exploration**.
+
+## Ce que vous voyez à l'écran
+
+- Un **résumé** : le nombre de versions (nœuds), de ChangeSets (arêtes), et la **tête courante**.
+- Les **deux bandes** (above / below) en légende.
+- Le **DAG** rendu en graphe, **navigable** : vous pouvez **pan** (déplacer) et **zoomer** (molette ou les boutons de zoom).
+- Au **clic sur une version**, son détail s'ouvre : son **hash**, ses **parents**, sa **strate**, si elle est la tête, et si elle est **atteignable depuis la racine** — en lecture seule.
+
+## Le mur, ici aussi
+
+`/v2/dag` est une **projection de lecture**. On regarde le graphe, on navigue, on inspecte — **on n'écrit rien**. Aucune écriture kernel/mirrors/fitness. Un vrai *branch / checkout / rebranch* passe par le CLI `aidos` (au-dessus du mur, via une approbation) ; l'écran, lui, ne fait que **montrer**.
+
+## Ce que WB2-07 vous permet de faire, concrètement
+
+1. **Voir** l'espace des versions comme un graphe, pas une ligne.
+2. **Naviguer** (pan / zoom) dans le DAG.
+3. **Distinguer** la tête courante, les lignes abandonnées (présentes, jamais effacées), et les deux bandes above / below.
+4. **Ouvrir** une version pour lire son hash, ses parents, son atteignabilité.
+
+## La suite
+
+Le DAG de versions est la **mémoire structurée** d'AIDOS : il garde toutes les lignes, même celles qu'on a quittées. Les six liens (WB2-08) viendront relier les versions et les kernels ; le merge sémantique (S25) joindra deux branches en **rejouant les miroirs**. Aujourd'hui le graphe est synthétique (le DAG canonique §120, déterministe) ; il reflétera le store réel quand celui-ci servira le DAG live — l'écran, lui, ne changera pas.

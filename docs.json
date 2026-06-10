@@ -499,7 +499,9 @@
        "steps/concept/wb2-05-grille",
        "steps/internals/wb2-05-grille",
        "steps/concept/wb2-06-anatomie",
-       "steps/internals/wb2-06-anatomie"
+       "steps/internals/wb2-06-anatomie",
+       "steps/concept/wb2-07-dag",
+       "steps/internals/wb2-07-dag"
       ]
      }
     ]
