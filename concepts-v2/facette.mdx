@@ -1,0 +1,38 @@
+---
+title: "La facette — l'axe orthogonal, la nature d'une vérité"
+description: "La facette est le second axe de toute vérité : la nature de ce qu'elle prouve, parmi huit facettes — fonctionnel (F), invariants (I), sécurité (S), budgets (B), fiabilité (R), évolutivité (V), maintenabilité (M), expérience (X). C'est l'axe orthogonal à la verticale : les facettes ne se mélangent pas (FKE-1.3)."
+keywords: ["aidos", "krd", "facette", "facet", "F·I·S·B·R·V·M·X", "fonctionnel", "invariants", "sécurité", "budgets", "fiabilité", "évolutivité", "maintenabilité", "expérience", "FKE-1.3", "axe orthogonal", "grille"]
+---
+
+<Note>Côté concept — aucune ligne de code. Voir l'onglet **Pour moi** pour le wiring des facettes.</Note>
+
+## En une phrase
+
+La **facette** est l'**axe orthogonal** d'une vérité : la **nature** de ce qu'elle prouve — fonctionnel, sécurité, fiabilité… — parmi huit facettes qui ne se mélangent jamais.
+
+## Les huit facettes (F·I·S·B·R·V·M·X)
+
+- **F — Fonctionnel** : ce que l'app fait (le comportement).
+- **I — Invariants** : ce qui est vrai sur tous les chemins (∀).
+- **S — Sécurité** : qui a le droit, ce qui est protégé.
+- **B — Budgets** : les seuils de performance et de coût.
+- **R — Fiabilité** : la résistance aux pannes.
+- **V — éVolutivité** : la capacité à changer sans casser.
+- **M — Maintenabilité** : la lisibilité, la navigabilité du code.
+- **X — eXpérience** : la qualité ressentie à l'usage.
+
+## Pourquoi « orthogonal »
+
+La verticale est **couplante** (descendre = préciser). La facette est **orthogonale** : les facettes **ne se mélangent pas** (FKE-1.3). Une vérité de sécurité au niveau opération ne se confond pas avec une vérité fonctionnelle au même niveau. On peut avoir, à un seul endroit de la verticale, des vérités de plusieurs facettes — chacune prouvée à part, par sa propre forme de miroir.
+
+## La grille : verticale × facette
+
+Croiser les deux axes donne la **grille** : une matrice **niveau × facette** (7 × 8). Chaque cellule compte les kernels qui résolvent à cette coordonnée. Les **sommes Σ** (par ligne, par colonne, au total) sont l'invariant cardinal : Σ lignes = Σ colonnes = total = nombre de kernels. **Aucune vérité n'est perdue ni comptée deux fois.**
+
+## Pourquoi ça compte
+
+Deux axes valent mieux qu'un (FKE-1.4). La verticale répond à *où* ; la facette répond à *de quelle nature*. Ensemble, ils permettent de voir d'un coup d'œil **où le produit est dense, où il est vide** — par exemple : aucune vérité de fiabilité au niveau entité.
+
+## La suite
+
+Une vérité posée sur la grille n'est jamais seule : elle s'accompagne de son miroir. C'est [les paires-miroir](/concepts-v2/paires-miroir).

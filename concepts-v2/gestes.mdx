@@ -1,0 +1,39 @@
+---
+title: "Les gestes — les procédures rejouables d'AIDOS"
+description: "Un geste est une procédure rejouable qu'on déclenche depuis un écran : grill (challenger une idée), goal (promouvoir une idée via son miroir), déploiement (émettre et déployer l'app), et bien d'autres. Tout se fait par écran : chaque opération a un contrôle qui la déclenche (ui-completeness, jamais de capacité headless). Sous le mur, le geste agit ; pour une vérité, il propose."
+keywords: ["aidos", "krd", "gestes", "geste", "skill", "grill", "goal", "déploiement", "ui-completeness", "action-capable", "contrôle", "écran", "propose", "changeset", "mur", "déterminisme"]
+---
+
+<Note>Côté concept — aucune ligne de code. Voir l'onglet **Pour moi** pour le détail de chaque geste.</Note>
+
+## En une phrase
+
+Un **geste** est une **procédure rejouable** qu'on déclenche **depuis un écran** — griller une idée, ouvrir un goal, déployer l'app — chacun lié à un **contrôle** qui l'exécute.
+
+## Quelques gestes
+
+- **grill** — challenger l'intention d'une idée et la router sur un verdict (nette → grillée, floue → spike, mauvaise → rejetée).
+- **goal** — promouvoir une idée en vérité **via son miroir** : ouvrir le but, mener rouge → vert, fermer **seulement** quand la garde non-jouable passe.
+- **déploiement** — émettre l'app (3 cibles), franchir la garde sécurité, obtenir une **URL live** en prod.
+- … et tous les autres : grilling, descente, impacts, why, conscience, émetteurs.
+
+## Tout se fait par écran
+
+La règle V2 : **tout se fait par écran**. Chaque opération qu'un geste développe a un **contrôle** qui la **déclenche** — atteignable **et exécutable** depuis un écran (**ui-completeness**). Aucune capacité **headless** : si un geste existe, un bouton le lance. Un Playwright e2e prouve que chaque contrôle s'exécute.
+
+## Le geste respecte le mur
+
+- **Sous le mur** (archive, projections) : le geste **agit directement**.
+- **Pour une vérité** (kernel/mirrors/fitness) : le geste **propose** — propose → ChangeSet → approbation. Un bouton « propose » lit et propose ; il n'écrit pas. À l'écran, ce bouton porte `data-proposes=goal` : il ouvre la porte légale, jamais une écriture directe.
+
+## Les gestes sont déterministes d'abord
+
+Ce qui **peut** être une fonction pure **doit** l'être (parse, validation, hash, diff, routage, score sur des poids déclarés, comptage, transformation, rendu). L'agent/LLM est l'**exception gardée**, réservée à la génération irréductible, isolée et re-vérifiée. Un geste qui ferait avec un agent ce qu'une fonction sait faire est une **lacune de déterminisme**. Chaque geste déterministe porte un **miroir de reproductibilité** (même entrée → même sortie).
+
+## Pourquoi ça compte
+
+Les gestes sont la **main** d'AIDOS sur la grille : ils rendent chaque capacité **atteignable, exécutable et prouvée** depuis l'interface, sans jamais contourner le mur ni glisser vers un agent là où une fonction suffirait.
+
+## La suite
+
+Un geste particulier place le besoin sur la verticale, sous garde : [l'AI Lab](/concepts-v2/ai-lab).

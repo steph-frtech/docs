@@ -1,0 +1,44 @@
+---
+title: "L'idée — la vérité candidate, au-dessus du mur"
+description: "L'idée est le point d'entrée de toute vérité dans AIDOS : une vérité candidate, formulée au-dessus du mur, avec sa provenance (humain ou incident). Elle n'a ni gel, ni miroir — c'est un souhait tant qu'elle n'est pas grillée, dotée d'un miroir, et promue par un /goal approuvé."
+keywords: ["aidos", "krd", "idée", "idea", "vérité candidate", "provenance", "mur", "grill", "goal", "ideas", "schéma ideas"]
+---
+
+<Note>Côté concept — aucune ligne de code. Voir l'onglet **Pour moi** pour l'implémentation du schéma `ideas`.</Note>
+
+## En une phrase
+
+Une **idée** est une **vérité candidate** : ce que l'humain (ou un incident de production) veut voir devenir vrai, formulé **au-dessus du mur**, avant tout gel et avant tout miroir.
+
+## Ce qu'est une idée
+
+L'idée est la **seule porte** vers le kernel. Aucune vérité n'entre dans AIDOS autrement que comme une idée d'abord. Une idée porte :
+
+- son **intention** — ce qu'on veut, en langage clair ;
+- sa **provenance** — qui l'a voulue, quand, pourquoi (un humain, ou un signal de production via la boucle de réalité) ;
+- son **statut** — capturée, grillée, en spike, rejetée.
+
+Une idée **n'a pas de miroir** et **n'est pas gelée**. Tant qu'elle n'est pas prouvée, c'est un **souhait**.
+
+## Le chemin de l'idée vers la vérité
+
+```
+idée → grill → miroir → /goal → approbation humaine → kernel
+```
+
+- **Grill** : on challenge l'intention. Est-elle falsifiable ? Nette → grillée. Floue → spike. Mauvaise → rejetée (et tracée).
+- **Miroir** : une fois nette, l'idée reçoit son miroir (Gherkin, propriété, ou fixture) — la preuve de son comportement, écrite **avant** le code.
+- **/goal** : le miroir rouge devient le but. Rouge → vert. La fermeture est **calculée**, jamais déclarée.
+- **Approbation** : seul l'humain promeut une idée en vérité. L'agent ne franchit jamais le mur.
+
+## Où vit une idée
+
+Les idées vivent dans le schéma Postgres **`ideas`** — pas dans des fichiers épars. Chacune garde sa provenance. C'est le seul espace au-dessus du mur que l'agent peut alimenter (via la porte légale d'intake), sans jamais écrire le kernel.
+
+## Pourquoi ça compte
+
+La règle fondatrice d'AIDOS : **jamais prompt → code directement**. L'idée est le premier maillon de la chaîne `Idée → Miroir → Goal → Kernel`. Sauter ce maillon, c'est fabriquer un **monstre** (une vérité sans miroir, ou un code sans vérité).
+
+## La suite
+
+Une idée ne devient vérité qu'en franchissant un seuil qu'elle ne peut pas franchir seule : [le mur](/concepts-v2/mur).

@@ -1,0 +1,42 @@
+---
+title: "Le mur — la frontière que l'agent ne franchit jamais"
+description: "Le mur est la frontière infranchissable d'AIDOS : l'humain possède la vérité, l'agent possède l'implémentation. L'agent écrit le code librement, mais n'écrit jamais le kernel, les mirrors ni la fitness. Défense en profondeur : un hook PreToolUse refuse l'écriture, et les GRANT Postgres la rendent impossible."
+keywords: ["aidos", "krd", "mur", "wall", "frontière", "kernel", "mirrors", "fitness", "PreToolUse", "hook", "GRANT", "BlockReason", "propose", "changeset"]
+---
+
+<Note>Côté concept — aucune ligne de code. Voir l'onglet **Pour moi** pour le hook du mur et les GRANT Postgres.</Note>
+
+## En une phrase
+
+Le **mur** sépare ce que l'agent peut écrire (le **code**, librement) de ce qu'il ne touche **jamais** (la **vérité** : les schémas `kernel`, `mirrors`, `fitness`).
+
+## La règle, en trois rôles
+
+- **L'humain possède la vérité.** Lui seul promeut une idée en kernel.
+- **L'agent possède l'implémentation.** Il écrit le code, les projections, les adaptateurs — autant qu'il veut.
+- **Le harnais fait respecter le mur.** Aucune écriture de vérité ne passe « en passant ».
+
+## Défense en profondeur
+
+Le mur tient à **deux niveaux**, pour que la frontière ne dépende jamais d'une seule garde :
+
+1. **Le hook `PreToolUse`** (un binaire Go) : il refuse toute écriture dans une zone interdite et renvoie un **BlockReason** actionnable (`code`, `severity`, `explanation`, `how_to_fix[]`) — il dit *pourquoi* et *comment faire autrement*.
+2. **Les GRANT Postgres** : le rôle base de l'agent **n'a aucun droit d'écriture** sur les tables de vérité. Même si un hook tombait, la base refuserait. Seul le CLI `aidos`, via un changeset approuvé, écrit la vérité.
+
+## La seule porte
+
+Pour changer une vérité, il n'y a qu'un chemin :
+
+```
+idée → miroir → /goal → approbation humaine
+```
+
+Jamais une écriture directe. À l'écran, c'est la même règle : les opérations **sous le mur** (archive, projections) agissent directement, mais une **écriture de vérité** passe par **propose → ChangeSet → approbation**. Un bouton qui « propose » lit et propose ; il n'écrit pas.
+
+## Pourquoi ça compte
+
+Sans le mur, l'agent pourrait écrire la vérité qu'il est censé prouver — la **circularité** : fabriquer le test puis le satisfaire. Le mur rend cette triche impossible. C'est ce qui fait d'AIDOS un système où **rien ne casse silencieusement** ce qui a été décidé par l'humain.
+
+## La suite
+
+De l'autre côté du mur se trouve ce que le mur protège : [le kernel](/concepts-v2/kernel).

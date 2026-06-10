@@ -1,0 +1,38 @@
+---
+title: "Les liens — comment les vérités se relient"
+description: "Les liens relient les vérités du kernel entre elles : compose (qui emboîte qui), contraint (un invariant qui borne un niveau), sème (la descente engendre la paire suivante), impacte (un changement propage une vague de rouge). Les liens sont typés et pondérés : ils portent la propagation et le calcul du blast radius."
+keywords: ["aidos", "krd", "liens", "links", "compose", "contraint", "sème", "impacte", "propagation", "vague de rouge", "blast radius", "poids", "semantic diff", "caused_by"]
+---
+
+<Note>Côté concept — aucune ligne de code. Voir l'onglet **Pour moi** pour les liens et la propagation pondérée.</Note>
+
+## En une phrase
+
+Les **liens** relient les vérités du kernel entre elles — *qui compose qui*, *qui contraint qui*, *qui impacte qui* — et c'est par eux que circule la **propagation**.
+
+## Les types de liens
+
+- **compose** : une vérité en **emboîte** une autre (le parcours compose ses vues, l'opération compose ses entités). C'est l'ossature de la verticale.
+- **contraint** : un **invariant** qui **borne** un niveau — vrai sur tous les chemins de ce niveau et de tous les niveaux sources au-dessus (le produit cartésien latéral).
+- **sème** : la **descente** (valider un niveau) **engendre** la paire-miroir du niveau suivant.
+- **impacte** : un changement à un endroit **propage** vers les vérités liées — une **vague de rouge**.
+
+## Les liens portent la propagation
+
+Quand une vérité change, AIDOS suit ses liens pour calculer le **blast radius** : quelles autres vérités sont touchées, lesquelles repassent au rouge. C'est le **SemanticDiff** — non pas un diff de texte, mais un diff de comportement, qui dit *ce qui se propage*.
+
+## Les liens sont pondérés
+
+Les liens portent des **poids** — **déclarés** au-dessus du mur, jamais appris. Un poids dit l'importance d'une propagation. Cela permet de prioriser : un changement qui touche une vérité fortement pondérée pèse plus lourd. Les poids sont de la vérité ; ils ne dérivent jamais de l'usage.
+
+## Lien de cause : `caused_by`
+
+Un lien particulier remonte la **causalité** : `caused_by`. D'un symptôme, on remonte de lien en lien jusqu'à la **cause racine** — c'est ce qui rend l'arbre du pourquoi navigable.
+
+## Pourquoi ça compte
+
+Sans liens, chaque vérité serait une île, et un changement pourrait casser silencieusement une vérité voisine. Les liens rendent la **propagation explicite et calculable** : rien ne casse en silence, parce que la vague de rouge est *visible* avant d'être appliquée.
+
+## La suite
+
+Les liens dessinent des structures plus grandes : [les arbres](/concepts-v2/arbres).

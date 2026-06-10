@@ -1,0 +1,34 @@
+---
+title: "Les arbres — les lectures arborescentes du kernel"
+description: "Les arbres sont les vues arborescentes d'AIDOS : l'arbre de composition (l'emboîtement des vérités le long de la verticale), le DAG des phases stables (l'histoire — branches, reverts, merges), l'arbre du pourquoi (du symptôme à la cause racine, via caused_by) et le graphe 3D de tout le projet. Ce sont des projections de lecture ; le mur reste intact."
+keywords: ["aidos", "krd", "arbres", "arbre", "composition", "emboîtement", "DAG", "phases stables", "branches", "revert", "merge", "arbre du pourquoi", "why tree", "caused_by", "graphe 3D", "projection", "mur"]
+---
+
+<Note>Côté concept — aucune ligne de code. Voir l'onglet **Pour moi** pour le DAG, le WhyTree et le graphe 3D.</Note>
+
+## En une phrase
+
+Les **arbres** sont les manières de **lire** le kernel en relief : par emboîtement, par histoire, par causalité, ou en graphe complet.
+
+## Les quatre arbres
+
+- **L'arbre de composition** — l'**emboîtement** des vérités le long de la verticale (le parcours compose ses vues, qui composent leurs contrôles…). Il répond à *qui contient qui*.
+- **Le DAG des phases stables** — l'**histoire** d'AIDOS : un unique graphe orienté acyclique dont les nœuds sont des **phases stables** et les arêtes des **changesets**. Il porte les **branches**, les **reverts** et les **merges**. Rien n'est détruit (append-only).
+- **L'arbre du pourquoi** (WhyTree) — d'un **symptôme**, on remonte de `caused_by` en `caused_by` jusqu'à la **cause racine**. Il répond à *pourquoi est-ce rouge*.
+- **Le graphe 3D** — la vue d'ensemble, façon Obsidian : tout le projet, ses vérités et ses liens, dans un seul espace navigable.
+
+## Tous des projections de lecture
+
+Aucun de ces arbres n'écrit une vérité. Les parcourir, déplier un nœud, remonter une cause : tout cela **lit**. Le **mur** (§2) reste intact — aucune écriture `kernel`/`mirrors`/`fitness`. Pour changer une vérité, on repasse toujours par idée → miroir → /goal.
+
+## Pourquoi quatre vues du même espace
+
+Une seule représentation ne suffit pas. L'emboîtement montre la **structure** ; le DAG montre le **temps** ; le WhyTree montre la **causalité** ; le graphe 3D montre l'**ensemble**. Ce sont quatre lectures du même kernel — on choisit celle qui répond à la question du moment.
+
+## Pourquoi ça compte
+
+Un kernel devient vite trop grand pour être tenu en tête. Les arbres le rendent **navigable** : on entre par n'importe quel nœud et on suit les liens — sans jamais risquer d'écrire la vérité qu'on explore.
+
+## La suite
+
+Au croisement d'une vérité, de son miroir et de son code se trouve l'unité vivante : [les cellules](/concepts-v2/cellules).

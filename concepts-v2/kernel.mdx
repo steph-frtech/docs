@@ -1,0 +1,45 @@
+---
+title: "Le kernel — le noyau de vérité exécutable"
+description: "Le kernel (noyau) est le cœur d'AIDOS : non pas un dossier de fichiers, mais un schéma Postgres qui stocke la vérité comme des AST (DSL : expr, policy, operation, control, action, entity). Il est content-addressed (la version est une empreinte) et append-only (rien n'est détruit, la tête est mutable). Le code en repo n'est qu'une projection."
+keywords: ["aidos", "krd", "kernel", "noyau", "Postgres", "AST", "DSL", "content-addressed", "append-only", "expr", "policy", "operation", "control", "action", "entity", "projection", "vérité"]
+---
+
+<Note>Côté concept — aucune ligne de code. Voir l'onglet **Pour moi** pour le schéma `kernel` et les AST en JSONB.</Note>
+
+## En une phrase
+
+Le **kernel** (noyau) est le petit cœur de **vérité exécutable** d'AIDOS — pas un dossier de fichiers, mais un **schéma Postgres** qui stocke chaque vérité comme un **AST**.
+
+## Ce que le kernel n'est pas
+
+Le piège : croire que le « kernel » est un répertoire de code. Il ne l'est pas. Le code (Go, `.feature`, composants Next) vit dans le dépôt git, mais ce n'est qu'une **projection** — régénérable, jetable. **La source de vérité est Postgres.**
+
+## Ce que le kernel stocke
+
+Le schéma `kernel` garde les **AST** des DSL (stockés en JSONB) :
+
+- **expr** — les expressions évaluables ;
+- **policy** — les règles d'autorisation ;
+- **operation** — les workflows (`state → command → events`) ;
+- **control** — les contrôles (un bouton-comme-source) ;
+- **action** — la liaison contrôle → opération ;
+- **entity** — les contrats/entités, source unique qui émet Go + DDL + types TS.
+
+À cela s'ajoutent les **invariants** et les **budgets**.
+
+## Deux propriétés cardinales
+
+- **Content-addressed** : la **version est l'empreinte** du contenu. Deux vérités identiques ont la même version ; changer un octet change la version. La reproductibilité est gratuite.
+- **Append-only** : **rien n'est détruit**. On ajoute, on supersède, on déprécie via le cycle de vie — la tête est mutable, l'histoire est intacte.
+
+## Réutiliser, ne pas réinventer
+
+Le kernel **stocke** le comportement comme AST, mais l'**évaluation** et la **génération** réutilisent des librairies mûres (CEL/`expr-lang` pour évaluer les expr, un moteur d'états pour les fixtures, sqlc + templates pour l'émission). Seul l'interpréteur de pas d'opération est maison.
+
+## Pourquoi ça compte
+
+Mettre la vérité **dans Postgres** (et non dans des fichiers) la rend **interrogeable, versionnée, et hors de portée de l'agent** (le mur agit sur les schémas, pas sur des fichiers). C'est le mandat B d'AIDOS : *toute la vérité + sa méta vivent dans Postgres*.
+
+## La suite
+
+Une vérité du kernel se range sur deux axes. Le premier, l'axe couplant : [la verticale](/concepts-v2/verticale).

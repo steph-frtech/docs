@@ -1,0 +1,35 @@
+---
+title: "L'AI Lab — le besoin placé sur la verticale, sous garde"
+description: "L'AI Lab est le banc d'essai du besoin : on pose une intention sur la verticale (le niveau où elle atterrit), sous garde. Le cerveau gauche déterministe clampe l'altitude, le mur reste intact (lit + propose, jamais d'écriture de vérité), et un fallback gère le cas où le besoin n'a pas de place nette. C'est l'élicitation du besoin avant tout /goal."
+keywords: ["aidos", "krd", "AI Lab", "besoin", "verticale", "altitude", "clamp", "cerveau gauche", "déterministe", "garde", "mur", "fallback", "élicitation", "BesoinGraph", "idée"]
+---
+
+<Note>Côté concept — aucune ligne de code. Voir l'onglet **Pour moi** pour l'AI Lab et l'élicitation du besoin.</Note>
+
+## En une phrase
+
+L'**AI Lab** est le **banc d'essai du besoin** : on y pose une **intention** sur la **verticale** — à l'**altitude** où elle atterrit — **sous garde**, avant tout /goal.
+
+## Poser le besoin sur la verticale
+
+Un besoin n'arrive pas avec son niveau écrit dessus. L'AI Lab le **place** : ce besoin parle-t-il du produit, d'un parcours, d'une vue, d'un contrôle, d'une opération, d'une entité ? Le niveau où il **atterrit** est son **altitude**. Placer le besoin, c'est commencer à le rendre **falsifiable** — l'amener vers une forme qui pourra recevoir un miroir.
+
+## Le cerveau gauche clampe l'altitude
+
+Le placement n'est pas laissé au hasard ni à un agent libre. Le **cerveau gauche déterministe** **clampe** l'altitude : il borne le niveau possible, refuse une réponse hors-altitude (rejet par schéma), et **calcule** le verdict de résolution — jamais déclaré. L'agent **phrase** le dialogue ; le **code juge**.
+
+## Le mur, ici aussi
+
+L'AI Lab vit **au-dessus du mur**, mais il **lit + propose** — il n'écrit **jamais** une vérité. Chaque réponse capturée sur un niveau qui mappe **émet une idée** via la porte légale d'intake ; un niveau qui ne mappe pas (parcours, vue, invariant) **n'émet rien** — aucun cast silencieux. Le kernel/mirrors/fitness reste intouché.
+
+## Le fallback
+
+Tout besoin ne tombe pas net sur la verticale. Quand l'intention est **floue**, l'AI Lab la **route vers le spike** (idée → grill → spike) : la zone d'exploration, cliquet OFF, code jetable, où l'on rend l'intention falsifiable avant qu'elle n'approche le kernel. Le **fallback** garantit qu'aucun besoin flou n'est forcé de force dans une altitude qui ne lui va pas.
+
+## Pourquoi ça compte
+
+L'AI Lab est l'**entrée humaine** du besoin dans AIDOS — l'endroit où une envie devient une **idée placée**, prête à devenir un backlog d'idées que l'app-builder consommera. C'est l'amont de toute la chaîne : besoin → idées → /goal → vérité.
+
+## La suite
+
+Une fois le besoin résolu en specs, la chaîne descend jusqu'au bout : [l'émission / déploiement](/concepts-v2/emission-deploiement).

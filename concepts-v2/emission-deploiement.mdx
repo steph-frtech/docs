@@ -1,0 +1,48 @@
+---
+title: "Émission / déploiement — de la spec à l'app en prod"
+description: "L'émission projette les specs du kernel en une app web réelle via des émetteurs déterministes (jamais un agent qui génère) ; le déploiement la met en prod derrière une garde sécurité fail-closed (auth, rate-limit) et une route Traefik vers une URL live https. Le plan de déploiement est content-adressé (appHash) et reproductible — même entrée, même plan. Le mur reste intact (ADR 0007, ADR 0052)."
+keywords: ["aidos", "krd", "émission", "émetteur", "déploiement", "deploy", "app émise", "Traefik", "URL live", "appHash", "content-adressé", "reproductible", "garde", "fail-closed", "auth", "rate-limit", "ADR 0007", "ADR 0052", "mur"]
+---
+
+<Note>Côté concept — aucune ligne de code. Voir l'onglet **Pour moi** pour les émetteurs et le plan de déploiement.</Note>
+
+## En une phrase
+
+L'**émission** transforme les specs du kernel en une **app web réelle** par des **émetteurs déterministes** ; le **déploiement** la met **en prod** derrière une garde sécurité, jusqu'à une **URL live**.
+
+## L'émission : des émetteurs, jamais un agent
+
+Une spec (l'entité, l'opération, le contrôle) est projetée en code par un **émetteur** — une **fonction déterministe**, jamais un agent qui génère. Une entité émet ses structs Go (sqlc), son DDL Postgres et ses types TS depuis **une seule source**. Le résultat est **reproductible** : même spec → mêmes octets (ADR 0007, *no-fork* — on réutilise le jumeau pur, on ne duplique pas la logique). C'est le mandat de **déterminisme** : l'émetteur l'emporte toujours sur la génération par LLM.
+
+## Le déploiement : la parenthèse sécurité FERMÉE
+
+Déployer n'est pas un simple `push`. C'est une **garde fail-closed et ordonnée** (ADR 0052) :
+
+1. **Auth d'abord** — non authentifié → `DEPLOY_GATE_UNAUTHENTICATED`, **aucun plan**.
+2. **Rate-limit ensuite** — quota dépassé → `DEPLOY_GATE_RATE_LIMITED`, **aucun plan**.
+
+Une garde refusée ne produit **aucun plan** et **aucune écriture** : elle renvoie un **BlockReason** actionnable. La parenthèse de sécurité est **fermée** avant toute action.
+
+## Le plan de déploiement, content-adressé
+
+Garde franchie, on **construit le plan** (`buildDeployPlan`) :
+
+- un **appHash** = l'empreinte des octets des **3 cibles** émises ;
+- un **planId** (`d-…`) dérivé ;
+- les **services** clos : `postgres`, `app`, `traefik` ;
+- une **route Traefik** : `subdomainOf(table).sagedesk.fr` → une **URL live https** (par ex. `https://order.sagedesk.fr`) ;
+- un **aperçu live** de l'app.
+
+Le plan est **reproductible** : re-planifier produit un plan **stable** (même appHash, même planId) — la preuve de reproductibilité. Un Order amputé (AST différent) donne un **appHash distinct** : le contenu *est* l'identité.
+
+## Le mur, jusqu'au bout
+
+Déployer **n'écrit aucune vérité**. L'écran lit les specs et **propose** ; l'opération de déploiement agit **sous le mur** (projections, infra), mais ne touche jamais `kernel`/`mirrors`/`fitness`. Le bouton qui mène à une vérité porte `data-proposes=goal`. Le mur tient jusqu'à la prod.
+
+## Pourquoi ça compte
+
+C'est la **fin de la chaîne** : `specs → app web → prod`. Tout ce qui précède (idée, kernel, verticale, facettes, paires-miroir, liens, cellules, gestes, AI Lab) converge ici — une app **émise déterministiquement** et **déployée sous garde**, avec une URL que l'on peut ouvrir, sans qu'une seule vérité n'ait été écrite à la main.
+
+## Boucler la carte
+
+Vous avez parcouru le schéma de bout en bout. Revenez à [l'index des concepts](/concepts-v2) pour relire une notion, ou descendez à nouveau depuis [l'idée](/concepts-v2/idee).

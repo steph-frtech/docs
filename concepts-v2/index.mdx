@@ -1,0 +1,70 @@
+---
+title: "Les concepts — la carte de la grille V2"
+description: "L'index des concepts d'AIDOS, organisé selon le schéma de la grille V2 : de l'idée au mur, du kernel à la verticale et aux facettes, des paires-miroir aux liens, des arbres aux cellules, jusqu'aux gestes, à l'AI Lab et à l'émission/déploiement. Une entrée par concept, dans l'ordre où vous les rencontrez à l'écran."
+keywords: ["aidos", "krd", "concepts", "V2", "grille", "idée", "mur", "kernel", "verticale", "facette", "paire-miroir", "liens", "arbres", "cellules", "gestes", "AI Lab", "émission", "déploiement", "langage ubiquitaire"]
+---
+
+<Note>Côté concept — aucune ligne de code. Ces pages décrivent les notions ; pour le détail d'implémentation pas à pas, voir l'onglet **Pour moi → Les étapes**.</Note>
+
+## En une phrase
+
+**Les concepts** est la carte de lecture de la Workbench V2 : une page par notion, rangées dans l'**ordre du schéma** — l'ordre où elles apparaissent à l'écran, de l'**idée** brute jusqu'à l'**app émise et déployée**.
+
+## Pourquoi cette section existe
+
+La Workbench V2 organise tout autour d'un **schéma** unique. Cette section suit ce même schéma : chaque concept y est défini une fois, simplement, dans le même **langage ubiquitaire** que le code (kernel/noyau, miroir, cliquet, mur — gardés tels quels). Lisez-la dans l'ordre, et vous descendez la chaîne complète d'AIDOS.
+
+<Warning>
+**« BDD » ne veut jamais dire « la base de données ».** Ici **BDD = Behavior-Driven Development**, la méthode (`Given / When / Then` avant le code). La base, elle, s'appelle toujours **Postgres**.
+</Warning>
+
+## Le schéma, dans l'ordre
+
+<CardGroup cols={2}>
+  <Card title="L'idée" icon="lightbulb" href="/concepts-v2/idee">
+    La vérité candidate, au-dessus du mur — ce que l'humain veut, avant tout gel.
+  </Card>
+  <Card title="Le mur" icon="shield" href="/concepts-v2/mur">
+    La frontière infranchissable : l'agent écrit le code, jamais la vérité.
+  </Card>
+  <Card title="Le kernel" icon="atom" href="/concepts-v2/kernel">
+    Le noyau de vérité exécutable, stocké en Postgres, content-addressed.
+  </Card>
+  <Card title="La verticale" icon="arrow-down-wide-short" href="/concepts-v2/verticale">
+    L'axe couplant : produit → parcours → vue → contrôle → action → opération → entité.
+  </Card>
+  <Card title="La facette" icon="grid-2" href="/concepts-v2/facette">
+    L'axe orthogonal : la nature d'une vérité (F·I·S·B·R·V·M·X).
+  </Card>
+  <Card title="Les paires-miroir" icon="copy" href="/concepts-v2/paires-miroir">
+    Chaque vérité et son miroir, de part et d'autre du mur — l'anatomie d'un kernel.
+  </Card>
+  <Card title="Les liens" icon="link" href="/concepts-v2/liens">
+    Comment les vérités se relient : compose, contraint, sème, impacte.
+  </Card>
+  <Card title="Les arbres" icon="sitemap" href="/concepts-v2/arbres">
+    Les lectures arborescentes : l'emboîtement, le DAG, l'arbre du pourquoi.
+  </Card>
+  <Card title="Les cellules" icon="cube" href="/concepts-v2/cellules">
+    L'unité vivante : une vérité, son miroir, son code — réplicable et évoluable.
+  </Card>
+  <Card title="Les gestes" icon="hand-pointer" href="/concepts-v2/gestes">
+    Les procédures rejouables : grill, goal, déploiement… une action par geste.
+  </Card>
+  <Card title="L'AI Lab" icon="flask" href="/concepts-v2/ai-lab">
+    Le banc d'essai du besoin : poser une intention sur la verticale, sous garde.
+  </Card>
+  <Card title="Émission / déploiement" icon="rocket" href="/concepts-v2/emission-deploiement">
+    De la spec à l'app web, jusqu'à la prod — émetteurs déterministes, URL live.
+  </Card>
+</CardGroup>
+
+## Comment lire cette section
+
+1. **Dans l'ordre** : chaque page suppose la précédente. L'idée précède le mur, le mur précède le kernel, etc.
+2. **Une notion par page** : court, accessible, sans code.
+3. **Les mots sont gardés tels quels** : kernel, miroir, cliquet, mur, verticale, facette — ce sont des mots de vérité, on ne les traduit pas.
+
+## La suite
+
+Commencez par [l'idée](/concepts-v2/idee) — le point d'entrée de toute vérité dans AIDOS — puis descendez la chaîne jusqu'à [l'émission/déploiement](/concepts-v2/emission-deploiement), où la spec devient une app web en prod.

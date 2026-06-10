@@ -1,0 +1,39 @@
+---
+title: "Les paires-miroir — chaque vérité face à sa preuve"
+description: "Une paire-miroir associe une vérité du kernel à son miroir : la preuve exécutable de son comportement, écrite avant le code. L'anatomie d'un kernel est faite de paires-miroir disposées autour du mur — la vérité d'un côté, le miroir de l'autre. Trois formes de miroir : Gherkin (parcours), propriété (invariant), fixture (workflow)."
+keywords: ["aidos", "krd", "paire-miroir", "miroir", "mirror", "vérité", "anatomie", "Gherkin", "Godog", "propriété", "rapid", "fast-check", "fixture", "complétude", "monstre", "mur"]
+---
+
+<Note>Côté concept — aucune ligne de code. Voir l'onglet **Pour moi** pour l'anatomie d'un kernel et les formes de miroir.</Note>
+
+## En une phrase
+
+Une **paire-miroir** met face à face une **vérité** du kernel et son **miroir** — la preuve exécutable de son comportement, écrite **avant** le code.
+
+## Le miroir est la spec
+
+Dans AIDOS, **le miroir EST la spécification du comportement**. On n'écrit pas le code puis le test : on écrit le **miroir d'abord**, on le regarde **rouge**, puis on code jusqu'au **vert**. `rouge → vert → refactor`. Une vérité sans miroir est un **souhait** (un monstre) ; un miroir orphelin est un monstre aussi. La **loi de complétude** interdit les monstres.
+
+## Trois formes, une par nature de vérité
+
+- **Parcours / acceptance (N0)** → **Gherkin** `.feature`, joué par **Godog** (back) et **Playwright + playwright-bdd** (front).
+- **Invariant (∀)** → **test de propriété** (**rapid** en Go, **fast-check** en front).
+- **Workflow (N2)** → **fixture** `state → command → events` (l'interpréteur d'Operation DSL en Go).
+
+La forme se **dérive** de la nature : un parcours ne se prouve pas comme un invariant.
+
+## L'anatomie : des paires autour du mur
+
+L'**anatomie** d'un kernel, c'est l'ensemble de ses paires-miroir, disposées **de part et d'autre du mur** : la **vérité** (au-dessus, intouchable) et son **miroir** (la preuve). Lire l'anatomie d'un kernel, c'est voir, paire par paire, ce qui est *voulu* et ce qui le *prouve*.
+
+## Où vivent les miroirs
+
+Les miroirs vivent dans le schéma Postgres **`mirrors`** — avec leur source (texte Gherkin, spec de propriété, données de fixture). Le fichier `.feature` sur disque est **dérivé** : la base est la source, le disque est matérialisé pour le runner.
+
+## Pourquoi ça compte
+
+La paire-miroir est l'unité de **preuve** d'AIDOS. C'est elle qui garantit le mandat A : *aucune ligne de code sans un scénario rouge d'abord*. C'est aussi elle qui rend tout **non-régressif** : on rejoue les miroirs, et un miroir rouge bloque.
+
+## La suite
+
+Les vérités ne sont pas isolées : elles se relient. C'est [les liens](/concepts-v2/liens).

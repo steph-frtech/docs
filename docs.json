@@ -39,6 +39,24 @@
       ]
      },
      {
+      "group": "Les concepts (V2)",
+      "pages": [
+       "concepts-v2/index",
+       "concepts-v2/idee",
+       "concepts-v2/mur",
+       "concepts-v2/kernel",
+       "concepts-v2/verticale",
+       "concepts-v2/facette",
+       "concepts-v2/paires-miroir",
+       "concepts-v2/liens",
+       "concepts-v2/arbres",
+       "concepts-v2/cellules",
+       "concepts-v2/gestes",
+       "concepts-v2/ai-lab",
+       "concepts-v2/emission-deploiement"
+      ]
+     },
+     {
       "group": "Développer votre app",
       "pages": [
        "guide/getting-started",

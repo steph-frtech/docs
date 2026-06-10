@@ -1,0 +1,39 @@
+---
+title: "La verticale — l'axe couplant, du produit à l'entité"
+description: "La verticale est le premier des deux axes de toute vérité : son niveau dans l'architecture, du produit jusqu'à l'entité (produit → parcours → vue → contrôle → action → opération → entité, §23). C'est l'axe couplant : descendre d'un niveau, c'est entrer dans le détail. Valider une spec à un niveau engendre la paire suivante en dessous."
+keywords: ["aidos", "krd", "verticale", "niveau", "§23", "produit", "parcours", "vue", "contrôle", "action", "opération", "entité", "axe couplant", "descente", "anatomie"]
+---
+
+<Note>Côté concept — aucune ligne de code. Voir l'onglet **Pour moi** pour la descente de l'anatomie.</Note>
+
+## En une phrase
+
+La **verticale** est l'**axe couplant** d'une vérité : sa place dans l'architecture, du sommet (**produit**) jusqu'au sol (**entité**) — descendre d'un niveau, c'est entrer dans le détail.
+
+## Les sept niveaux (§23)
+
+De haut en bas :
+
+1. **Produit** — l'app dans son ensemble, son intention.
+2. **Parcours** — un voyage de l'utilisateur (journey/acceptance, N0).
+3. **Vue** — un écran, ses zones, ses données affichées.
+4. **Contrôle** — un bouton, sa règle de visibilité/activation.
+5. **Action** — la liaison du contrôle à une opération.
+6. **Opération** — le workflow `state → command → events` (N2).
+7. **Entité** — le contrat de données, source unique des projections (N3).
+
+## Pourquoi « couplant »
+
+La verticale est **couplante** par opposition à l'axe orthogonal (la facette). **Descendre** un niveau, ce n'est pas changer de sujet : c'est **préciser le même sujet**. Le parcours implique des vues, la vue implique des contrôles, le contrôle implique une action, l'action implique une opération, l'opération implique des entités. Chaque niveau **dépend** de ceux du dessus.
+
+## La descente engendre la paire suivante
+
+Valider une vérité à un niveau ne s'arrête pas là : cela **engendre la paire-miroir du niveau juste en dessous**. Valider un parcours fait naître les vues ; valider une vue fait naître ses contrôles. La verticale n'est pas qu'une carte : c'est un **mécanisme de génération** — on descend en validant, et le détail apparaît au fur et à mesure.
+
+## Pourquoi ça compte
+
+La verticale donne à AIDOS sa **traçabilité de bout en bout** : du produit jusqu'au bouton et à l'entité, chaque vérité sait d'où elle vient et ce qu'elle implique. C'est l'ossature de l'app — l'axe le long duquel on lit *pourquoi* une chose existe.
+
+## La suite
+
+La verticale dit *où* dans l'architecture. L'autre axe dit *de quelle nature* : [la facette](/concepts-v2/facette).
