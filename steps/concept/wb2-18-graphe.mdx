@@ -1,0 +1,48 @@
+---
+title: "WB2-18 · Le graphe 3D façon Obsidian — naviguer « plein de specs » sur trois axes"
+description: "WB2-18 ajoute au Workbench V2 un écran /v2/graphe : un graphe 3D façon Obsidian où chaque spec (placée) et chaque spec du DAG existant est un nœud posé sur trois axes — x = la verticale (niveau), y = la facette, z = la profondeur d'anatomie (spec → sous-spec). Les liens dessinent la descente d'anatomie et l'impact sur le DAG existant ; les couleurs portent l'état (proposé / validé / réalisé ; impacté / résolu). Le graphe monte, tourne, zoome ; « Valider tout » résout la vague de rouge (rouge → vert) sous vos yeux. Le verdict de résolution est le même que la liste, la grille et les cellules. Le mur reste intact : le graphe lit et propose, il n'écrit aucune vérité."
+keywords: ["aidos", "krd", "WB2-18", "Workbench V2", "graphe", "graphe 3D", "Obsidian", "specs", "verticale", "facette", "anatomie", "profondeur", "nœud", "lien", "descente", "impact", "DAG", "vague de rouge", "proposé", "validé", "réalisé", "impacté", "résolu", "couleurs", "tourner", "zoomer", "déterministe", "mur", "propose", "/v2/graphe"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-18](/steps/internals/wb2-18-graphe).</Note>
+
+## En une phrase
+
+WB2-18 ajoute le **graphe 3D** façon **Obsidian** à l'AI Lab : quand il y a **beaucoup** de specs, une liste ne tient pas — un **graphe** oui ; chaque spec et chaque spec du DAG existant devient un **nœud** posé sur **trois axes** (niveau × facette × profondeur d'anatomie), et vous **tournez**, **zoomez**, et regardez la **vague de rouge** se résorber.
+
+## Le problème que ça résout
+
+Les écrans précédents montrent le besoin en **liste** (la verticale de WB2-15), en **anatomie** (la descente de WB2-16) et en **vague de rouge** (la liste d'impacts de WB2-17). Tant qu'il y a peu de specs, une liste suffit. Mais un vrai projet en compte des **centaines** : à ce moment, une liste plate ne laisse plus **voir** la structure — quelles specs sont proches, lesquelles s'enchaînent, lesquelles le besoin met en rouge.
+
+Un **graphe** le fait. Comme dans Obsidian, où chaque note est un point et chaque lien un trait, ici chaque **spec** est un point et chaque **descente** ou **impact** un trait — mais **en 3D**, sur les trois axes mêmes du modèle KRD.
+
+## Les trois axes
+
+Chaque nœud est **posé**, pas jeté au hasard. Sa position dit ce qu'il est :
+
+- **x — la verticale (niveau)** : produit → parcours → vue → contrôle → action → opération → entité. On lit la **hauteur** du besoin.
+- **y — la facette** : fonctionnel, sécurité, robustesse, valeur… La **dimension** que la spec adresse.
+- **z — la profondeur d'anatomie** : spec → comportement → scénarios → modèle → contrat → evidence. Le **degré de raffinement** (la sous-spec).
+
+Deux specs de **même** niveau, **même** facette et **même** profondeur tombent au **même** point : la position est une **adresse**, pas un effet de mise en scène.
+
+## Les liens et les couleurs
+
+- Les **liens de descente** relient une spec à sa sous-spec (l'anatomie d'une cellule).
+- Les **liens d'impact** relient une spec placée à la spec **existante** du DAG qu'elle touche.
+- Les **couleurs** portent l'état, comme partout dans le Workbench : **ambre** = proposé, **vert** = validé / résolu, **bleu** = réalisé, **gris** = DAG existant non touché, **rouge** = impacté (la vague de rouge).
+
+## Comment ça marche, vu de l'écran
+
+1. Vous choisissez un besoin d'exemple (par exemple « un tunnel de paiement »).
+2. Le graphe **monte** : les specs placées + le DAG existant + la vague de rouge apparaissent comme des nœuds sur les trois axes. Un résumé compte les specs, les nœuds du DAG, les impactées, les résolues et les liens.
+3. Vous **tournez** le graphe (glisser), vous **zoomez** (molette), vous **survolez** un nœud pour lire son libellé (facette · niveau · spec).
+4. Vous cliquez **« Valider tout → résoudre la vague de rouge »** : les nœuds du DAG impactés passent du **rouge** au **vert** sous vos yeux. « Réinitialiser » fait revenir le rouge.
+
+## Cohérent partout — et déterministe
+
+Le verdict **« cette spec impactée est-elle résolue ? »** est **le même** dans le graphe, la liste, la grille et les cellules : si un nœud est vert dans le graphe, sa ligne est verte dans la liste. Et le graphe est **déterministe** : les mêmes specs donnent **exactement** le même graphe — mêmes nœuds, mêmes positions, mêmes liens. Aucun aléa, aucune horloge : le rendu 3D est une bibliothèque, mais **la donnée** est une fonction pure, vérifiée par un test de reproductibilité.
+
+## Le mur reste intact
+
+Afficher, tourner, zoomer ou résoudre la vague de rouge n'écrit **aucune vérité**. Le graphe **lit** (les specs placées, le DAG existant, les impacts proposés) et **propose** ; il ne touche aucune spec du DAG. La promotion vers la vérité passe, comme toujours, par `idée → miroir → /goal → décision humaine`.
