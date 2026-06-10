@@ -1,0 +1,47 @@
+---
+title: "WB2-17 · Internals — impactResolved réutilisé, needImpacts/impactRows purs, et l'e2e « tout validé → tout vert »"
+description: "Internals de WB2-17 : le twin pur lib/v2/ai-lab.ts ré-exporte la machinerie d'impact de l'évaluateur v1 lib/ai-lab.ts (impactResolved / cellFullyHandled / allPlacementsHandled / validateImpacts / EXISTING_DAG / existingSpec) sans forker, et ajoute trois fonctions pures : needImpacts(raw) (clampe les impacts bruts à des ids du DAG réel), impactRows(placements, impacts) (la vue liste — chaque spec impactée + son voyant rouge/vert via le MÊME impactResolved que la grille/le graphe), et validateAllPlacements(placements) (« j'ai tout validé » → tous les placements proposés passent à validated). Le client AiLabClient.tsx ajoute la section « vague de rouge », le bouton Valider-tout, et les voyants par ligne. Le namespace bilingue v2AiLab gagne impactHeading/impactHint/validateAllBtn/impactRed/impactGreen. Le miroir fast-check épingle le déterminisme + le clamp + « valider tout → tout vert » ; l'e2e Playwright drive la résolution complète sans aucune écriture. Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "WB2-17", "internals", "impactResolved", "needImpacts", "impactRows", "impactTally", "allImpactsResolved", "validateAllPlacements", "cellFullyHandled", "allPlacementsHandled", "validateImpacts", "EXISTING_DAG", "existingSpec", "vague de rouge", "voyant", "rouge", "vert", "fast-check", "playwright", "déterministe", "mur", "FKE-38"]
+---
+
+<Note>Côté « Pour moi » — l'intérieur. Pour le concept, voir [Pour les futurs utilisateurs → WB2-17](/steps/concept/wb2-17-impacts).</Note>
+
+## Implémentation
+
+**Le twin `lib/v2/ai-lab.ts`** gagne la **vague de rouge**, bâtie par **réutilisation** de l'évaluateur v1 `lib/ai-lab.ts` (FK11) — aucune règle inventée :
+
+- **Réutilise & ré-exporte** (depuis `../ai-lab`) : `impactResolved(placements, level, facet)` (une spec impactée est résolue ssi sa cellule est entièrement traitée OU tout le besoin est validé), `cellFullyHandled` / `allPlacementsHandled` (les deux prédicats sur lesquels `impactResolved` repose), `validateImpacts(raw)` (le clamp des impacts bruts : ne garde que les ids du DAG réel, dédupliqué, ordonné), `EXISTING_DAG` (le seed du DAG du projet checkout), `ExistingSpec` / `existingSpec(id)` (la résolution d'un id vers sa spec), `DagImpact`.
+- **Ajoute** (le neuf de WB2-17) :
+  - `ImpactVoyant` = `"red" | "green"` et `ImpactRow` = `{ spec, reason, resolved, voyant }`.
+  - `needImpacts(impactsRaw)` = `validateImpacts(impactsRaw)` — le **clamp** de la vague de rouge proposée par le cerveau gauche (un id inventé est jeté).
+  - `impactRows(placements, impacts)` : pour chaque impact gardé, résout sa `spec` (`existingSpec`, ignore si absente), calcule `resolved = impactResolved(placements, spec.level, spec.facet)` (le **MÊME** prédicat que la grille/le graphe → cohérent partout), et donne `voyant = resolved ? "green" : "red"`. PURE + TOTALE + DÉTERMINISTE.
+  - `impactTally(rows)` = `{ red, green, total }` (le résumé d'en-tête), `allImpactsResolved(rows)` (true ssi ≥1 ligne et toutes résolues).
+  - `validateAllPlacements(placements)` : « j'ai tout validé » — chaque placement `proposed` passe à `validated`, les `realized` restent. PURE + TOTALE.
+- **Le registre `NEED_SAMPLES`** gagne un champ optionnel `impactsRaw` : la sortie BRUTE des impacts du cerveau gauche, alignée sur les cellules placées (donc résoluble) + **un id inventé** (`d-inexistant-ghost`) pour prouver le clamp à l'écran.
+
+**Le client `app/v2/ai-lab/AiLabClient.tsx`** :
+
+- État ajouté : `impacts` (les `DagImpact[]` gardés). `onPickSample(s)` passe `s.impactsRaw` à `runPlace`, qui pose `setImpacts(needImpacts(impactsRaw))` ; le fallback et le refus au mur posent `setImpacts([])`. Mémos : `rows = impactRows(placements, impacts)`, `tally`, `allGreen`.
+- Handler `onValidateAll()` : `setPlacements(prev => validateAllPlacements(prev))` — tout passe à validé, les `rows` se recalculent en vert.
+- Section `v2-ai-lab-impacts` (`data-all-green`) : l'en-tête + le compteur `v2-ai-lab-impact-tally` (`data-red`/`data-green`/`data-total`), le bouton `v2-ai-lab-validate-all` (désactivé quand `allGreen`), puis une ligne `v2-ai-lab-impact-<id>` par impact (`data-voyant="red|green"`, `data-resolved`) avec un badge ROUGE/VERT.
+- **Le namespace bilingue `v2AiLab`** (fr+en, diff **additif**) gagne : `impactHeading`, `impactHint`, `validateAllBtn`, `impactRed`, `impactGreen`. `page.tsx` ajoute ces clés à `KEYS`.
+
+**Les miroirs.** Le **miroir de reproductibilité** `lib/v2/ai-lab.test.ts` (Vitest + fast-check) gagne 7 tests WB2-17 : le clamp de `needImpacts` (ids du DAG seuls, l'id inventé jeté), le **déterminisme** de `needImpacts` et de `impactRows` (property), « au placement, **tout est rouge** », « **valider tout → tout vert** » (le critère de done), la **cohérence** (un besoin mono-cellule vire au vert quand sa cellule est validée), et la préservation des `realized` par `validateAllPlacements`. **32/32 GREEN** (15 WB2-15 + 10 WB2-16 + 7 WB2-17). L'**e2e Playwright** `tests/e2e/v2-ai-lab.spec.ts` gagne un test : choisir le besoin checkout, vérifier que la vague de rouge apparaît **toute rouge** (`data-all-green="false"`, `green=0`), que l'id inventé n'y figure pas (clamp), cliquer « Valider tout », et asserter `data-all-green="true"` + `data-red="0"` + **chaque ligne `data-voyant="green"`** + le bouton désactivé + **aucune écriture POST/PUT/PATCH/DELETE**. **4/4 GREEN.**
+
+## Méta
+
+**Pourquoi `impactResolved` est réutilisé et non recodé.** Le critère de done insiste : « cohérent partout (liste, grille, cellules, graphe) ». La seule façon **garantie** d'avoir le même verdict aux quatre endroits est de lire la **même** fonction. WB2-17 ne définit donc **aucun** nouveau prédicat de résolution — `impactRows` appelle l'`impactResolved` que `buildSpecGraph` (le graphe) et `requirementsRollup` (la grille) appellent déjà. La cohérence n'est pas une discipline qu'on espère tenir ; c'est une **conséquence structurelle** du partage de code.
+
+**Le clamp des impacts, jumeau du clamp des placements.** WB2-15 clampe les *cellules* inventées par le cerveau gauche ; WB2-17 clampe les *ids* inventés de la vague de rouge — par exactement le même patron (`validateImpacts` ne garde que les ids du DAG réel, jamais coercés). Le cerveau gauche **propose** où le besoin frappe ; le code **vérifie** que ce qu'il nomme existe vraiment. L'`impactsRaw` d'exemple inclut délibérément `d-inexistant-ghost` pour que l'e2e **prouve** ce rejet à l'écran.
+
+**`validateAllPlacements` rend tangible « j'ai tout validé ».** La sémantique de résolution de v1 dit qu'un impact se résorbe quand *sa* cellule est traitée **ou** quand **tout** le besoin l'est. Le second cas n'avait pas de geste : il fallait valider chaque paire de chaque cellule à la main. `validateAllPlacements` est ce geste — pur, total, sans aléa — qui fait passer le besoin entier à l'état validé d'un coup. Le bouton « Valider tout » n'invente aucune règle ; il **applique en masse** la validation que WB2-16 applique une paire à la fois.
+
+**Le mur, jusqu'à la résolution.** « Résoudre la vague de rouge » pourrait sonner comme « réparer le DAG ». Il n'en est rien : aucune spec existante n'est touchée, seules les **nouvelles** specs du besoin passent à validé. L'e2e le prouve : la résolution complète, un clic, **zéro** requête d'écriture. La vague de rouge est un **diagnostic** au-dessus du mur, pas une opération sur la vérité.
+
+## Méta-méta
+
+**La vague de rouge est l'impact du cliquet, rendu visible.** Le cliquet KRD (§ ratchet) dit : rien ne casse en silence ce qui était vert. WB2-17 montre la **face propositionnelle** de ce principe — avant même qu'un changement soit promu, l'écran révèle **quelles vérités acquises** il met en tension (le rouge). C'est la mise en scène, au-dessus du mur, de la **vague de rouge** que le moteur d'impact (S22) calcule sous le mur : voir d'abord ce qui rougit, valider ensuite ce qui le résorbe.
+
+**Cohérent partout = une seule source de vérité de calcul.** Le contrat AIDOS interdit de **dupliquer** un jugement (§9, anti-overwrite ; déterminisme-first §8). WB2-17 en est l'application littérale au prédicat de résolution : un **seul** `impactResolved`, lu par la liste, la grille, les cellules et le graphe. Si demain la règle de résolution évolue, elle évolue **en un point**, et les quatre vues bougent ensemble. La cohérence transversale n'est pas un test qu'on ajoute ; c'est l'**absence** de la duplication qui la rendrait fausse.
+
+**Le diagnostic précède la décision — et reste séparé d'elle.** WB2-17 boucle la triade de l'AI Lab : le cerveau gauche **propose** (placement + impact), le code **vérifie et calcule** (clamp + résolution déterministe), l'humain **décide** (la promotion via /goal). La vague de rouge enrichit le diagnostic sans jamais empiéter sur la décision : voir tout le rouge passer au vert **informe** l'humain qu'un besoin est cohérent avec l'existant — mais ne grave rien à sa place. Le code éclaire ; il ne tranche pas.

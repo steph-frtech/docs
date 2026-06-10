@@ -1,0 +1,35 @@
+---
+title: "WB2-17 · La vague de rouge — les specs existantes que le besoin impacte (rouge → vert)"
+description: "WB2-17 prolonge l'écran /v2/ai-lab : un besoin ne crée pas que des specs neuves — il TOUCHE aussi des specs déjà là (le DAG existant du projet). À droite, ces specs impactées apparaissent en ROUGE. Puis, quand vous validez le besoin (« Valider tout » ou paire par paire), elles se RÉSOLVENT — le rouge passe au VERT. La résolution est cohérente PARTOUT : la liste, la grille, les cellules et le graphe lisent le même verdict (le même impactResolved). Le mur reste intact : identifier l'impact et le résoudre, c'est valider des propositions de lab, jamais écrire la vérité du DAG."
+keywords: ["aidos", "krd", "WB2-17", "Workbench V2", "ai-lab", "impact", "vague de rouge", "specs existantes", "DAG", "résolution", "rouge", "vert", "valider tout", "impactResolved", "cohérent", "liste", "grille", "cellules", "graphe", "déterministe", "mur", "propose", "/v2/ai-lab", "FKE-38"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-17](/steps/internals/wb2-17-impacts).</Note>
+
+## En une phrase
+
+WB2-17 ajoute la **vague de rouge** à l'AI Lab : à droite de l'écran, le besoin montre **quelles specs existantes** il **impacte** (en rouge) ; puis, quand vous **validez** le besoin, ces specs se **résolvent** — le **rouge passe au vert** — et ce verdict est **cohérent partout**.
+
+## Le problème que ça résout
+
+Un besoin nouveau n'arrive jamais dans un projet vide. Il **touche** ce qui existe déjà : la boutique, le bouton Payer, l'entité Order. Si vous placez un besoin de paiement sans **voir** qu'il impacte la commande déjà spécifiée, vous risquez de casser, en silence, une vérité acquise.
+
+Sans WB2-17, le besoin n'affichait que ses **nouvelles** specs (la verticale de WB2-15) et leur **anatomie** (la descente de WB2-16). Il manquait l'**autre face** : les specs **déjà là** que ce besoin met en rouge — et la preuve que, une fois le besoin validé, ce rouge **se résorbe**.
+
+## Comment ça marche, vu de l'écran
+
+1. Vous choisissez un besoin (par exemple « un tunnel de paiement »).
+2. À gauche, le cerveau gauche place les nouvelles specs (WB2-15). À droite apparaît, en plus, une section **« La vague de rouge »** : les specs **existantes** que ce besoin touche, chacune en **ROUGE**.
+3. Un petit compteur résume l'état : combien de specs encore **rouges**, combien déjà **vertes**.
+4. Vous cliquez **« Valider tout → résoudre la vague de rouge »** (ou vous validez les specs une à une, comme dans WB2-16).
+5. Chaque spec impactée dont la cellule est maintenant validée passe au **VERT**. Quand tout est validé, **tout le rouge est devenu vert** ; le bouton « Valider tout » se désactive (plus rien à résoudre).
+
+## Cohérent partout
+
+La force de WB2-17 est que le verdict **« cette spec impactée est-elle résolue ? »** est **le même** partout dans le Workbench : la **liste** des impacts (cet écran), la **grille** niveau × facette, les **cellules**, et le **graphe** 3D lisent tous le **même** calcul. Pas de divergence possible : si une spec est verte dans la liste, elle est verte dans le graphe.
+
+Concrètement, une spec impactée est **résolue** quand **sa cellule** (son niveau × sa facette) est entièrement validée, **ou** quand **tout** le besoin est validé. C'est ce que veut dire « j'ai tout validé » : le besoin est traité, donc ses impacts se résorbent.
+
+## Le mur reste intact
+
+Identifier les specs impactées, puis les résoudre, n'écrit **aucune vérité**. La vague de rouge est une **proposition** du cerveau gauche ; la résolution n'est que la validation de **nouvelles** specs (au-dessus du mur). Aucune spec du DAG existant n'est modifiée par l'écran. La promotion vers la vérité passe, comme toujours, par `idée → miroir → /goal → décision humaine`.
