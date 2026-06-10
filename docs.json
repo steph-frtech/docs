@@ -503,7 +503,9 @@
        "steps/concept/wb2-07-dag",
        "steps/internals/wb2-07-dag",
        "steps/concept/wb2-08-liens",
-       "steps/internals/wb2-08-liens"
+       "steps/internals/wb2-08-liens",
+       "steps/concept/wb2-09-cellules",
+       "steps/internals/wb2-09-cellules"
       ]
      }
     ]

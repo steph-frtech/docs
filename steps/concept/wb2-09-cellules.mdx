@@ -1,0 +1,70 @@
+---
+title: "WB2-09 · Les cellules — une grosse app est une fédération de bounded contexts liés par contrat"
+description: "WB2-09 ajoute l'écran /v2/cellules : les cellules (bounded contexts = features = kernels grossiers, KRD §49). Une grosse app n'est jamais un seul Kernel indivis, mais une fédération délibérée de petites cellules. Par cellule : sa grille niveau × facette (le rollup, somme Σ), ses liens internes composes ↓ (la verticale dedans), et ses contrats depends_on / Pact → vers les autres cellules. Cliquer une cellule descend (drill-down) ; cliquer une case ouvre ses specs. La fédération partitionne les kernels : chaque kernel appartient à exactement une cellule, aucune spec perdue. Projection de lecture : le mur reste intact."
+keywords: ["aidos", "krd", "WB2-09", "Workbench V2", "cellules", "cells", "bounded context", "§49", "fédération", "federation", "Pact", "contrat", "depends_on", "composes", "grille", "niveau", "facette", "rollup", "Σ", "somme", "drill-down", "partition", "spec", "/v2/cellules"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-09](/steps/internals/wb2-09-cellules).</Note>
+
+## En une phrase
+
+WB2-09 ouvre l'écran `/v2/cellules` : il **dessine la fédération de cellules** (les bounded contexts, KRD §49) et, par cellule, **sa grille niveau × facette** (le rollup Σ), **ses liens internes `composes ↓`** et **ses contrats `depends_on` / Pact** vers les autres cellules — vous cliquez une cellule pour **descendre dedans**, et une case pour **ouvrir ses specs**.
+
+## Le problème que WB2-09 résout
+
+Une grosse application n'est **jamais** un seul Kernel indivis. Si tout vivait dans un bloc unique, la moindre évolution risquerait de tout casser, et l'agent qui code une partie devrait charger l'**univers entier**. AIDOS suit le KRD §43–§51 : une grosse app est une **fédération délibérée de petites cellules** — des **bounded contexts** (au sens DDD), chacun une *feature* cohérente, un « kernel grossier ».
+
+La règle clé : **la grandeur vit dans le NOMBRE de cellules, jamais dans la taille d'une**. On ne fait pas grossir une cellule ; on en ajoute. Chaque cellule reste petite, locale, compréhensible — et c'est leur **assemblage** qui fait l'application.
+
+## Ce qu'est une cellule
+
+Une cellule, c'est :
+
+- **Ses kernels** — les vérités de cette feature (sa verticale produit → … → entité, sa grille niveau × facette).
+- **Ses liens internes `composes ↓`** — la verticale (§23) qui descend **à l'intérieur** de la cellule (la vue compose le contrôle, le contrôle compose l'opération…).
+- **Ses contrats** — la **seule** façon dont elle parle aux **autres** cellules : un lien `depends_on` (un **contrat**, vérifié par **Pact**, §49). Le bounded context **est** la frontière : on ne tend pas la main dans les internals d'une voisine, on passe par un contrat.
+
+## Dedans vs dehors : la distinction cardinale
+
+| | À l'intérieur d'une cellule | Entre deux cellules |
+|---|---|---|
+| Lien | `composes ↓` (la verticale §23) | `depends_on` / **Pact** (un contrat §49) |
+| Sens | la descente couplante | une dépendance contractuelle |
+| Visibilité | les internals de la cellule | seulement le contrat public |
+
+Un lien `composes` dont les deux bouts sont dans la **même** cellule est **interne** ; un lien `depends_on` qui part d'une cellule et arrive dans une **autre** est un **contrat**. Cette distinction est ce qui permet à une cellule de **shipper localement** même quand la fédération entière est encore en flux (le fractal §43).
+
+## La grille par cellule — le rollup Σ
+
+Chaque cellule rend **sa propre grille niveau × facette** (la même matrice 7×8 que WB2-05, mais limitée aux kernels de la cellule), avec **ses sommes Σ** par ligne, par colonne, et son total. Le total de la grille d'une cellule **égale** son nombre de kernels — rien ne se perd dans le rollup.
+
+Et au niveau de la fédération : **la somme des Σ de toutes les cellules = le nombre total de kernels**. La fédération **partitionne** les kernels : chaque kernel appartient à **exactement une** cellule, **aucune spec n'est perdue ni comptée deux fois**. C'est le critère de done de WB2-09.
+
+## Ce que vous voyez à l'écran
+
+- Un **résumé** : le nombre de cellules, le total de kernels, le nombre de contrats inter-cellules.
+- Un **sélecteur de cellule** : un bouton par cellule (avec son compte de kernels).
+- Au clic, le **drill-down** de la cellule s'ouvre :
+  - sa **grille niveau × facette** (rollup Σ) ;
+  - ses **liens internes `composes ↓`** ;
+  - ses **contrats `depends_on` / Pact** (entrants ←, sortants →).
+- Au clic d'une **case** de la grille, **ses specs** s'ouvrent : la liste des kernels de cette case, chacun cliquable vers son **anatomie** (WB2-06).
+
+## Naviguer cellule → cases → specs — l'action de l'écran
+
+Le geste central de WB2-09 : **descendre**. Cliquez une cellule → vous voyez sa grille, ses liens internes, ses contrats. Cliquez une case (niveau × facette) → vous voyez **ses specs**, et de là vous ouvrez l'anatomie d'un kernel. Vous **naviguez la fédération** de haut (la liste des cellules) jusqu'au bas (une spec précise), de proche en proche.
+
+## Le mur, ici aussi
+
+`/v2/cellules` est une **projection de lecture**. On regarde les cellules, on descend, on inspecte un contrat — **on n'écrit rien**. Aucune écriture kernel/mirrors/fitness. Promouvoir un nouveau contrat reste le chemin canonique : **idée → miroir → /goal**.
+
+## Ce que WB2-09 vous permet de faire, concrètement
+
+1. **Voir** une grosse app comme ce qu'elle est : une fédération de petites cellules, pas un bloc.
+2. **Descendre** dans une cellule pour lire sa grille (rollup Σ), ses liens internes et ses contrats.
+3. **Vérifier** qu'aucune spec n'est perdue : la somme des cellules = le total de kernels.
+4. **Ouvrir** une case → ses specs → l'anatomie d'un kernel.
+
+## La suite
+
+Les cellules s'appuient sur les liens de WB2-08 (`composes ↓` internes, `depends_on` / Pact en contrats) et sur la grille de WB2-05 (le rollup par cellule). Elles préfigurent la **fédération à l'échelle** (S100–S105 de l'app-builder) : le second ratchet structurel sur le graphe de dépendances inter-cellules, la Context-Map, la vague de rouge qui fan-out d'une cellule à ses partenaires contractées. Aujourd'hui la fédération est synthétique (un graphe canonique déterministe : checkout, order, inventory) ; elle reflétera le store réel quand celui-ci servira les cellules live — l'écran, lui, ne changera pas.
