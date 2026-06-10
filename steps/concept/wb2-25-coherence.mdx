@@ -1,0 +1,44 @@
+---
+title: "WB2-25 · La passe de cohérence — nav V2 complète, le bon mot partout, la V2 en ligne"
+description: "WB2-25 est la passe de cohérence finale du Workbench V2 : une fois les vingt-et-un écrans construits (WB2-02..22), on vérifie que l'ensemble tient. Un registre déclaré recense chaque écran V2 avec son titre français — la source unique « quels écrans existent et comment ils s'appellent ». De ce registre, deux preuves automatiques découlent : la nav est complète (chaque route /v2/<slug> réelle est listée et joignable, aucun écran orphelin, aucun fantôme) et le vocabulaire est propre (aucun franglais accidentel dans les titres, les termes KRD français verbatim, les rares noms propres — Goal, Policy DSL, DAG — autorisés explicitement). La page d'accueil /v2 affiche désormais « Tous les écrans » : la liste cliquable de tout le Workbench V2. Côté prod, la V2 est servie à sa nouvelle URL (/v2) en https, et l'ancien Workbench reste joignable à / — rien n'est cassé, tout coexiste."
+keywords: ["aidos", "krd", "WB2-25", "Workbench V2", "cohérence", "nav complète", "registre des écrans", "lint vocabulaire", "franglais", "glossaire", "le bon mot", "déterministe", "coexistence", "bascule prod", "V2 en ligne", "/v2", "ancien Workbench", "déploiement", "Traefik", "mur", "/goal"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-25](/steps/internals/wb2-25-coherence).</Note>
+
+## En une phrase
+
+WB2-25 est la **passe de cohérence** qui clôt le Workbench V2 : on vérifie que les vingt-et-un écrans forment un **tout cohérent** — chacun joignable, chacun **bien nommé** — et on bascule la V2 **en ligne** sans rien casser de l'ancien.
+
+## Le problème que ça résout
+
+WB2-02 à WB2-22 ont construit le Workbench V2 écran par écran : l'idée, le grill, les kernels, la grille, la verticale, les liens, les arbres, les cellules, l'anatomie, le DAG, l'AI-Lab, le graphe, le pourquoi, la conscience, les émetteurs, le déploiement… Chaque écran a été livré **isolément**, avec son propre miroir. Mais un Workbench n'est pas une **pile** d'écrans : c'est un **ensemble**. Deux questions restent :
+
+1. **Tous les écrans sont-ils joignables ?** Un écran qu'aucune navigation n'atteint est un **écran orphelin** — du travail invisible. Inversement, une entrée de menu qui mène à une page inexistante est un **lien mort**. La nav doit être **complète** : exactement les écrans qui existent, ni plus ni moins.
+2. **Sont-ils tous bien nommés ?** Au fil de vingt-et-un écrans, un titre franglais a pu se glisser (« le dashboard », « les settings », « le workflow »). Le mandat KRD est **le bon mot partout** : les termes du glossaire, en français d'abord, verbatim. Il faut une **garde** qui le prouve.
+
+## La source unique : le registre des écrans
+
+WB2-25 introduit un **registre déclaré** des écrans V2 : une liste où **un écran = un slug = sa route** `/v2/<slug>` **+ son titre français + son titre anglais**. C'est l'**inventaire officiel** du Workbench V2, content-adressé (il porte une empreinte stable). Tout découle de là.
+
+De ce registre, deux preuves **automatiques** tombent :
+
+- **La nav est complète.** On compare le registre aux routes **réellement présentes** sur le disque (`app/v2/*/page.tsx`). Toute route réelle doit être déclarée (aucun écran orphelin) ; tout écran déclaré doit exister (aucun fantôme). Les deux ensembles doivent être **identiques** — la cohérence cardinale.
+- **Le vocabulaire est propre.** Chaque titre français est passé au crible d'une liste **déclarée** de mots franglais bannis (`wall`, `tree`, `link`, `cell`, `idea`, `dashboard`, `settings`, `workflow`…). Un titre fautif est **refusé**. Les rares noms propres KRD qui restent en anglais ou en sigle — **Goal** (le geste), **Policy DSL**, **DAG**, **Pact**, **AI-Lab** — sont autorisés **explicitement**, jamais devinés.
+
+## Ce que l'écran montre
+
+La page d'accueil **/v2** gagne une section **« Tous les écrans (nav complète) »** : la liste de **tout** le Workbench V2, chaque écran avec son titre français et sa route, **cliquable et exécutable**. C'est la nav complète rendue visible — on voit d'un coup d'œil l'intégralité des écrans, et on peut ouvrir n'importe lequel. La section porte l'**empreinte du registre** : si un écran est ajouté ou renommé, l'empreinte change.
+
+## La bascule en ligne, sans rien casser
+
+WB2-25 met la V2 **en production** :
+
+- la V2 est servie à sa **nouvelle URL** — le préfixe **/v2** — en https, derrière Traefik ;
+- l'**ancien Workbench** reste servi à **/**, intact. Aucune route V1 n'est touchée.
+
+C'est la **coexistence** : la V2 est en ligne, l'ancien est gardé. On peut comparer les deux, migrer progressivement, revenir en arrière — rien n'est détruit. C'est le principe d'AIDOS : on **ajoute**, on ne **remplace** jamais en écrasant.
+
+## Le mur, intact
+
+Toute cette passe est **en lecture seule**. Le registre **décrit** les écrans, il n'écrit aucune vérité. La nav **navigue**, le lint **vérifie**, l'écran **propose**. Rien ici ne franchit le mur : modifier le Workbench reste une affaire de specs et de `/goal`.

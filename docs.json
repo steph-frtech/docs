@@ -549,7 +549,9 @@
        "steps/concept/wb2-21-emetteurs",
        "steps/internals/wb2-21-emetteurs",
        "steps/concept/wb2-22-deploy",
-       "steps/internals/wb2-22-deploy"
+       "steps/internals/wb2-22-deploy",
+       "steps/concept/wb2-25-coherence",
+       "steps/internals/wb2-25-coherence"
       ]
      }
     ]
