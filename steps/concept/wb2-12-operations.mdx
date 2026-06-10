@@ -1,0 +1,53 @@
+---
+title: "WB2-12 · Les fixtures Operation DSL — rejouer un workflow : état → commande → events"
+description: "WB2-12 ajoute l'écran /v2/operations/[op] : une fixture Operation DSL (la forme N2 de vérité d'un workflow) rendue et exécutée comme une machine. Vous rejouez la fixture pas-à-pas — chaque verbe de l'opération est une commande qui peut émettre un event — et vous voyez les events apparaître dans l'ordre, l'état courant, et le graphe d'états complet. Rejouer ne lit que le comportement : aucune vérité n'est écrite. Une fixture refusée (une autorisation qui dit non) court-circuite et n'émet aucun event. Le verdict (les events émis égalent-ils les events attendus ?) est calculé, jamais déclaré."
+keywords: ["aidos", "krd", "WB2-12", "Workbench V2", "Operation DSL", "fixture", "état", "commande", "events", "workflow", "N2", "rejouer", "rejeu", "pas-à-pas", "machine", "XState", "graphe d'états", "React Flow", "verdict", "PASS", "authorize", "DENY", "refus", "createOrder", "mutate", "OrderCreated", "CartCleared", "mur", "/v2/operations", "ADR 0053"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-12](/steps/internals/wb2-12-operations).</Note>
+
+## En une phrase
+
+WB2-12 ouvre l'écran `/v2/operations/[op]` : vous **rejouez** une **fixture** de workflow comme une machine — **état → commande → events** — et vous voyez, pas à pas, les **events** s'émettre et le **graphe d'états** s'animer, sans qu'aucune vérité ne soit écrite.
+
+## Le problème que WB2-12 résout
+
+Un **workflow** (passer une commande, vider un panier, débiter un compte) est une suite de gestes ordonnés. Dans KRD, sa vérité (le niveau N2) n'est pas du code libre : c'est une **fixture** de la forme **état → commande → events** — un état initial donné, une commande déclenchante, et la **liste ordonnée des events** que l'opération doit émettre. C'est la preuve exécutable du comportement.
+
+Mais une fixture écrite sur papier ne se laisse pas inspecter. Comment **voir** un workflow se dérouler ? Comment vérifier, geste après geste, que la bonne séquence d'events sort, et que rien ne s'émet quand une autorisation refuse ?
+
+La réponse de WB2-12 : **rejouer la fixture comme une machine**. Chaque verbe de l'opération (valider, autoriser, lire, muter, retourner) devient une **commande** ; on avance d'un pas à la fois, et les events s'accumulent au fil des pas.
+
+## Ce que vous voyez à l'écran
+
+Trois zones, plus les commandes de rejeu :
+
+1. **L'en-tête de la fixture** — son nom (par exemple `createOrder/happy`), l'**état initial** (le given), la **commande** déclenchante, et les **events attendus**. Un badge **PASS / FAIL** dit si le rejeu produit bien les events attendus.
+2. **L'état courant du rejeu** — où en est la machine (au début : *état initial*), quel **verbe** vient d'être joué, et la liste des **events émis jusqu'ici** (cumulés, dans l'ordre). Au départ : aucun event.
+3. **Le graphe d'états** — les états de la machine (un par verbe) reliés par les commandes, rendu visuellement. Le nœud courant est mis en évidence au fil du rejeu.
+
+Et trois commandes : **« Avancer »** (jouer le pas suivant), **« Rejouer tout »** (aller jusqu'au bout d'un coup), **« Recommencer »** (revenir à l'état initial).
+
+## Rejouer, pas à pas
+
+Cliquez **« Avancer »** : la machine joue le premier verbe (valider l'entrée), puis le suivant (autoriser), puis lit le panier, puis **mute** — et c'est là qu'un **event** apparaît (`OrderCreated`), puis un autre (`CartCleared`). À la fin, la machine est **terminée**, et les deux events sont visibles **dans l'ordre**. C'est exactement la séquence que la fixture déclare attendre — d'où le **PASS**.
+
+## Le refus, montré en action
+
+Une fixture peut aussi prouver un **refus**. Sur `createOrder/denied`, l'**autorisation dit non** : la machine **court-circuite** — plus aucun verbe ne joue après l'autorisation, **aucun event** n'est émis, et l'état courant est marqué *denied*. C'est la règle de KRD (§93) « tout refus bloque à la frontière de l'opération », rendue visible : un workflow non autorisé ne mute rien, n'émet rien.
+
+## Le mur, intact
+
+Rejouer une fixture **n'écrit aucune vérité**. C'est une **lecture** du comportement : une mutation atteint le monde via une couture mockée (sous la ligne de flottaison), jamais une écriture réelle. L'écran montre ; il n'applique rien.
+
+## Le verdict, calculé
+
+Le badge PASS / FAIL n'est pas une opinion : c'est un **calcul**. Les events émis par le rejeu sont comparés, **dans l'ordre**, aux events attendus de la fixture. Égaux → PASS. Le rejeu est **déterministe** : la même fixture donne toujours la même séquence d'events, au rechargement comme la première fois.
+
+## Comment savoir que c'est juste
+
+- On **rejoue** la fixture pas-à-pas et les events apparaissent **dans l'ordre** (`OrderCreated` puis `CartCleared`) — prouvé par un e2e Playwright qui avance la machine.
+- Les **états** et les **events** sont **visibles** : l'état de la machine, le graphe d'états, la liste des events — l'e2e les exige à l'écran.
+- Une fixture **refusée** finit terminée **sans aucun event** — l'e2e le vérifie sur `createOrder/denied`.
+- **Aucune écriture-vérité** n'est émise pendant le rejeu — l'e2e surveille le réseau et exige qu'aucune écriture ne parte.
+- Le rejeu est **déterministe** : mêmes commandes → mêmes events (un miroir de reproductibilité par propriété l'épingle).

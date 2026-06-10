@@ -1,0 +1,66 @@
+---
+title: "WB2-12 · Internals — le twin de rejeu pur, la machine XState du curseur, le graphe React Flow et l'e2e du rejeu"
+description: "Internals de WB2-12 : le twin pur lib/v2/operations.ts (frames(fixture) → suite ordonnée de frames état→commande→events ; stateGraph(fixture) → nœuds/arêtes content-adressés pour React Flow ; verdict(fixture) calculé ; réutilise l'interpréteur S10 lib/operation.ts run/CREATE_ORDER), les fixtures CREATE_ORDER_HAPPY/CREATE_ORDER_DENIED + le registre clos FIXTURES + le routage slug↔id (-- pour /), la machine XState app/v2/operations/OperationReplayMachine.ts (curseur idle/finished, AVANCER/REJOUER_TOUT/RECOMMENCER, délègue tout au twin), le client OperationReplayClient.tsx (useMachine + ReactFlow), la page dynamique [op] + l'index, le lien geste depuis /v2/verticale, les miroirs fast-check + fixtures XState + e2e Playwright. Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "WB2-12", "internals", "operations.ts", "frames", "stateGraph", "verdict", "ReplayFrame", "OperationFixture", "OperationReplayMachine", "XState", "createActor", "useMachine", "ReactFlow", "@xyflow/react", "run", "CREATE_ORDER", "lib/operation", "fast-check", "playwright", "déterminisme", "mur", "ADR 0053"]
+---
+
+<Note>Côté « Pour moi » — l'intérieur. Pour le concept, voir [Pour les futurs utilisateurs → WB2-12](/steps/concept/wb2-12-operations).</Note>
+
+## Implémentation
+
+**Le twin de rejeu `lib/v2/operations.ts`** — la source unique de la LOGIQUE, PUR (aucun React/DOM, aucun LLM, aucune horloge, aucun aléa) :
+
+- Types : `OpStateKind` (`idle | step | done | denied`) ; `OperationFixture` (`id`, `op: Operation`, `state`, `deps: Pick<MockDeps, "authorizeAllow" | "cart">`, `command {name, input}`, `expectedEvents`) ; `ReplayFrame` (`index` — −1 = état initial, `command` — l'étiquette du verbe, `kind`, `events` — cumulés ordonnés, `done`) ; `StateNode` / `StateEdge` / `StateGraph` (la projection React Flow).
+- `frames(fixture)` : **le cœur**. Appelle l'interpréteur S10 (`run`) **une fois** pour la vérité des events, puis déroule les `op.steps` en frames : frame −1 = l'état initial (idle), puis une frame par verbe ; un `mutate` consomme le prochain event émis (`OrderCreated`, `CartCleared`) et l'ajoute au cumul ; un `authorize` qui a refusé (`res.denied`) devient `denied` et **court-circuite** (la boucle `break`). PURE & TOTALE & déterministe.
+- `stepLabel(step)` (privé) : l'étiquette lisible d'un verbe (`validate X`, `authorize X`, `read E → slot`, `mutate E op`, `return ref`) ; jeu clos — un verbe inconnu lève (miroir de `operation.ts`).
+- `stateGraph(fixture)` : projette les frames en nœuds (`id = "s<index>"` content-adressé par position, `label`, `kind`) + arêtes (`source/target` consécutifs, `label` = la commande). Déterministe : `|nodes| = |frames|`, `|edges| = |frames|−1`.
+- `verdict(fixture)` : les events de la dernière frame égalent-ils, **dans l'ordre**, `expectedEvents` ? → `{events, pass}`. Calculé, jamais déclaré.
+- Fixtures canoniques : `CREATE_ORDER_HAPPY` (réutilise `CREATE_ORDER`, `HAPPY_STATE`, `HAPPY_CART` de S10 ; `authorizeAllow: true` ; attend `[OrderCreated, CartCleared]`) et `CREATE_ORDER_DENIED` (même op/état, `authorizeAllow: false`, attend `[]`).
+- Registre clos `FIXTURES` (par id) + routage : `fixtureBySlug(slug)` (`--` → `/`, undefined pour un inconnu — totalité), `fixtureSlug(id)` (`/` → `--`), `fixtureSlugs()`. `STEP_SLUG = "wb2-12-operations"`.
+
+**La réutilisation de S10** : l'interpréteur (`run`), l'ancre §93 `CREATE_ORDER`, l'état et le panier heureux (`HAPPY_STATE`, `HAPPY_CART`), le résolveur `$`-selector et le type `Operation`/`Step`/`MockDeps` viennent **tous** de `lib/operation.ts` (S10). Le twin ne **réinvente rien** : il **déroule** l'interpréteur existant en frames rejouables + un graphe d'états.
+
+**La machine `app/v2/operations/OperationReplayMachine.ts`** (XState v5, `setup().createMachine`) :
+
+- Contexte : `ReplayContext` (`fixture`, `allFrames` — pré-calculées par `frames`, `cursor` — l'index dans `allFrames`). `initialReplayContext(fixture)` construit `{fixture, allFrames: frames(fixture), cursor: 0}`. Le contexte est **injecté par `input`** (la fixture choisie par la route) — totalité.
+- États : `idle` (au début ou en cours) et `finished` (la dernière frame atteinte).
+- Événements : `AVANCER` (action `avancer` : `+1` borné à `length−1`), `REJOUER_TOUT` (action `rejouerTout` : saute à `length−1`, va à `finished`), `RECOMMENCER` (action `recommencer` : `cursor = 0`).
+- `AVANCER` depuis `idle` : si le pas suivant est le dernier → `finished` (action `avancer`) ; sinon reste `idle` (garde `aUnPasSuivant`). Un `always` mène à `finished` si le curseur est déjà au bout. **La machine ne juge rien** : elle ne fait qu'avancer un curseur dans des frames que **le twin** a calculées.
+
+**Le client `app/v2/operations/OperationReplayClient.tsx`** (`"use client"`) : `useMachine(operationReplayMachine, {input: initialReplayContext(fixture)})` ; la frame courante = `allFrames[cursor]` ; `verdict`/`stateGraph` mémoïsés ; le graphe `ReactFlow` (`@xyflow/react`) rend les nœuds positionnés verticalement (déterministe), le nœud courant surligné (`nodeStyle` via les tokens CSS `var(--primary)`/`var(--destructive)` — ADR 0010, aucun hex en dur) ; les contrôles `AVANCER`/`REJOUER_TOUT`/`RECOMMENCER` (désactivés à `finished` pour les deux premiers). Test-ids : `v2-op-fixture-id`, `v2-op-verdict`, `v2-op-machine-state`, `v2-op-current-step`, `v2-op-events`/`v2-op-event-N`/`v2-op-no-events`, `v2-op-graph`, `v2-op-step`/`v2-op-replay-all`/`v2-op-restart`.
+
+**Les pages** (Server Components) : `app/v2/operations/[op]/page.tsx` — `generateStaticParams` depuis `fixtureSlugs()`, `fixtureBySlug(op)` ou `notFound()` (totalité), puis `<OperationReplayClient/>` ; `app/v2/operations/page.tsx` — l'index qui liste `FIXTURES` (chaque entrée → `/v2/operations/<slug>` avec son badge `verdict`). Nouveau namespace i18n `v2Operations` (FR + EN). Le geste est rendu **reachable** depuis l'écran `/v2/verticale` (où vit le niveau `operation`) : `GrilleScreen` expose un lien `→ /v2/operations` (clé i18n `v2Grille.gestureOperations`).
+
+**Les miroirs** :
+
+- Reproductibilité — `lib/v2/operations.test.ts` (Vitest + fast-check, 14) : rejeu **déterministe** (frames deux fois identiques + property `fc.constantFrom`) ; frame initiale (idle, index −1, aucun event) ; `createOrder/happy` → `[OrderCreated, CartCleared]` à la dernière frame ; `authorize` DENY court-circuite (denied, dernière frame, aucun event) ; events **cumulatifs & monotones** (le préfixe conservé) ; `stateGraph` cohérent (`|nodes|`/`|edges|`, ids stables `s-1`…) ; `verdict` calculé (happy et denied passent) ; routage slug↔id bijectif, aucun `/` dans un slug, slug inconnu → undefined.
+- Transitions — `app/v2/operations/OperationReplayMachine.test.ts` (Vitest + `createActor`, 6) : démarrage idle/curseur 0 ; `AVANCER` pas à pas → `finished` + events cumulés ; `REJOUER_TOUT` saute au bout ; `RECOMMENCER` revient à idle/0 ; une fixture refusée finit finished sans event ; `AVANCER` borné (jamais hors-limite).
+- e2e — `tests/e2e/v2-operations.spec.ts` (Playwright, contre le build prod, 2) : on rejoue `createOrder/happy` pas-à-pas → `finished`, events `OrderCreated`/`CartCleared` visibles dans l'ordre, verdict PASS, `RECOMMENCER` → idle, **garde anti-écriture** (aucun POST/PUT/PATCH/DELETE) ; `createOrder/denied` via REJOUER_TOUT → finished, aucun event, état courant `denied`.
+
+## Méta
+
+- **Déterminisme-first.** Le rejeu est une **fonction pure** (`frames`), jamais un agent : la séquence d'events, leur cumul, le graphe d'états et le verdict sont du code. La machine XState n'**orchestre** qu'un **curseur** dans des frames déjà calculées ; elle ne décide d'aucun event. Le LLM n'entre nulle part. Le miroir de reproductibilité (fast-check) prouve : mêmes commandes → mêmes events.
+- **Réutiliser, ne pas réinventer.** Le twin **importe** l'interpréteur S10 (`run`, `CREATE_ORDER`, `HAPPY_STATE`, `HAPPY_CART`, les types) au lieu de le redéfinir. WB2-12 n'ajoute que la **mise en frames rejouables** et le **graphe d'états** — la couche de présentation d'une vérité N2 qui existe déjà. XState/React Flow (ADR 0053) sont le **rendu**, pas l'autorité.
+- **Le mur, prouvé deux fois.** Une mutation passe par une couture mockée (le `Mutator` de S10), jamais par une écriture réelle ; et l'e2e **surveille le réseau** — aucune écriture ne part pendant un rejeu. Rejouer est une lecture, par construction.
+- **Le refus, dans le modèle.** Le court-circuit `authorize` DENY n'est pas un cas spécial de l'UI : c'est une frame `denied` que **le twin** produit (`res.denied`), reflétée par l'état `finished` de la machine et le badge à l'écran. La §93 « tout DENY bloque » est portée par la donnée, pas par le rendu.
+- **ui-completeness.** Chaque geste de cet étage a un contrôle exécutable — « Avancer », « Rejouer tout », « Recommencer » — et l'e2e prouve qu'ils s'exécutent (les events apparaissent, l'état change, le refus n'émet rien). Aucune capacité headless.
+
+## Méta-méta
+
+- **Une fixture EST une machine.** La forme N2 de vérité d'un workflow (`état → commande → events`) n'est pas un document inerte : c'est une **machine à états** dont les états sont les pas de l'opération et les transitions les commandes. Rendre la fixture exécutable et observable (la rejouer, voir les events s'émettre) referme l'écart entre la **preuve écrite** et le **comportement vécu** — la même fixture qui sert de miroir au backend (Godog/Go) se rejoue ici sous les yeux.
+- **Le rejeu déterministe est la condition de la preuve.** Si rejouer la même fixture donnait des events différents, la fixture ne prouverait rien. C'est pourquoi `frames` délègue à un interpréteur **pur** et ne réintroduit aucune source de non-déterminisme : le déterminisme n'est pas un confort, c'est ce qui fait d'une fixture une **vérité** plutôt qu'une observation.
+- **Le content-addressing du graphe.** Les nœuds du graphe d'états sont identifiés par leur **position** (`s<index>`), donc le graphe est **stable** d'un appel à l'autre — même structure, mêmes ids. C'est la même discipline que le truth-store (l'identité = l'empreinte du contenu) appliquée à une projection visuelle : la vue d'un workflow est elle-même reproductible.
+- **Au-dessus / sous la ligne, à l'écran.** Le mur sépare la vérité (qu'on ne touche pas) des projections (qu'on rejoue). WB2-12 montre l'opération **sous** la ligne — son comportement, ses events, son graphe — sans jamais franchir vers le **dessus** (l'AST de l'opération, écrit seulement via un ChangeSet approuvé). L'écran rend tangible cette frontière : on peut tout **voir** d'un workflow sans rien pouvoir en **écrire**.
+
+## Fichiers
+
+- `front/web/lib/v2/operations.ts` — le twin pur (frames, stateGraph, verdict, fixtures, routage slug↔id).
+- `front/web/lib/v2/operations.test.ts` — le miroir de reproductibilité (Vitest + fast-check, 14).
+- `front/web/app/v2/operations/OperationReplayMachine.ts` — la machine XState (curseur idle/finished).
+- `front/web/app/v2/operations/OperationReplayMachine.test.ts` — les fixtures de transition (Vitest + `createActor`, 6).
+- `front/web/app/v2/operations/OperationReplayClient.tsx` — le client (useMachine + ReactFlow + contrôles).
+- `front/web/app/v2/operations/[op]/page.tsx` — la page dynamique (generateStaticParams, notFound).
+- `front/web/app/v2/operations/page.tsx` — l'index des fixtures.
+- `front/web/app/v2/grille/GrilleScreen.tsx` — le lien geste `verticale → /v2/operations` (ui-completeness).
+- `front/web/messages/{fr,en}.json` — le namespace i18n `v2Operations` + `v2Grille.gestureOperations`.
+- `tests/e2e/v2-operations.spec.ts` — l'e2e Playwright (rejeu, états/events visibles, refus, aucune écriture, 2).
