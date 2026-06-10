@@ -1,0 +1,34 @@
+---
+title: "WB2-00 · Internals — le groupe de routes /v2, le glossaire-twin et le lint vocabulaire déterministe"
+description: "Internals de WB2-00 : le groupe de routes app/v2/ (layout + shell + V2Header + V2Nav), le module lib/v2/glossary.ts (source unique des libellés V2, FR+EN+def par slug), le lint lib/v2/vocabulary-lint.ts (détection franglais, déterministe), le miroir de reproductibilité fast-check (totalité + déterminisme) et l'e2e Playwright (coexistence /v2 200 ∧ / 200). Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "WB2-00", "internals", "app/v2", "layout", "V2Nav", "V2Header", "glossary.ts", "vocabulary-lint.ts", "fast-check", "playwright", "next-intl", "shadcn", "ADR 0010", "ADR 0011", "ADR 0053", "déterminisme", "twin", "miroir"]
+---
+
+<Note>Côté « Pour moi » — l'intérieur. Pour le concept, voir [Pour les futurs utilisateurs → WB2-00](/steps/concept/wb2-00-fondation).</Note>
+
+## Implémentation
+
+**Le groupe de routes `app/v2/`** (Next.js App Router), distinct des routes actuelles, aucune touchée :
+
+- `app/v2/layout.tsx` — le shell V2 : `V2Header` en haut, `V2Nav` (aside) à gauche, contenu à droite. Le layout racine pousse le `<body>` de `sm:pl-64` pour la barre V1 ; la V2 ayant sa propre nav, on récupère la gouttière avec `sm:-ml-64`.
+- `app/v2/page.tsx` — `/v2` : la carte des concepts (une carte cliquable par entrée du glossaire) + la note du mur. Server Component, libellés via `getLocale()` + le glossaire.
+- `app/v2/[slug]/page.tsx` — `/v2/<slug>` : l'écran d'un concept (sa définition canonique à la fondation ; `generateStaticParams` depuis `SLUGS` ; un slug hors-glossaire → `notFound()`).
+- `app/v2/V2Header.tsx`, `app/v2/V2Nav.tsx` — Client Components (route active via `usePathname`, locale via `useLocale`), réutilisent le `LanguageSwitcher` partagé.
+
+**Le glossaire-twin `lib/v2/glossary.ts`** — la source unique : `GLOSSARY` (neuf `GlossaryEntry` : `slug`, `fr {label,def}`, `en {label,def}`), et les fonctions pures `entry`, `term`, `def`, `isTotal`, `glossaryHash` (FNV-1a 32 bits). `isTotal` = le critère de done : chaque concept a quatre cellules non vides, slugs uniques.
+
+**Le lint `lib/v2/vocabulary-lint.ts`** — `lintNav(navLabels, glossary)` : un libellé est conforme ssi (1) il est le terme FR d'un slug du glossaire ET (2) il ne contient aucun token de `FORBIDDEN_FRANGLAIS` (liste déclarée, jamais apprise). Verdict : `{clean, violations[]}`.
+
+**Le miroir** `lib/v2/glossary.test.ts` (Vitest + fast-check) : totalité, unicité des slugs, lint propre sur la nav, détection d'un hors-glossaire/franglais, round-trip `term`/`def` sur tout slug × locale, totalité (slug inconnu → `undefined`, jamais d'exception), `glossaryHash` déterministe. **L'e2e** `tests/e2e/v2-foundation.spec.ts` : coexistence (`/v2` 200 ∧ `/` 200), shell + en-tête + nav rendus, neuf concepts en nav, chaque carte navigue, retour V1.
+
+i18n : namespace `v2Shell` ajouté à `messages/{fr,en}.json` (chrome du shell) ; les libellés de concepts viennent du glossaire, pas des messages. Thème : tokens shadcn (`bg-background`, `text-foreground`, `border-border`, `bg-primary/…`), jamais de couleur en dur (ADR 0010).
+
+## Méta
+
+WB2-00 applique le **déterminisme-first** (CLAUDE.md §6/§8) à la lettre. Le « bon vocabulaire » n'est pas confié à un agent qui jugerait le franglais : c'est un **algorithme** — un set-membership (`canonicalFr`) + un scan de tokens (`FORBIDDEN_FRANGLAIS`). Le glossaire est un **twin pur** : la donnée (concepts, libellés, définitions) est code testé, jamais une chaîne dispersée dans les composants. Les libs de rendu (Next, next-intl) ne font que projeter cette donnée. C'est l'invariant de la V2 (WB2_PLAN) : « la donnée = projections pures testées dans `lib/`, les libs ne sont que du rendu ».
+
+Le **mur** (CLAUDE.md §2) tient sans effort ici : la fondation est en lecture seule, elle ne propose même pas encore (les wizards arrivent à WB2-03/10/11). La coexistence est une garantie de **non-régression** : la V2 est additive (CLAUDE.md §9 anti-overwrite), elle n'écrase aucune route.
+
+## Méta-méta
+
+WB2-00 est le **cliquet** qui permet aux 25 étapes V2 suivantes de cliquer sans dériver. En faisant du glossaire la **source unique** et en le gardant **total** (prouvé par propriété), chaque écran V2 ultérieur hérite d'un vocabulaire qui ne peut pas se contredire : ajouter un écran ne peut pas réintroduire un libellé en dur ni un franglais sans faire rougir le lint. Le glossaire devient lui-même un **garde-fou que la méta-boucle ne fait qu'enrichir** (CLAUDE.md §5) : on y AJOUTE des concepts, on n'en retire pas la totalité. Ainsi la refonte est monotone — chaque dent ajoutée laisse une phase stable que l'étape suivante consomme, et rien, jamais, ne casse silencieusement le vocabulaire de ce qui précède.

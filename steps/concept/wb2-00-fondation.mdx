@@ -1,0 +1,50 @@
+---
+title: "WB2-00 · La fondation du Workbench V2 — une refonte propre, à neuves URLs, l'ancien Workbench gardé, et un seul vocabulaire KRD"
+description: "WB2-00 pose la fondation du Workbench V2 : un groupe de routes /v2 (layout + shell + en-tête + nav par concept), distinct des routes actuelles qui restent servies. Le cœur est le glossaire canonique KRD (lib/v2/glossary.ts) : un concept = un slug → son terme FR + EN + sa définition, source UNIQUE de tous les libellés V2. La nav est prouvée sans franglais par un lint vocabulaire déterministe. /v2 et l'ancien / coexistent (200/200)."
+keywords: ["aidos", "krd", "WB2-00", "Workbench V2", "/v2", "shell", "navigation", "glossaire", "vocabulaire canonique", "idée", "mur", "kernel", "verticale", "facette", "paires-miroir", "liens", "arbres", "cellules", "franglais", "lint vocabulaire", "coexistence", "ADR 0010", "ADR 0011", "ADR 0053"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-00](/steps/internals/wb2-00-fondation).</Note>
+
+## En une phrase
+
+WB2-00 ouvre le **Workbench V2** : un groupe de routes **`/v2`** propre (shell + nav par concept), à côté de l'ancien Workbench qui reste servi — et un **glossaire canonique KRD** qui devient la source unique de tous les libellés, sans aucun terme franglais.
+
+## Le problème que WB2-00 résout
+
+Le Workbench actuel a grandi panneau par panneau. La V2 le rejoue **par concept**, avec le **bon mot partout**. Mais une refonte ne doit casser ni l'ancien, ni le vocabulaire. WB2-00 ferme trois pièges :
+
+1. **Casser l'existant.** La V2 vit sous le préfixe `/v2` ; **aucune route actuelle n'est touchée**. Les deux coexistent : `/v2` répond 200 **et** l'ancien `/` répond 200.
+2. **Le vocabulaire qui dérive.** Chaque écran réinventait ses libellés. WB2-00 crée **un** glossaire — un concept = un slug → son terme FR + EN + sa définition. Tout libellé V2 vient de là, jamais d'une chaîne en dur.
+3. **Le franglais.** « Wall », « Dashboard », « Idea »… WB2-00 ajoute un **lint vocabulaire** déterministe : la nav V2 ne peut contenir qu'un terme FR canonique, et aucun mot anglais banni. On dit **Mur**, pas « Wall » ; **Idée**, pas « Idea ».
+
+## Le glossaire : le schéma KRD, dans l'ordre du parcours
+
+Le glossaire liste les neuf concepts du schéma complet, dans l'ordre où on les rencontre :
+
+**idée → mur → kernel → verticale → facette → paires-miroir → liens → arbres → cellules.**
+
+- **Idée** — un candidat-vérité capturé au-dessus du mur (§115), sans gel ni miroir.
+- **Mur** — la frontière : au-dessus on déclare, en dessous on prouve ; franchie seulement par idée → miroir → /goal.
+- **Kernel** — une vérité gelée, content-adressée, append-only.
+- **Verticale** — l'axe couplant produit → … → entité (§23).
+- **Facette** — l'axe orthogonal des huit lentilles F·I·S·B·R·V·M·X.
+- **Paires-miroir** — l'anatomie 1-pour-1 d'un kernel autour du mur.
+- **Liens** — les six liens du §17, tous pinnés @version.
+- **Arbres** — les arbres fractals de composition.
+- **Cellules** — les contextes délimités reliés par contrats Pact.
+
+## Ce que vous voyez à l'écran
+
+`/v2` rend le **shell** : un en-tête V2 (avec la note de coexistence et le retour vers le Workbench actuel), une **nav par concept** à gauche, et la **carte des concepts** — neuf cartes cliquables, une par concept du glossaire. Cliquer une carte ouvre l'écran du concept (à la fondation, sa définition canonique ; les écrans riches arrivent aux étapes suivantes). Chaque libellé, chaque définition vient du glossaire — bilingue, français d'abord.
+
+## Le mur, intact
+
+Tout écran V2 **propose** ou **navigue** ; aucune écriture kernel/mirrors/fitness ne se fait depuis un écran hors du chemin idée → miroir → /goal. La fondation est une projection de lecture.
+
+## Comment savoir que c'est juste
+
+- Le glossaire est **total** : chaque concept a un libellé ET une définition non vides, en FR ET en EN (prouvé par propriété).
+- La nav est **sans franglais** : le lint vocabulaire ne laisse passer qu'un terme FR canonique (prouvé par propriété).
+- La **coexistence** est prouvée : `/v2` 200 et `/` 200 (e2e Playwright).
+- Chaque carte de concept **navigue** réellement vers son écran (e2e).
