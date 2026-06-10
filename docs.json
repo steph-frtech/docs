@@ -513,7 +513,9 @@
        "steps/concept/wb2-12-operations",
        "steps/internals/wb2-12-operations",
        "steps/concept/wb2-13-workflows",
-       "steps/internals/wb2-13-workflows"
+       "steps/internals/wb2-13-workflows",
+       "steps/concept/wb2-14-policy",
+       "steps/internals/wb2-14-policy"
       ]
      }
     ]

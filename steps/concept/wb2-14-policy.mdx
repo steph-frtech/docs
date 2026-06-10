@@ -1,0 +1,60 @@
+---
+title: "WB2-14 · Policy DSL — l'arbre de règles ALLOW / DENY (all · any · not)"
+description: "WB2-14 ajoute l'écran /v2/policy : une autorisation de KRD (§24.4) rendue comme un ARBRE RÉCURSIF de règles. Les combinateurs all (∧ — tout doit tenir), any (∨ — au moins un) et not (¬ — l'inverse) au-dessus de feuilles (égalité, comparaison, présence, motif), avec un scope (RESOURCE / OPERATION / ENTITY / FIELD) et un effet (ALLOW / DENY). Vous le dépliez en React Arborist, vous choisissez un contexte d'exemple, et l'arbre s'ÉVALUE : chaque nœud tient ou échoue, et la décision §93 « tout ALLOW passe, n'importe quel DENY bloque » apparaît. Le mur reste intact : évaluer ne touche aucune vérité."
+keywords: ["aidos", "krd", "WB2-14", "Workbench V2", "policy", "Policy DSL", "autorisation", "arbre de règles", "all", "any", "not", "combinateur", "feuille", "eq", "gt", "lt", "exists", "matches", "scope", "RESOURCE", "OPERATION", "ENTITY", "FIELD", "effet", "ALLOW", "DENY", "décision", "§93", "React Arborist", "déplier", "évaluer", "contexte", "canPlaceOrder", "mur", "/v2/policy", "§24.4"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-14](/steps/internals/wb2-14-policy).</Note>
+
+## En une phrase
+
+WB2-14 ouvre l'écran `/v2/policy` : vous **voyez** une autorisation comme un **arbre de règles** — des combinateurs **all / any / not** au-dessus de feuilles — et vous **l'évaluez** contre un contexte d'exemple, pour lire d'un coup d'œil la décision **autoriser** ou **bloquer**, et **pourquoi** (quel nœud tient, quel nœud échoue).
+
+## Le problème que WB2-14 résout
+
+Une autorisation n'est pas une case à cocher : c'est une **règle**, souvent composée. « Un utilisateur peut passer commande **si** il est connecté, **et si** le panier lui appartient, **et si** le panier n'est pas vide. » Trois conditions, liées par un **et**. Ailleurs ce sera un **ou** (l'une **ou** l'autre suffit) ou un **non** (l'inverse). Écrite en prose, cette logique est ambiguë ; cachée dans du code, elle est invisible.
+
+WB2-14 la montre telle qu'elle est dans le kernel : un **arbre**. Les nœuds internes sont les **combinateurs** (et / ou / non), les feuilles sont les **tests** concrets (une égalité, une comparaison, une présence, un motif). Vous dépliez l'arbre, vous l'évaluez, vous comprenez la décision.
+
+## Ce que vous voyez à l'écran
+
+- **L'en-tête de la policy** : son **scope** (à quoi elle s'applique — une ressource, une opération, une entité, un champ), sa **cible**, son **effet** (autoriser ou bloquer), et sa **composition** (combien de combinateurs, combien de feuilles).
+- **L'arbre de règles**, en React Arborist — déplié par défaut :
+  - les **combinateurs** : **all** (∧ — *tout* doit tenir), **any** (∨ — *au moins un*), **not** (¬ — *l'inverse*) ;
+  - les **feuilles** : une égalité, une comparaison (plus grand / plus petit), une présence, un motif.
+  Vous pouvez **replier** et **redéplier** chaque nœud pour explorer la structure.
+- **Le choix d'un contexte d'exemple** : un bouton par scénario (un utilisateur connecté, un panier vide, un champ secret…). En le choisissant, vous **évaluez** l'arbre.
+- **La décision**, calculée : **ALLOW** (autorisé) ou **DENY** (bloqué) — et chaque nœud de l'arbre **coloré** : il **tient** ou il **échoue**.
+
+## La loi : tout ALLOW passe, n'importe quel DENY bloque
+
+C'est la règle de combinaison de KRD (§93). Une policy a un **effet** :
+
+- un effet **ALLOW** autorise **seulement si** sa règle tient — sinon elle bloque ;
+- un effet **DENY** bloque **dès que** sa règle tient — sinon elle s'abstient (autorise).
+
+Autrement dit : pour autoriser, **toutes** les conditions d'autorisation doivent passer ; mais il suffit **qu'un seul** interdit s'applique pour bloquer. Le **DENY domine**. Sur l'arbre, vous le lisez directement : si la règle d'une policy DENY « fire », la décision bascule sur **bloqué**, point.
+
+## Un exemple, déplié
+
+Prenons `canPlaceOrder` (l'ancrage §93) : un **all** au-dessus de trois feuilles —
+
+1. l'utilisateur est **présent** (connecté) ;
+2. le panier **appartient** à cet utilisateur (une égalité) ;
+3. le panier contient **plus de zéro** article (une comparaison).
+
+Choisissez le contexte « utilisateur connecté, panier non vide qui lui appartient » : les trois feuilles **tiennent**, le **all** tient, la décision est **ALLOW**. Choisissez « panier vide » : la troisième feuille **échoue** (zéro n'est pas plus grand que zéro), donc le **all** échoue, et la décision est **DENY** — l'arbre montre exactement *quelle* condition a fait basculer.
+
+Une seconde policy, `denySecretField` (scope **champ**, un **any** avec un motif), illustre l'autre sens : dès que le champ commence par « secret », la règle **DENY** fire et la décision est **bloqué** ; sur un champ ordinaire, rien ne fire et c'est **autorisé**.
+
+## Le mur, intact
+
+Afficher un arbre de règles et l'évaluer contre un contexte d'exemple **n'écrit aucune vérité**. La policy elle-même (sa structure dans le kernel) n'est écrite que par le CLI `aidos`, via un ChangeSet approuvé. L'écran **lit** et **évalue** ; il ne propose ni n'applique aucune écriture. Comme partout dans AIDOS, la promotion d'une vraie règle reste le chemin idée → miroir → /goal.
+
+## Comment savoir que c'est juste
+
+- L'**arbre se déplie** : la racine et ses enfants sont présents, repliables et redéployables — un e2e Playwright l'exige à l'écran.
+- Un **cas évalue** : on choisit un contexte → la décision (ALLOW/DENY) s'affiche et chaque nœud est marqué « tient » ou « échoue » — l'e2e le prouve, sur un cas ALLOW **et** un cas DENY.
+- Le **DENY domine** : sur la policy de blocage, le cas interdit bloque et le cas ordinaire passe — l'e2e l'exige.
+- L'évaluation est **déterministe** : le même arbre, le même contexte, donnent toujours le même verdict — un miroir de reproductibilité par propriété l'épingle, dont la **domination du DENY** comme propriété.
+- **Aucune écriture-vérité** ne part pendant l'affichage ou l'évaluation — l'e2e surveille le réseau et exige qu'aucune écriture ne soit émise.
