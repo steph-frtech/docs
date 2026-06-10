@@ -1,0 +1,66 @@
+---
+title: "WB2-08 · Les six liens — un kernel relié, chaque lien pinné @version"
+description: "WB2-08 ajoute l'écran /v2/liens : les six familles de liens typés du KRD §17/§41 entre kernels — composes (verticaux), depends_on (horizontaux, Pact), supersedes (généalogiques), provenance (origine), triggers/binds (control), mirrors (paires-miroir). Chaque lien pointe une version (id@version), jamais une identité nue : c'est ce pinning qui fait que la vague de rouge (§42) sait détecter qu'un lien est périmé quand la tête de la cible bouge. Rendu en React Flow, navigable (pan/zoom), avec un filtre par famille de lien. Projection de lecture : le mur reste intact."
+keywords: ["aidos", "krd", "WB2-08", "Workbench V2", "liens", "links", "§17", "§41", "composes", "depends_on", "supersedes", "provenance", "triggers", "binds", "mirrors", "Pact", "version", "id@version", "pinné", "pinning", "identité nue", "vague de rouge", "§42", "stale", "périmé", "React Flow", "filtre", "pan", "zoom", "/v2/liens"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-08](/steps/internals/wb2-08-liens).</Note>
+
+## En une phrase
+
+WB2-08 ouvre l'écran `/v2/liens` : il **dessine les six familles de liens** (KRD §17/§41) qui relient les kernels entre eux, où **chaque lien pointe une version précise** (`id@version`) et **jamais une identité nue** — et il vous laisse **filtrer par famille** pour ne voir qu'un type d'arête à la fois.
+
+## Le problème que WB2-08 résout
+
+Un kernel ne flotte jamais seul. Une vue **compose** un contrôle, un contrôle **compose** une opération, une opération **dépend d'**une autre cellule, une version **remplace** une version antérieure, une vérité a une **provenance**, un contrôle **déclenche** une action qui **lie** une opération, une vérité a son **miroir**. Ces relations sont la **structure** d'AIDOS — et elles doivent être **typées** (on ne mélange pas une composition et une dépendance) et **versionnées**.
+
+Le piège classique : un lien qui pointe une **identité nue** (« ce kernel dépend de *create-order* »). Quand *create-order* évolue, le lien ne sait pas vers **quelle version** il pointait — il ne peut donc pas savoir s'il est devenu **périmé**. AIDOS l'interdit : **tout lien pinne sa cible par `id@version`**.
+
+## Les six familles de liens (§17/§41)
+
+| Famille | Sens | Exemple |
+|---|---|---|
+| **composes** (verticaux ↓) | un niveau N compose le niveau N+1 (la descente §23) | une vue compose son contrôle |
+| **depends_on** (horizontaux) | un contrat entre cellules (Pact §49) | une opération dépend d'une autre cellule |
+| **supersedes** (généalogiques) | une version remplace une version antérieure (le DAG §120) | create-order@v3 remplace create-order@v2 |
+| **provenance** (origine) | d'où vient une vérité (idée / incident, §27/§43) | une opération vient d'une idée |
+| **triggers/binds** (control) | un contrôle déclenche, une action lie une opération (S11) | un bouton déclenche, son action lie l'opération |
+| **mirrors** (paires-miroir) | une vérité ↔ son miroir (la paire bicéphale §17/S06) | une opération ↔ son fixture |
+
+C'est un **jeu clos** : il n'y a **que** ces six familles. Un lien d'une famille inconnue est refusé.
+
+## Le pinning @version : pourquoi c'est tout l'enjeu
+
+Chaque lien pointe une **version** : `create-order@v3`, pas `create-order`. C'est ce détail qui rend la **vague de rouge** (§42) possible :
+
+- Tant que la cible pointée est **la tête courante**, le lien est **sain** (vert).
+- Dès que la tête de la cible **bouge**, le lien pinné à l'ancienne version devient **périmé** (*stale*, rouge) — il pointe une version qui n'est plus la tête.
+- Si la cible **disparaît** entièrement, le lien est **absent** (rouge) — il pend bruyamment.
+
+Sans le pinning, rien de tout cela ne serait détectable : on ne saurait pas qu'un changement a **cassé** quelque chose en aval. Le pinning est ce qui transforme un changement en **onde** qui se propage et s'allume en rouge là où elle casse.
+
+## Ce que vous voyez à l'écran
+
+- Un **résumé** : le nombre de kernels (nœuds) et le nombre de liens (arêtes) affichés.
+- Une **barre de filtres** : « toutes les familles », puis un bouton par famille (avec le compte de liens de cette famille).
+- Le **graphe** rendu en React Flow, **navigable** : vous pouvez **pan** (déplacer) et **zoomer**. Chaque arête est colorée par sa famille.
+- Au **clic sur un lien**, son détail s'ouvre : sa **famille**, son `from`, sa **cible pinnée** (`id@version`) et son kind canonique — en lecture seule.
+
+## Le filtre par famille — l'action de l'écran
+
+Le geste central de WB2-08 : **filtrer par type d'arête**. Cliquez « composes » et le graphe ne montre **que** les liens de composition ; cliquez « mirrors » et il ne montre que les paires-miroir ; revenez à « toutes » et tout réapparaît. Le filtre est **réversible** et **exact** — il ne perd ni n'ajoute aucun lien.
+
+## Le mur, ici aussi
+
+`/v2/liens` est une **projection de lecture**. On regarde les liens, on filtre, on inspecte une cible pinnée — **on n'écrit rien**. Aucune écriture kernel/mirrors/fitness. Promouvoir un nouveau lien reste le chemin canonique : **idée → miroir → /goal**.
+
+## Ce que WB2-08 vous permet de faire, concrètement
+
+1. **Voir** comment les kernels sont reliés, par les six familles typées.
+2. **Filtrer** par famille pour isoler un type de relation (composition, dépendance, généalogie…).
+3. **Vérifier** que chaque lien pointe une **version** (`id@version`), jamais une identité nue.
+4. **Ouvrir** un lien pour lire sa cible pinnée et son kind canonique.
+
+## La suite
+
+Les six liens sont le **tissu** d'AIDOS : ils relient les versions (WB2-07) et les kernels (WB2-04) en un réseau cohérent. Les cellules (WB2-09) s'appuieront sur les liens internes `composes ↓` et les contrats `depends_on` / **Pact** pour fédérer les bounded contexts ; l'arbre `caused_by` (WB2-22) remontera ces liens d'un symptôme à sa cause racine. Aujourd'hui le graphe est synthétique (un graphe canonique déterministe) ; il reflétera le store réel quand celui-ci servira les liens live — l'écran, lui, ne changera pas.
