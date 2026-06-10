@@ -1,0 +1,45 @@
+---
+title: "WB2-01 · Les librairies du Workbench V2 — installées, prouvées au montage, chargées à la demande"
+description: "WB2-01 installe les librairies dont le Workbench V2 a besoin (react-arborist pour les arbres, react-aria-components pour des contrôles accessibles, xstate pour les wizards à états, react-hook-form + zod pour les formulaires validés, @xyflow/react pour les diagrammes ; bpmn-js différé) et prouve, à l'écran et exécutable, que chacune MONTE en client-only — un arbre, un bouton, une machine, un formulaire, un diagramme — sur un banc de sondes /v2/lab, le build vert, les bundles chargés paresseusement par route."
+keywords: ["aidos", "krd", "WB2-01", "Workbench V2", "librairies", "react-arborist", "react-aria-components", "xstate", "react-hook-form", "zod", "@xyflow/react", "bpmn-js", "smoke", "sonde", "client-only", "dynamic ssr false", "lazy", "bundle", "/v2/lab", "ADR 0053"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-01](/steps/internals/wb2-01-librairies).</Note>
+
+## En une phrase
+
+WB2-01 **installe** les briques visuelles du Workbench V2 et prouve, sur un **banc de sondes** (`/v2/lab`), que chacune **monte** réellement à l'écran — sans alourdir le démarrage, car chaque librairie est **chargée à la demande**.
+
+## Le problème que WB2-01 résout
+
+Le Workbench V2 va dessiner des arbres fractals, des wizards à étapes, des formulaires validés, des diagrammes de concepts. Plutôt que de réinventer ces briques, on **réutilise** des librairies mûres (mai 2026). Mais installer ne suffit pas : une librairie peut s'installer et **ne pas monter** (incompatible avec le rendu serveur de Next, par exemple). WB2-01 ferme ce piège — chaque librairie est **prouvée au montage**, à l'écran et exécutable, avant qu'aucun écran réel ne s'appuie dessus.
+
+## Les six librairies (et la septième, différée)
+
+- **react-arborist** — l'arbre virtualisé (l'arbre de composition des kernels, plus tard).
+- **react-aria-components** — des contrôles accessibles (boutons, champs).
+- **xstate** + **@xstate/react** — la machine à états des wizards (capturer une idée pas à pas).
+- **react-hook-form** + **zod** — le formulaire et sa validation.
+- **@xyflow/react** — le diagramme (la carte des concepts).
+- **bpmn-js** — **différé** : une OpenQuestion (ADR 0053). Déclaré, mais pas encore monté ; on ne prétend pas l'avoir prouvé.
+
+## Ce que vous voyez à l'écran
+
+`/v2/lab` est un **banc de sondes** : une carte par librairie, où la brique **s'exécute** vraiment. Vous y voyez un petit arbre dépliable, un bouton accessible qui compte vos clics, une machine qui passe de « repos » à « actif » et compte ses tours, un formulaire qui refuse un texte trop court puis l'accepte, et un diagramme à deux nœuds (Idée → Mur). Une bande signale honnêtement ce qui est **différé** (bpmn-js).
+
+Ce n'est **pas** une fonctionnalité — c'est une **preuve de montage**. Le banc est atteignable depuis l'en-tête V2.
+
+## Chargé à la demande
+
+Chaque librairie est lourde. Pour ne pas pénaliser le démarrage, les sondes sont **chargées paresseusement** (client-only) : le code d'une librairie n'arrive au navigateur que sur l'écran qui en a besoin. Le démarrage du Workbench reste léger ; le **build** est vert avec toutes les librairies.
+
+## Le mur, intact
+
+Le banc **prouve un montage** ; il n'écrit aucune vérité kernel/mirrors/fitness. C'est une projection de lecture, comme tout le shell V2.
+
+## Comment savoir que c'est juste
+
+- Le **build** Next est vert avec toutes les librairies installées.
+- Chaque librairie **monte et s'exécute** à l'écran (un arbre, un bouton, une machine, un formulaire, un diagramme) — prouvé par un e2e Playwright, une sonde par librairie.
+- **bpmn-js** est honnêtement marqué **différé** (déclaré, non monté).
+- Le registre des sondes est **déterministe** : même registre → même empreinte (prouvé par propriété).

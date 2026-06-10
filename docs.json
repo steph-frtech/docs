@@ -487,7 +487,9 @@
        "steps/concept/fk16-contract",
        "steps/internals/fk16-contract",
        "steps/concept/wb2-00-fondation",
-       "steps/internals/wb2-00-fondation"
+       "steps/internals/wb2-00-fondation",
+       "steps/concept/wb2-01-librairies",
+       "steps/internals/wb2-01-librairies"
       ]
      }
     ]

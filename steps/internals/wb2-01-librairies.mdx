@@ -1,0 +1,46 @@
+---
+title: "WB2-01 · Internals — le registre-twin des sondes, le banc /v2/lab en client-only et le build vert"
+description: "Internals de WB2-01 : l'installation des librairies V2 (react-arborist, react-aria-components, xstate + @xstate/react, react-hook-form, zod, @xyflow/react ; bpmn-js différé), le registre-twin déterministe lib/v2/lib-smoke.ts (source unique des sondes + hash content-addressed), le banc app/v2/lab (chaque sonde montée via dynamic(ssr:false), une par librairie), le miroir de reproductibilité fast-check et l'e2e Playwright (un montage prouvé par librairie). Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "WB2-01", "internals", "lib-smoke.ts", "app/v2/lab", "dynamic ssr false", "react-arborist", "react-aria-components", "xstate", "react-hook-form", "zod", "@xyflow/react", "bpmn-js", "lazy", "bundle", "fast-check", "playwright", "déterminisme", "twin", "ADR 0053"]
+---
+
+<Note>Côté « Pour moi » — l'intérieur. Pour le concept, voir [Pour les futurs utilisateurs → WB2-01](/steps/concept/wb2-01-librairies).</Note>
+
+## Implémentation
+
+**Installation** (npm workspace `@aidos/web`) : `react-arborist`, `react-aria-components`, `xstate` + `@xstate/react`, `react-hook-form`, `zod` (déjà présent), `@xyflow/react`. `bpmn-js` **différé** (OpenQuestion, ADR 0053).
+
+**Le registre-twin `lib/v2/lib-smoke.ts`** — la source unique des sondes, PUR (aucune dépendance React/DOM) :
+
+- `LIB_SMOKES` : un `LibSmoke[]` (`id`, `pkg`, `label`, `clientOnly`, `deferred`) — les six librairies + bpmn-js `deferred:true`.
+- `mountedSmokes()` : les sondes non différées (cinq) — ce que le banc monte et l'e2e voit s'exécuter.
+- `smokeById(id)`, `isTotal()` (id/pkg/label non vides, id uniques), `smokeRegistryHash()` (FNV-1a 32 bits hex) — content-addressed, idempotent.
+
+**Le banc `app/v2/lab/`** :
+
+- `page.tsx` — Server Component : titre/sous-titre via le namespace i18n `v2Shell`, l'empreinte `smokeRegistryHash()` affichée, la bande des différés (`LIB_SMOKES.filter(deferred)`), et `<LabClient/>`.
+- `LabClient.tsx` — Client Component : chaque sonde montée via `next/dynamic(..., { ssr:false })` (chargement paresseux), la liste pilotée par `mountedSmokes()` (jamais une chaîne en dur).
+- `smokes/{ArboristSmoke,AriaSmoke,XStateSmoke,RhfZodSmoke,FlowSmoke}.tsx` — une sonde minimale par librairie, chacune `"use client"`, themed (tokens shadcn).
+
+**L'en-tête** `V2Header.tsx` gagne un lien `v2-lab-link` → `/v2/lab` (le banc est atteignable depuis un écran).
+
+**Les miroirs** :
+
+- Reproductibilité — `lib/v2/lib-smoke.test.ts` (Vitest + fast-check) : totalité, les six libs requises + bpmn-js différé, cinq sondes montées, round-trip `smokeById`, hash déterministe. GREEN.
+- e2e — `tests/e2e/v2-lib-smoke.spec.ts` (Playwright) : le banc atteignable depuis l'en-tête, puis **une preuve de montage par librairie** (l'arbre affiche « Produit » ; le bouton aria compte un clic ; la machine xstate passe repos→actif et compte un tour ; le formulaire rhf+zod refuse « ab » puis accepte ; le diagramme xyflow affiche « Idée ») ; bpmn-js différé ∧ coexistence (`/v2/lab` 200 ∧ `/` 200). GREEN.
+
+**Bundles** : les librairies sont code-split par `dynamic(ssr:false)` — le code d'une lib n'arrive qu'à l'écran qui l'importe (lazy par route). `next build` vert avec toutes les libs ; `/v2/lab` est une route dynamique (ƒ), son First Load initial n'embarque pas les chunks de lib (chargés à la demande).
+
+## Méta
+
+- **Déterminisme-first.** Ce qui peut être une fonction pure l'EST : le registre des sondes, le tri des montées, le hash sont du code (twin `lib-smoke.ts`), pas un agent. Aucun LLM n'entre. La sonde elle-même (montage React) n'est pas une fonction pure → elle est prouvée par l'e2e, pas par le twin ; le twin prouve la **table**, l'e2e prouve le **montage**.
+- **Réutiliser, ne pas réinventer (ADR 0053).** Chaque besoin visuel V2 (arbre, contrôle accessible, machine, formulaire, diagramme) est délégué à une lib mûre choisie dans le slot gelé ; le step n'écrit que la colle minimale + la preuve de montage.
+- **Honnêteté du différé.** bpmn-js n'est pas prétendu prouvé : `deferred:true`, listé à l'écran, tracé comme OpenQuestion. Une capacité non montée n'est pas une capacité acquise.
+- **Le mur.** Le banc est une projection de lecture : il monte des composants, il n'écrit aucune vérité. `authority=below`.
+- **ui-completeness.** Le banc n'est pas headless : chaque sonde a un contrôle exécutable depuis l'écran, et l'e2e prouve qu'il s'exécute (clic, transition, validation).
+
+## Méta-méta
+
+- **Une lib se prouve au montage, pas à l'installation.** Le critère de done n'est pas « le `package.json` la liste » mais « elle monte et s'exécute à l'écran ». La frontière entre « installé » et « acquis » est un e2e, pas un `npm install`.
+- **Le twin et l'e2e se partagent la charge de preuve selon la nature de la vérité.** Ce qui est déterministe (la table des sondes) va au property test ; ce qui est un effet de bord (le montage DOM) va à l'e2e. Mettre le montage dans un property test serait un faux miroir ; mettre la table dans l'e2e serait du gaspillage. Chaque vérité à sa forme de miroir (Mandat A).
+- **Le lazy est une décision d'architecture, pas un détail.** `dynamic(ssr:false)` n'est pas qu'un contournement du rendu serveur : c'est le mécanisme qui garde le démarrage du Workbench léger malgré des libs lourdes. La preuve de montage et le découpage de bundle sont le même geste.
