@@ -1,0 +1,50 @@
+---
+title: "WB2-13 · Scénarios & workflows visuels — le pipeline étape · gate · décision"
+description: "WB2-13 ajoute l'écran /v2/workflows : un scénario de la verticale (le pipeline FKE-3) rendu comme un flux visuel. Là où WB2-12 montre une fixture comme une suite linéaire d'events, WB2-13 la projette comme un PIPELINE branché : ses verbes deviennent des étapes, l'autorisation devient un GATE, et le gate bifurque sur une DÉCISION (autorisé → la suite → succès ; refusé → l'arrêt). Vous l'affichez en React Flow (nœuds custom, pan/zoom) et vous déplacez un nœud — une édition PROPOSÉE, jamais écrite. Le mur reste intact : déplacer ne touche aucune vérité."
+keywords: ["aidos", "krd", "WB2-13", "Workbench V2", "workflow", "scénario", "pipeline", "FKE-3", "verticale", "flux", "étape", "gate", "décision", "branche", "allow", "deny", "React Flow", "nœud custom", "pan", "zoom", "édition proposée", "déplacer", "layout", "mur", "createOrder", "authorize", "succès", "arrêt", "/v2/workflows", "ADR 0053"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-13](/steps/internals/wb2-13-workflows).</Note>
+
+## En une phrase
+
+WB2-13 ouvre l'écran `/v2/workflows` : vous **voyez** un scénario de la verticale comme un **pipeline** — ses verbes en **étapes**, l'autorisation en **gate**, la bifurcation en **décision** (autorisé → la suite → succès ; refusé → l'arrêt) — et vous **déplacez** un nœud pour réagencer le flux, sans qu'aucune vérité ne soit écrite.
+
+## Le problème que WB2-13 résout
+
+À l'étape WB2-12, vous rejouez une fixture de workflow comme une suite **linéaire** : état → commande → events. C'est parfait pour suivre l'émission des events pas à pas. Mais un workflow n'est pas qu'une ligne droite : il a une **structure**. Il y a des étapes ordinaires, il y a des **points de garde** (une autorisation peut dire non), et chaque garde **bifurque** le flux — d'un côté la suite normale, de l'autre l'arrêt.
+
+WB2-13 montre cette **forme** : le **pipeline FKE-3**, un flux de la verticale dessiné comme un graphe branché. On ne suit plus seulement *ce qui s'émet* ; on voit *comment le flux se ramifie*.
+
+## Ce que vous voyez à l'écran
+
+- **La composition du pipeline** — un petit décompte : combien d'**étapes**, combien de **gates**, combien de **décisions**, combien de **bornes** (début / fin / arrêt).
+- **Le pipeline lui-même**, en React Flow — des **nœuds custom** :
+  - une **étape** (un verbe ordinaire : valider, lire, muter, retourner) ;
+  - un **gate** (l'autorisation — le point qui peut refuser), mis en avant ;
+  - une **décision** (la bifurcation du gate : *autorisé ? / refusé*) ;
+  - des **bornes** (le début, la fin en succès, l'arrêt en refus).
+  La branche **refusé** est tracée en rouge et mène toujours à un nœud **d'arrêt**. Vous pouvez **déplacer la vue** (pan), **zoomer**, et **déplacer chaque nœud**.
+- **Une légende** des nœuds, et l'**état de l'édition proposée** (le nœud déplacé et sa nouvelle position, ou « aucun déplacement proposé »).
+
+## Le flux, branché
+
+Prenons `createOrder` : valider l'entrée (étape), **autoriser** (gate), puis — si autorisé — lire le panier, créer la commande, vider le panier, retourner (des étapes), jusqu'au **succès**. Le gate est suivi d'une **décision** : la branche *autorisé* descend vers la suite ; la branche *refusé* part sur le côté vers un nœud **d'arrêt**. Les **deux** branches sont toujours dessinées — le pipeline montre la structure complète, pas seulement le chemin qu'un cas particulier emprunte.
+
+Sur un scénario **refusé** (`createOrder/denied`), c'est la même forme : le gate, la décision, et la branche *refusé* qui mène à l'arrêt. Le pipeline rend visible la règle de KRD (§93) « tout refus bloque à la frontière de l'opération ».
+
+## Déplacer un nœud — une édition proposée
+
+Vous pouvez **réagencer** le pipeline : attraper un nœud et le glisser ailleurs (ou cliquer un bouton qui propose un déplacement déterministe). La nouvelle position s'affiche. Mais c'est une **édition proposée** : un layout local, pour mieux lire le flux — **rien n'est écrit**. Un bouton **« réinitialiser »** ramène le pipeline à son agencement d'origine.
+
+## Le mur, intact
+
+Afficher un pipeline et déplacer ses nœuds **n'écrit aucune vérité**. L'agencement est une **proposition** de présentation, jamais appliquée au kernel. Comme partout dans AIDOS : l'écran propose, il n'applique rien. La promotion d'une vraie modification reste le chemin idée → miroir → /goal.
+
+## Comment savoir que c'est juste
+
+- Le **pipeline s'affiche** : le gate, la décision et les étapes sont présents et comptés — un e2e Playwright l'exige à l'écran.
+- On **déplace un nœud** (à la souris et par bouton) et la nouvelle position s'affiche — l'e2e le prouve.
+- **Aucune écriture-vérité** ne part pendant l'affichage ou le déplacement — l'e2e surveille le réseau et exige qu'aucune écriture ne soit émise.
+- Le pipeline est **déterministe** : le même scénario donne toujours le même graphe (mêmes nœuds, mêmes positions) — un miroir de reproductibilité par propriété l'épingle.
+- Déplacer est **immuable** : le graphe d'origine reste intact, seul le nœud visé bouge — la propriété le garantit.
