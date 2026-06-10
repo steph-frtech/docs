@@ -1,0 +1,48 @@
+---
+title: "WB2-03 · Internals — le twin d'idée pur, la machine XState du wizard et l'e2e du mur"
+description: "Internals de WB2-03 : le twin pur lib/v2/idea.ts (besoin → coordonnée → idée, validation, forme de miroir réutilisée de l'EL10, hash content-addressed, invariants hasMirror=false/wroteKernel=false), la machine XState app/v2/idee/IdeaWizardMachine.ts (5 états, transitions, délégation au twin), le client RHF/Zod app/v2/idee/IdeaWizardClient.tsx, la page Server Component, les miroirs fast-check + fixtures XState + e2e Playwright (parcours complet → idée amber, aucune écriture-vérité). Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "WB2-03", "internals", "idea.ts", "IdeaWizardMachine", "XState", "createActor", "useMachine", "react-hook-form", "zod", "composeIdea", "validateBesoin", "ideaHash", "levelMirrorForm", "EL10", "besoin-grammar", "facets", "coordonnée", "provenance", "hasMirror", "wroteKernel", "fast-check", "playwright", "déterminisme", "mur", "ADR 0053"]
+---
+
+<Note>Côté « Pour moi » — l'intérieur. Pour le concept, voir [Pour les futurs utilisateurs → WB2-03](/steps/concept/wb2-03-idee).</Note>
+
+## Implémentation
+
+**Le twin d'idée `lib/v2/idea.ts`** — la source unique de la LOGIQUE, PUR (aucun React/DOM, aucun LLM, aucune horloge) :
+
+- Types & jeux clos : `Provenance` (`humain | incident` + `PROVENANCES`), `FractalScale` (`cellule | kernel | feuille` + `FRACTAL_SCALES`), `FACET_LETTERS` (réutilisé de `lib/facets`, les huit lentilles FKE-1.3), `Besoin` (intent, level, facet, scale, provenance bruts), `Coordinate` (level × facet × scale), `Idea`.
+- `selectableLevels()` / `verticaleOrder()` : les niveaux proposables — **réutilisés de la grammaire besoin** (`allLevels()` = 7 rungs SOURCE + 2 bands ; `SOURCE_ORDER` = la verticale §23), jamais un fork.
+- `validateBesoin(b)` : la liste ordonnée & stable des `BesoinError` (`intent_too_short`, `level_unknown`, `facet_unknown`, `scale_unknown`, `provenance_unknown`) — l'oracle de validité, total.
+- `ideaHash(intent, coord, provenance)` : FNV-1a 32 bits hex sur la sérialisation canonique `intent | level×facet×scale | provenance` — content-addressed, déterministe.
+- `composeIdea(b)` : le cœur. Valide ; sinon `{ ok:false, errors }`. Sinon fige la `Coordinate`, **annexe la forme de miroir** via `levelMirrorForm(level)` (la table **EL10** de `lib/besoin-completeness`, réutilisée), content-adresse l'`id`, et pose les invariants du mur : `hasMirror: false`, `wroteKernel: false` (typés littéraux).
+
+**La machine `app/v2/idee/IdeaWizardMachine.ts`** (XState v5, `setup().createMachine`) :
+
+- États : `intention → coordonnee → provenance → revue → proposee` (`WIZARD_STEPS`).
+- Événements : `PATCH` (met à jour un champ du `Besoin` via `assign`), `SUIVANT` / `PRECEDENT` (navigation), `PROPOSER`, `RECOMMENCER`.
+- `PROPOSER` (depuis `revue`) : transition gardée `besoinValide` (= `validateBesoin().length === 0`) vers `proposee` avec l'action `compose` ; sinon reste sur `revue` et expose `context.errors`. **La machine ne juge rien** : `compose` délègue à `composeIdea` (le code), `besoinValide` à `validateBesoin`.
+- `RECOMMENCER` (depuis `proposee`) : action `reset` → besoin vide, idée null.
+
+**Le client `app/v2/idee/IdeaWizardClient.tsx`** (`"use client"`) : `useMachine(ideaWizardMachine)` ; le stepper rend `WIZARD_STEPS` (`data-state`, `data-active`) ; chaque étape rend ses champs (textarea intent ; `<select>` level/facet/scale alimentés par `selectableLevels()`/`FACET_LETTERS`/`FRACTAL_SCALES` ; radios provenance depuis `PROVENANCES`) qui `send({type:'PATCH'})` ; l'étape `proposee` rend l'encart **amber** (id, coordonnée, `expectedMirrorForm`, `hasMirror`/`wroteKernel`). Les libellés viennent du namespace i18n `v2Idee` (passés en props depuis le serveur). `useId()` pour les `htmlFor`.
+
+**La page `app/v2/idee/page.tsx`** (Server Component) : segment **statique** qui prime sur `/v2/[slug]`. Elle rend l'identité canonique du concept depuis le glossaire (`entry("idee")` → `v2-concept-title` = « Idée », `v2-concept-def`) — ce qui **préserve le contrat de navigation `/v2 → /v2/idee`** (le bloc « Idée » du schéma mène ici) — puis le titre du wizard, la note du mur, et `<IdeaWizardClient/>`. Nouveau namespace i18n `v2Idee` (FR + EN).
+
+**Les miroirs** :
+
+- Reproductibilité — `lib/v2/idea.test.ts` (Vitest + fast-check) : le mur (toute idée `hasMirror=false ∧ wroteKernel=false`) ; coordonnée totale (reprise exacte du besoin) ; forme de miroir = `levelMirrorForm(level)` (réutilisée) ; déterminisme (même besoin → même idée, empreinte byte-identique) ; validation totale (texte court / niveau hors grammaire / facette·échelle·provenance hors jeu clos refusés) ; `validateBesoin` oracle de `composeIdea`. GREEN (10 tests).
+- Transitions — `app/v2/idee/IdeaWizardMachine.test.ts` (Vitest + `createActor`) : fixtures `état → commande → état` (démarrage, avance, recul, PATCH accumule, PROPOSER valide → `proposee` + invariants du mur, PROPOSER invalide → reste `revue` + erreurs, RECOMMENCER → reset). GREEN (8 tests).
+- e2e — `tests/e2e/v2-idee.spec.ts` (Playwright) : parcours complet → idée **amber** (empreinte hex, forme de miroir, `hasMirror`/`wroteKernel` false) **avec une garde anti-écriture** (aucune requête POST/PUT/PATCH/DELETE) ; PRÉCÉDENT recule ; RECOMMENCER remet à zéro (et la forme de miroir `entity → property_n1` est vérifiée) ; coexistence (`/v2/idee` 200 ∧ `/` 200). GREEN (4 tests).
+
+## Méta
+
+- **Déterminisme-first.** Composer une idée est une **fonction pure** (`composeIdea`), jamais un agent : parse/validation/coordonnée/forme-de-miroir/hash sont du code. XState n'**orchestre** que l'état d'écran ; il **délègue** tout jugement au twin (la garde `besoinValide` appelle `validateBesoin`, l'action `compose` appelle `composeIdea`). Le LLM n'entre nulle part — pas même pour « comprendre » le besoin : le texte est repris verbatim.
+- **Réutiliser, ne pas réinventer.** Les niveaux viennent de `besoin-grammar` (la verticale §23), les facettes de `lib/facets` (FKE-1.3), la **forme de miroir** de `levelMirrorForm` (l'EL10). Le step n'invente aucune table ; il **compose** des sources déjà prouvées. La lib de wizard (XState + RHF/Zod, slot gelé ADR 0053) est un **rendu**, pas une autorité.
+- **Le mur, prouvé deux fois.** `hasMirror` et `wroteKernel` sont des **littéraux `false`** dans le type `Idea` (impossible à mettre à `true` sans changer le type) ; et l'e2e **surveille le réseau** — aucune écriture ne part. Le mur n'est pas une intention, c'est un invariant (property) + une garde (e2e).
+- **Pré-hydratation & contrat de navigation.** Le segment statique `/v2/idee` prime sur `[slug]` (Next), mais la page **garde** `v2-concept-title`/`v2-concept-def` (depuis le glossaire) pour que l'e2e WB2-02 « chaque bloc navigue vers son écran » reste vert — anti-overwrite : on **enrichit** l'écran sans casser le contrat amont.
+- **ui-completeness.** Le seul geste de cet étage (capturer → proposer une idée) a un contrôle exécutable (« Proposer »), et l'e2e prouve qu'il s'exécute. Aucune capacité headless.
+
+## Méta-méta
+
+- **Le geste EST une machine à états.** Un wizard KRD n'est pas un formulaire multi-pages : c'est une **machine** (XState) dont les états sont des altitudes du besoin (intention → coordonnée → provenance → revue → proposée). Modéliser le geste comme une machine rend ses transitions **testables comme des fixtures** (`état → commande → état`) — la même forme que les fixtures Operation DSL (S10) du runtime. L'outil qui code AIDOS et la méthode qu'il outille partagent la grammaire.
+- **L'idée est un candidat-vérité, pas une vérité.** Tout l'écran matérialise §115 : `hasMirror=false`, pas de gel, amber. La frontière entre « déclarer » et « prouver » n'est pas un commentaire — c'est un **type** (`Idea` ne peut pas porter de miroir) et une **couleur** (amber ≠ vert). On voit le mur à l'œil nu.
+- **Content-adresser un besoin.** `ideaHash` donne au candidat une **identité stable** (même besoin → même empreinte) **avant** tout gel. C'est la même discipline que le kernel (la version est l'empreinte) appliquée un cran plus haut, au-dessus du mur : un candidat est déjà référençable, donc déjà traçable jusqu'à sa promotion `/goal`.

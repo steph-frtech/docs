@@ -1,0 +1,42 @@
+---
+title: "WB2-03 · L'idée — capturer un besoin avec le wizard"
+description: "WB2-03 ajoute l'écran /v2/idee : l'étage d'entrée du schéma KRD. Un wizard guidé (XState + formulaire validé) capture un besoin au-dessus du mur — un texte, sa coordonnée cible (niveau × facette × échelle fractale), sa provenance (humain ou incident), et la forme de miroir attendue. Le résultat est une idée : un candidat-vérité (§115), sans gel ni miroir, présenté en amber. L'écran PROPOSE ; il n'écrit aucune vérité (le mur intact). La promotion reste idée → miroir → /goal."
+keywords: ["aidos", "krd", "WB2-03", "Workbench V2", "idée", "besoin", "candidat-vérité", "§115", "wizard", "XState", "coordonnée", "niveau", "facette", "échelle fractale", "provenance", "humain", "incident", "forme de miroir", "mur", "/goal", "/v2/idee", "ADR 0053"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-03](/steps/internals/wb2-03-idee).</Note>
+
+## En une phrase
+
+WB2-03 ouvre l'écran `/v2/idee` : un **wizard** qui vous fait **capturer un besoin** — étape par étape — et le transforme en une **idée**, un candidat-vérité (§115) qui attend, au-dessus du mur, de devenir une vérité.
+
+## Le problème que WB2-03 résout
+
+Tout commence par un besoin. Mais un besoin lâché en une phrase floue (« il faut que ça marche mieux ») n'est pas exploitable : on ne sait ni **où** il s'applique dans l'architecture, ni **de quelle nature** il relève, ni **comment** on le prouvera. WB2-03 vous fait **préciser** le besoin sans le geler : vous le situez sur la **verticale** (produit → … → entité), vous lui donnez une **facette** (la lentille — fonctionnel, sécurité, budgets…) et une **échelle fractale** (cellule, kernel, feuille), vous notez **qui l'a voulu** (un humain, ou un incident remonté de la réalité), et le wizard en déduit la **forme de miroir** qu'il faudra écrire plus tard. Le besoin devient une **idée** : nette, située, traçable — mais toujours **au-dessus du mur**.
+
+## Ce que vous voyez à l'écran
+
+Un wizard en cinq étapes, avec un **fil d'étapes** (le stepper) qui montre où vous en êtes :
+
+1. **L'intention** — vous écrivez le besoin (« Je veux payer en un clic »). Le texte est repris **verbatim**, jamais reformulé.
+2. **La coordonnée cible** — vous choisissez le **niveau** (la verticale §23), la **facette** (FKE-1.3) et l'**échelle fractale** (§49).
+3. **La provenance** — humain ou incident.
+4. **La revue** — un récapitulatif du besoin ; un clic sur « Proposer ».
+5. **L'idée proposée** — un encart **amber** : l'empreinte de l'idée, sa coordonnée, la **forme de miroir attendue**, et — affiché noir sur blanc — qu'elle **n'a pas de miroir** et **n'a écrit aucune vérité**.
+
+Vous pouvez revenir en arrière à chaque étape, et « recommencer » pour capturer un autre besoin.
+
+## Pourquoi « amber » et pas « vert »
+
+L'idée est **amber** (ambre) à dessein : ce n'est **pas** une vérité validée (qui serait verte). C'est un candidat, en attente. Le vert ne viendra qu'après le franchissement du mur — `idée → miroir → /goal` — quand un humain l'aura approuvée et qu'un miroir la prouvera.
+
+## Le mur, intact
+
+Capturer une idée **n'écrit jamais** une vérité (ni kernel, ni mirrors, ni fitness). L'écran **propose**. C'est la règle du mur (§2) : au-dessus, on déclare ; en dessous, on prouve ; on ne franchit la frontière que par le geste `/goal`.
+
+## Comment savoir que c'est juste
+
+- Le **parcours complet** du wizard aboutit à **une idée proposée** (amber) — prouvé par un e2e Playwright qui remplit chaque étape et clique « Proposer ».
+- **Aucune écriture-vérité** n'est émise pendant le parcours — l'e2e surveille les requêtes et exige qu'aucune écriture ne parte.
+- La **forme de miroir** affichée est exactement celle qu'impose le niveau choisi — la même table que tout le reste d'AIDOS, jamais un calcul à part.
+- Le wizard est **déterministe** : le même besoin produit toujours la même idée, avec la même empreinte.
