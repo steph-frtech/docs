@@ -1,0 +1,53 @@
+---
+title: "WB2-20 · La conscience — voulu, construit, prouvé, autorisé (l'agrégateur déterministe)"
+description: "WB2-20 ajoute au Workbench V2 un écran /v2/conscience : la conscience compare, paire par paire, les quatre axes d'une vérité — voulu (l'idée, le miroir attendu), construit (le code, la projection), prouvé (le miroir vert), autorisé (la policy, le mur) — et en tire un seul rapport. Elle n'invente aucun juge : elle agrège les verdicts qui existent déjà, allume un voyant 🟢/🔴/🟡 par paire, et produit, pour chaque divergence, une decision card actionnable (accepter / corriger / rejeter / différer). Tout aligné → aucune card. Une divergence du runner → drift + sa card. Casser la sécurité → un voyant « autorisé » rouge + une card de blocage. Casser l'expérience (X) → ça reste aligné, juste une card advisory (X informe, ne bloque jamais). Le mur reste intact : la conscience lit et propose ; agir sur une card passe par /goal."
+keywords: ["aidos", "krd", "WB2-20", "Workbench V2", "conscience", "consciousness", "agrégateur", "voulu", "construit", "prouvé", "autorisé", "voyant", "decision card", "accepter", "corriger", "rejeter", "différer", "drift", "aligné", "réconcilier", "FK09", "facette", "sécurité", "expérience", "advisory", "déterministe", "mur", "/goal", "/v2/conscience"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-20](/steps/internals/wb2-20-conscience).</Note>
+
+## En une phrase
+
+WB2-20 ajoute **la conscience** au Workbench V2 : un écran qui compare, pour un même kernel, ce qui est **voulu**, ce qui est **construit**, ce qui est **prouvé** et ce qui est **autorisé** — et qui, dès qu'un de ces quatre **diverge**, allume un voyant rouge et pose la **decision card** qui dit quoi faire.
+
+## Le problème que ça résout
+
+Au fil d'un projet, une vérité vit sur **plusieurs plans** en même temps : l'**intention** (l'idée, le miroir qu'on attend), le **code** (ce qui est réellement écrit), la **preuve** (le miroir qui passe au vert), et l'**autorisation** (la policy, le mur). Le danger, c'est que ces plans **dérivent** les uns par rapport aux autres sans qu'on s'en aperçoive : le code accepte 31 jours alors que le contrat dit 30 ; une preuve manque ; une règle de sécurité n'est plus respectée.
+
+La conscience **réconcilie** ces plans en un seul coup d'œil. Elle range chaque verdict sous l'un des **quatre axes** — **voulu · construit · prouvé · autorisé** — et montre, paire par paire, si l'axe est **🟢 vert** (tout concorde), **🔴 rouge** (ça diverge durement) ou **🟡 ambre** (un avertissement, qui informe sans bloquer).
+
+## Elle n'invente aucun juge
+
+Le point le plus important : la conscience **ne juge rien elle-même**. Ce serait piéger AIDOS dans un cercle — « un second agent qui valide le premier » n'est pas une preuve. Elle **agrège** les verdicts que les juges **existants** ont déjà rendus : le runner des miroirs, la loi de complétude, le squelette des facettes, le SemanticDiff, la RealityMirror, les capteurs, le ledger. Chaque ligne du rapport **porte son juge-source**. La conscience **lit** et **route** ; elle n'ajoute aucun avis.
+
+## Le voyant par paire
+
+Pour chaque axe, la conscience compte les paires vertes, rouges et advisories, puis allume **un seul voyant** :
+
+- **🔴 rouge** dès qu'une paire **dure** est rouge — l'axe diverge, il faut décider ;
+- **🟡 ambre** s'il n'y a pas de rouge mais au moins un **avertissement** — la facette **expérience (X)** informe, sans jamais bloquer ;
+- **🟢 vert** sinon — tout concorde sur cet axe.
+
+Le verdict **global** suit la même règle : **DRIFT** dès qu'une paire dure est rouge, **ALIGNÉ** sinon. La facette **X ne fait jamais basculer** le verdict — elle reste un conseil.
+
+## La decision card (accepter / corriger / rejeter / différer)
+
+Chaque **divergence** (une paire rouge ou un avertissement) produit **une** decision card. La card dit : quelle est la **lacune**, quel **juge** l'a vue, sa **classe de drift**, son **blast radius** (l'étendue de l'impact), et surtout **quatre options** pour la traiter :
+
+- **Accepter** — entériner le nouveau « voulu » (proposer ce changement vers le haut) ;
+- **Corriger** — réparer sous le mur (le code, la projection) ;
+- **Rejeter** — bloquer / refuser la dérive (le cas typique d'une faille de **sécurité**) ;
+- **Différer** — renvoyer à une décision humaine plus tard.
+
+La card recommande **une** de ces options (marquée d'une étoile), selon la nature de la divergence — par exemple « Rejeter » pour une dérive de sécurité.
+
+## Les quatre cas, vus de l'écran
+
+1. **Tout aligné** — quatre voyants verts, **aucune** decision card.
+2. **Le runner diverge** (le code accepte 31 jours, le contrat dit 30) — le verdict passe à **DRIFT**, le voyant **prouvé** devient rouge, et **sa** decision card apparaît, avec ses options.
+3. **On casse la sécurité (S)** — le voyant **autorisé** devient rouge, et une card de **blocage** apparaît (« Rejeter » recommandé).
+4. **On casse l'expérience (X)** — le verdict **reste ALIGNÉ** ; seule une card **advisory** s'affiche. L'expérience informe, elle ne bloque jamais.
+
+## Le mur reste intact
+
+Réconcilier, lire le rapport, regarder les cards : rien de tout cela n'écrit la moindre vérité. Le rapport et les cards sont des **projections**. Et **agir** sur une option — accepter, corriger, rejeter, différer — ne modifie **pas** directement le kernel : ça **propose** un changement, qui repart par le chemin habituel `idée → miroir → /goal → décision humaine`. La conscience montre où ça diverge ; c'est l'humain qui tranche.
