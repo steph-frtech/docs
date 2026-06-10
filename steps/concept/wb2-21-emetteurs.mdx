@@ -1,0 +1,51 @@
+---
+title: "WB2-21 · Les émetteurs — d'une entité au DDL, au Go et au TypeScript (byte-stable)"
+description: "WB2-21 ajoute au Workbench V2 un écran /v2/emetteurs : à partir d'une seule source d'entité (un nom + ses attributs ordonnés et typés), AIDOS rend déterministiquement ses trois projections — le DDL Postgres (CREATE TABLE), le struct Go (sqlc) et le type TypeScript — plus le contrat partagé (les champs que les trois doivent épingler à l'identique) et un aperçu de l'app émise (la table, ses colonnes, sa clé primaire). On choisit une entité, on émet, on voit le DDL et les types ; on ré-émet pour prouver que la sortie est byte-identique à chaque tour. Une seule source → N projections, jamais doublement typée. Le mur reste intact : l'écran lit la source et rend des projections ; modifier la source passe par /goal."
+keywords: ["aidos", "krd", "WB2-21", "Workbench V2", "émetteurs", "emitters", "entité", "entity", "DDL", "Postgres", "CREATE TABLE", "struct Go", "sqlc", "type TypeScript", "projection", "byte-identique", "byte-stable", "re-émission", "contrat", "aperçu", "app émise", "déterministe", "une source N projections", "mur", "/goal", "/v2/emetteurs"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-21](/steps/internals/wb2-21-emetteurs).</Note>
+
+## En une phrase
+
+WB2-21 ajoute **les émetteurs** au Workbench V2 : un écran où, à partir d'une **seule** description d'entité, AIDOS **génère** sa table Postgres, son type Go et son type TypeScript — et où l'on peut vérifier que cette génération est **byte-identique** à chaque fois qu'on la relance.
+
+## Le problème que ça résout
+
+Une même chose — disons une **commande** (`Order`) — doit exister à trois endroits : dans la **base** (une table avec ses colonnes), dans le **back** (une structure Go que le code manipule) et dans le **front** (un type TypeScript). Le piège classique : **retaper** ces trois définitions à la main. Elles **divergent** alors immanquablement — un champ ajouté dans la base mais oublié dans le type, un `total` numérique d'un côté et texte de l'autre. C'est le bug le plus banal et le plus coûteux d'un projet.
+
+AIDOS supprime ce piège : il y a **une seule source** — la description de l'entité — et les trois définitions en sont **dérivées automatiquement**. On ne tape jamais deux fois la même information. C'est la règle « **une source → N projections, jamais doublement typée** ».
+
+## Ce que l'écran montre
+
+On choisit une entité d'exemple (la commande `Order` : `id · customer · total · discount · placed_at`), on clique **Émettre**, et l'écran affiche les **trois projections** :
+
+- **Le DDL Postgres** — le `CREATE TABLE "order"` avec une colonne par attribut, son type SQL, sa nullabilité, et la clé primaire ;
+- **Le struct Go (sqlc)** — la structure que le back utilise, un champ par attribut, avec le type Go correspondant ;
+- **Le type TypeScript** — le type que le front utilise, un champ par attribut, avec le `?` sur les champs optionnels.
+
+Chaque projection porte son **chemin de fichier** (où elle serait écrite) et son **empreinte de sortie** (le hash de ses octets).
+
+## Le contrat partagé
+
+Au-dessus des trois projections, l'écran montre le **contrat** : la liste des champs — `id`, `customer`, `total`, `discount`, `placed_at` — que les **trois** cibles doivent épingler **à l'identique**. Ni ajout, ni retrait, ni renommage. C'est la garantie visible que les trois définitions ne peuvent pas dériver : elles parlent toutes du même jeu de champs, dans le même ordre.
+
+## La re-émission byte-identique
+
+Le cœur de WB2-21 : un émetteur est une **fonction pure**. Donné le même AST d'entité, il produit **exactement les mêmes octets** — à la virgule près — peu importe quand et combien de fois on le relance. L'écran le **prouve** : on clique **Ré-émettre**, l'émetteur regénère la même source **seize fois** d'affilée, et un voyant **🟢 vert** par cible confirme que chaque tour est **byte-identique** au premier.
+
+Pourquoi est-ce important ? Parce que les fichiers générés sont **protégés** : on ne les édite jamais à la main. Si la génération n'était pas reproductible, on ne pourrait jamais distinguer « le fichier a changé parce que la source a changé » de « le fichier a changé parce que le générateur est instable ». La byte-stabilité rend ce diagnostic **exact**.
+
+## L'aperçu de l'app émise
+
+Sous les projections, l'écran montre un **aperçu** de l'application que ces définitions composent : la **table** que l'app stockerait, ses **colonnes** (avec leur type SQL, leur type TS, leur nullabilité), et sa **clé primaire**. C'est « la base de données du résultat codé » — ce que l'app construirait réellement — montré **sans rien exécuter**, dérivé du même AST.
+
+On y lit la règle directement : un champ **requis** devient une colonne **NOT NULL** (non nullable) ; le champ **identifiant** devient la **clé primaire** ; l'ordre des colonnes suit l'ordre de la source.
+
+## La source qui bouge
+
+Pour montrer que la génération **suit la source à la lettre**, l'écran propose une seconde entité : la même commande, mais **amputée du `discount`**. On l'émet : le DDL n'a **plus** la colonne `discount`, le contrat n'a plus ce champ, et l'**empreinte de la source** est **différente** de la commande complète. La génération ne devine rien et n'invente rien : elle rend **exactement** ce que la source épingle.
+
+## Le mur reste intact
+
+Émettre, regarder le DDL, ré-émettre, lire l'aperçu : rien de tout cela n'écrit la moindre vérité. La source d'entité est une **vérité au-dessus de la ligne** que l'écran **lit** ; les projections et l'aperçu sont des **vues**. Et **modifier** la source ne se fait pas depuis l'écran : ça **propose** un changement, qui repart par le chemin habituel `idée → miroir → /goal → décision humaine`. L'écran montre la génération ; c'est l'humain qui change la source.
