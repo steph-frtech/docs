@@ -515,7 +515,9 @@
        "steps/concept/wb2-13-workflows",
        "steps/internals/wb2-13-workflows",
        "steps/concept/wb2-14-policy",
-       "steps/internals/wb2-14-policy"
+       "steps/internals/wb2-14-policy",
+       "steps/concept/wb2-15-ai-lab",
+       "steps/internals/wb2-15-ai-lab"
       ]
      }
     ]

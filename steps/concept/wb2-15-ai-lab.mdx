@@ -1,0 +1,46 @@
+---
+title: "WB2-15 · AI Lab — le besoin placé sur la verticale (cerveau gauche)"
+description: "WB2-15 ajoute l'écran /v2/ai-lab : à gauche, un chat en langage naturel (le cerveau gauche, Claude) où vous décrivez un besoin ; à droite, la VERTICALE — chaque morceau du besoin est PLACÉ à un (niveau × facette × paire). Le placement est le seul jugement irréductible du LLM ; il est GATÉ et VÉRIFIÉ — CLAMPÉ à l'espace déclaré (7 niveaux × 8 facettes × 6 paires-miroir) : un niveau, une facette ou une paire inventés sont jetés, jamais coercés. Le mur reste intact : le chat PROPOSE (ambre), il n'écrit jamais la vérité. Et quand Claude est indisponible, un fallback déterministe répond quand même."
+keywords: ["aidos", "krd", "WB2-15", "Workbench V2", "ai-lab", "AI Lab", "cerveau gauche", "chat", "langage naturel", "besoin", "placement", "verticale", "niveau", "facette", "paire", "clamp", "gaté", "vérifié", "espace déclaré", "fallback déterministe", "mur", "propose", "ambre", "/v2/ai-lab", "§23", "FKE-38"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-15](/steps/internals/wb2-15-ai-lab).</Note>
+
+## En une phrase
+
+WB2-15 ouvre l'écran `/v2/ai-lab` : vous **décrivez un besoin** en langage naturel à gauche, et le **cerveau gauche** le **place** sur la **verticale** à droite — chaque morceau du besoin tombe à sa place (un **niveau**, une **facette**, une **paire-miroir**), et tout placement hors de l'espace déclaré est **écarté**, jamais inventé.
+
+## Le problème que WB2-15 résout
+
+Un besoin exprimé en une phrase — « je veux un tunnel de paiement sécurisé du panier au reçu » — n'est pas *une* chose : il se **déploie** sur toute la verticale. Il y a un **produit** (vendre, encaisser), un **parcours** (du panier au reçu), un **contrôle** (le bouton Payer), une **action** (le paiement atomique), une **opération** (créer la commande), une **entité** (la commande elle-même). Et chacun a une **facette** dominante (fonctionnel, sécurité, budget…) et une **paire-miroir** (la spec et sa machine).
+
+Décider *où* va chaque morceau d'un besoin est un **jugement** — c'est exactement ce qu'un cerveau (Claude) sait faire et qu'un programme ne sait pas faire seul. Mais ce jugement ne doit jamais pouvoir **inventer** une case qui n'existe pas, ni **écrire** quoi que ce soit dans la vérité. WB2-15 sépare les deux : le cerveau gauche **propose** le placement, le **code** le **vérifie**.
+
+## Ce que vous voyez à l'écran
+
+- **À gauche — le cerveau gauche** : une zone de texte où vous **décrivez le besoin**, deux boutons (**Placer sur la verticale** et **Fallback déterministe**), et des **besoins d'exemple** prêts à cliquer.
+- **À droite — la verticale** : les specs placées, **groupées par niveau** (produit → parcours → vue → contrôle → action → opération → entité). Chaque spec porte sa **facette** et sa **paire-miroir**, et un badge **PROPOSÉ** (ambre — rien n'est écrit).
+- **Un compteur** : combien de specs placées, et sur **combien de niveaux** — pour voir d'un coup d'œil le **fan-out** du besoin.
+- **Un bandeau du mur** qui rappelle que placer un besoin **n'écrit aucune vérité**.
+
+## Le placement, gaté et vérifié (le clamp)
+
+Le cerveau gauche peut se tromper, ou être imprécis : il pourrait proposer un niveau qui n'existe pas (« galaxie »), une facette inventée (« Z »), une paire fantôme. Le **clamp** est la garde : il **ne garde que** les placements qui tombent dans l'**espace déclaré** — **7 niveaux × 8 facettes × 6 paires-miroir**, soit **336 cellules**. Tout le reste est **jeté**, jamais « corrigé de force ».
+
+Vous le voyez à l'écran : les besoins d'exemple **incluent volontairement une cellule inventée**, et elle **n'apparaît pas** dans la verticale — la preuve que le code juge, pas le LLM.
+
+## Le mur, intact
+
+Placer un besoin **n'écrit aucune vérité**. Les placements sont **ambre** (proposés) ; ils ne deviennent jamais des truths depuis cet écran. Et si vous demandez explicitement une **écriture directe** (« écris la vérité dans le kernel ») — le chat **refuse** au mur, avec un message d'erreur actionnable, et **ne place rien**. La seule porte vers la vérité reste, comme partout dans AIDOS, le chemin **idée → miroir → /goal**.
+
+## Le fallback déterministe
+
+Et si Claude n'est pas disponible ? L'écran ne reste pas muet : un **fallback déterministe** pose un placement par défaut (la spec, au niveau produit, facette fonctionnelle), **purement** — sans aléa, sans horloge, sans LLM — et le dit honnêtement (« Claude indisponible — le twin pur a répondu »). Le besoin n'est jamais bloqué par l'absence du cerveau.
+
+## Comment savoir que c'est juste
+
+- **Un besoin → des specs multi-niveaux** : le besoin « tunnel de paiement » se déploie sur **au moins trois niveaux** (produit *et* entité présents) — un e2e Playwright l'exige à l'écran.
+- **Le clamp** : la cellule inventée par le cerveau gauche **n'apparaît jamais** — l'e2e vérifie qu'aucun niveau « galaxie » ni aucune facette « Z » ne s'affiche.
+- **Le fallback déterministe** : taper un besoin libre et cliquer « Fallback » pose un placement par défaut — l'e2e le prouve, et un miroir de reproductibilité épingle « même besoin → même placement ».
+- **L'écriture-vérité refusée** : un message d'écriture directe déclenche un **refus au mur** et **aucun placement** — l'e2e l'exige.
+- **Aucune écriture** ne part pendant le placement — l'e2e surveille le réseau et exige zéro écriture.
