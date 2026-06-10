@@ -517,7 +517,9 @@
        "steps/concept/wb2-14-policy",
        "steps/internals/wb2-14-policy",
        "steps/concept/wb2-15-ai-lab",
-       "steps/internals/wb2-15-ai-lab"
+       "steps/internals/wb2-15-ai-lab",
+       "steps/concept/wb2-16-descente",
+       "steps/internals/wb2-16-descente"
       ]
      }
     ]

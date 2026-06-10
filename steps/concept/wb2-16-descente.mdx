@@ -1,0 +1,38 @@
+---
+title: "WB2-16 · La descente de l'anatomie — valider une spec génère la paire suivante"
+description: "WB2-16 prolonge l'écran /v2/ai-lab : une fois un besoin placé sur la verticale (WB2-15), valider une spec FAIT DESCENDRE l'anatomie d'un cran. Chaque cellule (niveau × facette) porte une anatomie de six paires-miroir — Spec → Comportement → Scénarios → Modèle → Contrat → Evidence. Valider la spec génère le comportement ; valider le comportement génère les scénarios ; et ainsi de suite jusqu'à l'Evidence, la dernière paire, où la descente est RÉALISÉE. L'enrichissement du texte par Claude est gaté (vous l'activez) ; sinon un fallback template déterministe écrit la paire suivante. La structure (quelle paire, dans quel ordre) est toujours du code déterministe ; le mur reste intact (on PROPOSE, on n'écrit jamais la vérité)."
+keywords: ["aidos", "krd", "WB2-16", "Workbench V2", "ai-lab", "descente", "anatomie", "paire-miroir", "Spec", "Comportement", "Scénarios", "Modèle", "Contrat", "Evidence", "valider", "réaliser", "enrichissement Claude", "fallback template", "déterministe", "mur", "propose", "/v2/ai-lab", "FKE-38"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-16](/steps/internals/wb2-16-descente).</Note>
+
+## En une phrase
+
+WB2-16 ajoute la **descente** à l'AI Lab : après avoir placé un besoin sur la verticale (WB2-15), vous **validez une spec** et le code **génère la paire suivante** de son anatomie — `Spec → Comportement → Scénarios → Modèle → Contrat → Evidence` — jusqu'au bout, où la dernière paire est **réalisée**.
+
+## Le problème que ça résout
+
+Placer un besoin (WB2-15) vous donne une **spec** posée dans une cellule `(niveau × facette)`. Mais une spec seule ne suffit pas : derrière elle se cache une **anatomie** — le comportement attendu, ses scénarios `Given/When/Then`, son modèle de données, son contrat (entrées/sorties, pré/post, invariants), et enfin l'**evidence** qui prouve que tout cela tient.
+
+Sans WB2-16, il faudrait écrire ces six niveaux à la main, dans le bon ordre, en risquant d'en oublier ou de les inverser. WB2-16 rend cet ordre **mécanique** : vous validez un cran, le suivant apparaît.
+
+## Comment ça marche, vu de l'écran
+
+1. Vous placez un besoin (WB2-15) — par exemple une **Spec** au niveau `produit`, facette `F`.
+2. Sous la spec apparaît un bouton **« Valider ↓ »**.
+3. Vous cliquez : la spec passe à **VALIDÉ**, et la paire suivante — le **Comportement** — apparaît dessous, **proposée**.
+4. Vous continuez : Comportement → Scénarios → Modèle → Contrat. À chaque clic, le parent passe à VALIDÉ et l'enfant apparaît.
+5. À la dernière paire, **Evidence**, le bouton devient **« Réaliser ✓ »**. Vous cliquez : la paire passe à **RÉALISÉ** — la descente est **complète**, la cellule a parcouru toute son anatomie.
+
+## L'enrichissement Claude, gaté
+
+Le **texte** de chaque paire générée peut venir de deux sources :
+
+- **Le fallback template déterministe** (par défaut) : le code écrit un libellé dérivé de la spec parente — « Comportement attendu — dérivé de : … ». Pur, reproductible, honnête sur le fait que Claude n'a pas écrit.
+- **L'enrichissement Claude** (vous l'activez par une case à cocher) : Claude rédige un **vrai** comportement à partir de la spec.
+
+Dans les deux cas, la **structure** — quelle paire vient ensuite, son placement, son statut — est **toujours** du code déterministe. Claude ne décide **jamais** de l'ordre de l'anatomie ; il n'écrit que le texte d'une paire dont la position est déjà fixée.
+
+## Le mur reste intact
+
+Descendre l'anatomie n'écrit **aucune vérité**. Chaque paire générée est **proposée** (ambre) ; même la paire « réalisée » à la fin de la descente reste une **proposition de lab**. La promotion vers la vérité passe, comme toujours, par `idée → miroir → /goal → décision humaine`. L'écran propose une descente complète ; il ne grave rien dans le kernel.
