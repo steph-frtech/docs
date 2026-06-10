@@ -1,0 +1,67 @@
+---
+title: "WB2-11 · Internals — le twin de /goal pur, la machine XState du wizard et l'e2e du mur"
+description: "Internals de WB2-11 : le twin pur lib/v2/goal.ts (idée + miroir → kernel proposé ; validation de la forme attendue EL10, version gelée content-addressed préfixe k:, ChangeSet DRAFT préfixe cs:, refuseDirectWrite → BlockReason, invariants hasMirror=true/wroteKernel=false), la machine XState app/v2/goal/GoalWizardMachine.ts (3 états, gardes mirrorValide/promotable, action refuse), le client app/v2/goal/GoalWizardClient.tsx, la page Server Component, le lien geste depuis /v2/mur, les miroirs fast-check + fixtures XState + e2e Playwright (parcours complet → version gelée, écriture directe refusée, aucune écriture-vérité). Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "WB2-11", "internals", "goal.ts", "GoalWizardMachine", "XState", "createActor", "useMachine", "promoteIdea", "validateMirror", "frozenVersion", "changeSetId", "refuseDirectWrite", "MirrorSpec", "ProposedKernel", "BlockReason", "ChangeSet", "DRAFT", "FNV-1a", "fast-check", "playwright", "déterminisme", "mur", "ADR 0053"]
+---
+
+<Note>Côté « Pour moi » — l'intérieur. Pour le concept, voir [Pour les futurs utilisateurs → WB2-11](/steps/concept/wb2-11-goal).</Note>
+
+## Implémentation
+
+**Le twin de /goal `lib/v2/goal.ts`** — la source unique de la LOGIQUE, PUR (aucun React/DOM, aucun LLM, aucune horloge) :
+
+- Constantes / types : `MIN_MIRROR_LEN = 3` ; `MirrorSpec` (`form: MirrorForm` du jeu clos EL10 réutilisé de `besoin-completeness`, `text`) ; `GoalStage` (`idea | mirror_written | frozen`) + `GOAL_STAGES` ; `ChangeSetStatus` (`DRAFT | APPLIED | REVERTED`) ; `ProposedKernel` (ideaId, intent, coordinate, mirror, `hasMirror: true` littéral, version, `changeSet {id, status}`, `wroteKernel: false` littéral) ; `PromoteError` (`mirror_form_unknown | mirror_text_empty | mirror_form_mismatch`) ; `PromoteResult` ; `BlockReason` (code, severity, explanation, howToFix).
+- `fnv1a(canon)` (privé) : FNV-1a 32 bits hex — aligné sur les twins WB2-03/WB2-07 (content-addressing). `canonCoordinate(c)` : `level×facet×scale` (la même sérialisation que `lib/v2/idea`).
+- `frozenVersion(intent, coordinate, mirror)` : le hash du corps canonique `coordonnée | intention | forme | texte`, **préfixé `k:`** (espace de noms kernel). Déterministe ; toute mutation du miroir la change.
+- `changeSetId(ideaId, version)` : le hash de `ideaId | version`, **préfixé `cs:`**. Idempotent.
+- `validateMirror(idea, mirror)` : liste ordonnée & stable des `PromoteError` — forme du jeu clos (`isMirrorForm`), texte non vide (≥ `MIN_MIRROR_LEN`), et **forme = forme attendue** par la coordonnée de l'idée (`idea.expectedMirrorForm`, si non null — EL10). L'oracle, total.
+- `promoteIdea(idea, mirror)` : le cœur. Valide ; si erreurs → `{ ok:false, errors }` (le mur — un candidat mal-prouvé n'est pas promu). Sinon : trim du texte, `frozenVersion`, `changeSetId`, et compose le `ProposedKernel` — l'idée **descend à sa coordonnée verbatim** (`coordinate`, `intent`, `ideaId` repris de l'idée), `hasMirror: true` (le mur franchi), `changeSet.status: "DRAFT"`, `wroteKernel: false` (propose, n'applique pas).
+- `refuseDirectWrite(targetKernel)` : le mur littéral — renvoie **toujours** un `BlockReason` (`code: "WALL_DIRECT_TRUTH_WRITE_FORBIDDEN"`, `severity: "error"`, `howToFix` qui rappelle `idée → miroir → /goal → approbation`). Jamais un succès.
+- `goalStage(mirrorWritten, proposed)` : le stade **calculé** — `proposed !== null → frozen` ; `mirrorWritten → mirror_written` ; sinon `idea`.
+- `syntheticIdea()` / `syntheticMirror()` / `STEP_SLUG = "wb2-11-goal"` : une idée de démonstration (niveau `operation`, forme attendue `fixture_n2`, `hasMirror=false`) + un miroir `fixture_n2` de la bonne forme, pour seeder l'écran tant que le store ne sert pas d'idée live (OpenQuestion documentée, ne bloque pas).
+
+**La machine `app/v2/goal/GoalWizardMachine.ts`** (XState v5, `setup().createMachine`) :
+
+- États : `idea → mirror_written → frozen` (`GOAL_STEPS`).
+- Événements : `SET_FORM` / `SET_MIRROR_TEXT` (via `assign`), `ECRIRE_MIROIR`, `GOAL`, `ECRIRE_DIRECT`, `RECOMMENCER`.
+- `ECRIRE_MIROIR` (depuis `idea`) : transition gardée `mirrorValide` (= `validateMirror().length === 0`) vers `mirror_written` ; un miroir invalide ne franchit pas.
+- `GOAL` (depuis `mirror_written`) : transition gardée `promotable` (= `promoteIdea().ok`) vers `frozen` avec l'action `goal` (qui pose `context.proposed`) ; sinon reste et expose `context.errors`.
+- `ECRIRE_DIRECT` (à **tout** stade) : action `refuse` (pose `context.block` via `refuseDirectWrite`), **sans transition** — le mur.
+- `RECOMMENCER` (depuis `frozen`) : action `reset` → idée vierge. **La machine ne juge rien** : `goal` délègue à `promoteIdea`, `refuse` à `refuseDirectWrite`, les gardes à `validateMirror`/`promoteIdea` (le code).
+
+**Le client `app/v2/goal/GoalWizardClient.tsx`** (`"use client"`) : `useMachine(goalWizardMachine)` ; le stepper rend `GOAL_STEPS` (`data-state`, `data-active`) ; l'idée est toujours visible (`v2-goal-idea-*`) ; l'étape `idea` rend le `<select>` de forme (`mirrorForms()`) + le `<textarea>` de texte ; `mirror_written` rend l'encart vert `false → true` ; `frozen` rend l'encart amber (version `v2-goal-version`, ChangeSet `v2-goal-changeset` DRAFT, coordonnée `v2-goal-frozen-coordinate`, `hasMirror`/`wroteKernel`) ; `block` rend l'encart de refus (`v2-goal-block`, code + howToFix). Les libellés viennent du namespace i18n `v2Goal` (passés en props depuis le serveur).
+
+**La page `app/v2/goal/page.tsx`** (Server Component) : segment **statique** — `goal` n'est pas un slug du glossaire, donc aucun conflit avec `/v2/[slug]`. En-tête (eyebrow, titre, sous-titre, note du mur) puis `<GoalWizardClient/>`. Nouveau namespace i18n `v2Goal` (FR + EN). Le geste est rendu **reachable** depuis l'écran du concept `mur` : `app/v2/[slug]/page.tsx` expose un lien `CONCEPT_GESTURES.mur → /v2/goal` (clé i18n `v2Shell.gestureGoal`).
+
+**Les miroirs** :
+
+- Reproductibilité — `lib/v2/goal.test.ts` (Vitest + fast-check) : le démo canonique se promeut ; le mur (texte vide → pas de promotion) ; le franchissement (`HasMirror false → true`) ; `wroteKernel` toujours false (ChangeSet DRAFT) ; l'idée descend à sa coordonnée verbatim ; la version gelée déterministe & content-adressée ; toute mutation du miroir change la version ; le ChangeSet id idempotent ; la validation de forme (inconnue, mismatch, bonne forme) ; `refuseDirectWrite` refuse toute cible ; le stade calculé. GREEN (14 tests).
+- Transitions — `app/v2/goal/GoalWizardMachine.test.ts` (Vitest + `createActor`) : démarrage à `idea` (hasMirror=false) ; `ECRIRE_MIROIR` (forme valide) → `mirror_written` ; `GOAL` → `frozen` (version `k:`, ChangeSet DRAFT, wroteKernel=false) ; un miroir de mauvaise forme ne franchit pas ; `ECRIRE_DIRECT` refuse (BlockReason) sans transition ; `RECOMMENCER` réinitialise. GREEN (6 tests).
+- e2e — `tests/e2e/v2-goal.spec.ts` (Playwright, contre le build prod) : au `/goal` l'idée descend à sa coordonnée + reçoit une version (`k:`) dans un ChangeSet DRAFT (`cs:`), `HasMirror false → true`, l'écriture directe refusée (`WALL_DIRECT_TRUTH_WRITE_FORBIDDEN`), **garde anti-écriture** (aucune requête POST/PUT/PATCH/DELETE) ; déterminisme (même parcours → même version au rechargement). GREEN (2 tests).
+
+## Méta
+
+- **Déterminisme-first.** La transition idée → miroir → /goal → gel est une **fonction pure** (`promoteIdea`), jamais un agent : validation, version gelée (un hash), ChangeSet id et refus-du-mur sont du code. XState n'**orchestre** que l'état d'écran ; il **délègue** tout jugement au twin (les gardes `mirrorValide`/`promotable` appellent `validateMirror`/`promoteIdea`, l'action `goal` appelle `promoteIdea`, `refuse` appelle `refuseDirectWrite`). Le LLM n'entre nulle part.
+- **Réutiliser, ne pas réinventer.** Le twin réutilise l'`Idea` et sa `Coordinate` de WB2-03 (aucune duplication du modèle), le jeu clos `MirrorForm` (EL10) de `besoin-completeness`, et le même FNV-1a content-addressed que WB2-03/WB2-07 (les espaces de noms `k:`/`cs:` les distinguent). Le slot wizard gelé (XState, ADR 0053) est le **rendu**, pas l'autorité.
+- **Le mur, prouvé trois fois.** `hasMirror: true` et `wroteKernel: false` sont des **littéraux** dans `ProposedKernel` (le type interdit l'inverse) ; `refuseDirectWrite` renvoie **toujours** un refus (une property fast-check le balaie sur toute cible) ; et l'e2e **surveille le réseau** — aucune écriture ne part.
+- **La forme attendue, vérifiée.** Promouvoir n'accepte pas n'importe quel miroir : `validateMirror` exige la **forme attendue par la coordonnée** de l'idée (`expectedMirrorForm`, EL10). Un Gherkin sur une coordonnée qui attend une fixture est un `mirror_form_mismatch` — le mauvais miroir ne franchit pas le mur.
+- **ui-completeness.** Chaque geste de cet étage a un contrôle exécutable — « Écrire le miroir », « Ouvrir le /goal », « Tenter une écriture-vérité directe » — et l'e2e prouve qu'ils s'exécutent (le dernier en provoquant le refus). Aucune capacité headless.
+
+## Méta-méta
+
+- **Le franchissement EST une machine à états.** « Promouvoir » n'est pas un bouton magique : c'est une **machine** (XState) dont les états sont les altitudes du mur (idée au-dessus → miroir écrit → version gelée). Modéliser le franchissement comme une machine rend ses transitions **testables comme des fixtures** (`état → commande → état`) — la même forme que les fixtures Operation DSL (S10) du runtime. La frontière la plus sacrée de KRD (le mur) devient un objet exécutable et observable.
+- **Promouvoir = écrire le miroir (§116), rendu littéral.** L'écran ne sépare pas « promouvoir » et « écrire le miroir » : écrire le miroir **est** le franchissement (`HasMirror false → true`), et `/goal` **est** le gel qui suit. La règle de méthode n'est pas une consigne ; c'est l'enchaînement des transitions de la machine, impossible à court-circuiter.
+- **Le refus, par construction.** Le mur n'est pas un `if` qu'on pourrait oublier : `refuseDirectWrite` ne possède **aucun** chemin de succès — sa signature renvoie un `BlockReason`, point. Refuser n'est pas une décision prise à l'exécution, c'est un **type**. C'est la défense-en-profondeur (§2) portée jusqu'à l'écran : même l'UI ne peut pas écrire la vérité.
+- **Content-adresser un kernel proposé.** `frozenVersion` donne au kernel proposé une **identité stable** (même idée+miroir → même version) **avant** toute approbation, et `changeSetId` rattache la proposition à cette version. C'est la version-comme-empreinte du truth-store appliquée au moment exact du franchissement : un kernel proposé est déjà référençable, donc déjà traçable de l'idée jusqu'à l'approbation.
+
+## Fichiers
+
+- `front/web/lib/v2/goal.ts` — le twin pur (transition, version gelée, ChangeSet, refus-du-mur).
+- `front/web/lib/v2/goal.test.ts` — le miroir de reproductibilité (Vitest + fast-check, 14).
+- `front/web/app/v2/goal/GoalWizardMachine.ts` — la machine XState (3 états, gardes, action `refuse`).
+- `front/web/app/v2/goal/GoalWizardMachine.test.ts` — les fixtures de transition (Vitest + `createActor`, 6).
+- `front/web/app/v2/goal/GoalWizardClient.tsx` — le wizard client-only (stepper, formulaire, encarts).
+- `front/web/app/v2/goal/page.tsx` — la page Server Component (segment statique).
+- `front/web/app/v2/[slug]/page.tsx` — le lien geste `mur → /v2/goal` (ui-completeness).
+- `front/web/messages/{fr,en}.json` — le namespace i18n `v2Goal` + `v2Shell.gestureGoal`.
+- `tests/e2e/v2-goal.spec.ts` — l'e2e Playwright (parcours, mur franchi, refus, aucune écriture, 2).

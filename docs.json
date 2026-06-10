@@ -507,7 +507,9 @@
        "steps/concept/wb2-09-cellules",
        "steps/internals/wb2-09-cellules",
        "steps/concept/wb2-10-grill",
-       "steps/internals/wb2-10-grill"
+       "steps/internals/wb2-10-grill",
+       "steps/concept/wb2-11-goal",
+       "steps/internals/wb2-11-goal"
       ]
      }
     ]

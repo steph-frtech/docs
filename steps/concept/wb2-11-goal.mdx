@@ -1,0 +1,53 @@
+---
+title: "WB2-11 · Le /goal — promouvoir une idée : idée → miroir → /goal → gel"
+description: "WB2-11 ajoute l'écran /v2/goal : la transition idée → écrire le miroir → /goal → gel, conduite comme un wizard guidé (XState). Une idée propose (elle n'a pas de miroir) ; pour devenir une vérité, elle doit franchir le mur — on écrit son miroir (HasMirror passe de faux à vrai), puis /goal fait descendre l'idée à sa coordonnée et lui gèle une version. Le résultat propose un ChangeSet en brouillon (DRAFT) — jamais une écriture-vérité directe. Une tentative d'écriture directe est refusée par un motif de blocage actionnable. L'écran propose ; il n'écrit aucune vérité. L'application reste l'approbation humaine."
+keywords: ["aidos", "krd", "WB2-11", "Workbench V2", "goal", "/goal", "promouvoir", "idée", "miroir", "HasMirror", "franchir le mur", "mur", "coordonnée", "version", "gel", "ChangeSet", "DRAFT", "approbation", "écriture-vérité directe", "refus", "BlockReason", "wizard", "XState", "/v2/goal", "ADR 0053"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-11](/steps/internals/wb2-11-goal).</Note>
+
+## En une phrase
+
+WB2-11 ouvre l'écran `/v2/goal` : un **wizard** qui fait **franchir le mur** à une idée — vous écrivez son **miroir**, puis `/goal` la fait **descendre à sa coordonnée** et lui **gèle une version**, le tout en **proposant** (un ChangeSet en brouillon), jamais en écrivant la vérité.
+
+## Le problème que WB2-11 résout
+
+Une **idée** est un candidat-vérité : elle propose, elle n'est pas encore vraie. Une idée seule **n'a pas de miroir** — et une vérité sans miroir est un **vœu** (un monstre). Comment une idée devient-elle une vérité, sans jamais qu'on puisse l'écrire « en passant » dans le kernel ?
+
+La réponse de KRD (§116) est un **chemin obligé** : **promouvoir, c'est écrire le miroir, c'est `/goal`**. Trois moments :
+
+1. **L'idée propose** — elle porte une intention, une **coordonnée** cible (un niveau × une facette × une échelle), mais aucun miroir.
+2. **Écrire le miroir** — on rédige la preuve exécutable attendue (un Gherkin, une propriété, une fixture). Cet acte fait passer `HasMirror` de **faux à vrai** : c'est le **franchissement du mur**.
+3. **`/goal`** — l'idée **descend à sa coordonnée** et reçoit une **version gelée** (une empreinte stable). Le résultat est un **ChangeSet en brouillon** (DRAFT) : il **propose**, il n'**applique** rien.
+
+L'application de la vérité reste, à la toute fin, une **approbation humaine** — jamais un clic d'écran.
+
+## Ce que vous voyez à l'écran
+
+Un wizard en trois stades, avec un **fil d'étapes** (le stepper) qui montre où en est la promotion :
+
+1. **L'idée** — l'intention, la coordonnée, et — noir sur blanc — qu'elle **n'a pas de miroir** (elle propose). On y choisit la **forme du miroir** et on en écrit le **texte**.
+2. **Le miroir écrit** — un encart vert : `HasMirror : false → true`. Le mur est franchi.
+3. **La version gelée** — un encart amber : la **version** (une empreinte préfixée `k:`), le **ChangeSet** (préfixé `cs:`) au statut **DRAFT**, l'idée **descendue à sa coordonnée**, et la double garantie : `HasMirror = true` mais `wroteKernel = false` (rien n'a été écrit, tout est proposé).
+
+Un bouton supplémentaire est toujours présent : **« Tenter une écriture-vérité directe »**.
+
+## Le mur, montré en action
+
+Cliquer sur **« Tenter une écriture-vérité directe »** ne contourne rien : l'écran **refuse** par un **motif de blocage actionnable** — un code (`WALL_DIRECT_TRUTH_WRITE_FORBIDDEN`), une explication, et la **marche à suivre légale** : capturer une idée, écrire son miroir, ouvrir un `/goal`, faire approuver le ChangeSet. C'est la règle du mur (§2), rendue visible : le kernel n'est **jamais** écrit en passant ; la **seule porte** est `idée → miroir → /goal → approbation`.
+
+## La version gelée, déterministe
+
+La version qu'une idée reçoit au `/goal` n'est pas un numéro : c'est l'**empreinte** de son contenu (sa coordonnée, son intention, la forme et le texte de son miroir). Le même couple (idée + miroir) donne **toujours la même version** — et toute modification du miroir change la version. C'est la même discipline que le kernel : **la version est l'empreinte**.
+
+## Le mur, intact
+
+Promouvoir une idée **n'écrit jamais** une vérité (ni kernel, ni mirrors, ni fitness). L'écran **propose** un ChangeSet en brouillon. Son application reste une décision humaine séparée.
+
+## Comment savoir que c'est juste
+
+- Au `/goal`, l'idée **descend à sa coordonnée** et **reçoit une version** (préfixe `k:`) dans un ChangeSet **DRAFT** — prouvé par un e2e Playwright qui parcourt le wizard.
+- Le mur est **franchi** : `HasMirror` passe de `false` à `true` — visible à l'écran et vérifié par l'e2e.
+- L'**écriture-vérité directe est refusée** : l'e2e clique le bouton et exige le motif de blocage.
+- **Aucune écriture-vérité** n'est émise pendant le parcours — l'e2e surveille le réseau et exige qu'aucune écriture ne parte.
+- La promotion est **déterministe** : le même parcours produit toujours la même version gelée, au rechargement comme la première fois.
