@@ -493,7 +493,9 @@
        "steps/concept/wb2-02-schema",
        "steps/internals/wb2-02-schema",
        "steps/concept/wb2-03-idee",
-       "steps/internals/wb2-03-idee"
+       "steps/internals/wb2-03-idee",
+       "steps/concept/wb2-04-kernels",
+       "steps/internals/wb2-04-kernels"
       ]
      }
     ]

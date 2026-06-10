@@ -1,0 +1,43 @@
+---
+title: "WB2-04 · L'arbre de composition — naviguer les kernels"
+description: "WB2-04 ajoute l'écran /v2/kernels : l'arbre fractal des kernels. La relation composes (§17) — produit → parcours → … → entité — projetée en un arbre dépliable où chaque nœud est un kernel à son niveau. L'arbre est virtualisé (il tient 200+ nœuds sans ralentir), on déplie/replie pour descendre, et un clic sur un kernel ouvre son anatomie. L'écran est une projection de lecture : le mur reste intact."
+keywords: ["aidos", "krd", "WB2-04", "Workbench V2", "arbre", "composition", "composes", "§17", "§49", "fractale", "kernel", "verticale", "produit", "entité", "drill-down", "virtualisation", "React Arborist", "anatomie", "mur", "/v2/kernels", "ADR 0053"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-04](/steps/internals/wb2-04-kernels).</Note>
+
+## En une phrase
+
+WB2-04 ouvre l'écran `/v2/kernels` : l'**arbre fractal** de vos kernels — du produit, tout en haut, jusqu'aux entités, tout en bas — que vous **dépliez** pour descendre dans le détail, et où chaque nœud **s'ouvre sur son anatomie**.
+
+## Le problème que WB2-04 résout
+
+Un produit AIDOS n'est pas une liste à plat : c'est un **emboîtement**. Le produit **compose** des parcours, qui composent des vues, qui composent des contrôles, des actions, des opérations, des entités (§23). Cet emboîtement est la relation `composes` (§17), et il est **fractal** (§49) : à chaque niveau, le même motif se répète. Sans vue dédiée, ce maillage reste invisible — on ne sait pas ce qui descend de quoi, ni jusqu'où.
+
+WB2-04 vous donne cet emboîtement **comme un arbre** : vous voyez les racines (les produits), vous **dépliez** une branche pour voir ce qu'elle compose, et vous redescendez ainsi rung par rung jusqu'à l'entité. C'est la carte de navigation de votre architecture, par composition.
+
+## Ce que vous voyez à l'écran
+
+- Un **arbre** : chaque ligne est un **kernel**, marqué de sa **facette** (la lentille : F, I, S…) et de son **niveau** (produit, parcours, vue…).
+- Un **chevron** par nœud : `▸` replié, `▾` déplié, `•` pour une feuille. Cliquez-le pour **déplier ou replier** la branche (le drill-down).
+- Un **compteur de nœuds** : il indique combien de kernels l'arbre contient en tout. L'arbre est **virtualisé** — même avec des centaines de nœuds, seul ce qui est visible est dessiné, donc rien ne ralentit.
+- Au **clic sur un kernel**, une barre de sélection apparaît avec un bouton **« Ouvrir l'anatomie »** : il vous mène à l'anatomie de ce kernel (ses six paires-miroir autour du mur — l'écran complet arrive à l'étape suivante).
+
+## Pourquoi un arbre, et pas une liste
+
+Parce que la composition **est** un arbre. Une liste à plat perdrait l'information essentielle : **qui compose qui**. L'arbre rend la profondeur lisible (la position fractale d'un kernel = sa distance à la racine) et le drill-down naturel : on n'ouvre que la branche qui nous intéresse.
+
+## Le mur, ici aussi
+
+L'arbre est une **projection de lecture**. Le naviguer, le déplier, ouvrir une anatomie : rien de tout cela n'écrit une vérité. Le mur (§2) reste intact — aucune écriture kernel/mirrors/fitness. Modifier une vérité passe toujours par idée → miroir → /goal.
+
+## Ce que WB2-04 vous permet de faire, concrètement
+
+1. **Voir** l'emboîtement complet de votre produit, par composition.
+2. **Descendre** dans une branche précise (déplier), **remonter** (replier).
+3. **Naviguer** des centaines de kernels sans ralentissement (la virtualisation).
+4. **Ouvrir** l'anatomie d'un kernel d'un clic, pour examiner ses paires-miroir.
+
+## La suite
+
+L'arbre vous mène à l'**anatomie** d'un kernel (WB2-06) : ses six paires-miroir autour du mur. WB2-05 ajoute, en parallèle, la **grille** niveau × facette — l'autre façon de parcourir le même espace.
