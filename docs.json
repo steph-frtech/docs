@@ -489,7 +489,9 @@
        "steps/concept/wb2-00-fondation",
        "steps/internals/wb2-00-fondation",
        "steps/concept/wb2-01-librairies",
-       "steps/internals/wb2-01-librairies"
+       "steps/internals/wb2-01-librairies",
+       "steps/concept/wb2-02-schema",
+       "steps/internals/wb2-02-schema"
       ]
      }
     ]

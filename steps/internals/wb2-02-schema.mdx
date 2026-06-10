@@ -1,0 +1,49 @@
+---
+title: "WB2-02 · Internals — le schéma-twin déterministe, le diagramme React Flow en lecture seule et les blocs-ancres cliquables"
+description: "Internals de WB2-02 : le schéma-twin pur lib/v2/schema.ts (nœuds × étages, arêtes, layout déterministe, libellés projetés du glossaire, hash content-addressed), le diagramme app/v2/SchemaDiagram.tsx (React Flow en lecture seule, monté client-only via dynamic(ssr:false), chaque nœud = un <Link> Next vers /v2/<slug>), le miroir de reproductibilité fast-check et l'e2e Playwright (chaque bloc navigue vers son écran). Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "WB2-02", "internals", "schema.ts", "SchemaDiagram", "React Flow", "@xyflow/react", "dynamic ssr false", "Link", "nopan", "pointer-events", "glossaire", "nodeLabel", "nodePosition", "schemaHash", "fast-check", "playwright", "déterminisme", "twin", "lecture seule", "ADR 0053"]
+---
+
+<Note>Côté « Pour moi » — l'intérieur. Pour le concept, voir [Pour les futurs utilisateurs → WB2-02](/steps/concept/wb2-02-schema).</Note>
+
+## Implémentation
+
+**Le schéma-twin `lib/v2/schema.ts`** — la source unique du schéma, PUR (aucune dépendance React/DOM, aucun LLM) :
+
+- `SchemaTier` + `TIER_ORDER` : les cinq étages d'altitude par rapport au mur (`entree`, `mur`, `verticale`, `axes`, `structure`) — le rang vertical déterministe du layout.
+- `SCHEMA_NODES` : un `SchemaNode[]` (`slug`, `tier`) — les neuf concepts canoniques placés sur leurs étages : idée (entrée) → mur → kernel + verticale → facette + paires-miroir → liens + arbres + cellules.
+- `SCHEMA_EDGES` : un `SchemaEdge[]` (`from`, `to`) — le flux (idée → mur → kernel ; kernel → verticale/facette/paires-miroir ; ces axes → liens → arbres → cellules).
+- `nodePosition(slug)` : la position `(x, y)` PURE — `y` vient du rang de l'étage, `x` centre les nœuds d'un même étage (pas de positions magiques codées une à une).
+- `nodeLabel(slug, locale)` : le libellé, **projeté du glossaire** via `term(slug, locale)` (jamais une chaîne en dur ; `""` si slug hors-glossaire).
+- `isSchemaTotal()` : chaque nœud cible un slug canonique, chaque arête relie deux nœuds, aucun slug dupliqué (pas de lien mort).
+- `schemaHash()` : FNV-1a 32 bits hex sur la sérialisation ordonnée (nœuds@étages | arêtes) — content-addressed, déterministe.
+
+**Le diagramme `app/v2/SchemaDiagram.tsx`** (`"use client"`) :
+
+- Rend `<ReactFlow>` (`@xyflow/react`) en **lecture seule** : `nodesDraggable={false}`, `nodesConnectable={false}`, `elementsSelectable={false}`, `panOnDrag={false}`, zoom désactivé, attribution masquée.
+- `nodeTypes = { concept: ConceptBlock }` ; chaque nœud-bloc est un **`<Link>` Next** (vraie ancre `<a href="/v2/<slug>">`) — donc il **navigue même avant l'hydratation** (pas de course au clic). Classe `nopan` + une feuille de style scoped mettant `pointer-events:none` sur le pane/renderer/viewport et `pointer-events:all` sur le nœud/lien, pour que le clic atteigne l'ancre et non le canvas.
+- `data-testid="v2-schema-node-<slug>"` par bloc ; les positions de `nodePosition`, les libellés de `nodeLabel(locale)` (locale via `next-intl`), les arêtes de `SCHEMA_EDGES`.
+
+**Le montage `app/v2/SchemaDiagramMount.tsx`** (`"use client"`) : isole `next/dynamic(..., { ssr:false })` (Next 16 interdit `ssr:false` dans un Server Component) — React Flow touche le DOM (ResizeObserver), il est donc client-only et code-split par route.
+
+**La page `app/v2/page.tsx`** (Server Component) : rend la section schéma (titre/sous-titre via le namespace i18n `v2Shell`, l'empreinte `schemaHash()` affichée, `<SchemaDiagramMount/>`) au-dessus de la carte de concepts en repli. Nouvelles clés i18n `v2Shell` : `schemaHeading`, `schemaSubtitle`, `schemaHash` (FR + EN).
+
+**Les miroirs** :
+
+- Reproductibilité — `lib/v2/schema.test.ts` (Vitest + fast-check) : totalité (chaque nœud canonique, chaque arête valide, neuf concepts couverts, pas d'orphelin) ; **libellés du glossaire** (`nodeLabel(slug) === glossaire[slug][locale].label` en FR+EN ; slug hors-glossaire → `""`) ; déterminisme (`nodePosition`/`schemaHash` purs & stables, l'étage gouverne le `y`). GREEN (10 tests).
+- e2e — `tests/e2e/v2-schema.spec.ts` (Playwright) : `/v2` rend le diagramme + l'empreinte ; les neuf blocs présents et libellés depuis le glossaire (FR) ; **chaque bloc navigue vers son écran `/v2/<slug>`** (les neuf) ; coexistence (`/v2` 200 ∧ `/` 200). GREEN (4 tests).
+
+## Méta
+
+- **Déterminisme-first.** Un **layout est une fonction pure**, jamais un agent : nœuds, positions, arêtes et hash sont du code (`schema.ts`), aucun LLM n'entre. Le twin prouve la **structure** (la table + les positions + le hash) ; l'e2e prouve le **montage et la navigation** (ce que React Flow rend n'est pas une fonction pure → c'est l'e2e qui le couvre).
+- **Une seule source de libellés.** Le schéma ne nomme rien : il projette le glossaire (`nodeLabel`). « Le bon vocabulaire partout » devient une **propriété** prouvée, pas une vigilance — changer le glossaire ou la locale change le schéma, jamais une chaîne en dur.
+- **Réutiliser, ne pas réinventer (ADR 0053).** Le besoin « diagramme de concepts » est délégué à `@xyflow/react` (slot gelé, déjà prouvé au montage en WB2-01) ; le step n'écrit que la projection (twin) + la colle de rendu + les preuves.
+- **Pré-hydratation.** Le nœud est une **vraie ancre** : il navigue sans JS, ce qui supprime la course au clic (un `<button onClick>` exigeait l'hydratation ; l'ancre non) — robustesse et accessibilité.
+- **Le mur.** Le diagramme est une projection de lecture (`authority=below`) : il propose/navigue, il n'écrit aucune vérité. React Flow est en lecture seule (pas de drag/connexion/sélection) — c'est un schéma, pas un éditeur de vérité.
+- **ui-completeness.** Chaque concept du schéma a un contrôle exécutable depuis l'écran (le bloc cliquable), et l'e2e prouve que chacun s'exécute (navigue). Aucune capacité headless.
+
+## Méta-méta
+
+- **La page d'accueil EST le schéma.** Faire de l'écran d'entrée le schéma KRD lui-même est un acte d'**auto-description** : le Workbench montre, dès l'accueil, la forme de la méthode qu'il outille (idée → mur → verticale × facette × anatomie → liens → arbres → cellules). L'outil et le modèle se reflètent.
+- **Le schéma se contrôle par sa totalité.** `isSchemaTotal()` interdit le **monstre** côté diagramme : un bloc sans concept canonique (lien mort) ou une arête vers un nœud absent. La complétude (§5) s'applique à la carte comme au kernel — pas de bloc orphelin, pas de cible fantôme.
+- **Une empreinte content-adressée pour un dessin.** `schemaHash()` rend le schéma **versionnable** : toute mutation de la structure change l'empreinte, ce qui permet (plus tard) de pinner une vue ou de détecter une dérive — la même discipline que le kernel (la version est l'empreinte), appliquée à une projection.

@@ -1,0 +1,43 @@
+---
+title: "WB2-02 · La page d'accueil = le schéma KRD complet, interactif"
+description: "WB2-02 transforme la page d'accueil /v2 en LE schéma KRD complet et interactif : l'idée (l'étage d'entrée) franchit le mur (/goal) vers le kernel, qui porte la verticale, la facette et les paires-miroir, reliés par les liens du §17, organisés en arbres puis en cellules. Chaque bloc du schéma est cliquable et mène à son écran. Le diagramme est rendu en lecture seule (React Flow) et chaque libellé vient du glossaire canonique — le bon vocabulaire partout, jamais une chaîne en dur."
+keywords: ["aidos", "krd", "WB2-02", "Workbench V2", "schéma", "diagramme", "React Flow", "@xyflow/react", "idée", "mur", "/goal", "verticale", "facette", "paires-miroir", "liens §17", "arbres", "cellules", "glossaire", "vocabulaire", "/v2", "lecture seule", "ADR 0053"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-02](/steps/internals/wb2-02-schema).</Note>
+
+## En une phrase
+
+WB2-02 fait de la page d'accueil `/v2` **LE schéma KRD complet, interactif** : un diagramme où chaque concept (idée, mur, kernel, verticale, facette, paires-miroir, liens, arbres, cellules) est un **bloc cliquable** qui ouvre son écran.
+
+## Le problème que WB2-02 résout
+
+KRD n'est pas une liste de fonctionnalités : c'est un **schéma**. Une idée franchit un **mur** (par `/goal`) pour devenir une vérité gelée (un **kernel**), qui se lit selon deux axes — la **verticale** (produit → … → entité) et la **facette** (les huit lentilles) — et dont l'anatomie est faite de **paires-miroir** (déclaré ↔ prouvé), le tout relié par les **liens du §17**, composé en **arbres** puis en **cellules**. Présenter ça comme une grille de cartes plates trahit la structure. WB2-02 montre le **schéma lui-même**, et le rend **navigable** : chaque bloc mène à son écran dédié.
+
+## Ce que vous voyez à l'écran
+
+À l'ouverture de `/v2`, le **diagramme** occupe la page :
+
+- En haut, **l'idée** — l'étage d'entrée, au-dessus du mur.
+- En dessous, **le mur** — la frontière qu'on ne franchit que par `idée → miroir → /goal` (mis en avant).
+- Sous le mur, **le kernel**, qui porte **la verticale**, **la facette** et **les paires-miroir**.
+- Ces axes convergent vers **les liens** (§17), puis vers **les arbres**, puis vers **les cellules**.
+
+Le diagramme est **en lecture seule** : on ne le déplace pas, on ne réécrit rien dessus. Mais **chaque bloc est cliquable** — cliquer « Mur » ouvre l'écran du concept « Mur », cliquer « Verticale » ouvre celui de la verticale, etc. C'est un schéma **vivant**, pas une image.
+
+Sous le diagramme, la même liste de concepts reste disponible en cartes (un repli accessible, sans canvas), elle aussi cliquable.
+
+## Le bon vocabulaire, partout
+
+Aucun libellé n'est écrit en dur dans le diagramme : chaque bloc tire son nom du **glossaire canonique KRD** (français d'abord — « Idée », jamais « Idea » ; « Mur », jamais « Wall »). Changer la langue change tous les blocs d'un coup. Le schéma est une **projection** du glossaire : même glossaire → même schéma, et son empreinte déterministe est affichée.
+
+## Le mur, intact
+
+Le diagramme **propose** et **navigue** ; il n'écrit aucune vérité kernel/mirrors/fitness. C'est une projection de lecture, comme tout le shell V2.
+
+## Comment savoir que c'est juste
+
+- **Chaque bloc** du schéma **navigue** vers son écran `/v2/<concept>` — prouvé par un e2e Playwright qui clique les neuf blocs.
+- Les **libellés viennent du glossaire** (pas de chaîne en dur) — prouvé par une propriété : le libellé d'un bloc est exactement celui du glossaire, en français comme en anglais.
+- Le schéma est **total** : chaque bloc cible un concept canonique, chaque flèche relie deux blocs existants — aucun lien mort, aucun bloc orphelin.
+- L'**empreinte** du schéma est **déterministe** : même schéma → même empreinte.
