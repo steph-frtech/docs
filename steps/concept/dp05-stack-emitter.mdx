@@ -1,0 +1,39 @@
+---
+title: "DP05 · EmitStack(phase) — la stack complète, mêmes octets sur toute machine"
+description: "DP05 compose DP03+DP04 en UNE émission de stack complète et déterministe depuis une phase DAG stable (S23, réutilise S78) : EmitStack(phase) → {docker-compose.yml, .env.example, start.sh, start_with_rebuild.sh, config dynamique Traefik}, hash-protégée, avec le miroir-pierre-angulaire de reproductibilité — même phase content-adressée → mêmes octets sur toute machine. La phase est la source autoritative : un fichier gen/ hand-edité bloque la ré-émission entière (EMITTED_FILE_HAND_EDITED, fail-closed). Le sidecar interpréteur Go (ADR 0040 Décision 7) apparaît comme service role=interpreter, profile core. Le preview (DP25) et le deploy (DP26) réutiliseront cette fonction : ils ne choisissent jamais entre artefacts, ils ré-émettent."
+keywords: ["aidos", "krd", "DP05", "EmitStack", "phase", "phase stable", "S23", "S78", "bundle", "docker-compose", ".env.example", "traefik dynamic", "config dynamique", "sidecar interpréteur", "role=interpreter", "ADR 0040", "byte-identique", "reproductibilité", "EMITTED_FILE_HAND_EDITED", "hand-edit", "bundle_hash", "phase_version", "le mur", "/stack-emit", "piste DP"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP05](/steps/internals/dp05-stack-emitter).</Note>
+
+## En une phrase
+
+DP05 assemble tout ce que la piste DP a émis jusqu'ici en **une seule fonction** : `EmitStack(phase)` projette, depuis une **phase DAG stable et content-adressée**, le bundle déployable complet de votre app — compose, `.env.example`, scripts, config dynamique Traefik — avec la garantie pierre-angulaire de tout l'épic : **même phase → mêmes octets, sur toute machine**.
+
+## Le problème que ça résout
+
+DP03 émet le compose ; DP04 émet l'env et les scripts. Mais un déploiement n'assemble pas des artefacts à la main : il a besoin du **bundle entier, d'un seul geste, depuis une source unique**. Si le preview et le deploy choisissaient eux-mêmes quels fichiers prendre et dans quelle version, la dérive reviendrait par la porte de service — un compose d'hier avec un `.env.example` d'aujourd'hui.
+
+DP05 ferme cette porte : le preview (DP25) et le deploy (DP26) **ne choisissent jamais** — ils appellent `EmitStack(phase)` et reçoivent les cinq artefacts, cohérents par construction, adressés par le hash de la phase.
+
+## La phase est la source — pas le dossier gen/
+
+Trois refus gardent le mur, tous **calculés** :
+
+1. une phase **non stable** est refusée (`PHASE_NOT_STABLE`) — le verdict de stabilité vient de S23, jamais déclaré ;
+2. un manifest **non épinglé** dans la coupe de la phase est refusé — la phase décide ce qui s'émet, pas l'appelant ;
+3. un fichier `gen/` **hand-edité** bloque la ré-émission **entière** (`EMITTED_FILE_HAND_EDITED`) : un octet modifié sur disque ne hashe plus vers l'`output_hash` du ledger, et rien n'est ré-émis par-dessus une édition humaine — fail-closed, au premier drift.
+
+Pour changer l'émission, on change la **source** (idée → miroir → /goal), jamais le fichier émis.
+
+## Le sidecar interpréteur Go
+
+L'ADR 0040 (Décision 7) a tranché : les handlers de l'app émise rappellent un **service-interpréteur Go** — la conséquence assumée est un sidecar Go dans chaque déploiement. DP05 le branche : le service `role=interpreter` du StackManifest traverse l'émission en **profile core** (il tourne toujours), joignable en `docker_internal` (`${APP_NAME}-interpreter` sur le réseau partagé), son port déclaré dans le `.env.example`.
+
+## La config dynamique Traefik
+
+Le cinquième artefact est nouveau : `traefik.dynamic.yml`, la projection **file-provider** de la même topologie que les labels du compose — routeur HTTPS (websecure + certresolver), redirect HTTP→HTTPS, URLs de service internes. Tout y est **référence d'environnement** (`${APP_SUBDOMAIN}.${DOMAIN}`, `${CERT_RESOLVER_NAME}`) — jamais une URL ni un secret en dur (SPEC-stack-2026).
+
+## Où le voir
+
+Sur l'écran [/stack-emit](https://aidos.sagedesk.fr/stack-emit) : la carte DP05 montre la `phase_version` (l'adresse S23), le `bundle_hash` (phase + les 5 artefacts), la config Traefik émise et le badge du sidecar interpréteur. Le bouton « émettre » **ré-émet le bundle entier** : ré-émettez deux fois — le `bundle_hash` est égal les deux fois ; modifiez le manifest — nouvelle phase, nouveau bundle, et le scan secret reste vert.

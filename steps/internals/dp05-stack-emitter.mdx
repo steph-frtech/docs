@@ -1,0 +1,47 @@
+---
+title: "DP05 · Internals — stackemit : EmitStack(phase), le miroir-pierre-angulaire"
+description: "Le journal de build de DP05 : le package pur back/runtime/stackemit (EmitStack = composition de composeemit DP03 + envemit DP04 + le Target additif traefik-dynamic), le miroir property ∀ N1 (rapid) écrit d'abord et rouge puis vert — 9 lois (reproductibilité byte-identique ∀×2 + Example×100, sidecar interpréteur ADR 0040 D7, porte hand-edit EMITTED_FILE_HAND_EDITED, autorité de la phase S23, cohérence ${VAR}, zéro valeur de secret + fault-injection du scanner, triple content-addressing phase_version·source_hash·bundle_hash, chmod pur, targets clos) — le jumeau TS phase-emit épinglé octet-pour-octet, l'écran /stack-emit étendu et les 4 e2e Playwright."
+keywords: ["aidos", "krd", "DP05", "stackemit", "EmitStack", "internals", "rapid", "property", "miroir", "rouge-vert", "PhaseFor", "phases.IsStable", "S23", "S78", "regen", "LedgerEntry", "DiskFile", "EMITTED_FILE_HAND_EDITED", "blockreason", "traefik-dynamic", "bundle_hash", "phase_version", "records.Hash", "jumeau TS", "phase-emit", "fast-check", "vitest", "Playwright"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP05 — EmitStack(phase)](/steps/concept/dp05-stack-emitter).</Note>
+
+## Implémentation
+
+### Le miroir d'abord (rouge → vert)
+
+`back/runtime/stackemit/stackemit_property_test.go` est écrit **avant** tout code : le package ne contient aucun fichier Go non-test, le `go test` échoue à la compilation — c'est le rouge. Les **9 lois** gravées :
+
+1. **Reproductibilité (la pierre angulaire)** — ∀ manifest valide épinglé dans sa phase, deux émissions rendent les CINQ artefacts byte-identiques et le même `bundle_hash` (×2 sous rapid, ×100 sur `stackmanifest.Example()`) ;
+2. **Sidecar interpréteur (ADR 0040 D7)** — `InterpreterSidecar(Example)` existe, profile `core` ; le compose porte le service `interpreter` en `container_name: ${APP_NAME}-interpreter` (docker_internal), SANS bloc `profiles:` (core tourne toujours) ; `INTERPRETER_PORT` est une clé du `.env.example` ;
+3. **Porte hand-edit** — ledger construit depuis la première émission, disque fidèle → ré-émission identique ; UN octet basculé sur n'importe quel fichier tracké → refus du bundle ENTIER avec le code clos `EMITTED_FILE_HAND_EDITED` (ajout additif à l'enum blockreason, catalogue + codeOrder) ;
+4. **Autorité de la phase** — une phase `Stable:false` refuse `PHASE_NOT_STABLE` (S23 réutilisé) ; un manifest dont le hash n'apparaît pas dans la coupe refuse `OUT_OF_SCOPE` (la phase décide) ;
+5. **Cohérence** — tout `${VAR}` du compose ET du `traefik.dynamic.yml` ∈ `envemit.Keys(.env.example)` ;
+6. **Zéro valeur de secret** — `secretstore.ScanEmission` (S91 verbatim) vide sur les cinq artefacts ; fault-injection : une vraie valeur plantée fait tirer le scanner ;
+7. **Triple content-addressing** — `Bundle.PhaseVersion == phase.Version()` (S23/S02), `SourceHash == stackmanifest.HashManifest` (jamais forké), chaque artefact `OutputHash == records.Hash(bytes)`, chemins below-the-line `back/gen/<app>/`, header protégé ; `bundle_hash` bouge quand le manifest bouge ;
+8. **Chmod pur** — `envemit.Mode` réutilisé : `.env.example` 0600, scripts 0755, ymls 0644 ;
+9. **Targets clos** — `stackemit` ne possède QUE `traefik-dynamic` ; DP03/DP04 gardent les leurs (la matrice reste énumérable, additive).
+
+### Le package pur
+
+`back/runtime/stackemit/stackemit.go` : `EmitStack(phase, manifest, ledger, disk)` est une **composition** — `composeemit.Emit` (DP03) et `envemit.Emit` (DP04) sont importés verbatim, les formes ledger/disque sont `regen.LedgerEntry`/`regen.DiskFile` (S78), la loi de drift est `generators.Drifted` (S34). Seul le rendu `traefik-dynamic` est nouveau : la projection file-provider des labels DP03 (routeurs websecure + redirect, middleware partagé, `url: http://${APP_NAME}:<port>` — références, jamais une valeur). `PhaseFor(m)` construit la phase minimale S23 (coupe à une contrainte, vacuously stable) — le seed déterministe ; une vraie phase de build vient du DAG. Adresses autoritatives du Example (alphashop) : PHASE `a26d29c7…4a9ba76c`, SOURCE `8011728e…62acdd2` (inchangé depuis DP02), TRAEFIK `8d08ebf5…a4cd9dad`, BUNDLE `19670343…b891af3a`. `go test ./...` (back entier) vert ; gofmt/go vet propres.
+
+### Le jumeau TS épinglé
+
+`front/web/lib/phase-emit.ts` reproduit la composition octet pour octet (y compris `phaseVersionFor` — le jumeau de `records.Canonicalize` sur le body de phase) ; le miroir vitest `lib/phase-emit.test.ts` (fast-check, **12 tests**) épingle `GO_PHASE_VERSION`, `GO_TRAEFIK_OUTPUT_HASH`, `GO_BUNDLE_HASH`, `GO_SOURCE_HASH` — toute divergence d'un octet rougit. Il porte la fault-injection du scanner (une clé AWS plantée fait tirer `scanEmission`) et la loi de drift (`driftDetected`, le versant TS de `EMITTED_FILE_HAND_EDITED`). Vitest complet **2103/2103** (baseline 2091 intacte, anti-overwrite).
+
+### L'écran et la preuve e2e
+
+`/stack-emit` est **étendu** (pas de nouvelle route — la même verticale) : la carte DP05 montre `phase_version`, `bundle_hash`, le `traefik.dynamic.yml` seedé avec son `output_hash`, le badge du **sidecar interpréteur** (role=interpreter · profile core · :8973) et le code clos `EMITTED_FILE_HAND_EDITED`. Le contrôle « émettre » passe par `emitStackBundle` : il ré-émet le bundle ENTIER et compare le `bundle_hash` au seedé (mesure pure — n'écrit rien). `tests/e2e/stack-bundle.spec.ts` **4/4** sur le port 3210 : bundle seedé épinglé aux adresses Go, sidecar visible, **ré-émettre DEUX FOIS → bundle_hash égal les deux fois** (le critère central), manifest modifié → nouvelle phase + nouveau bundle avec scan toujours vert. Baseline intacte : stack-emit 4/4, env-emit 4/4, e2e v3 16/16 — prod :3000 intouchée.
+
+## Méta
+
+- **La composition est la fonction.** DP05 n'écrit presque pas de rendu : il écrit la **porte** (phase stable, manifest épinglé, disque fidèle) puis compose trois émetteurs publiés. La valeur de l'étape est dans l'ordre des refus — la porte hand-edit passe AVANT toute émission, donc aucun octet n'est jamais produit par-dessus une édition humaine.
+- **Le `bundle_hash` rend la reproductibilité comparable en UNE égalité.** Plutôt que comparer cinq fichiers, le bundle replie `phase:<version>` + chaque `path:output_hash` sous `records.Hash` : « ré-émettre deux fois, hash égaux » devient un seul `===` — sur l'écran, dans l'e2e, et dans le miroir Go.
+- **`PhaseFor` est un seed, pas un raccourci.** La coupe à une contrainte est la phase **minimale honnête** : vacuously stable par S23, elle épingle exactement le manifest. Quand DP25/DP26 brancheront la vraie phase du DAG (multi-contraintes, senseurs), `EmitStack` ne change pas — seule la provenance de la phase change. OpenQuestion documentée : le ledger d'émission persistant (qui écrit `LedgerEntry` après une vraie écriture disque) arrive avec le bootstrap DP10+ ; aujourd'hui le ledger est un input explicite (le motif S78).
+
+## Méta-méta
+
+- **Une pierre angulaire est un miroir, pas une promesse.** « Mêmes octets sur toute machine » ne se déclare pas : ça se pin (∀×2, ×100, jumeau TS octet-pour-octet, e2e qui clique deux fois). Tout l'épic DP25/DP26 pourra s'appuyer dessus parce que la propriété est **exécutable**, pas affirmée.
+- **L'enum fermée s'étend par le rituel, jamais en passant** : `EMITTED_FILE_HAND_EDITED` est entré dans blockreason par le triplet const + catalogue (explanation + how_to_fix ≥ 1) + codeOrder — et son miroir property (l'enum totale) a validé l'ajout sans qu'aucun test existant ne bouge. Le cliquet n'a fait qu'ADDitionner.
+- **La discipline de report** : critères atteints → rapport immédiat, sans re-vérification redondante — la leçon des étapes brûlées au polissage final.
