@@ -1,33 +1,53 @@
 ---
-title: "WB2-27 · L'IA Builder — un chat qui fait tout, par une grammaire fermée"
-description: "WB2-27 ajoute l'écran /v2/builder : UN seul chat pour tout faire — capturer un besoin, faire pousser l'arbre, promouvoir une idée, mesurer un impact, lire l'état du projet, proposer un déploiement. Mais ce chat n'est pas magique : il parle une grammaire d'intentions FERMÉE. Six intentions déclarées, rien d'autre. Chaque message est classé par un algorithme (jamais un prompt) ; à chaque tour, l'écran montre « l'attente » (ce que le système a compris), « les types de réponse possibles » (tous les candidats, classés), « la réponse » (des événements typés) et « les impacts » (la vague calculée). Une ambiguïté est détectée et OFFERTE — jamais tranchée en silence. L'IA (Claude) n'intervient que comme exception gatée pour reformuler un message ambigu, et sa phrase repasse par le même pipeline déterministe : le code a l'autorité. Et le mur tient sur TOUTES les phrases possibles : aucune intention, jamais, n'écrit une vérité."
-keywords: ["aidos", "krd", "WB2-27", "IA Builder", "chat", "grammaire fermée", "intentions", "attente", "types de réponse possibles", "ambiguïté", "événements", "impacts", "vague", "event-sourcé", "append-only", "déterministe", "Claude", "reformulation", "exception gatée", "mur", "/goal", "/v2/builder", "ADR 0057"]
+title: "WB2-27 · L'IA Builder — le cycle de vie complet d'une appli, dans un chat à grammaire fermée"
+description: "WB2-27 ajoute l'écran /v2/builder : UN seul chat pour développer TOUTE une appli — capturer un besoin, faire pousser l'arbre, promouvoir une idée, GÉNÉRER l'application, la DÉPLOYER en test puis en prod, voir les DELTAS, mesurer un impact, lire l'état. Mais ce chat n'est pas magique : il parle une grammaire d'intentions FERMÉE. Huit intentions déclarées, rien d'autre (ADR 0057 + ADR 0058). Chaque message est classé par un algorithme (jamais un prompt) ; l'app générée est une PROJECTION PURE des kernels proposés (version content-adressée app:<hash>, jamais stockée) ; et le déploiement obéit au CLIQUET D'ENVIRONNEMENTS : la prod est REFUSÉE tant que la version courante exacte n'est pas passée en test — et toute nouvelle promotion ré-arme la porte. Le delta est un écart CALCULÉ (les kernels hors de l'ensemble déployé), jamais estimé. À chaque tour, l'écran montre « l'attente », « les types de réponse possibles », « la réponse » (des événements typés) et « les impacts » (la vague calculée). Une ambiguïté est détectée et OFFERTE — jamais tranchée en silence. L'IA (Claude) n'intervient que comme exception gatée pour reformuler ; le code a l'autorité. Et le mur tient sur TOUTES les phrases possibles : aucune intention, jamais, n'écrit une vérité ni n'exécute une infrastructure."
+keywords: ["aidos", "krd", "WB2-27", "IA Builder", "chat", "grammaire fermée", "intentions", "cycle de vie", "générer", "déployer", "test", "prod", "cliquet d'environnements", "delta", "app:<hash>", "projection pure", "attente", "types de réponse possibles", "ambiguïté", "événements", "impacts", "vague", "event-sourcé", "append-only", "déterministe", "Claude", "reformulation", "exception gatée", "mur", "/goal", "/v2/builder", "ADR 0057", "ADR 0058"]
 ---
 
 <Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-27](/steps/internals/wb2-27-builder).</Note>
 
 ## En une phrase
 
-WB2-27 ouvre l'écran `/v2/builder` : **un seul chat qui fait tout** — mais « tout » passe par une **grammaire d'intentions fermée**, classée par un algorithme, réduite par une fonction pure, et **jamais** par la magie d'un modèle.
+WB2-27 ouvre l'écran `/v2/builder` : **un seul chat qui porte le cycle de vie complet d'une appli** — capturer, greffer, promouvoir, **générer**, **déployer en test puis en prod** (le cliquet), **voir les deltas** — et « tout » passe par une **grammaire d'intentions fermée**, classée par un algorithme, réduite par une fonction pure, **jamais** par la magie d'un modèle.
 
 ## Le problème que ça résout
 
-Vous voulez parler à votre projet : « greffe les pommes sous le catalogue », « capture cette idée », « quel impact si je modifie le paiement ? », « déploie ». Un seul endroit, une seule conversation — pas dix panneaux.
+Vous voulez parler à votre projet : « greffe les pommes sous le catalogue », « capture cette idée », « promeus la dernière idée », **« génère l'application »**, **« déploie l'application en test »**, **« déploie l'application en prod »**, **« montre le delta depuis la prod »**. Un seul endroit, une seule conversation — de la première idée jusqu'à la prod, et retour.
 
-Le danger, c'est le **chat-magie** : un grand modèle qui « comprend » votre phrase, décide seul, et exécute. Personne ne sait ce qu'il fera de la prochaine phrase ; la même demande peut donner deux réponses différentes ; et un système qui « comprend tout » finit par **écrire** ce qu'il n'aurait jamais dû toucher. WB2-27 prend le chemin inverse : le chat fait tout — **dans les limites exactes de ce qui est déclaré**.
+Le danger, c'est le **chat-magie** : un grand modèle qui « comprend » votre phrase, décide seul, et exécute — la prod avant le test, un « build » qui diverge de ses vérités, une dérive « estimée » au doigt mouillé. WB2-27 prend le chemin inverse : le chat fait tout — **dans les limites exactes de ce qui est déclaré**, et le cycle de vie obéit à une **loi prouvée**.
 
-## La grammaire fermée : six intentions, rien d'autre
+## La grammaire fermée : huit intentions, rien d'autre
 
-Le chat sait faire **six choses**, déclarées noir sur blanc (ADR 0057) :
+Le chat sait faire **huit choses**, déclarées noir sur blanc (ADR 0057 + ADR 0058) :
 
 - **capturer une idée** — votre besoin devient un candidat-vérité, placé automatiquement dans l'arbre du projet ;
 - **greffer** — faire pousser l'arbre des besoins (« greffe pommes sous app/catalogue ») ;
 - **promouvoir** — geler la dernière idée en kernel **proposé** (un brouillon, jamais appliqué) ;
+- **générer** — « génère l'application » : l'app **entière**, projetée des kernels proposés — une **projection pure**, recalculée, jamais stockée, avec une version content-adressée `app:<hash>` ;
+- **déployer** — « déploie l'application en test » ou « … en prod » : l'environnement est lu dans la phrase, et la prod est gardée par **le cliquet** ;
+- **delta** — « montre le delta depuis la prod » (ou le test) : l'**écart calculé** entre ce qui tourne et ce qui a changé depuis ;
 - **impacter** — « si je modifie ça, quoi est touché ? » : la vague, calculée ;
-- **interroger** — lire l'état du projet (l'arbre, les idées, les kernels proposés) ;
-- **déployer** — **proposer** un déploiement (le geste reste humain et approuvé).
+- **interroger** — lire l'état du projet (l'arbre, les idées, les kernels proposés).
 
 Rien d'autre. Une phrase qui ne s'accroche à aucune intention est **incomprise** — le chat le dit, il n'invente jamais.
+
+## L'app générée est une projection, jamais un stock
+
+« Génère l'application » ne fabrique pas un artefact rangé quelque part : l'app est **recalculée** depuis les kernels proposés — une entité par kernel, une route par entité, et une version `app:<hash>` qui ne dépend **que du contenu** (le hash des versions de kernels, jamais l'horloge). Même état → même app, même version. Il ne peut pas exister de « build » qui diverge de ses vérités : la divergence n'a nulle part où vivre.
+
+## Le cliquet d'environnements : test d'abord, toujours
+
+C'est **la loi du cycle de vie**, prouvée par le miroir :
+
+- « déploie l'application en **test** » exige au moins un kernel proposé — on ne déploie pas le vide ;
+- « déploie l'application en **prod** » est **REFUSÉ** tant que la version courante **exacte** de l'app n'est pas passée en test — jamais de prod directe ;
+- et **toute nouvelle promotion ré-arme la porte** : un kernel de plus change la version de l'app, et la prod redevient refusée tant que cette nouvelle version n'a pas **repassé** le test.
+
+Le refus n'est pas un silence : c'est un événement explicable — « la version courante n'est pas passée en test (le cliquet — test d'abord, toujours) ». C'est le cliquet KRD appliqué aux environnements : il ne mord que dans le bon sens. Le déploiement **réel** (docker, Traefik) reste le pipeline gaté d'ADR 0052, lié depuis l'écran — le chat **séquence et propose**, il n'exécute aucune infrastructure.
+
+## Le delta : un écart compté, jamais estimé
+
+« Montre le delta depuis la prod » ne demande pas son avis à un modèle : le système **compte** les kernels qui ne sont pas dans l'ensemble déployé. Juste après un déploiement, le delta est **0** ; promouvez une idée de plus, il devient **1** — exactement. Sans aucun déploiement, le delta est **total** (tout est écart), jamais une erreur. La dérive est une donnée, pas une opinion.
 
 ## L'attente et les types de réponse possibles
 
@@ -35,10 +55,10 @@ Rien d'autre. Une phrase qui ne s'accroche à aucune intention est **incomprise*
 
 - « **l'attente** » — ce que le système a compris : l'intention en tête, ou le constat d'une ambiguïté, ou l'aveu d'incompréhension ;
 - « **les types de réponse possibles** » — **tous** les candidats, classés par score : vous voyez ce que le chat aurait pu comprendre d'autre ;
-- « **la réponse** » — pas de la prose libre : des **événements typés** d'un jeu clos (« idée capturée », « arbre greffé », « kernel proposé », « impact calculé », « refus »…) ;
+- « **la réponse** » — pas de la prose libre : des **événements typés** d'un jeu clos (« idée capturée », « arbre greffé », « kernel proposé », « app générée », « déploiement test », « déploiement prod », « delta calculé », « refus »…) ;
 - « **les impacts** » — la **vague calculée** : quels nœuds de l'arbre, quelles idées, quels kernels sont touchés par ce tour.
 
-Le classement n'est pas une opinion d'IA : c'est un **algorithme à lexiques déclarés** — les mêmes mots donnent toujours le même classement.
+Le classement n'est pas une opinion d'IA : c'est un **algorithme à lexiques déclarés** — les mêmes mots donnent toujours le même classement. Les boutons de l'écran ne court-circuitent rien : chacun **envoie un message canonique** qui repasse par le même circuit — le chat reste l'unique source de gestes.
 
 ## L'ambiguïté est offerte, jamais tranchée en silence
 
@@ -50,9 +70,9 @@ Et Claude, alors ? Il n'entre qu'à **un seul endroit**, et comme **exception** 
 
 ## Le mur, prouvé sur toutes les phrases
 
-Le chat **propose** ; il n'écrit **aucune vérité**. Une idée capturée n'a pas de miroir ; un kernel promu est un **brouillon** (ChangeSet DRAFT) ; un déploiement est **proposé**, jamais exécuté. Et ce n'est pas une promesse : c'est une **propriété prouvée sur toutes les suites de messages possibles** — quoi que vous tapiez, dans n'importe quel ordre, aucune écriture-vérité ne part. La promotion réelle reste le chemin légal : idée → miroir → `/goal` → approbation humaine.
+Le chat **propose** ; il n'écrit **aucune vérité** et n'exécute **aucune infrastructure**. Une idée capturée n'a pas de miroir ; un kernel promu est un **brouillon** (ChangeSet DRAFT) ; un déploiement est un **événement du jeu clos** — le vrai pipeline (ADR 0052) reste gaté par l'approbation humaine. Et ce n'est pas une promesse : c'est une **propriété prouvée sur toutes les suites de messages possibles** — quoi que vous tapiez, dans n'importe quel ordre, aucune écriture-vérité ne part. La promotion réelle reste le chemin légal : idée → miroir → `/goal` → approbation humaine.
 
 ## Comment savoir que c'est juste
 
-- Le miroir du builder (**14 propriétés et exemples**) prouve : le jeu des intentions est **clos** ; le classement est **total et déterministe** ; un message clair est **compris**, une égalité est **ambiguë**, une phrase sans accroche est **incomprise** ; le réducteur est **pur** (même entrée → même résultat) et le journal **append-only** ; chaque intention canonique fait exactement ce qu'elle dit ; et **le mur tient ∀ messages** — aucune écriture-vérité, jamais.
-- Étendre le chat, c'est **déclarer** : une nouvelle intention + son lexique + sa réduction + ses tests — jamais « le modèle improvisera ».
+- Le miroir du builder (**22 propriétés et exemples**) prouve : le jeu des intentions est **clos** (les huit, ni plus ni moins) ; le classement est **total et déterministe** ; un message clair est **compris**, une égalité est **ambiguë**, une phrase sans accroche est **incomprise** ; le réducteur est **pur** et le journal **append-only** ; chaque intention canonique fait exactement ce qu'elle dit ; la version d'app est **stable** (même état → même `app:<hash>`) ; **la prod directe est refusée**, le chemin test → prod passe, et **le cliquet re-mord** après chaque nouvelle promotion ; le delta compte **exactement** l'écart (total sans déploiement, 0 juste après, 1 après une promotion) ; et **le mur tient ∀ messages** — aucune écriture-vérité, jamais.
+- Étendre le chat, c'est **déclarer** : une nouvelle intention + son lexique + sa réduction + ses tests — jamais « le modèle improvisera ». Les trois intentions du cycle de vie (générer, déployer, delta) sont nées exactement comme ça (ADR 0058).
