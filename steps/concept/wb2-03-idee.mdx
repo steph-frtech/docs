@@ -1,7 +1,7 @@
 ---
 title: "WB2-03 · L'idée — capturer un besoin avec le wizard"
-description: "WB2-03 ajoute l'écran /v2/idee : l'étage d'entrée du schéma KRD. Un wizard guidé (XState + formulaire validé) capture un besoin au-dessus du mur — un texte, sa coordonnée cible (niveau × facette × échelle fractale), sa provenance (humain ou incident), et la forme de miroir attendue. Le résultat est une idée : un candidat-vérité (§115), sans gel ni miroir, présenté en amber. L'écran PROPOSE ; il n'écrit aucune vérité (le mur intact). La promotion reste idée → miroir → /goal."
-keywords: ["aidos", "krd", "WB2-03", "Workbench V2", "idée", "besoin", "candidat-vérité", "§115", "wizard", "XState", "coordonnée", "niveau", "facette", "échelle fractale", "provenance", "humain", "incident", "forme de miroir", "mur", "/goal", "/v2/idee", "ADR 0053"]
+description: "WB2-03 ajoute l'écran /v2/idee : l'étage d'entrée du schéma KRD. Un wizard guidé (XState + formulaire validé) capture un besoin au-dessus du mur — un texte, sa coordonnée cible (niveau × facette × échelle fractale, une POSITION dans l'arbre composes — ADR 0055), sa provenance (humain ou incident), et la forme de miroir attendue. Le résultat est une idée : un candidat-vérité (§115), sans gel ni miroir, présenté en amber. L'écran PROPOSE ; il n'écrit aucune vérité (le mur intact). La promotion reste idée → miroir → /goal."
+keywords: ["aidos", "krd", "WB2-03", "Workbench V2", "idée", "besoin", "candidat-vérité", "§115", "wizard", "XState", "coordonnée", "niveau", "facette", "échelle fractale", "arbre composes", "position", "rôles dérivés", "provenance", "humain", "incident", "forme de miroir", "mur", "/goal", "/v2/idee", "ADR 0053", "ADR 0055"]
 ---
 
 <Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-03](/steps/internals/wb2-03-idee).</Note>
@@ -12,19 +12,27 @@ WB2-03 ouvre l'écran `/v2/idee` : un **wizard** qui vous fait **capturer un bes
 
 ## Le problème que WB2-03 résout
 
-Tout commence par un besoin. Mais un besoin lâché en une phrase floue (« il faut que ça marche mieux ») n'est pas exploitable : on ne sait ni **où** il s'applique dans l'architecture, ni **de quelle nature** il relève, ni **comment** on le prouvera. WB2-03 vous fait **préciser** le besoin sans le geler : vous le situez sur la **verticale** (produit → … → entité), vous lui donnez une **facette** (la lentille — fonctionnel, sécurité, budgets…) et une **échelle fractale** (cellule, kernel, feuille), vous notez **qui l'a voulu** (un humain, ou un incident remonté de la réalité), et le wizard en déduit la **forme de miroir** qu'il faudra écrire plus tard. Le besoin devient une **idée** : nette, située, traçable — mais toujours **au-dessus du mur**.
+Tout commence par un besoin. Mais un besoin lâché en une phrase floue (« il faut que ça marche mieux ») n'est pas exploitable : on ne sait ni **où** il s'applique dans l'architecture, ni **de quelle nature** il relève, ni **comment** on le prouvera. WB2-03 vous fait **préciser** le besoin sans le geler : vous le situez sur la **verticale** (produit → … → entité), vous lui donnez une **facette** (la lentille — fonctionnel, sécurité, budgets…) et une **échelle fractale** (§49) — non pas une étiquette choisie dans une liste, mais une **position dans l'arbre de composition `composes`** : le système vous **propose** où attacher le besoin, et vous pouvez surcharger —, vous notez **qui l'a voulu** (un humain, ou un incident remonté de la réalité), et le wizard en déduit la **forme de miroir** qu'il faudra écrire plus tard. Le besoin devient une **idée** : nette, située, traçable — mais toujours **au-dessus du mur**.
 
 ## Ce que vous voyez à l'écran
 
 Un wizard en cinq étapes, avec un **fil d'étapes** (le stepper) qui montre où vous en êtes :
 
 1. **L'intention** — vous écrivez le besoin (« Je veux payer en un clic »). Le texte est repris **verbatim**, jamais reformulé.
-2. **La coordonnée cible** — vous choisissez le **niveau** (la verticale §23), la **facette** (FKE-1.3) et l'**échelle fractale** (§49).
+2. **La coordonnée cible** — vous choisissez le **niveau** (la verticale §23) et la **facette** (FKE-1.3) ; pour l'**échelle fractale** (§49), le système vous **propose une position** dans l'arbre de composition `composes` (un chemin, par exemple `app/paiement/checkout`), que vous pouvez **surcharger** en désignant un autre nœud — ou en greffant une nouvelle branche.
 3. **La provenance** — humain ou incident.
 4. **La revue** — un récapitulatif du besoin ; un clic sur « Proposer ».
 5. **L'idée proposée** — un encart **amber** : l'empreinte de l'idée, sa coordonnée, la **forme de miroir attendue**, et — affiché noir sur blanc — qu'elle **n'a pas de miroir** et **n'a écrit aucune vérité**.
 
 Vous pouvez revenir en arrière à chaque étape, et « recommencer » pour capturer un autre besoin.
+
+## L'échelle fractale est vivante (ADR 0055)
+
+L'échelle fractale n'est **pas** un jeu clos à trois valeurs (le « cellule / kernel / feuille » figé de la première version était conceptuellement faux). C'est une **position** — un **chemin** — dans l'**arbre de composition `composes`** (§49, §108) :
+
+- **L'arbre pousse** au fur et à mesure des ajouts : chaque greffe s'**ajoute** sans rien réécrire (append-only), re-greffer le même libellé ne crée rien (idempotence), et la même greffe produit toujours la même identité (content-adressée). Sa profondeur est **illimitée** — bornée seulement par le plancher (la feuille) et le plafond (la racine).
+- **Racine, cellule, kernel, feuille sont des rôles DÉRIVÉS** de la position, calculés à la lecture — jamais stockés. La même donnée change de rôle quand l'arbre pousse : une feuille qui reçoit un enfant **devient** un kernel.
+- **Le placement est calculé, pas deviné** : un algorithme déterministe (jamais un prompt) propose le nœud d'attache du besoin ; si rien n'accroche, il propose une **nouvelle cellule** à la racine. L'**humain surcharge** quand il le juge — §49 : les frontières des cellules sont posées par jugement humain, pas engendrées par la récursion.
 
 ## Pourquoi « amber » et pas « vert »
 
@@ -40,3 +48,4 @@ Capturer une idée **n'écrit jamais** une vérité (ni kernel, ni mirrors, ni f
 - **Aucune écriture-vérité** n'est émise pendant le parcours — l'e2e surveille les requêtes et exige qu'aucune écriture ne parte.
 - La **forme de miroir** affichée est exactement celle qu'impose le niveau choisi — la même table que tout le reste d'AIDOS, jamais un calcul à part.
 - Le wizard est **déterministe** : le même besoin produit toujours la même idée, avec la même empreinte.
+- L'**échelle vivante** est prouvée par des **propriétés** (fast-check) : croissance append-only et idempotente, profondeur illimitée, rôles dérivés de la position, placement déterministe et toujours membre de l'arbre, bijection chemin ↔ nœud.
