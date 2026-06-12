@@ -1,0 +1,77 @@
+---
+title: "WB2-28 · Internals — les twins lib/v3 (session rejouable replayTo/turnsOf, projection graphe composesToFlow), le contrat chatTurnAction (Claude propose, le réducteur juge) et le shell /v3 à cinq lentilles"
+description: "Internals de WB2-28 (ADR 0060) : les deux twins PURS lib/v3 — session.ts (replayTo(messages, n) = le FOLD du réducteur applyIntent sur un préfixe : l'état n'est JAMAIS stocké, il est REJOUÉ ; turnsOf(messages) → {turns: SessionTurn[] {index, msg, understanding, events, impacts}, state} : LA timeline) et flow.ts (composesToFlow(tree, focusPath) → {nodes, edges} : positions CALCULÉES — X = profondeur × 240, Y = rang préfixe × 84 — React Flow ne fait que rendre, ADR 0053). Le miroir 12/12 verts (session.test.ts 6 + flow.test.ts 6, fast-check) : rejeu ≡ fold ∀ transcript, préfixe indépendant du futur, totalité aux bornes, bijection arbre→graphe, positions finies et distinctes, focus fail-closed. Le contrat chatTurnAction (app/v3/actions.ts) : CLI claude --model claude-fable-5 --output-format json --max-turns 1, prompt-PALETTE (les phrases canoniques prouvées) + résumé d'état → {reply, actions[]} borné (reply ≤ 600, ≤ 5 actions ≤ 300) ; chaque action RE-JUGÉE par understand/applyIntent côté client ; toute panne → null (repli déterministe pur). Le shell /v3 : V3SessionProvider (une session, cinq lentilles — le transcript est LA SEULE vérité d'écran, turnsOf en useMemo, rewindTo = slice), V3Nav, la collecte impure du layout (fs-scan V1 + code-extract), le toggle « IA conversationnelle ». Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "WB2-28", "internals", "V3", "lib/v3", "session.ts", "flow.ts", "replayTo", "turnsOf", "SessionTurn", "composesToFlow", "FlowNode", "FlowEdge", "fold", "rejeu", "préfixe", "event-sourcé", "append-only", "chatTurnAction", "palette", "claude-fable-5", "exception gatée", "re-jugé", "fail-closed", "V3SessionProvider", "useV3Session", "V3SessionValue", "rewindTo", "aiEnabled", "toggle", "v3-shell", "v3-chat", "v3-input", "v3-ai-toggle", "v3-details", "détails techniques", "React Flow", "@xyflow/react", "positions calculées", "buildKernelTree", "nodeByPath", "applyIntent", "understand", "initBuilderState", "fast-check", "propriété ∀", "12/12", "mur", "/goal", "§6", "§8", "§9", "ADR 0053", "ADR 0054", "ADR 0057", "ADR 0058", "ADR 0059", "ADR 0060"]
+---
+
+<Note>Côté « Pour moi » — l'intérieur. Pour le concept, voir [Pour les futurs utilisateurs → WB2-28](/steps/concept/wb2-28-v3).</Note>
+
+## Implémentation
+
+**Le twin pur `lib/v3/session.ts` — la session rejouable (ADR 0060)** : l'HISTORY de la V3 n'est pas une fonctionnalité ajoutée, c'est une **conséquence** de l'event-sourcing du builder (ADR 0057). La session est UN TRANSCRIPT (la liste des messages) ; l'état n'est **jamais stocké**, il est **REJOUÉ** :
+
+- `replayTo(messages, n, extraScreens?) → BuilderState` : le **fold du réducteur pur** `applyIntent` sur les n premiers messages, depuis `initBuilderState(extraScreens)`. PURE & TOTALE : n est **clampé** aux bornes (négatif → état initial ; > longueur → état final) ; même `(transcript, n)` → même état. « Revenir en arrière » = rejouer un préfixe ; brancher une autre suite = un nouveau transcript à partir de ce préfixe.
+- `turnsOf(messages, extraScreens?) → {turns: SessionTurn[], state}` : **LA timeline** — un `SessionTurn {index, msg, understanding, events, impacts}` par message (le verdict d'attente + les événements + les impacts, **exactement ceux du rejeu**) + l'état final. L'écran Historique EST cette projection.
+- **Le mur (§2)** : rejouer ne produit aucune écriture — le réducteur est pur, et la loi ∀ du builder (« aucune suite de messages n'écrit jamais une vérité », test 14 d'ADR 0057) couvre **chaque pas du rejeu**. Aucun test-mur de plus n'était nécessaire.
+
+**Le twin pur `lib/v3/flow.ts` — la projection graphe des parcours (ADR 0060 × 0053)** : `composesToFlow(tree, focusPath) → {nodes: FlowNode[], edges: FlowEdge[]}` — un nœud de flow (`{id, label, level, depth, x, y}`) par nœud d'arbre, une arête (`{id, source, target}`) par lien `composes`, des **positions CALCULÉES** : `X = (profondeur − profondeur de base) × 240` (lecture de gauche à droite), `Y = rang d'apparition dans le parcours préfixe × 84` — aucun aléa, aucun layout physique. `focusPath null` → l'arbre entier ; focus connu → **son sous-arbre** (racine du focus incluse) ; focus inconnu → **graphe VIDE** (fail-closed, jamais une invention). RÉUTILISATION, pas de fork : l'ordre des fratries vient de `buildKernelTree` (WB2-04), le focus résout par `nodeByPath` (ADR 0055). La lib **React Flow (`@xyflow/react`) ne fait que RENDRE** — la ligne ADR 0053.
+
+**Le miroir `lib/v3/` : 12/12 verts** (Vitest + fast-check) —
+
+`session.test.ts` (6) :
+
+1. ∀ transcript : `replayTo(msgs, n)` ≡ le **fold du réducteur** sur les n premiers messages ;
+2. ∀ : **DÉTERMINISTE** — même transcript, même n → même état (le voyage est sûr) ;
+3. **REVENIR EN ARRIÈRE est un préfixe** : l'état à n ne dépend JAMAIS des messages > n ;
+4. n hors bornes est **TOTAL** (clampé) : négatif → état initial ; > longueur → état final ;
+5. ∀ transcript : `turnsOf` rend **un tour par message**, et l'état final égale `replayTo(msgs, len)` ;
+6. chaque tour porte **son verdict ET ses événements** (rien n'est recalculé différemment).
+
+`flow.test.ts` (6) :
+
+7. ∀ arbre : **BIJECTION** — un nœud de flow par nœud d'arbre, une arête par lien `composes` (sources/cibles présentes) ;
+8. ∀ arbre : **DÉTERMINISTE** — mêmes positions, même ordre (le rendu est rejouable) ;
+9. ∀ arbre : les positions sont **FINIES et DISTINCTES** (aucun nœud empilé sur un autre) ;
+10. le **FOCUS** sur un parcours ne projette QUE son sous-arbre (la racine du focus incluse) ;
+11. un focus **INCONNU est TOTAL** : graphe vide (fail-closed, jamais une invention) ;
+12. la **profondeur gouverne X**, la fratrie gouverne Y (lisible de gauche à droite).
+
+**Le contrat `chatTurnAction` (`app/v3/actions.ts`) — l'exception gatée du chat V3 (§6/§8)** : le **vrai Claude** répond chaleureusement ET propose des gestes canoniques —
+
+- **Entrée** : `chatTurnAction(message, stateSummary)` — server action ; le message est borné (600 chars), le résumé d'état (calculé du rejeu, jamais stocké) à 2 000.
+- **L'appel** : CLI `claude -p <prompt> --model claude-fable-5 --output-format json --max-turns 1` (`execFile`, timeout 90 s — le précédent `/ai-lab` et `/v2/builder`, ADR 0054).
+- **Le prompt-PALETTE** : déclare le jeu clos des **phrases canoniques PROUVÉES** par le miroir du builder (« capture l'idée : … », « greffe … sous … », « promeus la dernière idée », « génère l'application », « déploie l'application en test | staging | prod », « montre le delta depuis la prod », « quel impact si je modifie … », « montre-moi l'état du projet », « ouvre l'écran … ») + le résumé d'état, et exige un JSON strict `{"reply":"…","actions":["…"]}` — la réponse en langage simple, AUCUN jargon.
+- **Sortie bornée** : `{reply, actions[]} | null` — reply ≤ 600 chars, ≤ 5 actions de ≤ 300 chars, filtrées (chaînes non vides).
+- **L'AUTORITÉ DÉTERMINISTE** : chaque action retournée repasse côté client par le **MÊME pipeline `understand`/`applyIntent`** — le LLM **propose**, le code **juge** (une action invalide devient un refus doux, jamais un effet silencieux). **Toute panne → `null`** : le client retombe en mode déterministe pur (le texte brut entre directement dans le pipeline). Le mur : une réponse est du texte, les gestes sont re-jugés — aucune écriture-vérité.
+
+**Le shell `/v3` — une session, cinq lentilles** : le layout (`app/v3/layout.tsx`) enveloppe le groupe de routes dans la **`V3SessionProvider`** (`V3Session.tsx`) — chaque lentille (`/v3/lab` le chat, `/v3/parcours`, `/v3/history`, `/v3/environnements`, `/v3/parametrage`) lit la **MÊME session** via `useV3Session()`. Le contrat `V3SessionValue` : `messages` (le transcript — **la seule vérité d'écran**), `turns`/`state` (**DÉRIVÉS** par `turnsOf` en `useMemo` — jamais stockés), `send` (IA active → `chatTurnAction` puis chaque geste re-jugé ; sinon le texte entre tel quel), `rewindTo(n)` (**le voyage dans le temps** : tronquer le transcript = rejouer un préfixe), `aiEnabled`/`setAiEnabled` (la bascule « **IA conversationnelle** », défaut ON — l'herméticité e2e et le repli sans modèle), `replies` (les réponses conversationnelles de Claude, par index du premier tour du groupe), `busy` (l'indicateur de frappe), `codeNodes`/`codeEdges` et `strings` (i18n `v3`, fr/en). La **collecte impure** vit dans le layout serveur (le motif `/v2/builder`) : l'inventaire des écrans V1 (fs-scan d'`app/`, hors `v2`/`v3`/`api`) **injecté en DONNÉES** dans le twin, et le graphe de code extrait des twins `lib/v2` réels (`code-extract`, ADR 0056). Le transcript est **append-only** (§9) ; `/v3` redirige vers `/v3/lab`. Shell additif (`v3-shell`, `v3-nav`, `sm:-ml-64` — le motif V2) : **V1 + V2 intactes**. Le chat (`v3-chat`, `v3-input`, `v3-send`, `v3-typing`, `v3-msg-user`, `v3-msg-assistant`, `v3-ai-toggle`, `v3-suggestion`, `v3-chip`, `v3-open-screen`) parle **français simple** ; le détail technique (verdicts, kinds, hashes, impacts) vit TOUJOURS replié dans « Détails techniques » (`v3-details`). Thème ccup (ADR 0010), bilingue (ADR 0011).
+
+**Le paramétrage en lecture** : `/v3/parametrage` rend **toutes les données déclarées** (les 9 `INTENT_KINDS` et leurs lexiques, `ENV_LADDER`, les niveaux, les facettes, les formes de miroir, les seuils) — **aucun champ d'édition** ; le seul bouton « proposer un changement » compose une phrase et l'envoie **dans le chat** (idée → miroir → `/goal` → approbation humaine, le mur intact).
+
+## Méta
+
+**Une seule vérité d'écran, des lentilles dérivées.** Le danger des vues multiples n'est pas l'esthétique, c'est la **divergence** : quatre écrans qui tiennent chacun leur état finissent par se contredire. La V3 applique au front la leçon du truth-store : UNE source (le transcript), tout le reste **recalculé** (`turnsOf` en `useMemo`). « Deux panneaux en désaccord » n'est pas interdit par une revue de code — c'est **structurellement impossible**.
+
+**L'history gratuite est le dividende de l'event-sourcing.** `rewindTo` fait **18 lignes** : tronquer une liste. Tout le travail avait déjà été payé par l'ADR 0057 (le réducteur pur) — et le miroir le dit en une propriété : *l'état à n ne dépend jamais des messages > n*. Quand une capacité coûte une `slice`, c'est le signe que l'architecture porte ; quand elle coûte un module « undo-manager », c'est le signe qu'elle a cédé.
+
+**Le LLM gagne en surface, pas en autorité.** `reformulateAction` (ADR 0057) réécrivait UNE phrase ; `chatTurnAction` converse et propose **plusieurs** gestes par tour. La surface conversationnelle a décuplé — la surface d'**autorité** est restée exactement **zéro** : la palette est le jeu clos prouvé, chaque geste est re-jugé, la panne déclenche un repli pur. Et le toggle rend ce zéro **vérifiable** : l'e2e hermétique tourne IA coupée, sur le même pipeline.
+
+**Les positions se calculent, le rendu se loue.** ADR 0053 disait : les bibliothèques d'interaction rendent, elles ne décident pas. `composesToFlow` le pousse au bout : React Flow reçoit des coordonnées **finies, distinctes, déterministes** — pas un layout physique qui danse à chaque rendu. Le graphe est rejouable comme le reste : même arbre → même dessin.
+
+**La simplicité de surface est une projection, pas une perte.** Le français simple (« Votre idée a été ajoutée ») et le bloc « Détails techniques » sont la **divulgation progressive** appliquée au KRD : la même donnée (l'événement typé, le hash, l'impact compté) existe toujours — elle change d'étage d'affichage. La V3 ne dé-rigorise rien : elle **traduit**, et la traduction est elle-même du rendu sur les mêmes événements clos.
+
+**Composer les twins, jamais les forker.** `session.ts` importe `applyIntent`/`understand`/`initBuilderState` ; `flow.ts` importe `buildKernelTree`/`nodeByPath`. La V3 n'a ni réducteur, ni arbre, ni grammaire à elle — corriger le builder corrige `/v2/builder` ET les cinq lentilles V3, sans divergence possible.
+
+## Méta-méta
+
+**La troisième refonte ne réécrit toujours rien.** V1 = un écran par dent ; V2 = un écran par concept ; V3 = un écran par **personne** (l'utilisateur final). Trois générations d'interface coexistent, additives (§9), sur les MÊMES twins. C'est le test d'une architecture event-sourcée : quand changer de public ne coûte que des lentilles — jamais un moteur — la séparation calcul/rendu était la bonne.
+
+**« Comme GPT » est un objectif d'expérience, jamais d'architecture.** L'utilisateur a demandé un chat « comme GPT » ; la V3 le livre — bulles, frappe, conversation naturelle, multi-actions — sans céder l'inversion fondatrice d'ADR 0057 : **la grammaire devant le LLM**, jamais le LLM devant le produit. L'IA est devenue l'interface ; la loi est restée le code. C'est la réponse générale du KRD à l'ère des agents : on peut donner TOUTE la surface au modèle, à condition de ne lui donner AUCUNE autorité.
+
+**Le rejeu est la forme front du content-addressing.** Au noyau, une version est son hash ; à l'écran, un état est son transcript. Dans les deux cas, l'identité est le **contenu**, et la divergence n'a nulle part où vivre : pas de build périmé (ADR 0058), pas d'écran périmé (ADR 0060). Le jour où le transcript se range en Postgres (OpenQuestion), les sessions deviendront des fixtures `state → command → events` rejouables telles quelles — l'écran et le miroir parleront le même format.
+
+**Le paramétrage en lecture est le mur rendu visible.** Exposer TOUTES les données déclarées sans un seul champ d'édition enseigne le mur mieux qu'aucune doc : tout se voit, rien ne se touche, tout se **propose** — et la proposition passe par la conversation, comme le reste. La transparence totale et l'autorité humaine ne sont pas en tension : la première est la condition d'exercice de la seconde.
+
+## Place dans le cliquet KRD
+
+WB2-28 grave la dent « **une session, cinq lentilles — le chat-IA sous la loi du réducteur** » (ADR 0060) : elle consomme les phases stables d'ADR 0057/0058/0059 (le builder à grammaire fermée, le cycle de vie, l'échelle et la couverture totale — le réducteur que la session rejoue), de WB2-04/ADR 0055 (`buildKernelTree`/`nodeByPath`, l'assiette de `composesToFlow`), d'ADR 0053 (React Flow ne fait que rendre) et d'ADR 0054 (Fable 5, le modèle déclaré de `chatTurnAction`). Sa construction a cliqueté red → green : les deux miroirs `lib/v3` (**12/12**) rouges d'abord, verts ensuite — et le mur n'a pas exigé de test neuf, la loi ∀ du builder couvrant chaque pas du rejeu. Les OpenQuestions de l'ADR 0060 (la persistance du transcript par projet ; les branches d'history nommées — un DAG de transcripts ; la palette étendue aux gestes KRD `/grill`/`/spike`/`/goal`) rejoignent celles encore ouvertes des ADR 0057–0059 — l'exception bootstrap (§6), documentée, jamais des échecs. Le mur reste intact : le chat **propose** — Claude propose, le réducteur juge, et la promotion réelle passe par idée → miroir → `/goal` → approbation humaine.

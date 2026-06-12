@@ -1,0 +1,55 @@
+---
+title: "WB2-28 · Workbench V3 — une session, cinq lentilles : le chat-IA pour tout le monde"
+description: "WB2-28 ouvre la V3 du Workbench à /v3 : un menu, cinq écrans — et au centre, un vrai chat-IA « comme GPT » où une personne NON technique développe son application en conversant. Le vrai Claude répond naturellement et décompose chaque message en plusieurs gestes canoniques (capturer une idée, faire pousser l'arbre, générer, déployer en gravissant test → staging → prod, ouvrir n'importe quel écran) — mais LE RÉDUCTEUR RESTE LA LOI : chaque geste proposé par l'IA est re-jugé par le même algorithme déterministe, et une bascule « IA conversationnelle » permet le mode pur-déterministe. Les cinq écrans (AI Lab, Parcours produit, Historique, Environnements, Paramétrage) ne sont pas cinq features : ce sont CINQ LENTILLES posées sur la MÊME session — la seule vérité est le transcript, tout le reste est REJOUÉ. L'historique n'est pas un undo codé : revenir en arrière = rejouer un préfixe (une conséquence de l'event-sourcing, prouvée). Les parcours s'affichent en graphes aux positions CALCULÉES (React Flow ne fait que rendre). La surface parle français simple — le vocabulaire technique vit replié dans « Détails techniques ». Et le paramétrage montre TOUTES les données déclarées en lecture : modifier passe par le chat, le mur intact. V1 et V2 restent intactes (ADR 0060)."
+keywords: ["aidos", "krd", "WB2-28", "V3", "une session cinq lentilles", "chat-IA", "comme GPT", "end-user", "non technique", "transcript", "rejeu", "replay", "préfixe", "history", "voyage dans le temps", "parcours", "graphes", "React Flow", "positions calculées", "environnements", "paramétrage", "données déclarées", "détails techniques", "divulgation progressive", "IA conversationnelle", "toggle", "Claude", "fable-5", "gestes canoniques", "palette", "réducteur", "la loi", "fail-closed", "mur", "/v3", "/v3/lab", "/v3/parcours", "/v3/history", "/v3/environnements", "/v3/parametrage", "ADR 0053", "ADR 0057", "ADR 0058", "ADR 0059", "ADR 0060"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-28](/steps/internals/wb2-28-v3).</Note>
+
+## En une phrase
+
+WB2-28 ouvre la **V3** du Workbench (`/v3`) : **un menu, cinq écrans, un chat-IA central** — le vrai Claude converse et agit en plusieurs gestes par tour, **mais le réducteur déterministe reste la loi** ; les cinq écrans sont **cinq lentilles posées sur la même session rejouable**, l'historique est un **rejeu de préfixe** (jamais un undo codé), les parcours sont des **graphes aux positions calculées**, et le paramétrage expose **toutes les données déclarées en lecture** — V1 et V2 restent intactes.
+
+## Le problème que ça résout
+
+La V1 du Workbench, c'est **160 écrans d'experts** : tout y est, mais il faut parler KRD pour s'y promener. La V2 a refondu **par concept** : un écran par idée exécutable, jusqu'au chat à grammaire fermée. La V3 fait la dernière marche : **une personne qui n'a jamais entendu le mot « kernel » développe son application en conversant** — « j'aimerais une appli pour gérer ma cave à vin » — et l'écran lui répond en français simple, agit, montre, sans jamais lui imposer le jargon.
+
+Deux dangers gardaient cette porte. Le **chat-magie** : un grand modèle qui « comprend », décide seul et exécute — la prod avant le test, une action inventée. Et la **divergence d'écrans** : si l'historique, les environnements et les parcours tiennent chacun *leur* état, quatre vérités d'écran se contredisent pour une seule session. La V3 désarme les deux d'un coup, avec la même idée.
+
+## Une session, cinq lentilles
+
+Le menu V3 propose cinq écrans : **AI Lab** (le chat), **Parcours produit**, **Historique**, **Environnements**, **Paramétrage**. Mais ce ne sont pas cinq fonctionnalités avec cinq états : la **seule vérité est le transcript** — la liste des messages de votre conversation. Tout le reste — l'état du projet, la frise des tours, les barreaux d'environnements, les graphes de parcours — est **recalculé** à partir de lui, à la demande.
+
+Conséquence structurelle : **deux écrans V3 ne peuvent pas être en désaccord**. Ils ne synchronisent rien — ils lisent la même chose. Ce n'est pas une discipline d'équipe, c'est une impossibilité de construction.
+
+## Le chat est une vraie IA — et le code reste la loi
+
+L'AI Lab V3 ressemble à ce que vous connaissez : une conversation plein écran, des bulles, la saisie en bas, Entrée pour envoyer, l'indicateur de frappe. Et derrière, **le vrai Claude** : il répond chaleureusement, en français simple — et il **décompose votre message en plusieurs gestes** : « ajoute la gestion des clients et déploie une version de test » devient une greffe, une capture, une génération, un déploiement — enchaînés dans le bon ordre.
+
+Mais voici la différence avec un chat-magie : **Claude ne commande rien**. Il choisit ses gestes dans une **palette fermée** — les phrases canoniques prouvées de la grammaire (les neuf intentions, l'échelle d'environnements, « ouvre l'écran … ») — et **chaque geste proposé est re-jugé par le réducteur déterministe**, le même qui jugerait votre phrase tapée à la main. Un geste invalide devient un refus doux, jamais un effet silencieux. La prod avant le test ? Refusée — par la loi du cliquet, pas par la bonne volonté du modèle.
+
+Et une bascule visible — « **IA conversationnelle** », activée par défaut — vous donne le mode **pur-déterministe** : vos phrases entrent directement dans le pipeline, sans modèle. Si Claude tombe en panne, la V3 entière continue de fonctionner. L'IA est un confort, jamais une dépendance.
+
+## L'historique n'est pas une fonctionnalité — c'est une conséquence
+
+« Revenir en arrière » est d'habitude un chantier : un undo, des snapshots, des bugs. En V3, c'est **gratuit par construction** : puisque l'état n'est jamais stocké mais toujours **rejoué** depuis le transcript, revenir au tour 3 = **rejouer les 3 premiers messages**. Rien d'autre.
+
+L'écran Historique montre la frise de vos tours — ce qui a été compris, ce qui s'est produit, ce qui a été touché — et le **voyage dans le temps** est prouvé sûr : l'état au tour n ne dépend **jamais** de ce qui s'est dit après. Repartir d'un point du passé pour essayer autre chose, c'est ouvrir une autre suite sur le même préfixe.
+
+## Les parcours en graphes — des positions calculées, jamais un layout qui danse
+
+L'écran Parcours produit dessine votre application en **graphe** : le produit, ses parcours, leurs écrans, leurs gestes — de gauche à droite. La bibliothèque de rendu (React Flow) **ne décide de rien** : chaque position est **calculée** par une projection pure de l'arbre (la profondeur donne la colonne, l'ordre donne la ligne). Même arbre → même dessin, au pixel. Un parcours focalisé ne montre que son sous-arbre ; un parcours inconnu montre un graphe vide — jamais une invention.
+
+## Le français simple devant, la technique repliée derrière
+
+La V3 parle votre langue : « **Votre idée a été ajoutée** », « **Application déployée en test** », « **Impossible de déployer en prod : il faut d'abord passer par staging** ». Aucun « kernel », aucun « hash », aucun « event-sourcing » dans la copie primaire. Mais la rigueur n'a pas disparu : chaque réponse porte un bloc replié « **Détails techniques** » — le verdict exact, les événements typés, les versions content-adressées, les impacts comptés. Celles et ceux qui veulent voir l'envers du décor l'ouvrent ; les autres ne le subissent jamais. La rigueur ne baisse pas d'un cran — elle change d'étage.
+
+## Le paramétrage : tout voir, rien toucher — proposer
+
+L'écran Paramétrage expose **toutes les données déclarées** qui gouvernent le système : les neuf intentions et leurs mots-clés, l'échelle test → staging → prod, les niveaux, les facettes, les formes de miroir, les seuils. En **lecture seule** — parce que ces données sont des **vérités déclarées**, jamais des réglages d'écran. Le seul bouton est « **proposer un changement** » : il compose une phrase et l'envoie **dans le chat** — votre proposition devient une idée, qui suivra le chemin légal (idée → miroir → `/goal` → approbation humaine). Le mur ne bouge pas d'un millimètre.
+
+## Comment savoir que c'est juste
+
+- **Douze propriétés et exemples, verts**, prouvent les deux mécanismes neufs : la **session rejouable** (le rejeu est exactement le pli du réducteur sur le préfixe ; déterministe ; l'état à n ignore le futur ; total aux bornes ; la frise des tours égale le rejeu ; chaque tour porte son verdict et ses événements) et la **projection graphe** (un nœud de dessin par nœud d'arbre, une arête par lien ; déterministe ; positions finies et toutes distinctes ; le focus exact ; l'inconnu → vide, fail-closed ; la profondeur gouverne la colonne).
+- **Le mur n'a pas eu besoin d'un test de plus** : rejouer est un pli du réducteur, et la loi déjà prouvée du builder — *aucune suite de messages, jamais, n'écrit une vérité* — couvre chaque pas du rejeu. L'IA non plus : ses gestes repassent par le même circuit que vos phrases.
+- **V1 et V2 restent intactes** : la V3 est additive, et elle ne réécrit aucun moteur — elle compose ceux qui existent (le réducteur du builder, l'arbre vivant, le registre des écrans). Corriger un moteur corrige les trois Workbench à la fois.

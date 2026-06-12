@@ -555,7 +555,9 @@
        "steps/concept/wb2-26-code",
        "steps/internals/wb2-26-code",
        "steps/concept/wb2-27-builder",
-       "steps/internals/wb2-27-builder"
+       "steps/internals/wb2-27-builder",
+       "steps/concept/wb2-28-v3",
+       "steps/internals/wb2-28-v3"
       ]
      }
     ]
