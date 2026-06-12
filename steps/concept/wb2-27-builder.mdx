@@ -1,0 +1,58 @@
+---
+title: "WB2-27 · L'IA Builder — un chat qui fait tout, par une grammaire fermée"
+description: "WB2-27 ajoute l'écran /v2/builder : UN seul chat pour tout faire — capturer un besoin, faire pousser l'arbre, promouvoir une idée, mesurer un impact, lire l'état du projet, proposer un déploiement. Mais ce chat n'est pas magique : il parle une grammaire d'intentions FERMÉE. Six intentions déclarées, rien d'autre. Chaque message est classé par un algorithme (jamais un prompt) ; à chaque tour, l'écran montre « l'attente » (ce que le système a compris), « les types de réponse possibles » (tous les candidats, classés), « la réponse » (des événements typés) et « les impacts » (la vague calculée). Une ambiguïté est détectée et OFFERTE — jamais tranchée en silence. L'IA (Claude) n'intervient que comme exception gatée pour reformuler un message ambigu, et sa phrase repasse par le même pipeline déterministe : le code a l'autorité. Et le mur tient sur TOUTES les phrases possibles : aucune intention, jamais, n'écrit une vérité."
+keywords: ["aidos", "krd", "WB2-27", "IA Builder", "chat", "grammaire fermée", "intentions", "attente", "types de réponse possibles", "ambiguïté", "événements", "impacts", "vague", "event-sourcé", "append-only", "déterministe", "Claude", "reformulation", "exception gatée", "mur", "/goal", "/v2/builder", "ADR 0057"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-27](/steps/internals/wb2-27-builder).</Note>
+
+## En une phrase
+
+WB2-27 ouvre l'écran `/v2/builder` : **un seul chat qui fait tout** — mais « tout » passe par une **grammaire d'intentions fermée**, classée par un algorithme, réduite par une fonction pure, et **jamais** par la magie d'un modèle.
+
+## Le problème que ça résout
+
+Vous voulez parler à votre projet : « greffe les pommes sous le catalogue », « capture cette idée », « quel impact si je modifie le paiement ? », « déploie ». Un seul endroit, une seule conversation — pas dix panneaux.
+
+Le danger, c'est le **chat-magie** : un grand modèle qui « comprend » votre phrase, décide seul, et exécute. Personne ne sait ce qu'il fera de la prochaine phrase ; la même demande peut donner deux réponses différentes ; et un système qui « comprend tout » finit par **écrire** ce qu'il n'aurait jamais dû toucher. WB2-27 prend le chemin inverse : le chat fait tout — **dans les limites exactes de ce qui est déclaré**.
+
+## La grammaire fermée : six intentions, rien d'autre
+
+Le chat sait faire **six choses**, déclarées noir sur blanc (ADR 0057) :
+
+- **capturer une idée** — votre besoin devient un candidat-vérité, placé automatiquement dans l'arbre du projet ;
+- **greffer** — faire pousser l'arbre des besoins (« greffe pommes sous app/catalogue ») ;
+- **promouvoir** — geler la dernière idée en kernel **proposé** (un brouillon, jamais appliqué) ;
+- **impacter** — « si je modifie ça, quoi est touché ? » : la vague, calculée ;
+- **interroger** — lire l'état du projet (l'arbre, les idées, les kernels proposés) ;
+- **déployer** — **proposer** un déploiement (le geste reste humain et approuvé).
+
+Rien d'autre. Une phrase qui ne s'accroche à aucune intention est **incomprise** — le chat le dit, il n'invente jamais.
+
+## L'attente et les types de réponse possibles
+
+À chaque message, l'écran rend le raisonnement **visible** :
+
+- « **l'attente** » — ce que le système a compris : l'intention en tête, ou le constat d'une ambiguïté, ou l'aveu d'incompréhension ;
+- « **les types de réponse possibles** » — **tous** les candidats, classés par score : vous voyez ce que le chat aurait pu comprendre d'autre ;
+- « **la réponse** » — pas de la prose libre : des **événements typés** d'un jeu clos (« idée capturée », « arbre greffé », « kernel proposé », « impact calculé », « refus »…) ;
+- « **les impacts** » — la **vague calculée** : quels nœuds de l'arbre, quelles idées, quels kernels sont touchés par ce tour.
+
+Le classement n'est pas une opinion d'IA : c'est un **algorithme à lexiques déclarés** — les mêmes mots donnent toujours le même classement.
+
+## L'ambiguïté est offerte, jamais tranchée en silence
+
+« Greffe et déploie le paiement » : deux intentions s'accrochent à égalité. Un chat-magie choisirait pour vous, en silence. L'IA Builder **détecte** l'ambiguïté, la **dit**, et vous **offre le choix** : les candidats deviennent des boutons — vous cliquez celui que vous vouliez, et la demande repart, désambiguïsée, dans le même circuit. Le système ne devine jamais à votre place.
+
+## L'IA, exception gatée — le code a l'autorité
+
+Et Claude, alors ? Il n'entre qu'à **un seul endroit**, et comme **exception** : sur un message ambigu, un bouton « Reformuler » lui demande de réécrire votre phrase en **une** intention claire. Mais sa phrase ne commande rien : elle **repasse par le même pipeline déterministe** — le même classement, la même réduction. Le modèle **propose**, le code **juge**. Si Claude est en panne, rien ne casse : les boutons de choix déterministes restent là.
+
+## Le mur, prouvé sur toutes les phrases
+
+Le chat **propose** ; il n'écrit **aucune vérité**. Une idée capturée n'a pas de miroir ; un kernel promu est un **brouillon** (ChangeSet DRAFT) ; un déploiement est **proposé**, jamais exécuté. Et ce n'est pas une promesse : c'est une **propriété prouvée sur toutes les suites de messages possibles** — quoi que vous tapiez, dans n'importe quel ordre, aucune écriture-vérité ne part. La promotion réelle reste le chemin légal : idée → miroir → `/goal` → approbation humaine.
+
+## Comment savoir que c'est juste
+
+- Le miroir du builder (**14 propriétés et exemples**) prouve : le jeu des intentions est **clos** ; le classement est **total et déterministe** ; un message clair est **compris**, une égalité est **ambiguë**, une phrase sans accroche est **incomprise** ; le réducteur est **pur** (même entrée → même résultat) et le journal **append-only** ; chaque intention canonique fait exactement ce qu'elle dit ; et **le mur tient ∀ messages** — aucune écriture-vérité, jamais.
+- Étendre le chat, c'est **déclarer** : une nouvelle intention + son lexique + sa réduction + ses tests — jamais « le modèle improvisera ».

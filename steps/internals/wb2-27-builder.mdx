@@ -1,0 +1,62 @@
+---
+title: "WB2-27 · Internals — le twin builder.ts (grammaire fermée, réducteur pur), l'exception gatée Claude et l'écran /v2/builder"
+description: "Internals de WB2-27 : le twin PUR lib/v2/builder.ts (ADR 0057) — INTENT_KINDS (jeu clos de 6 intentions), classifyIntent (algorithme lexical déclaré : tokens pliés, verbes forts +2 / indices faibles +1, tri stable — jamais un prompt), understand (l'attente + les types de réponse possibles + l'ambiguïté détectée, jamais tranchée en silence), applyIntent (réducteur PUR event-sourcé : BuilderEvent jeu clos, BuilderImpact = la vague calculée, journal append-only). Le builder COMPOSE les twins existants : composition (growComposes/placeIntent/positionOf), idea (composeIdea — la coordonnée entière prise du nœud d'attache), goal (promoteIdea → ChangeSet DRAFT). L'exception gatée : reformulateAction (server action, CLI claude --model claude-fable-5) reformule un message ambigu et sa phrase repasse par le MÊME pipeline — le code a l'autorité, panne → null → repli déterministe. Le miroir lib/v2/builder.test.ts : 14 tests verts dont LE MUR ∀ (aucune suite de messages ne produit une écriture-vérité). L'écran /v2/builder : chat, attente, candidats cliquables, événements, impacts, arbre, idées, kernels, journal. Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "WB2-27", "internals", "builder.ts", "INTENT_KINDS", "classifyIntent", "understand", "applyIntent", "BuilderEvent", "BuilderImpact", "BuilderState", "réducteur pur", "event-sourcé", "append-only", "lexiques déclarés", "ambiguïté", "reformulateAction", "claude-fable-5", "exception gatée", "growComposes", "placeIntent", "positionOf", "composeIdea", "promoteIdea", "ChangeSet DRAFT", "fast-check", "propriété ∀", "mur", "/goal", "§6", "§8", "ADR 0052", "ADR 0055", "ADR 0056", "ADR 0057"]
+---
+
+<Note>Côté « Pour moi » — l'intérieur. Pour le concept, voir [Pour les futurs utilisateurs → WB2-27](/steps/concept/wb2-27-builder).</Note>
+
+## Implémentation
+
+**Le twin pur `lib/v2/builder.ts`** (ADR 0057) — PUR & TOTAL & DÉTERMINISTE (pas d'horloge, pas d'aléa, pas d'E/S, pas de LLM) :
+
+- `INTENT_KINDS` : le **jeu clos** des intentions — `capturer_idee · greffer · promouvoir · impacter · interroger · deployer`. Tout ce que le chat sait faire, déclaré, rien d'autre.
+- `classifyIntent(text) → IntentCandidate[]` : l'**algorithme lexical déclaré** — tokens pliés (NFD, minuscules, ≥ 3 chars), `LEXICONS` par intention (verbes **forts** +2, indices **faibles** +1, déclarés au-dessus de la ligne, jamais appris — §8), **tous** les kinds retournés, triés score ↓ puis ordre déclaré (stable). Ce classement EST « les types de réponse possibles ».
+- `understand(state, text) → Understanding` : « **l'attente** » — `comprise` (un candidat net en tête, `attente` = son kind), `ambigue` (égalité en tête à score > 0 : **détectée et remontée**, jamais tranchée en silence), `incomprise` (score 0 : jamais une invention). Total.
+- `applyIntent(state, text) → {state, events, impacts}` : le **réducteur PUR event-sourcé** — même `(état, message)` → même `(état', événements, impacts)` ; le journal (`state.log`) est **append-only** (§9). « La réponse » = `BuilderEvent` (jeu clos : `idee_capturee · arbre_greffe · kernel_propose · impact_calcule · etat_lu · deploiement_propose · refus`, chaque événement portant `detail` + `ref` content-adressée) ; « les impacts » = `BuilderImpact[]` (`cible` + `type: composes|idee|kernel`) — la **vague calculée**, jamais estimée. Ambiguë/incomprise → un événement `refus` explicable. Parsing auxiliaire fail-closed : `parseGraft` (« greffe X sous a/b », sinon `placeIntent` identifie l'attache), `explicitPath` (le premier chemin `a/b/c` cité), `subtreePaths` (la vague du sous-arbre, ordre stable).
+- `initBuilderState()` : l'arbre `seedComposes()` (un **seul** produit racine, ADR 0055), idées/kernels/journal vides.
+
+**La composition des twins (pas de fork)** : l'arbre vivant vient de `lib/v2/composition` (`growComposes` append-only/idempotent/content-adressé, `placeIntent` placement calculé, `positionOf` lecture topologique, `nodeByPath` fail-closed) ; la capture délègue à `composeIdea` (`lib/v2/idea`) — **le niveau, la facette et l'échelle sont PRIS DU NŒUD D'ATTACHE** : le système identifie la coordonnée entière, l'utilisateur ne tape qu'un besoin ; la promotion délègue à `promoteIdea` (`lib/v2/goal`) → un `ProposedKernel` (version `k:…` content-adressée, ChangeSet **DRAFT**, `wroteKernel=false`). L'impact code (`lib/v2/code-graph`, ADR 0056) est composé **côté écran** sur le graphe extrait.
+
+**L'exception gatée `app/v2/builder/actions.ts`** : `reformulateAction(message)` — server action qui appelle le **CLI `claude --model claude-fable-5`** (`execFile`, le précédent `/ai-lab`, ADR 0054) avec un prompt qui déclare le jeu clos et exige `{"text":"…"}` JSON. La phrase réécrite est **renvoyée au client qui la repasse dans le MÊME pipeline** `understand`/`applyIntent` — le LLM **propose**, le code **re-juge** (§6/§8). Toute panne (binaire absent, timeout, JSON invalide) → `null` : le client affiche une note neutre et **retombe sur les chips déterministes**.
+
+**Le miroir `lib/v2/builder.test.ts`** (Vitest + fast-check) : **14 tests verts** —
+
+1. le jeu des intentions est **déclaré et clos** ;
+2. ∀ texte : `classifyIntent` **total, déterministe**, candidats ⊆ jeu clos, triés score ↓ ;
+3. « l'attente » : un message clair est **compris** (le bon kind en tête) ;
+4. l'**ambiguïté est détectée**, jamais tranchée en silence (deux verbes forts → `ambigue`) ;
+5. un texte sans accroche est **incompris** (jamais une invention) ;
+6. ∀ (état, texte) : `applyIntent` **déterministe** — même entrée → même état', mêmes événements, mêmes impacts ;
+7. ∀ : le journal est **append-only** (le préfixe d'événements intact) ;
+8. GREFFER : « greffe pommes sous app/catalogue » fait pousser l'arbre **là** ;
+9. CAPTURER : une idée naît **placée** (niveau/facette/échelle pris du nœud d'attache), `hasMirror=false` ;
+10. PROMOUVOIR : « promeus la dernière idée » → un kernel **proposé** (DRAFT, `wroteKernel=false`) ;
+11. PROMOUVOIR sans idée → un **refus**, jamais un kernel inventé ;
+12. IMPACTER : « quel impact si je modifie app/paiement » → la **vague du sous-arbre** ;
+13. **LE MUR (∀ messages)** : pour toute suite de messages, aucune intention ne produit **jamais** une écriture-vérité — toute idée `hasMirror=false ∧ wroteKernel=false`, tout kernel `wroteKernel=false`, et aucun événement hors du jeu clos ;
+14. INTERROGER + DEPLOYER : totals — l'état est **lu**, le déploiement **proposé** (gaté ADR 0052), rien d'exécuté.
+
+**L'écran `/v2/builder`** (`app/v2/builder/page.tsx` + `BuilderClient.tsx`, enregistré dans `lib/v2/screens.ts` — la cohérence WB2-25 reste verte) : la page serveur passe les libellés i18n (`v2Builder`, fr/en) ; le client est **du rendu + l'état d'écran event-sourcé** (tours append-only, `BuilderState` réduit par `applyIntent`). Chaque tour rend visibles le chat (`v2-builder-chat`), « l'attente » (`v2-builder-attente`), « les types de réponse possibles » (`v2-builder-candidates`/`v2-builder-candidate`, **cliquables**), « la réponse » (`v2-builder-events`), « les impacts » (`v2-builder-impacts`/`v2-builder-impact`), le bouton Claude (`v2-builder-claude`), les suggestions canoniques (`v2-builder-suggestion`), l'entrée (`v2-builder-input`/`v2-builder-send`) ; et les panneaux d'état : l'arbre vivant (`v2-builder-tree`, badges de **position topologique** `racine`/`feuille · nN`/`nN`, ADR 0055 addendum), les idées (`v2-builder-ideas`), les kernels proposés (`v2-builder-kernels`, badge DRAFT), le journal (`v2-builder-log`). La **désambiguïsation manuelle** (cliquer un candidat) **compose un texte désambiguïsé** (retrait des mots qui accrochent une autre intention — mesuré par `classifyIntent` lui-même — puis préfixe du verbe fort canonique) qui repasse par le même pipeline : l'écran n'a **aucun pouvoir que le twin n'a pas**. Thème ccup (ADR 0010), bilingue (ADR 0011), note du mur (`v2-builder-wall-note`).
+
+## Méta
+
+**Pourquoi une grammaire fermée et pas un agent.** « Un chat qui fait tout » est le cas d'école du déterminisme-first (§6/§8) : comprendre une phrase **semble** être une tâche de LLM, mais classer un message contre six intentions à lexiques déclarés est une **fonction pure** — donc elle DOIT être du code, et le code est l'autorité. Le gain n'est pas idéologique : le classement est testable par propriété (∀ texte), le refus est explicable (un événement, pas un silence), et l'extension a un coût déclaré (une intention + son lexique + sa réduction + ses tests — jamais « le modèle improvisera »).
+
+**L'ambiguïté est une donnée, pas un échec.** `understand` ne renvoie pas « le » sens : il renvoie le **verdict** (comprise/ambigue/incomprise) + **tous** les candidats. L'égalité en tête est détectée par le même algorithme qui classe — et l'écran la rend **actionnable** (chips). C'est la même honnêteté que les `BlockReason` du mur : le système dit ce qu'il ne sait pas, et offre les chemins de sortie.
+
+**Le LLM propose, le pipeline juge.** `reformulateAction` est l'unique entrée du modèle, et sa sortie n'est **pas une commande** : c'est un texte qui repasse par `understand`/`applyIntent`. Si Claude reformule mal (toujours ambigu), le verdict reste `ambigue` ; s'il est en panne, `null` → repli déterministe. Le modèle ne peut rien faire que l'utilisateur n'aurait pu taper lui-même — la surface d'autorité du LLM est exactement **zéro**.
+
+**Composer les twins, pas les redonder.** Le builder n'a ni table de niveaux, ni logique de greffe, ni promotion à lui : il **appelle** `composition`, `idea`, `goal`. Une seule source par vérité de calcul (le principe « jamais double-typé » appliqué aux twins) — corriger `placeIntent` corrige le wizard ET le chat, sans divergence possible.
+
+## Méta-méta
+
+**Le chat total est la forme finale de l'écran unique — et il reste sous la grammaire.** Depuis WB2-00, chaque écran V2 rend UN concept exécutable ; WB2-27 les rend tous **adressables par la langue**. Mais la leçon est inversée par rapport au réflexe industriel : on ne met pas un LLM devant le produit, on met une **grammaire** devant le LLM. Le jeu clos des intentions est au chat ce que le jeu clos des niveaux est à la verticale : la condition pour que « tout faire » reste **prouvable**.
+
+**La réponse est un événement, l'impact est une vague — le KRD parle au présent.** `applyIntent` ne « répond » pas : il **réduit** — exactement la forme `state → command → events` des fixtures Operation (N2). Le chat est donc déjà dans la grammaire des miroirs du runtime : le jour où le builder se branche sur le store réel (S31/S33, OpenQuestion), ses tours deviendront des fixtures rejouables telles quelles. L'écran de conversation et le moteur de workflow partagent la même algèbre.
+
+**Le mur en ∀ est le seul mur qui compte pour un chat.** Un écran à boutons a un mur par bouton ; un chat a un espace d'entrées **infini**. La seule preuve qui couvre un espace infini est une **propriété** : ∀ suite de messages, aucune écriture-vérité. C'est le test 13 du miroir — fast-check générant des suites arbitraires — et c'est pourquoi le chat-magie était inacceptable : on ne peut pas écrire cette propriété sur un système dont la réponse dépend d'un modèle.
+
+## Place dans le cliquet KRD
+
+WB2-27 grave la dent « **un chat, une grammaire fermée** » : il consomme les phases stables de WB2-03/ADR 0055 (l'arbre `composes` vivant, le placement, la position topologique), WB2-11 (la promotion `promoteIdea` → DRAFT), WB2-26/ADR 0056 (l'impact au grain code) et WB2-25 (le registre des écrans, où `/v2/builder` est déclaré). Sa construction a cliqueté red → green — le miroir (14 tests : jeu clos, classement total/déterministe, ambiguïté détectée, réducteur pur, journal append-only, les six intentions canoniques, **le mur ∀**) rouge d'abord, vert ensuite. Les OpenQuestions de l'ADR 0057 (brancher le chat sur le store Postgres réel S31/S33, fusionner `/ai-lab` dans `/v2/builder`, l'intent `ancrer_code` dédié) sont l'exception bootstrap (§6) — documentées, jamais des échecs. Le mur reste intact : le chat **propose** — la promotion réelle passe par idée → miroir → `/goal` → approbation humaine.
