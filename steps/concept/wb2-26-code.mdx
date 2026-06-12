@@ -1,0 +1,56 @@
+---
+title: "WB2-26 · La descente dans le code — requirement → fichier → classe → fonction → version → ligne"
+description: "WB2-26 prolonge la descente fractale SOUS la feuille : jusqu'ici, l'arbre des besoins s'arrêtait au besoin le plus fin, et le code restait opaque. Désormais le code lui-même est un graphe de connaissance : chaque fichier, chaque classe, chaque fonction est un nœud avec sa position exacte (le fichier, les lignes) et sa version — une empreinte qui change si et seulement si son texte change. On peut enfin répondre aux deux questions : « tel requirement, c'est quelle classe, quelle fonction, quelle ligne ? » (l'ancrage) et « si on la modifie, quoi touche quoi ? » (la vague de rouge au grain code). Le graphe n'est jamais déclaré à la main ni deviné par une IA : il est EXTRAIT du source réel, déterministiquement — même code, même graphe. L'écran /v2/code rend la descente exécutable : choisir un besoin, voir les symboles qui le portent, simuler l'impact d'une modification, et ouvrir la ligne exacte dans VS Code."
+keywords: ["aidos", "krd", "WB2-26", "descente fractale", "graphe de connaissance du code", "requirement", "fichier", "classe", "fonction", "version", "ligne", "quoi touche quoi", "vague de rouge", "impact", "ancrage", "content-adressé", "déterministe", "extraction", "god nodes", "VS Code", "mur", "/goal", "ADR 0056"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-26](/steps/internals/wb2-26-code).</Note>
+
+## En une phrase
+
+WB2-26 fait **continuer la descente fractale sous la feuille** : le code devient un **graphe de connaissance** — requirement → **fichier** → **classe** → **fonction** → **version** → **ligne** — et « **quoi touche quoi** » devient un calcul, plus une intuition.
+
+## Le problème que ça résout
+
+L'arbre des besoins (la composition fractale, ADR 0055) descend du produit jusqu'au besoin le plus fin : `app → paiement → checkout → débit du compte`. Mais **sous cette feuille, le brouillard** : le code restait une masse opaque de fichiers. Deux questions essentielles n'avaient pas de réponse :
+
+1. **« Tel requirement, c'est où dans le code ? »** Quel fichier, quelle classe, quelle fonction portent réellement le débit du compte ? Sans réponse, la verticale s'arrête en l'air — on descend du produit au besoin, puis on saute dans le vide.
+2. **« Si on modifie cette fonction, quoi touche quoi ? »** Modifier un symbole, c'est rougir ses appelants, et les appelants de ses appelants. Sans graphe, l'impact d'une modification est une **devinette** — et les devinettes cassent ce qui marchait.
+
+## La descente continue : six grains
+
+WB2-26 prolonge l'échelle fractale dans le code, grain par grain :
+
+- **le requirement** — le chemin dans l'arbre des besoins (la feuille d'hier) ;
+- **le fichier** — l'unité de rangement du code ;
+- **la classe** — le regroupement de comportements ;
+- **la fonction** (ou méthode) — le geste exécutable le plus fin ;
+- **la version** — l'**empreinte content-adressée** du corps : elle change **si et seulement si** le texte du symbole change. Deux fonctions au même texte ont la même version ; modifier une virgule en crée une nouvelle ;
+- **la ligne** — le span exact (de la ligne X à la ligne Y) dans le fichier : l'adresse physique du symbole.
+
+C'est la même logique que l'arbre des besoins — une **contenance** (la méthode vit dans sa classe, la classe dans son fichier) et des **adresses** — appliquée au code lui-même.
+
+## Le graphe est extrait, jamais déclaré
+
+Personne ne remplit ce graphe à la main, et **aucune IA ne le devine** : il est **extrait du source réel** par un analyseur déterministe. Même code → même graphe, à chaque fois. Les liens entre symboles (« cette fonction appelle celle-là », « ce fichier importe celui-ci ») sont relevés dans le texte même du programme, et chaque lien porte sa **confiance** : *prouvé* quand l'analyseur l'a vu directement, *inféré* quand il a fallu résoudre un import entre fichiers. Rien n'est caché : on sait toujours si un lien est une certitude ou une déduction.
+
+## Quoi touche quoi : la vague de rouge au grain code
+
+Le cœur de l'écran, c'est la **simulation d'impact**. Choisissez une fonction, demandez « si je la modifie ? » — et la **vague de rouge** se propage : ses appelants directs rougissent (profondeur 1), puis les appelants de ses appelants (profondeur 2), et ainsi de suite, **plus les conteneurs** (le fichier d'une fonction touchée est touché). C'est exactement la vague de rouge qu'AIDOS calcule déjà sur les vérités du kernel — descendue au grain du code. L'impact est **calculé**, déterministe, identique à chaque demande : jamais une estimation.
+
+Deux lectures complémentaires :
+
+- **la clé d'invalidation** : chaque symbole porte une clé dérivée de son corps **et** des versions de ses dépendances directes — si rien de tout cela n'a changé, le symbole est intact, inutile d'y retoucher. C'est l'invalidation **fine** : une modification n'invalide que ce qu'elle touche, jamais tout ;
+- **les points chauds** (« god nodes ») : les symboles que tout le monde appelle. Les modifier rougit le plus de monde — le graphe les désigne, à vous de juger.
+
+## L'ancrage : du besoin au symbole, l'humain tranche
+
+Et le pont entre les deux mondes ? Choisissez un requirement dans l'arbre des besoins : l'écran **suggère** les symboles du code qui semblent le porter, classés par pertinence. C'est une **suggestion calculée** — un score de ressemblance, pas un jugement d'IA — et c'est **vous qui tranchez** : les frontières sont posées par jugement humain, jamais par la machine.
+
+## Ouvrir la ligne exacte
+
+La descente aboutit **physiquement** : chaque symbole affiché porte un bouton qui ouvre **VS Code à la ligne exacte** du fichier. Du besoin abstrait à la ligne de code réelle, sans rupture — c'est la verticale, prolongée jusqu'au bout.
+
+## Le mur, intact
+
+L'écran **lit** le code et **simule** l'impact ; il n'écrit **aucune vérité**. Constater qu'un point chaud mérite un refactor, vouloir figer un ancrage requirement→code : tout cela passe par le chemin légal — une idée, son miroir, un `/goal`, l'approbation humaine. La descente éclaire ; elle ne décide pas.
