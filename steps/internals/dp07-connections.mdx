@@ -1,0 +1,50 @@
+---
+title: "DP07 · Internals — connresolve : la projection des modes de connexion"
+description: "Le journal de build de DP07 : le nouveau package pur back/runtime/connresolve (ResolveConnection — l'ensemble clos {docker_internal, traefik_url, managed_url}, refus package-locaux UNKNOWN_ROLE/UNNAMED_SERVICE, UNKNOWN_ENVIRONMENT réutilisé de DP06), l'émetteur EmitConnectionsModule (module TS process.env pour le boot Hono, requireEnv fail-closed), le miroir property ∀ N1 (rapid) écrit d'abord et rouge puis vert (9 lois), le jumeau TS connections.ts épinglé octet-pour-octet (GO_MATRIX_HASH eb382dcf…), la matrice /environments et les 4 e2e Playwright."
+keywords: ["aidos", "krd", "DP07", "connresolve", "internals", "ResolveConnection", "ConnectionMode", "docker_internal", "traefik_url", "managed_url", "UNKNOWN_ROLE", "UNNAMED_SERVICE", "EmitConnectionsModule", "requireEnv", "MISSING_ENV_AT_BOOT", "rapid", "property", "miroir", "rouge-vert", "records.Hash", "jumeau TS", "connections.ts", "fast-check", "vitest", "Playwright", "DemoMatrix", "stackmanifest", "envbindings"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP07 — Le mode de connexion](/steps/concept/dp07-connections).</Note>
+
+## Implémentation
+
+### Le miroir d'abord (rouge → vert)
+
+`back/runtime/connresolve/connresolve_property_test.go` est écrit **avant** tout code (aucun fichier Go non-test → compile fail, c'est le rouge), puis le package le rend vert. Les **9 lois** :
+
+1. **Déterminisme** — même `(service, environnement)` → même `Resolution`, ∀ (le miroir de reproductibilité : la résolution est un algorithme, jamais un prompt) ;
+2. **Totalité sur les ensembles clos** — chaque rôle DP02 connu × chaque environnement connu résout sans erreur, et le mode appartient à l'ensemble clos à **trois** membres ;
+3. **Fail-closed sur l'inconnu** — environnement hors ensemble → `UNKNOWN_ENVIRONMENT` (le code DP06 réutilisé verbatim), rôle inconnu → `UNKNOWN_ROLE`, service sans nom → `UNNAMED_SERVICE` — jamais deviné ;
+4. **Aucun endpoint en dur, jamais** — ∀ résolutions : pas de `localhost`, pas de littéral IP, pas de domaine littéral ; le motif porte au moins une référence `${VAR}` et déclare ses variables de boot ;
+5. **La prod câble en interne** — en `prod`, un service non-serveur non-connecteur est `docker_internal`, hôte = la convention de nom de conteneur /data/dockers (`${APP_NAME}-<service>`), port = le port interne déclaré ;
+6. **Le cloud est managé** — un connecteur est `managed_url` dans TOUT environnement ; en `future_cloud` TOUT est managé ; l'endpoint managé est EXACTEMENT une référence `${VAR}` (le secret store S91 la résout au boot — jamais le source émis) ;
+7. **L'exposition publique est Traefik** — le serveur résout `traefik_url` = `https://${APP_SUBDOMAIN}.${DOMAIN}` sur prod/staging/dev (réseau `traefik_default`), et `docker_internal` en `local` ;
+8. **Le module émis est du pur process.env** — `EmitConnectionsModule` byte-identique ×2 sur les cinq environnements, tout endpoint passe par `requireEnv` (fail-closed `MISSING_ENV_AT_BOOT`), en-tête « DO NOT EDIT », aucun hôte/IP/domaine en dur ;
+9. **La matrice démo est épinglée** — `HashDemoMatrix()` reproduit l'adresse Go autoritative `eb382dcff9243e410ceb6d7bbfe79a942d3845d3adba1f3732439bdb39f45772` (consommée par le jumeau TS + l'e2e) et la matrice couvre services × les 5 environnements.
+
+### Le package pur
+
+`back/runtime/connresolve/connresolve.go` : `ResolveConnection` est une fonction totale pure — le `switch` à quatre branches (managé/connecteur → `managed_url` ; serveur × `traefik_default` → `traefik_url` ; sinon `docker_internal`) sur les contrats publiés de DP06 (`envbindings.BindingsFor`, le type `Refusal` réutilisé) et DP02 (`stackmanifest.IsKnownRole`, les ensembles clos). `ResolveMatrix` itère environnements canoniques × services triés par nom ; `DemoManifest` est la stack démo représentative de la palette SPEC-stack-2026 (server Hono, db postgres, cache valkey, pooler pgbouncer, workflows **Windmill — jamais Temporal**, crm connecteur) ; `CanonicalDemoMatrix`/`HashDemoMatrix` réutilisent `records.Canonicalize`/`records.Hash` (S02, jamais forké). Les codes de refus DP07 sont **package-locaux** — l'enum gelé `blockreason` n'est pas touché. `go test ./...` (back entier) vert ; gofmt/go vet propres sur le package.
+
+### L'émetteur du module de boot
+
+`EmitConnectionsModule(manifest, env)` rend le module TS que le serveur Hono consomme au boot : `requireEnv` (une variable absente ou vide lève `MISSING_ENV_AT_BOOT`, jamais un défaut silencieux), le record `connections` (un `Connection {service, mode, url}` par service, URLs reconstruites de `process.env`), l'accesseur `connection()` fail-closed (`UNKNOWN_SERVICE`). Rendu trié, newlines `\n`, byte-identique — le mur : c'est une projection below-the-line, le manifest reste la source.
+
+### Le jumeau TS épinglé
+
+`front/web/lib/connections.ts` reproduit l'algorithme octet pour octet — il importe le jumeau DP06 (`bindingsFor`) plutôt que de redéclarer la table, et fige le set clos des 14 rôles DP02. Le miroir vitest `lib/connections.test.ts` (fast-check, **13 tests**) épingle `GO_MATRIX_HASH` (toute divergence d'un octet rougit) et porte les lois L1–L7 côté twin, plus la recalcul-par-environnement de l'écran. Vitest complet **2128/2128** (baseline 2115 intacte, anti-overwrite).
+
+### L'écran et la preuve e2e
+
+`/environments` est **étendue** (la route DP06 n'est pas réécrite — un composant `ConnectionsMatrix` additif) : la matrice service × environnement → mode, cinq boutons d'environnement qui re-résolvent à l'écran via le jumeau pur, les motifs d'endpoint en références, et le contrôle « mesurer la matrice » (ui-completeness §7) qui re-hash la matrice entière — mesure, n'écrit rien (déclarer un binding-vérité passera par propose → ChangeSet, DP09). `tests/e2e/connections.spec.ts` **4/4** sur le port 3210 : la matrice en `prod` (serveur `traefik_url`, db `docker_internal`, crm `managed_url`, adresse Go épinglée), la bascule d'environnement avec modes recalculés (`local` → serveur interne ; `future_cloud` → tout managé ; retour `prod`), aucun endpoint en dur (`${APP_NAME}-db:5432`, `${CRM_MANAGED_URL}`, jamais localhost/sagedesk), et la mesure DEUX FOIS → même adresse. Baseline intacte : environments 4/4, stack-manifest 4/4, stack-emit 4/4, env-emit 4/4, stack-bundle 4/4, e2e v3 16/16 — prod :3000 intouchée.
+
+## Méta
+
+- **Le câblage est une projection, pas une configuration.** L'intuition initiale était « un fichier de config des connexions par environnement » — encore une table à maintenir. Le geste juste : DP06 a déjà déclaré les bindings, DP02 a déjà déclaré les rôles ; DP07 n'a RIEN à déclarer de neuf, il **calcule** le mode depuis ce qui existe. Quatre branches de switch remplacent une matrice de config de trente lignes — et la matrice affichée à l'écran est dérivée, jamais éditée.
+- **Réutiliser le type de refus du voisin plutôt que forker.** `connresolve` renvoie des `*envbindings.Refusal` — y compris pour ses codes propres (`UNKNOWN_ROLE`). L'alternative (un type `connresolve.Refusal` parallèle) aurait doublé le motif et cassé `errors.As` pour les appelants qui traitent les deux étapes ensemble. Le contrat publié d'une étape inclut ses types d'erreur.
+- **Épingler une matrice démo, pas la fonction.** La fonction est paramétrée par un manifest — son hash ne peut pas être épinglé. La solution : un `DemoManifest` représentatif gravé dans le package, dont la matrice EST hashable et épinglée sur trois plans (rapid, vitest, Playwright). La parité Go↔TS se prouve sur un échantillon canonique, pas sur l'espace entier.
+
+## Méta-méta
+
+- **Un ensemble clos de modes transforme un avis d'architecte en théorème.** « En prod on ne parle jamais à localhost » était une revue de code ; c'est maintenant la loi 5 d'un miroir ∀ — un générateur rapid qui essaie des milliers de services et d'environnements et ne trouve JAMAIS un localhost. La différence entre une convention et une vérité, c'est le générateur qui essaie de la casser.
+- **La chaîne des références tient parce que chaque étape ne résout RIEN.** DP02 déclare des rôles, DP04 émet des `.env.example` sans valeurs, DP06 déclare des motifs, DP07 calcule des modes — et la première valeur réelle n'apparaîtra qu'au boot (DP12), depuis le secret store. Quatre étapes de projection pure, zéro valeur gravée : c'est l'inverse exact du réflexe « on mettra une vraie URL pour tester » — et c'est ce qui rend `future_cloud` déjà câblable alors qu'il n'existe pas.

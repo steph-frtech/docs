@@ -569,7 +569,9 @@
        "steps/concept/dp05-stack-emitter",
        "steps/internals/dp05-stack-emitter",
        "steps/concept/dp06-environments",
-       "steps/internals/dp06-environments"
+       "steps/internals/dp06-environments",
+       "steps/concept/dp07-connections",
+       "steps/internals/dp07-connections"
       ]
      }
     ]

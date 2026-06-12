@@ -1,0 +1,39 @@
+---
+title: "DP07 · Le mode de connexion — l'algorithme qui câble sans rien graver"
+description: "DP07 ajoute la projection déterministe resolveConnection(service, environnement) → mode ∈ {docker_internal, traefik_url, managed_url} : l'algorithme pur qui câble les services d'une stack émise entre eux et vers l'extérieur sans AUCUN endpoint en dur. Service↔service = docker_internal (nom de conteneur + port interne) ; exposition publique = traefik_url (https://${APP_SUBDOMAIN}.${DOMAIN}) ; service cloud ou environnement managé = managed_url, résolu depuis le binding d'environnement + le secret store (S91) au boot — jamais depuis le source émis. Un module de config TS (process.env) est émis pour le serveur Hono."
+keywords: ["aidos", "krd", "DP07", "resolveConnection", "ConnectionMode", "docker_internal", "traefik_url", "managed_url", "projection", "below-the-line", "endpoint", "hardcodé", "process.env", "Hono", "Traefik", "secret store", "S91", "connecteur", "future_cloud", "/environments", "matrice", "piste DP"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP07](/steps/internals/dp07-connections).</Note>
+
+## En une phrase
+
+DP07 donne à votre stack émise **son câblage** : une fonction pure `resolveConnection(service, environnement)` qui répond, pour chaque service et chaque environnement, à la question « comment vous joint-on ? » — par le réseau Docker interne, par l'URL publique Traefik, ou par une URL managée externe — **sans qu'un seul hôte, port public ou URL soit jamais écrit en dur**.
+
+## Le problème que ça résout
+
+Une application multi-services meurt par ses endpoints en dur : un `localhost:5432` qui marche sur la machine du développeur et casse en prod, une URL de prod copiée dans un worker de staging, une clé d'API cloud collée dans le source. Chaque endpoint gravé est une bombe à retardement de déploiement.
+
+DP07 remplace la convention orale (« en prod on parle au conteneur, en cloud on prend l'URL RDS ») par un **algorithme** : trois modes, un ensemble clos, des règles déclarées. La question « par où passe cette connexion ? » n'a plus d'avis — elle a un calcul.
+
+## Les trois modes, les règles déclarées
+
+| Mode | Quand | À quoi ça ressemble |
+|---|---|---|
+| `docker_internal` | service↔service, tout environnement self-hosted | `${APP_NAME}-db:5432` — nom de conteneur + port interne, réseau partagé |
+| `traefik_url` | l'exposition publique du serveur (prod/staging/dev) | `https://${APP_SUBDOMAIN}.${DOMAIN}` — labels Traefik, TLS |
+| `managed_url` | un connecteur cloud (partout) ou `future_cloud` (tout) | `${CRM_MANAGED_URL}` — une référence, résolue du secret store au boot |
+
+Les règles tiennent en quatre lignes, déclarées et jamais apprises : un environnement **managé** (le binding `future_cloud` de DP06) résout tout en `managed_url` ; un service de rôle **connector** est managé partout ; le **serveur** est `traefik_url` sur tout environnement à réseau `traefik_default`, et `docker_internal` en `local` (pas de reverse proxy sur la machine) ; tout le reste est `docker_internal`. En `prod`, un service interne ne se résout **jamais** en `localhost` ni en IP — la loi est au miroir.
+
+## Tout est référence, rien n'est valeur
+
+Le motif d'endpoint résolu ne contient que des **références d'env-var** : `${APP_NAME}`, `${APP_SUBDOMAIN}`, `${DOMAIN}`, `${CRM_MANAGED_URL}`. Les valeurs n'existent qu'au déploiement — et les URLs managées arrivent du **secret store** (S91), jamais du source émis. C'est la loi DP03–DP05 prolongée jusqu'au câblage ; DP08 en fera un cliquet structurel (le senseur qui rougit sur tout littéral).
+
+## Le module de boot du serveur Hono
+
+DP07 émet aussi le **module de config TS** que le serveur Hono consomme au démarrage : pour chaque service, le module reconstruit l'URL depuis `process.env` via un `requireEnv` fail-closed — une variable absente lève `MISSING_ENV_AT_BOOT` au boot, jamais un défaut silencieux. L'émission est byte-identique à chaque run : même manifest + même environnement → même module, à l'octet près.
+
+## Ce que vous voyez à l'écran
+
+La route `/environments` s'étend d'une **matrice service × environnement → mode** : six services représentatifs de la palette (serveur Hono, Postgres, Valkey, PgBouncer, Windmill, un connecteur CRM) et cinq boutons d'environnement. Basculez de `prod` à `local` : le serveur passe de `traefik_url` à `docker_internal` sous vos yeux. Basculez sur `future_cloud` : tout devient `managed_url`. Le contrôle « mesurer la matrice » re-résout la matrice entière et re-hash — deux mesures, même adresse, toujours : la résolution est un algorithme, pas un avis.
