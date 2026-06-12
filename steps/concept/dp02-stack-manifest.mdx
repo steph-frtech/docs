@@ -1,0 +1,49 @@
+---
+title: "DP02 · Le StackManifest — la stack de votre app, gravée comme une source"
+description: "DP02 transforme le verdict GO du spike DP01 en vérité de premier rang : le StackManifest est gravé comme une SOURCE Kernel — un AST déclaré (votre app, ses services avec un rôle dans un ensemble FERMÉ, leurs ports internes, leurs profils, vos volumes, votre réseau, vos connector scopes), content-adressé (sa version EST son hash, via les mêmes fonctions que tout record du noyau), append-only (rien n'est jamais écrasé — la tête bouge par nouvelle version). La validation est pure et ferme : un nom d'app requis, au moins un service serveur (STACK_HAS_NO_SERVER), des ports internes uniques (DUPLICATE_INTERNAL_PORT), un rôle inconnu refusé (UNKNOWN_SERVICE_ROLE) — jamais deviné. Le manifest DÉCLARE la topologie ; il ne résout aucune URL ni secret. Le mur s'applique : graver passe par idée → miroir → /goal → approbation humaine."
+keywords: ["aidos", "krd", "DP02", "StackManifest", "source", "Kernel", "AST", "content-adressé", "append-only", "ensemble clos", "rôles", "profils", "UNKNOWN_SERVICE_ROLE", "DUPLICATE_INTERNAL_PORT", "STACK_HAS_NO_SERVER", "validation pure", "miroir", "property test", "mur", "idée", "/goal", "stack_manifest", "migration", "Atlas", "piste DP", "provisioning", "déploiement", "/stack-manifest"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP02](/steps/internals/dp02-stack-manifest).</Note>
+
+## En une phrase
+
+DP02 grave le **StackManifest** comme **source Kernel de premier rang** : la stack de votre application émise n'est plus un fichier docker-compose qu'on copie — c'est une **déclaration au-dessus du mur**, content-adressée, append-only, validée par une fonction pure, dont tous les artefacts de déploiement (DP03+) ne seront que des **projections régénérables**.
+
+## Le problème que ça résout
+
+Le spike DP01 a **mesuré** que déclarer la stack comme une source content-adressée porte sa valeur (ré-émission byte-identique, round-trip, détection de dérive qu'un template statique ne peut pas porter — par construction). DP02 encaisse ce verdict : il donne au StackManifest sa **forme de vérité**.
+
+Concrètement, quand AIDOS construira votre app, sa stack — *quels services tournent, quel rôle joue chacun, sur quel port interne, dans quel profil, avec quels volumes et quel réseau* — sera **déclarée une fois**, au-dessus du mur, et tout le reste (le `docker-compose.yml`, le `.env.example`, les scripts) sera **émis** depuis cette déclaration. Si quelqu'un modifie un fichier émis à la main, la source le détecte (le hash ne correspond plus). Si la stack doit changer, c'est la **source** qui change — par le chemin légal.
+
+## Ce que le manifest déclare (et ce qu'il ne déclare PAS)
+
+Le StackManifest est un **AST déclaré** :
+
+- **l'app** — son nom (requis, sinon refus `STACK_NAME_REQUIRED`) ;
+- **les services** — chacun avec un **rôle dans un ensemble FERMÉ de 14** (`server`, `datastore`, `cache`, `pooler`, `workflow`, `bus`, `observability`, `errortracking`, `git`, `tickets`, `auth`, `docs`, `connector`, `interpreter`), un **port interne unique** dans l'app, un **profil** dans l'ensemble fermé de la spec stack-2026 (`core · docs · observability · qa · git · tickets · connectors · non-prod · full`), un healthcheck, des dépendances ;
+- **les volumes** — des binds dont le chemin est une **référence de variable d'environnement** (jamais un chemin en dur) ;
+- **le réseau** — le réseau Traefik externe ;
+- **les connector scopes** — les portées déclarées des connecteurs.
+
+Ce qu'il ne déclare **pas** : aucune URL, aucun secret, aucun endpoint résolu. Le manifest **déclare la topologie** ; la résolution par environnement (dev, staging, prod…) est une **projection** d'une étape ultérieure (EPIC B). C'est la séparation KRD : la vérité dit *quoi*, les projections disent *où et comment*.
+
+## L'honnêteté de l'ensemble clos
+
+Un rôle inconnu n'est **jamais deviné** : il est refusé avec un code actionnable (`UNKNOWN_SERVICE_ROLE`). Deux services qui réclament le même port interne : refusés (`DUPLICATE_INTERNAL_PORT`). Une stack sans aucun service `server` — donc rien à exposer, rien à déployer : refusée (`STACK_HAS_NO_SERVER`). La validation est une **fonction pure et totale** : même manifest, même verdict, toujours — et son miroir de propriété (∀) le prouve à chaque exécution.
+
+## Content-adressé, append-only
+
+Le manifest valide reçoit son **adresse de contenu** : son identifiant et sa version sont **le même hash** de son corps canonique — calculé par les **mêmes fonctions** que tout record du noyau (réutilisées, jamais recopiées). Conséquences :
+
+- **même corps → même hash** (même si l'ordre des clés JSON change) — le round-trip ;
+- **un octet logique change → nouvelle adresse** — la tête bouge par **nouvelle version**, l'ancienne n'est jamais écrasée (append-only) ;
+- la projection émise (DP03) portera ce hash — c'est lui qui rend toute dérive détectable.
+
+## Le mur
+
+`stack_manifest` est une vérité **au-dessus de la ligne**. L'agent n'a **aucun droit d'écriture** sur sa table (lecture seule, refus Postgres prouvé par un miroir d'intégration) ; graver ou faire évoluer un manifest passe par **idée → miroir → /goal → approbation humaine**. L'écran Workbench `/stack-manifest` lit le manifest, affiche sa topologie et son adresse de contenu, et offre un seul contrôle — **« valider & hasher »** — qui re-mesure sans rien écrire : essayez un rôle inconnu ou un port dupliqué, le refus s'affiche avec son code.
+
+## Ce que ça change pour vous
+
+Votre stack devient **auditable comme votre code** : versionnée, signée par son contenu, impossible à modifier en douce. La suite de la piste DP s'appuie dessus : DP03 émettra le `docker-compose.yml` byte-identique depuis cette source, DP06+ projettera les environnements, et le déploiement réel (votre app visible sur `https://<projet>-dev.sagedesk.fr`) ré-émettra toujours depuis la source — jamais depuis un fichier qui traîne.
