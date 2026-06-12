@@ -1,0 +1,54 @@
+---
+title: "DP06 · Internals — envbindings : l'ensemble clos élargi + la porte A1"
+description: "Le journal de build de DP06 : l'élargissement additif de scope.Environment (S15) à 5 membres dans le MÊME ChangeSet (environmentOrder, message Validate, IsKnownEnvironment, scope_property_test 3→5, migration_roundtrip jsonb, SemanticDiff refine), le nouveau package pur back/runtime/envbindings (bindings déclarés + porte ValidateDatastore — DOLTGRES_NOT_ALLOWED_IN_PROD), le miroir property ∀ N1 (rapid) écrit d'abord et rouge puis vert (7 lois + 2 lois SemanticDiff), le jumeau TS environments.ts épinglé octet-pour-octet (GO_BINDINGS_HASH), la route /environments et les 4 e2e Playwright."
+keywords: ["aidos", "krd", "DP06", "envbindings", "internals", "scope.Environment", "EnvLocal", "EnvFutureCloud", "environmentOrder", "IsKnownEnvironment", "rapid", "property", "miroir", "rouge-vert", "SemanticDiff", "refine", "additif", "DOLTGRES_NOT_ALLOWED_IN_PROD", "UNKNOWN_ENVIRONMENT", "ValidateDatastore", "BindingsFor", "records.Hash", "jumeau TS", "environments.ts", "fast-check", "vitest", "Playwright", "ADR 0065"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP06 — Les 5 environnements](/steps/concept/dp06-environments).</Note>
+
+## Implémentation
+
+### Le mur d'abord : ADR 0065, ouvert avant le code
+
+L'Amendement A1 du roadmap interdisait de graver le refus `prod`+Doltgres tant que l'addendum à l'ADR 0006 n'était pas accepté ; l'Amendement A6 exigeait que l'élargissement de l'ensemble clos passe par un ChangeSet unique avec preuve SemanticDiff. `docs/adr/0065-dp06-environment-set-and-doltgres-non-prod.md` acte les deux ensemble, autorité = `SPEC-stack-2026.md` verbatim (« PostgreSQL = la prod. Doltgres = hors prod uniquement. » ; `environments local/dev/staging/prod/future_cloud`). L'ADR résout l'OPEN QUESTION « défaut vs opt-in » de 0006 : postgres défaut en `prod`/`future_cloud`, doltgres défaut hors prod, refus clos `prod`+doltgres.
+
+### Le miroir d'abord (rouge → vert)
+
+`back/runtime/envbindings/envbindings_property_test.go` est écrit **avant** tout code (aucun fichier Go non-test → compile fail, c'est le rouge) ; le flip de cardinalité 3→5 dans `scope_property_test.go` rougit S15 au même instant. Les **7 lois** :
+
+1. **Cinq environnements, clos** — `Bindings()` couvre exactement `scope.Environments()` (désormais 5), dans l'ordre canonique ;
+2. **Reproductibilité** — `CanonicalBindings()` byte-identique ×100, `HashBindings() == records.Hash(canon)` et == l'adresse Go autoritative `aaca11ab…b6f01e51` (épinglée par le jumeau TS + l'e2e) ; `BindingsFor` déterministe ∀ ;
+3. **La porte A1** — `ValidateDatastore(prod, doltgres)` refuse avec `DOLTGRES_NOT_ALLOWED_IN_PROD` ; ∀ environnement non-prod connu, doltgres est admis (opt-in) ;
+4. **Fail-closed sur l'inconnu** — ∀ chaîne hors ensemble : `UNKNOWN_ENVIRONMENT` / `UNKNOWN_DATASTORE`, jamais deviné ;
+5. **allowed ⇔ validate** — ∀ (env, ds) connus : la table `AllowedDatastores` et la porte ne divergent jamais ;
+6. **Références `${VAR}`, jamais des valeurs** — tout motif d'URL porte `${` et aucun domaine littéral (sagedesk/.fr/.com) ; les défauts suivent l'ADR 0065 ;
+7. **S15 reste fail-closed ∧ additif** — une vérité active scopée à CHACUN des 5 environnements passe `scope.Validate` ; une vérité active sans scope est TOUJOURS rejetée (`active-truth-without-scope`).
+
+S'y ajoutent les **2 lois SemanticDiff** (`semanticdiff_additivity_test.go`) : l'élargissement `{prod,staging,dev}` → `+{local,future_cloud}` classe **refine** (S21 réutilisé verbatim, le set rendu en body plat un-champ-par-membre), et ∀ préfixe strict → ensemble complet, jamais override — le trio S15 reste le préfixe de l'ordre canonique.
+
+### Le même ChangeSet (Amendement A6)
+
+`back/kernel/scope/scope.go` : `EnvLocal` + `EnvFutureCloud` APPENDUS à `environmentOrder` (le préfixe S15 préservé), message de `ValidateShape` `want prod|staging|dev|local|future_cloud`, `IsKnownEnvironment` dérivé de l'ordre (inchangé). `scope_property_test.go` : cardinalité 5 + `TestEnvironmentWideningIsAdditive`. `migration_roundtrip_test.go` : `TestWidenedEnvironmentsRoundTrip` — `local` et `future_cloud` round-trippent dans la colonne `kernel.truth.scope jsonb` **sans aucun DDL** (pas de CHECK d'énum : l'élargissement est additif jusqu'à la persistance, prouvé sur Postgres réel en Testcontainers, le mur GRANT intact).
+
+### Le package pur
+
+`back/runtime/envbindings/envbindings.go` : la table `bindings` est DÉCLARÉE (jamais apprise, §8) — une ligne par environnement, datastores défaut/autorisés, motif d'URL en références, TLS, réseau, managé. `ValidateDatastore` est la porte totale pure ; `BindingsFor` refuse l'inconnu ; `CanonicalBindings`/`HashBindings` réutilisent `records.Canonicalize`/`records.Hash` (S02, jamais forké). Les codes de refus sont **package-locaux** (motif DP02 `UNKNOWN_SERVICE_ROLE`) — l'enum gelé `blockreason` n'est pas touché. `go test ./...` (back entier) vert ; gofmt/go vet propres.
+
+### Le jumeau TS épinglé
+
+`front/web/lib/environments.ts` reproduit la table et la porte octet pour octet (canonicalize trié récursif + sha256) ; le miroir vitest `lib/environments.test.ts` (fast-check, **12 tests**) épingle `GO_BINDINGS_HASH` — toute divergence d'un octet rougit — et porte les lois L1–L7 côté twin (dont l'immutabilité de la table déclarée). Vitest complet **2115/2115** (baseline 2103 intacte, anti-overwrite).
+
+### L'écran et la preuve e2e
+
+`/environments` (thème ADR 0010, bilingue ADR 0011 fr/en, entrée nav) : le tableau des 5 environnements dans l'ordre canonique avec leurs bindings, l'adresse de la projection, et le contrôle « tester la liaison » (ui-completeness §7) qui exécute la porte PURE sur le couple choisi — mesure, n'écrit rien. `tests/e2e/environments.spec.ts` **4/4** sur le port 3210 : les 5 environnements rendus avec `prod` postgres-seul et le motif `${APP_NAME}-dev.${DOMAIN}` (référence, jamais sagedesk), `prod`+doltgres → `DOLTGRES_NOT_ALLOWED_IN_PROD` à l'écran, `dev`+doltgres admis avec l'adresse Go épinglée, et la mesure DEUX FOIS → même adresse les deux fois. Baseline intacte : stack-manifest 4/4, stack-emit 4/4, env-emit 4/4, stack-bundle 4/4, e2e v3 16/16 — prod :3000 intouchée.
+
+## Méta
+
+- **Réutiliser la dimension plutôt que créer le modèle.** Le réflexe « la piste déploiement a besoin d'un modèle Environment » aurait créé le doublon exact que S15 existe pour empêcher. Le geste juste était minuscule : deux constantes appendues à un ordre canonique — et tout le reste (validation, persistance, scope des vérités) suit gratuitement, parce que tout dérivait déjà de `environmentOrder`.
+- **L'additivité se prouve avec l'outil déjà construit.** Plutôt qu'affirmer « aucun scope existant n'est invalidé », le miroir appelle le classificateur S21 sur le set rendu en body plat : `refine` calculé, pas promis. Le coût : choisir une représentation (un champ par membre) que `isRefinement` sait lire — la représentation fait partie de la preuve.
+- **Une porte se grave seulement quand son autorité existe.** Le refus `prod`+Doltgres attendait depuis DP01 ; il n'entre au miroir qu'ici, parce que l'addendum 0065 l'acte d'abord. Un miroir qui fige une décision non actée serait un monstre d'autorité — l'ordre ADR-puis-miroir est le contrat, pas une politesse.
+
+## Méta-méta
+
+- **Un ensemble clos n'est pas une prison, c'est une porte avec un cérémonial.** La leçon DP06 : la clôture (cardinalité assertée, refus de l'inconnu) ne rend pas le système rigide — elle rend chaque élargissement VISIBLE, daté, prouvé additif. Le contraire (un enum ouvert « pour plus tard ») aurait été plus souple et aurait menti : personne n'aurait jamais su quand `local` est devenu un environnement réel.
+- **La vérité de déploiement remonte la même verticale que la vérité métier.** `future_cloud` n'existe encore nulle part — aucun conteneur, aucun provider. Le déclarer DÈS MAINTENANT dans l'ensemble clos, avec un binding managed-only, c'est appliquer aux environnements ce que le KRD applique aux comportements : on grave l'intention falsifiable avant de construire, et la construction (EPIC G) viendra rendre son miroir vert.

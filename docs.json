@@ -567,7 +567,9 @@
        "steps/concept/dp04-env-emitter",
        "steps/internals/dp04-env-emitter",
        "steps/concept/dp05-stack-emitter",
-       "steps/internals/dp05-stack-emitter"
+       "steps/internals/dp05-stack-emitter",
+       "steps/concept/dp06-environments",
+       "steps/internals/dp06-environments"
       ]
      }
     ]

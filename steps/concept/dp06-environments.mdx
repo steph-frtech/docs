@@ -1,0 +1,47 @@
+---
+title: "DP06 · Les 5 environnements — un seul modèle, des bindings déclarés"
+description: "DP06 élargit l'ensemble clos scope.Environment (S15) de trois à CINQ membres — prod, staging, dev + local, future_cloud — par extension ADDITIVE passée par le mur (ADR 0065, le SemanticDiff classe refine). Chaque environnement déclare ses bindings de connexion — datastore par défaut et autorisés, motif d'URL en références ${VAR} (jamais une valeur), TLS, réseau, managé — comme projection below-the-line. La porte A1 grave la règle de la spec : PostgreSQL = la prod, Doltgres = hors prod uniquement (DOLTGRES_NOT_ALLOWED_IN_PROD)."
+keywords: ["aidos", "krd", "DP06", "environnement", "Environment", "TruthScope", "S15", "ensemble clos", "local", "dev", "staging", "prod", "future_cloud", "bindings", "projection", "below-the-line", "Doltgres", "Postgres", "DOLTGRES_NOT_ALLOWED_IN_PROD", "ADR 0065", "ADR 0006", "addendum", "SemanticDiff", "refine", "additif", "le mur", "/environments", "piste DP"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP06](/steps/internals/dp06-environments).</Note>
+
+## En une phrase
+
+DP06 donne à votre application **un seul modèle d'environnement** — l'ensemble clos à cinq membres `prod · staging · dev · local · future_cloud`, qui **réutilise** la dimension `environment` du TruthScope (S15), jamais un modèle parallèle — et fait de chaque environnement une **déclaration** : ses datastores, son motif d'URL, son TLS, son réseau, le tout en **références d'env-var**, jamais une valeur.
+
+## Le problème que ça résout
+
+Avant DP06, l'environnement existait deux fois : comme dimension de scope des vérités (S15, trois membres) et comme intuition de déploiement (« le dev de mon projet », « la prod publique ») sans modèle. Deux modèles, c'est la dérive garantie : une vérité scopée `dev` et un déploiement « dev » qui ne parlent pas du même dev.
+
+DP06 ferme cette fourche par le choix le plus simple : **il n'y a qu'un environnement, celui du TruthScope**. La piste de déploiement n'invente pas d'enum — elle **élargit** l'ensemble clos existant de deux membres (`local`, la machine du développeur ; `future_cloud`, la portabilité managée déclarée dès maintenant) et y attache des **bindings de connexion déclarés**.
+
+## Élargir un ensemble clos, c'est changer une vérité
+
+L'ensemble `{prod, staging, dev}` était gravé et asserté par son miroir (la cardinalité 3 était une loi). On ne l'édite pas en passant : l'élargissement est passé **par le mur** — la spec canonique `SPEC-stack-2026` (gravée par l'humain) déclare verbatim `environments local/dev/staging/prod/future_cloud`, l'ADR 0065 l'acte, et le **même ChangeSet** met à jour l'ordre canonique, le message de refus, le miroir et le round-trip de persistance.
+
+L'additivité n'est pas promise, elle est **prouvée** : le SemanticDiff de l'élargissement classe **refine** (un sur-ensemble strict et cohérent), jamais override — aucune vérité scopée existante n'est invalidée, le trio S15 reste le préfixe de l'ordre canonique.
+
+## La porte A1 — PostgreSQL = la prod
+
+L'ADR 0006 avait adopté Doltgres pour les apps émises en laissant « défaut ou opt-in ? » en question ouverte. Son **addendum** (ADR 0065, ouvert AVANT cette étape) tranche avec la spec : **« PostgreSQL = la prod. Doltgres = hors prod uniquement. »**
+
+La porte est une fonction pure et fail-closed : `prod` + Doltgres est **refusé** avec le code clos `DOLTGRES_NOT_ALLOWED_IN_PROD` ; Doltgres reste opt-in en `local`/`dev`/`staging` (git-for-data là où l'on itère) ; un environnement ou un datastore hors ensemble clos est refusé, jamais deviné.
+
+## Des bindings déclarés, jamais des valeurs
+
+Chaque environnement déclare son binding — et tout y est **référence** :
+
+| Environnement | Datastore défaut | Motif d'URL | Réseau |
+|---|---|---|---|
+| `prod` | postgres (seul autorisé) | `https://${APP_NAME}.${DOMAIN}` | traefik_default |
+| `staging` | doltgres | `https://${APP_NAME}-staging.${DOMAIN}` | traefik_default |
+| `dev` | doltgres | `https://${APP_NAME}-dev.${DOMAIN}` | traefik_default |
+| `local` | doltgres | `http://localhost:${APP_PORT}` | default |
+| `future_cloud` | postgres (managé) | `${MANAGED_URL}` | managed |
+
+C'est la loi DP03–DP05 étendue aux environnements : le domaine, le nom d'app, le port arrivent au déploiement par variables d'environnement — l'URL réelle `https://<projet>-dev.sagedesk.fr` se **résout**, elle ne se grave jamais. Et le binding résolu est une **projection** below-the-line, jamais une source : la prochaine étape (DP07) en dérivera le mode de connexion service par service.
+
+## Ce que vous voyez à l'écran
+
+La route `/environments` du Workbench montre les cinq environnements dans l'ordre canonique, leurs bindings et l'adresse de contenu de la projection entière. Le contrôle « tester la liaison » exécute la porte sous vos yeux : choisissez `prod` + `doltgres`, le refus s'affiche avec son code ; choisissez `dev` + `doltgres`, la liaison est admise et la mesure re-hash la projection — deux mesures, même adresse, toujours.
