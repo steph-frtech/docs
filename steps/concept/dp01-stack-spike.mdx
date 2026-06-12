@@ -1,0 +1,39 @@
+---
+title: "DP01 · Le SPIKE-gate StackManifest — prouver par mesure avant de graver"
+description: "DP01 ouvre la piste DP (provisionner & déployer votre app émise) par un SPIKE-gate : avant de graver quoi que ce soit, une sonde jetable PROUVE PAR MESURE que déclarer la stack de votre app comme une SOURCE Kernel content-adressée (un StackManifest gouverné par le mur) porte sa valeur face à un simple template statique /data/dockers. Trois mesures : la ré-émission byte-identique (même manifest → mêmes octets, cent fois), le round-trip du docker-compose émis, et la détection de dérive par source-hash — qu'un template statique ne peut PAS porter, par construction. Le verdict est une mesure de hash, jamais un avis d'IA. Verdict mesuré : GO — la roadmap DP02–DP33 peut continuer ; un no-go l'aurait tuée honnêtement ici."
+keywords: ["aidos", "krd", "DP01", "spike", "SPIKE-gate", "StackManifest", "source", "content-adressé", "template statique", "/data/dockers", "docker-compose", "Traefik", "byte-identique", "ré-émission", "round-trip", "dérive", "source-hash", "verdict", "go/no-go", "harvest", "ratchet OFF", "T0", "mur", "déterminisme", "piste DP", "provisioning", "déploiement"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP01](/steps/internals/dp01-stack-spike).</Note>
+
+## En une phrase
+
+DP01 est la **porte d'entrée de la piste DP** (provisionner et déployer réellement votre app émise) : un **spike jetable** (ratchet OFF, rigueur T0, zone `/spike` uniquement) qui **mesure** — au lieu de supposer — que déclarer la stack comme une **SOURCE Kernel content-adressée** vaut mieux qu'un template statique copié-collé ; le verdict mesuré est **GO**.
+
+## Le problème que ça résout
+
+Quand AIDOS émet votre application, il faut bien la **déployer** : un `docker-compose.yml`, un réseau Traefik, des volumes, des variables d'environnement. La tentation évidente : copier un **template statique** (le dossier `/data/dockers` qui marche déjà) et remplacer trois noms à la main. Ça marche — mais qui garantit que personne n'a modifié le fichier à la main depuis ? Qu'il correspond encore à ce que votre app déclare ? Rien. Un template copié est **muet** : il ne sait pas d'où il vient.
+
+L'alternative KRD : la stack devient une **déclaration au-dessus du mur** — un `StackManifest` (vos services, leurs rôles, leurs ports internes, vos volumes, votre réseau) **content-adressé** (sa version EST son hash), dont le compose n'est qu'une **projection régénérable**. Mais c'est plus de machinerie. Avant de la construire, KRD exige une **preuve par mesure** : c'est exactement ce qu'est un SPIKE-gate.
+
+## Ce que la sonde a mesuré
+
+Un manifest minimal (une app, un serveur reverse-proxié, un datastore, un volume, le réseau Traefik) passe dans un **émetteur jetable pur** — pas d'horloge, pas de hasard, pas d'IA — qui produit un `docker-compose.yml` respectant les conventions `/data/dockers` (HTTPS via Traefik, redirection HTTP→HTTPS, aucune URL ni secret en dur : tout en variables d'environnement). Puis trois mesures :
+
+1. **Byte-identique ×100** : ré-émettre cent fois donne **exactement les mêmes octets** (même hash). La projection est reproductible — donc jetable et régénérable sans peur.
+2. **Round-trip** : le compose émis se relit et redonne la topologie déclarée — rien d'inventé, rien de perdu.
+3. **L'asymétrie de dérive** — la mesure décisive : modifiez **un seul octet** du fichier émis à la main ; côté source, le hash enregistré ne correspond plus — **dérive détectée**. Côté template statique, il n'existe aucun hash enregistré — la même modification est **invisible par construction**.
+
+C'est cette asymétrie qui fait le verdict : la source porte **versioning, audit et anti-écrasement** ; le template ne le pourra jamais.
+
+## Le verdict — mesuré, jamais déclaré
+
+**GO.** Et ce n'est pas une opinion : le verdict est une **conjonction booléenne** des mesures (hash égal/inégal). La sonde a aussi comparé **trois formes** possibles pour la vérité (record Kernel de premier rang, dimension de scope, simple projection) par un **comptage de critères déclarés** — le record de premier rang gagne 4/4 : il porte un corps, un content-address, le mur et l'append-only. Le verdict est **harvesté** comme un record content-adressé en brouillon (il *propose*, il ne gèle rien — la promotion passera par `/goal`). Si la mesure avait dit no-go, la roadmap DP entière se serait arrêtée ici, honnêtement, par un ADR d'abandon.
+
+## Ce que vous verrez
+
+Dans le Workbench, l'écran **/stack-spike** rend le verdict en lecture : le badge go/no-go, les quatre mesures, les octets comparés (le compose émis et ses deux hash), le tableau des trois formes, et le record /harvest avec ses questions ouvertes. Un seul bouton — « ré-émettre » — re-exécute l'émetteur pur sous vos yeux et constate que les octets sont identiques. Il ne modifie rien : juger n'écrit aucune vérité.
+
+## La suite
+
+DP02 gravera le `stack_manifest` comme record Kernel de premier rang ; DP03+ construiront les vrais émetteurs (compose, programme Pulumi) ; et chaque déploiement dev de votre projet produira une **vraie application** ouvrable dans votre navigateur — c'est tout l'objet de la piste DP que ce spike vient de débloquer.
