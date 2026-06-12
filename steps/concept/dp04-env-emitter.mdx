@@ -1,0 +1,45 @@
+---
+title: "DP04 · L'émetteur .env.example + scripts — toutes les clés, jamais les valeurs"
+description: "DP04 ajoute les Targets additifs env-example et start-scripts à la matrice fermée kind × target : Emit(stack_manifest) projette le .env.example (toutes les clés que l'app attend — APP_NAME, APP_SUBDOMAIN, DOMAIN, CERT_RESOLVER_NAME, APP_DATA_PATH, TRAEFIK_NETWORK_NAME, les ports internes — et les RÉFÉRENCES de secrets, jamais les valeurs) plus les scripts start.sh (down → up) et start_with_rebuild.sh (down → build --no-cache → up). L'ordre de merge /data/dockers (global → bp-default → bp-secrets → deploy-time) est gravé comme template d'émission en fonction pure — jamais un sed interactif. Un scan secret déterministe type-gitleaks (S91, du code, jamais un LLM) est vert sur chaque émission ; la cohérence avec le compose DP03 est prouvée au miroir : toute référence ${VAR} du compose existe dans le .env.example."
+keywords: ["aidos", "krd", "DP04", ".env.example", "start.sh", "start_with_rebuild.sh", "émetteur", "Target additif", "ordre de merge", "global", "bp-default", "bp-secrets", "deploy-time", "références de secrets", "from-secret-store", "S91", "gitleaks", "scan déterministe", "cohérence", "byte-identique", "déterminisme", "chmod 600", "APP_NAME", "le mur", "/stack-emit", "piste DP"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP04](/steps/internals/dp04-env-emitter).</Note>
+
+## En une phrase
+
+DP04 complète la projection déployable de votre stack : le même manifest qui émet le `docker-compose.yml` (DP03) émet maintenant son **`.env.example`** — **toutes les clés attendues, jamais une valeur de secret** — et ses deux **scripts de démarrage**, par une fonction **pure** qui grave l'ordre de merge `/data/dockers` au lieu de le rejouer à la main.
+
+## Le problème que ça résout
+
+Un compose sans son `.env` ne démarre pas : chaque `${VAR}` du fichier doit se résoudre. Dans `/data/dockers`, ce `.env` naît d'un **rituel de merge** exécuté par un script interactif : le `.env` global du host, puis les défauts du boilerplate, puis ses `.secrets`, puis le `APP_NAME` posé au déploiement — quatre couches, la dernière écriture gagne. Tant que ce rituel vit dans un shell, il n'est ni reproductible ni prouvable — et il manipule de **vraies valeurs de secrets**.
+
+DP04 transforme le rituel en **template d'émission gravé** : les quatre couches deviennent une fonction pure du manifest. Le résultat n'est pas le `.env` (qui porte des valeurs) mais le **`.env.example`** : la **forme** exacte du `.env` final — chaque clé à sa place, chaque secret remplacé par sa **référence** `<<from-secret-store>>`, chaque clé résolue au déploiement marquée `<<set-at-deploy-time>>`.
+
+## L'ordre de merge, gravé
+
+Les quatre couches rendent dans l'ordre exact de `deploy.sh`, et chaque clé affiche sa **provenance** :
+
+1. **global** (`deployments/.env`) — les clés du host, comme le PAT GitHub (une référence, jamais la valeur) ;
+2. **bp-default** (`boilerplates/<bp>/.env`) — les défauts non-secrets : `APP_SUBDOMAIN`, `DOMAIN`, `CERT_RESOLVER_NAME`, `TRAEFIK_NETWORK_NAME`, les device-vars des volumes (`APP_DATA_PATH`), les ports internes déclarés, les images des services émis ;
+3. **bp-secrets** (`boilerplates/<bp>/.secrets`) — une référence S91 par scope de connecteur déclaré (`APP_SECRET_…=<<from-secret-store>>`) ;
+4. **deploy-time** (`deploy.sh`) — `APP_NAME=<nom>` **remplace** la valeur héritée : l'écrasement du merge est observable dans le fichier émis.
+
+## Jamais une valeur de secret
+
+La loi est double, et **calculée** :
+
+- chaque clé secrète vaut exactement la référence `<<from-secret-store>>` — la valeur vit chiffrée dans le coffre S91, scoppée par projet, injectée au boot, jamais dans le source émis, jamais dans git ;
+- un **scan déterministe type-gitleaks** (le scanner S91 — un ensemble clos de règles, du code, jamais un LLM) passe sur chaque émission et doit rester vert. Le miroir l'injecte aussi en faute : un faux `.env` portant une vraie valeur fait **rougir** le scanner — un senseur qui ne tire jamais est mort.
+
+## La cohérence DP03 ↔ DP04
+
+Le `.env.example` n'est pas un fichier décoratif : c'est le **contrat de résolution** du compose. Le miroir le prouve : **toute** référence `${VAR}` que le compose DP03 émet existe comme clé du `.env.example` — aucun `${VAR}` orphelin, sur tous les manifests valides que la propriété ∀ tire.
+
+## Les scripts, byte-stables
+
+`start.sh` (down → up) et `start_with_rebuild.sh` (down → build `--no-cache` → up) sont les templates exacts que `deploy.sh` génère — désormais émis, header protégé, hash de sortie, régénérables. La discipline `chmod` est elle aussi une fonction pure : `.env*` → 600, scripts → 755.
+
+## Où le voir
+
+Sur l'écran [/stack-emit](https://aidos.sagedesk.fr/stack-emit) : le `.env.example` seedé avec son ordre de merge, les deux scripts, les trois `output_hash`, le verdict du scan secret et le verdict de cohérence — et le même bouton « émettre » ré-émet le tout depuis le JSON éditable : même manifest → mêmes octets ; un scope de connecteur ajouté → une **nouvelle référence**, jamais une valeur.

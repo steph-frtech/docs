@@ -563,7 +563,9 @@
        "steps/concept/dp02-stack-manifest",
        "steps/internals/dp02-stack-manifest",
        "steps/concept/dp03-compose-emitter",
-       "steps/internals/dp03-compose-emitter"
+       "steps/internals/dp03-compose-emitter",
+       "steps/concept/dp04-env-emitter",
+       "steps/internals/dp04-env-emitter"
       ]
      }
     ]

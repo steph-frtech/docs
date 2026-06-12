@@ -1,0 +1,48 @@
+---
+title: "DP04 · Internals — envemit : le merge /data/dockers gravé en fonction pure"
+description: "Le journal de build de DP04 : le package pur back/runtime/envemit (Targets additifs env-example + start-scripts), le miroir property ∀ N1 (rapid) écrit d'abord et rouge puis vert — 9 lois (reproductibilité byte-identique, zéro valeur de secret via le scanner S91, cohérence ${VAR} avec composeemit, ordre de merge gravé avec override deploy-time, scripts deploy.sh verbatim, refus BlockReason, drift 1 octet, double content-addressing, chmod pur) — le jumeau TS épinglé octet-pour-octet, l'écran /stack-emit étendu et les 4 e2e Playwright."
+keywords: ["aidos", "krd", "DP04", "envemit", "internals", "rapid", "property", "miroir", "rouge-vert", "secretstore", "ScanEmission", "EnvVar", "S91", "composeemit", "Artifact", "records.Hash", "HashManifest", "MergeOrder", "SecretPlaceholder", "Mode", "chmod", "jumeau TS", "fast-check", "vitest", "Playwright", "OQ-DP04-secret-keys"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP04 — l'émetteur .env.example + scripts](/steps/concept/dp04-env-emitter).</Note>
+
+## Implémentation
+
+### Le miroir d'abord (rouge → vert)
+
+`back/runtime/envemit/envemit_property_test.go` est écrit **avant** tout code : le package ne contient aucun fichier Go non-test, le `go test` échoue à la compilation — c'est le rouge. Les **9 lois** gravées :
+
+1. **Reproductibilité** — `Emit(m)` est pure : ∀ manifest valide, deux émissions sont byte-identiques sur les TROIS artefacts (×2 sous rapid, ×100 sur `stackmanifest.Example()`) ;
+2. **Zéro valeur de secret** — `secretstore.ScanEmission` (S91, réutilisé verbatim — jamais forké) ne trouve rien ; le PAT global et chaque `APP_SECRET_*` (nommé par `secretstore.EnvVar` sur le scope de connecteur) valent exactement `<<from-secret-store>>` ;
+3. **Cohérence DP03↔DP04** — `ComposeEnvRefs(composeemit.Emit(m).Bytes) ⊆ Keys(env)` : aucun `${VAR}` orphelin ;
+4. **Ordre de merge gravé** — `MergeOrder() == [global, bp-default, bp-secrets, deploy-time]`, les sections rendent dans cet ordre (visibles même vides), et `APP_NAME` apparaît **exactement une fois**, valué `m.AppName`, dans la couche deploy-time (dernière écriture gagne — l'étape 3 de deploy.sh) ;
+5. **Scripts** — `start.sh` = down → up ; `start_with_rebuild.sh` = down → `build --no-cache` → up (les templates exacts que `deploy.sh` génère dans `/data/dockers`, shebang + header protégé + `cd "$(dirname "$0")"`) ;
+6. **Refus** — un manifest cassé (codes clos DP02) rend un `BlockReason` actionnable, zéro octet émis ;
+7. **Drift** — un octet basculé sur n'importe lequel des trois artefacts → `Drifted` vrai (`generators.Drifted`, S34 réutilisé) ;
+8. **Double content-addressing** — `SourceHash == stackmanifest.HashManifest(m)` (S02 jamais forké), `OutputHash == records.Hash(bytes)`, chemins below-the-line `back/gen/<app>/{.env.example,start.sh,start_with_rebuild.sh}`, Targets enregistrés dans le `targetOrder` clos du package ;
+9. **Chmod pur** — `Mode(.env*) == 0600`, `Mode(*.sh) == 0755` (le §chmod 600 de /data/dockers comme fonction du chemin).
+
+### Le package pur
+
+`back/runtime/envemit/envemit.go` : le motif honoemit/apisurface/composeemit — le package **déclare ses Targets** (`env-example`, `start-scripts`) ; la matrice kind × target reste close et totale, `generators` S34 intouché. `Emit` valide (DP02), content-adresse la source, puis rend les trois artefacts (le type `composeemit.Artifact` est **importé**, le contrat publié de DP03 — jamais recopié). Le merge est `mergeEnv` : quatre couches écrites dans l'ordre gravé sur une map clé → (valeur, couche de DERNIÈRE écriture) ; le rendu groupe par couche, clés triées — aucune fuite d'ordre d'itération. Hashes autoritatifs du Example (alphashop) : SOURCE `8011728e…62acdd2` (== le hash kernel DP02/DP03), ENV `0f8a5147…a9a874f9`, START `10525a91…c1c6b06e`, REBUILD `8a1b598c…52d6f2db`.
+
+### Le jumeau TS épinglé
+
+`front/web/lib/env-emit.ts` reproduit l'émetteur octet pour octet ; le miroir vitest `lib/env-emit.test.ts` (fast-check, 11 tests) épingle les **trois** `GO_*_OUTPUT_HASH` + `GO_SOURCE_HASH` — toute divergence d'un octet rougit. Il porte aussi la **fault-injection du scanner** : un faux `.env` avec une vraie valeur (`POSTGRES_PASSWORD="…"`, URI postgres avec mot de passe) fait tirer `scanEmission` — un senseur qui ne tire jamais est mort. Vitest complet **2091/2091** (baseline 2080 intacte, anti-overwrite).
+
+### L'écran et la preuve e2e
+
+`/stack-emit` est **étendu** (pas de nouvelle route — le même manifest, la même émission) : la carte DP04 montre le `.env.example` seedé, l'ordre de merge gravé, les deux scripts, les trois `output_hash`, le **verdict du scan secret** et le **verdict de cohérence** (calculés côté serveur — du code, jamais un LLM). Le contrôle « émettre » ré-émet compose **et** bundle env (mesure pure — n'écrit rien). `tests/e2e/env-emit.spec.ts` **4/4** sur le port 3210 : références-jamais-valeurs visibles, scripts deploy.sh, ré-émission → MÊME `output_hash`, scope de connecteur ajouté → nouvelle référence `APP_SECRET_FORGEJO_READ_WRITE` et scan toujours vert. Baseline intacte : DP03 4/4, e2e v3 16/16 — prod :3000 intouchée.
+
+## Méta
+
+- **Le rituel devient une fonction.** L'ordre de merge de `deploy.sh` (global → bp-default → bp-secrets → deploy-time) existait comme procédure interactive ; DP04 le grave en template pur. La leçon KRD : un geste opérationnel répété est une **vérité de forme** qui dort dans un shell — l'émetteur la réveille en la rendant prouvable (le miroir pin l'ordre ET l'écrasement).
+- **L'exemple est le contrat, pas le fichier.** Émettre le `.env` (les valeurs) aurait violé le mur S91 ; émettre le `.env.example` (les clés + les références) donne tout ce que la machine et l'humain doivent savoir — la résolution des valeurs reste au boot (InjectEnv, branché en DP32).
+- **La cohérence est un miroir inter-émetteurs.** La loi 3 croise DEUX packages (composeemit × envemit) sans en coupler le code : le test extrait les `${VAR}` du compose émis et les cherche dans l'env émis. C'est le premier miroir de la piste DP qui prouve que deux projections du même manifest se **répondent**.
+- **OQ-DP04-secret-keys** (OpenQuestion documentée) : le StackManifest ne déclare pas encore de clés secrètes arbitraires ; la dérivation gravée aujourd'hui = le PAT global (documenté dans /data/dockers) + une référence par scope de connecteur. Les déclarations par environnement arrivent avec les bindings (DP06+) et le branchement S91 réel (DP32).
+
+## Méta-méta
+
+- **Déterminisme-first tient sur trois plans à la fois** : l'émetteur (fonction pure), le **juge** (le scanner S91 — un ensemble clos de règles regex, jamais « un LLM qui juge si c'est un secret »), et la **discipline fichier** (`Mode` : le chmod comme fonction du chemin). Quand la tentation est « l'agent regardera si un secret a fui », la réponse KRD est : non — le scan est un code, et son miroir l'injecte en faute.
+- **Le cliquet s'étend sans toucher l'existant** : DP04 n'a modifié ni `composeemit` (son `Artifact` est importé), ni `secretstore` (réutilisé verbatim), ni `generators` (Drifted, ProtectedMarker) — trois contrats publiés consommés, zéro fork. L'anti-overwrite n'est pas une contrainte : c'est ce qui rend la matrice kind × target **énumérable** après quatre émetteurs.
+- **La porte du turn-budget** : l'étape a appliqué la discipline de report — miroir rouge → vert → jumeau → écran → e2e → docs, et le rapport émis dès les critères atteints, sans passe de polissage redondante.
