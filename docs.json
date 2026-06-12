@@ -561,7 +561,9 @@
        "steps/concept/dp01-stack-spike",
        "steps/internals/dp01-stack-spike",
        "steps/concept/dp02-stack-manifest",
-       "steps/internals/dp02-stack-manifest"
+       "steps/internals/dp02-stack-manifest",
+       "steps/concept/dp03-compose-emitter",
+       "steps/internals/dp03-compose-emitter"
       ]
      }
     ]

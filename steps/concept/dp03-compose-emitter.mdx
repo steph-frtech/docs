@@ -1,0 +1,49 @@
+---
+title: "DP03 · L'émetteur docker-compose — votre stack projetée, octet pour octet"
+description: "DP03 ajoute le Target additif docker-compose à la matrice fermée kind × target : Emit(stack_manifest) projette un docker-compose.yml byte-identique qui reproduit les conventions /data/dockers — container_name $APP_NAME, env_file .env, AUCUN port publié (l'exposition passe par les labels Traefik : routeur HTTPS websecure/tls + middleware de redirection HTTP→HTTPS), volumes bind nommés par référence de variable d'environnement ($APP_DATA_PATH), réseau traefik_default externe (sauf le déploiement qui le possède), restart unless-stopped, healthchecks. L'émission est une fonction PURE de la forme canonique du manifest : même manifest → mêmes octets, 100 % du temps. Un fichier émis modifié à la main est rejeté par dérive de hash. Per ADR 0043, l'artefact IaC primaire est le programme Pulumi/TS — ce compose en est la projection convention /data/dockers, déployable aujourd'hui."
+keywords: ["aidos", "krd", "DP03", "docker-compose", "émetteur", "Target additif", "TargetDockerCompose", "projection", "byte-identique", "déterminisme", "Traefik", "websecure", "redirect", "APP_NAME", "APP_DATA_PATH", "traefik_default", "external", "healthcheck", "restart unless-stopped", "drift", "source_hash", "output_hash", "gen/", "le mur", "Pulumi", "ADR 0043", "/stack-emit", "piste DP"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP03](/steps/internals/dp03-compose-emitter).</Note>
+
+## En une phrase
+
+DP03 donne au StackManifest (DP02) sa **première projection déployable** : un émetteur **pur** qui transforme la source déclarée en `docker-compose.yml` **byte-identique** aux conventions `/data/dockers` — le fichier que Docker sait lancer et que Traefik sait router, régénérable à l'infini, jamais écrit à la main.
+
+## Le problème que ça résout
+
+Votre stack est désormais une **source** au-dessus du mur (DP02). Mais Docker ne lit pas un AST content-adressé : il lit un `docker-compose.yml`. Quelqu'un doit produire ce fichier — et ce quelqu'un ne doit **jamais** être un humain qui copie un template, ni un agent qui « rédige » du YAML à sa façon du jour.
+
+DP03 est ce quelqu'un : un **émetteur déterministe**. Même manifest → mêmes octets, à chaque exécution, sur chaque machine. Le fichier émis n'est pas une œuvre : c'est une **projection** — au même titre que les structs Go, le DDL Postgres ou les types TypeScript émis depuis une entité.
+
+## Les conventions /data/dockers, reproduites exactement
+
+Le compose émis reproduit le modèle éprouvé de vos déploiements (le modèle alphashop) :
+
+- **`container_name: $APP_NAME`** pour le serveur principal (les autres services sont suffixés `$APP_NAME-<service>`) ;
+- **`env_file: .env`** partout — aucune URL, aucun secret en dur : tout passe par variables d'environnement (la loi de la spec stack-2026) ;
+- **AUCUN port publié** : les services rejoignent le réseau **`traefik_default` externe** et l'exposition passe par les **labels Traefik** — le routeur HTTPS (`websecure`, `tls`, `certresolver`) et le **middleware de redirection HTTP→HTTPS** sont émis pour chaque service de rôle `server` ;
+- **volumes bind nommés** : `driver_opts { type: none, device: $APP_DATA_PATH, o: bind }` — le chemin est une **référence d'env-var**, jamais un chemin en dur ;
+- **`restart: unless-stopped`** et un **healthcheck** par service ;
+- le réseau est `external: true` partout… **sauf** dans le déploiement Traefik lui-même, qui le **possède**.
+
+## La double adresse de contenu
+
+Chaque émission porte **deux hashs** :
+
+- **`source_hash`** — l'adresse du manifest au noyau (les mêmes fonctions de hachage que tout record, réutilisées) : le fichier émis sait *de quelle vérité* il descend ;
+- **`output_hash`** — le hash des octets émis : la preuve de **ré-émission byte-identique**, et le détecteur de dérive.
+
+Si quelqu'un modifie le fichier émis à la main — un seul octet — le hash ne correspond plus : la dérive est **calculée**, jamais chassée, et la modification est rejetée. `gen/` n'est jamais édité à la main : si la stack doit changer, c'est la **source** qui change, par le chemin légal (idée → miroir → /goal), et la projection se ré-émet.
+
+## Un Target additif, jamais inventé
+
+L'émetteur ne s'ajoute pas n'importe comment : la matrice **kind × target est fermée et énumérable**. DP03 ajoute `stack_manifest × docker-compose` **additivement** — sans toucher aux targets existants (entité × Go/DDL/TS, opérations × serveur Hono, StackManifest × programme Pulumi). Per **ADR 0043**, l'artefact IaC **primaire** reste le programme **Pulumi/TS** ; ce compose est sa projection convention `/data/dockers` — l'artefact directement déployable aujourd'hui.
+
+## Ce que vous voyez dans le Workbench
+
+La route **`/stack-emit`** montre le compose émis depuis le manifest exemple, ses deux hashs et le chemin de projection. Un seul contrôle — **« émettre le compose »** — ré-exécute l'émetteur pur sur le JSON éditable : ré-émettez sans rien changer, vous obtenez **le même `output_hash`** ; glissez un rôle inconnu, un port dupliqué ou retirez le serveur, et le **refus porte son code** (`UNKNOWN_SERVICE_ROLE`, `DUPLICATE_INTERNAL_PORT`, `STACK_HAS_NO_SERVER`). Rien n'est écrit : c'est une mesure.
+
+## Ce que ça prépare
+
+DP04 émettra le `.env.example` et les scripts de démarrage depuis la même source ; DP05 composera le tout en **émission de stack complète par phase** — le miroir-pierre-angulaire : même phase → mêmes octets, sur toute machine. Et l'exigence absolue de la piste DP reste en ligne de mire : chaque déploiement dev produit une **vraie application** que vous ouvrez dans votre navigateur, à `https://<projet>-dev.sagedesk.fr`.
