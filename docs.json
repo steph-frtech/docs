@@ -617,7 +617,9 @@
        "steps/concept/dp29-deploy-cockpit",
        "steps/internals/dp29-deploy-cockpit",
        "steps/concept/dp30-emitted-app-docs",
-       "steps/internals/dp30-emitted-app-docs"
+       "steps/internals/dp30-emitted-app-docs",
+       "steps/concept/dp-pulumi-per-project",
+       "steps/internals/dp-pulumi-per-project"
       ]
      }
     ]
