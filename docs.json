@@ -607,7 +607,9 @@
        "steps/concept/dp24-connector-cockpit",
        "steps/internals/dp24-connector-cockpit",
        "steps/concept/dp25-preview-by-profile",
-       "steps/internals/dp25-preview-by-profile"
+       "steps/internals/dp25-preview-by-profile",
+       "steps/concept/dp26-deploy-pipeline",
+       "steps/internals/dp26-deploy-pipeline"
       ]
      }
     ]

@@ -1,0 +1,86 @@
+---
+title: "DP26 · Le PIPELINE de déploiement keyé sur les phases stables — « Déployer cette phase » permis seulement quand done-is-computed ; re-émission depuis la phase puis l'ORDRE network→volumes→datastore→migration Atlas→bootstrap→healthchecks→URL ; artefact re-projeté jamais stale ; ÉTEND S96, ne le duplique pas"
+description: "DP26 grave le PIPELINE de déploiement keyé sur les phases stables : « Déployer cette phase » n'est permis que lorsque la phase est done-is-computed (stable), l'app est RE-ÉMISE depuis la phase (jamais un artefact stale), puis les services se déroulent dans l'ORDRE canonique fixe — network → volumes → datastore-provision → migration (Atlas forward-only) → bootstrap → healthchecks → URL. DP26 ÉTEND la fonction deploy.BuildPlan de S96 sans la dupliquer : l'Input GAGNE 4 champs OPTIONNELS (Manifest, Env, Host, Secrets) — quand le Manifest est absent (AppName vide) la forme S96 est byte-inchangée (pur plan S96, aucun ordre). DeployPlan GAGNE Order *DeployOrder (nil pour un plan S96 — anti-overwrite §9 : order OMIS de l'adresse de contenu quand nil, donc les IDs de plan S96 existants restent byte-inchangés). BuildPlan step 6 (DP26, seulement quand Manifest.AppName != \"\") : DP05 stackemit.EmitStack RE-ÉMET depuis la phase (StackBundleHash) → DP15 datafragments.SubstrateCoreFragments (DP06 prod×doltgres délégué, prod omet doltgres) → DP12 bootstrap.EmitBootstrapSequence → ordonne les 7 étapes → content-address ; refus DP05/DP15/DP12 surfacés verbatim. L'INVARIANT CAPITAL tient : l'artefact déployé = hash de la phase — EmittedAppHash/URL/StackName sont préservés (re-projection, jamais altérée par l'ordre) ; DeployedMatchesPhase tient ∀ phase. L'ordre se replie dans l'adresse de contenu du plan via order_hash (ordre différent → deploy id différent), MAIS ne touche jamais EmittedAppHash/URL/StackName. Le miroir Go (RED-first, 8 Test funcs neufs DP26 + 9 S96 intacts, 31 lignes PASS) : phase non-stable refusée (PHASE_NOT_STABLE via IsDeployable même avec section ordre) ; migration ordonnée forward-only + breaking-no-backfill → BREAKING_MIGRATION_NO_BACKFILL via le gate S95 DataTruthScope ; PROPERTY hash artefact = hash phase (l'ordre n'altère jamais EmittedAppHash, DeployedMatchesPhase forall) ; ordre déterministe network→volumes→datastore→migration→bootstrap→healthcheck→URL + reproductible (même phase → DeployPlan+Order.Hash byte-identiques) ; + set fermé, opt-in additif, datastore-nomme-les-services. Backend-only ; below-the-line (deploy re-projette une phase, ne grave aucune vérité — pas de write kernel/mirrors/fitness) ; le mur tient. PRÉSERVÉS untouched : IsDeployable, Gate, BuildPlan→PHASE_NOT_STABLE, DeployedMatchesPhase, MigrationIsForwardOnly, subdomainOf."
+keywords: ["aidos", "krd", "DP26", "pipeline de déploiement", "deploy pipeline", "déploiement keyé sur les phases stables", "deploy keyed on stable phases", "déployer cette phase", "deploy this phase", "done is computed", "done-is-computed", "phase stable", "stable phase", "re-émission depuis la phase", "re-emission from the phase", "artefact re-projeté", "re-projected artifact", "jamais stale", "never stale", "ordre canonique", "canonical order", "network volumes datastore migration bootstrap healthcheck URL", "ÉTEND S96", "extends S96", "ne duplique pas", "does not duplicate", "back/runtime/deploy", "deploy.go", "deploy_dp26_test.go", "deploy.BuildPlan", "BuildPlan", "DeployPlan", "DeployOrder", "DeployStage", "DeployStageKind", "OrderedDeployStages", "StageNetwork", "StageVolumes", "StageDatastoreProvision", "StageMigration", "StageBootstrap", "StageHealthcheck", "StageURL", "DefaultDeployEnv", "scope.EnvProd", "EnvProd", "Manifest", "StackManifest", "stackmanifest.StackManifest", "Env", "scope.Environment", "Host", "bootstrap.HostState", "HostState", "Secrets", "bootstrap.SecretsState", "SecretsState", "Order", "Stages", "Seq", "Kind", "Detail", "StackBundleHash", "BootstrapHash", "Hash", "order_hash", "EmittedAppHash", "hash artefact = hash phase", "invariant capital", "capital invariant", "DeployedMatchesPhase", "URL", "StackName", "subdomainOf", "sous-domaine", "ordre différent deploy id différent", "different order different deploy id", "DP05", "stackemit.EmitStack", "EmitStack", "re-émet depuis la phase", "re-emits from phase", "DP15", "datafragments", "datafragments.SubstrateCoreFragments", "SubstrateCoreFragments", "DP06", "prod×doltgres", "doltgres en prod", "prod omet doltgres", "prod omits doltgres", "gate délégué", "delegated gate", "DP12", "bootstrap.EmitBootstrapSequence", "EmitBootstrapSequence", "amorçage one-shot", "S95", "DataTruthScope", "migration forward-only", "MigrationIsForwardOnly", "datamigrate", "datamigrate.Plan", "Atlas", "expand-contract", "forward-only", "BREAKING_MIGRATION_NO_BACKFILL", "migration destructive human-gated", "PHASE_NOT_STABLE", "IsDeployable", "Gate", "Stop-gate", "ErrManifestProjectMix", "manifest cross-app refusé", "cross-app manifest refused", "réutilise verbatim", "reuses verbatim", "ADR 0007", "réutilise jamais réinvente", "anti-overwrite", "§9", "champs optionnels", "optional fields", "opt-in additif", "opt-in additive", "S96 byte-inchangé", "S96 byte-unchanged", "AppName vide", "empty AppName", "order nil", "order omis de l'adresse de contenu", "order omitted from content-address", "IDs S96 byte-inchangés", "S96 plan IDs byte-unchanged", "pur plan S96", "pure S96 plan", "aucun ordre", "no order", "set fermé", "closed set", "ensemble fermé ordonné", "closed ordered set", "datastore nomme les services", "datastore names services", "miroir Go", "miroir fixture", "miroir property", "rapid", "fixture", "N2", "state command events", "RED-first", "écrit RED-first", "8 Test funcs DP26", "9 Test funcs S96", "17 top-level test funcs", "31 PASS lines", "31 lignes PASS", "TestDeployFixtures", "TestRefusalNamesTheRedMirror", "TestMigrationIsForwardOnly", "TestReproducible", "TestReProjection", "TestStopGateAlwaysRefusesNonStable", "TestContentAddressSensitivity", "TestForwardOnlyHolds", "TestDeployBDD", "hash artefact = hash phase forall", "ordre déterministe", "deterministic order", "reproductibilité", "reproducibility", "byte-identique", "byte-identical", "re-projection préservée", "re-projection preserved", "déterminisme-first", "§6", "§8", "no LLM", "zéro LLM", "fonction pure", "pure function", "plan-as-data", "plan comme donnée", "below-the-line", "en dessous de la ligne", "aucune écriture-vérité", "writes no truth", "deploy re-projette", "deploy re-projects", "pas de write kernel", "no kernel write", "le mur", "§2", "kernel", "mirrors", "fitness", "hérite le Stop-gate", "inherits the Stop-gate", "aucun nouveau gate", "no new gate", "human-gated", "DataTruthScope human-gated", "records.Hash", "content-addressed", "content-adressé", "phase content-adressée", "GOTOOLCHAIN=local", "go build", "go test", "132 packages", "0 FAIL", "gofmt", "go vet", "backend-only", "load-bearing", "S96", "DP05", "DP12", "DP15", "tout se fait par écran", "DeployPanel", "lib/deploy.ts", "front", "ordre optionnel", "optional order field", "EPIC F"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP26](/steps/internals/dp26-deploy-pipeline).</Note>
+
+## En une phrase
+
+DP26 grave le **pipeline de déploiement keyé sur les phases stables** : « **Déployer cette phase** » n'est permis que lorsque la phase est **done-is-computed** (stable), l'app est **re-émise depuis la phase** (jamais un artefact stale), puis les services se déroulent dans l'**ordre canonique** fixe — **network → volumes → datastore → migration (Atlas, forward-only) → bootstrap → healthchecks → URL**. DP26 **étend** la fonction `deploy.BuildPlan` de S96, ne la **duplique** pas.
+
+## Le problème que ça résout
+
+S96 a posé le **déploiement** : l'app émise depuis une phase **stable**, refusée si la phase n'est pas `done-is-computed` (`PHASE_NOT_STABLE`), avec la garantie capitale que **ce qui est déployé est exactement ce que la phase fige** (`DeployedMatchesPhase`) et qu'une migration ne peut être que **forward-only** (`MigrationIsForwardOnly`). Mais ce déploiement décrivait *quoi* déployer — l'app — sans dérouler le *comment* : **dans quel ordre** mettre en route le substrat autour d'elle (le réseau, les volumes, la base, les migrations, l'amorçage, les sondes, l'URL).
+
+L'EPIC D et l'EPIC E avaient pourtant déjà appris à raisonner ce substrat : DP05 sait **ré-émettre** une stack depuis une phase (la « BDD du résultat codé »), DP15 sait **provisionner** les fragments de données du substrat, S95 sait gater une **migration destructive** (`DataTruthScope`), DP12 sait **amorcer** les services dans un ordre déterministe. Restait à **brancher** ces moteurs sur le déploiement : *déployer cette phase*, dans un **ordre fixe et reproductible**, où chaque étape a sa place et où l'artefact servi n'est **jamais stale**.
+
+Le réflexe naïf serait d'écrire un **second** déploiement à côté de S96 — un « déploiement avec ordre ». Ce serait dupliquer un moteur, et faire dériver deux empreintes. DP26 pose la règle inverse : **étendre** S96, additivement, sans toucher d'un octet ni la forme S96 ni — surtout — l'invariant capital.
+
+## Le geste capital — « Déployer cette phase » permis seulement quand done-is-computed
+
+Le cœur de DP26, c'est que le déploiement reste **keyé sur la phase stable**. Le bouton « Déployer cette phase » n'existe que pour une phase dont le « done » a été **calculé** (red set → green ∧ green antérieur intact ∧ mutation ≥ seuil ∧ pas de monstre — jamais déclaré par l'agent). Une phase non-stable est **refusée** avec `PHASE_NOT_STABLE`, *même* quand le plan porte désormais sa section d'ordre : DP26 réutilise le gate `IsDeployable` de S96, il n'en ajoute **aucun autre**.
+
+```text
+phase stable (done-is-computed)  →  « Déployer cette phase » permis
+phase non-stable                 →  PHASE_NOT_STABLE (gate S96 IsDeployable, inchangé)
+```
+
+Et l'artefact déployé est **re-émis depuis la phase**, jamais un artefact qui traînait : `DeployedMatchesPhase` reste vrai ∀ phase, l'empreinte de l'app (`EmittedAppHash`), l'URL et le nom de stack restent une fonction **pure de la phase**. Le pipeline gouverne le **déroulé du substrat**, jamais le **résultat émis**.
+
+## L'ordre canonique — sept étapes, ordre fixe, reproductible
+
+Quand on déploie une phase avec son manifest de stack, DP26 déroule le substrat dans un **ordre canonique fixe**, jamais une itération de map :
+
+```text
+1. network             le réseau de la stack
+2. volumes             les volumes persistants
+3. datastore-provision la base de données provisionnée (DP15)
+4. migration           la migration Atlas forward-only (S95, le MÊME datamigrate.Plan)
+5. bootstrap           l'amorçage one-shot des services (DP12)
+6. healthcheck         les sondes de santé
+7. url                 l'URL live publiée
+```
+
+Cet ordre est un **ensemble fermé** (`DeployStageKind`) — sept rungs, ni plus ni moins, dans une séquence **déclarée**, jamais dérivée d'une itération non-déterministe. La migration **réutilise le MÊME** plan forward-only que S95 (`datamigrate.Plan`) — pas un second plan, le plan existant inséré à sa place dans la séquence. Et l'ordre est **reproductible** : la même phase produit un `DeployPlan` et un `Order.Hash` **byte-identiques**.
+
+## La forme étendue — 4 champs optionnels, S96 byte-inchangé
+
+DP26 ajoute à l'`Input` du déploiement **quatre champs OPTIONNELS**, et à `DeployPlan` **un champ**. La règle d'anti-overwrite (§9) est nette : quand le `Manifest` est **absent** (son `AppName` vide), le déploiement est un **pur plan S96** — aucun ordre, forme byte-inchangée.
+
+| Ce qui s'ajoute | Rôle | Quand absent |
+|---|---|---|
+| `Manifest` | la source de stack DP02 dont les services sont déroulés | **aucun ordre** — pur plan S96 |
+| `Env` | l'environnement (défaut `prod`), pour le gate doltgres-en-prod DP06 | non consulté |
+| `Host` / `Secrets` | l'état hôte + les secrets pour l'amorçage DP12 | non consultés |
+| `DeployPlan.Order` | l'ordre des 7 étapes + ses hashes (`nil` pour un plan S96) | `nil` |
+
+Le point décisif pour l'anti-overwrite : quand `Order` est `nil`, sa clé est **OMISE de l'adresse de contenu** — donc les **IDs de plan S96 existants restent byte-inchangés**. DP26 n'altère **rien** de l'existant ; il ajoute un comportement **quand on lui donne un manifest** (le défaut sûr : `DefaultDeployEnv = prod`).
+
+## Le déroulé du substrat — DP05 + DP15 + S95 + DP12 réutilisés verbatim
+
+Quand un `Manifest` est fourni (`AppName` non vide), `BuildPlan` exécute son étape 6 (DP26) en **réutilisant verbatim** quatre moteurs (ADR 0007 — réutiliser, jamais réinventer) :
+
+1. **Re-émettre la stack (DP05)** — `stackemit.EmitStack` re-projette la stack depuis la phase ; son empreinte devient le `StackBundleHash`. C'est ici que se garantit « jamais stale » : l'artefact déployé est ré-émis, pas exhumé.
+2. **Provisionner la base (DP15)** — `datafragments.SubstrateCoreFragments(project, env)` rend les fragments de données du substrat ; le gate **DP06 prod×doltgres** est **délégué** (en `prod`, doltgres est omis).
+3. **Amorcer (DP12)** — `bootstrap.EmitBootstrapSequence` émet la séquence d'amorçage one-shot ; son empreinte est le `BootstrapHash`.
+4. **Ordonner + adresser** — les sept étapes sont mises en ordre, puis l'`Order.Hash` est calculé sur le résumé canonique `stack/bootstrap/seq:kind:detail`.
+
+Tout refus de DP05, DP15 ou DP12 est **surfacé verbatim** — DP26 ne masque aucun blocage de ses moteurs. Un manifest qui n'appartient pas au projet de la surface est **refusé** (`ErrManifestProjectMix`).
+
+## L'invariant capital — l'ordre se replie dans l'id, jamais dans l'app
+
+L'ordre n'est pas un détail cosmétique : il **se replie dans l'adresse de contenu du plan** via `order_hash` — un **ordre différent donne un deploy id différent**. C'est le contraire d'un déploiement « aveugle » : deux pipelines distincts sont deux artefacts de déploiement distincts.
+
+Mais — et c'est la frontière capitale — l'ordre **ne touche JAMAIS** `EmittedAppHash`, l'URL ni le `StackName` : l'app émise reste une fonction pure de la phase, la re-projection est préservée. Le miroir l'épingle pour **toutes** les phases : changer le pipeline change le *deploy id*, jamais le *résultat émis*.
+
+## Le mur — le déploiement ne grave aucune vérité
+
+DP26 reste **below-the-line** : déployer une phase n'écrit **aucune** vérité. Le déploiement ne consulte ni n'écrit `kernel`, `mirrors` ou `fitness` ; il **re-projette** une phase déjà figée. C'est le **déterminisme-first** (§6/§8) : ré-émettre une stack, provisionner des fragments, ordonner sept étapes et calculer une empreinte sont des décisions **pures** — l'ordre est un **plan-as-data** (aucune horloge, aucun RNG, aucune I/O, aucun docker), donc du **code**, jamais un jugement d'un LLM — **aucun LLM n'entre**.
+
+Et le déploiement **hérite** du `Stop`-gate de S96 — il n'ajoute **aucun nouveau gate** : la phase non-stable est refusée par `IsDeployable`, la migration **destructive** est **human-gated** par `DataTruthScope` (S95). DP26 **étend** S96, il ne **duplique** pas : un seul moteur de déploiement, une seule re-émission DP05, un seul gate de migration dans tout AIDOS.
+
+## Ce que ça autorise
+
+DP26 transforme le déploiement en un **pipeline keyé sur la phase** : ce que ça **autorise**, c'est de déployer l'app émise depuis une phase stable, dans un **ordre canonique fixe et reproductible** (network → volumes → datastore → migration Atlas → bootstrap → healthchecks → URL), où l'artefact est **re-émis depuis la phase** (jamais stale) et où l'ordre se replie dans le *deploy id* sans jamais toucher le résultat émis. Ce que ça **préserve intact**, c'est S96 dans son entier : sans `Manifest`, le déploiement est byte-identique à S96, et les IDs de plan existants ne bougent **pas**. La loi de complétude veille : le geste ne vit que parce qu'il porte sa preuve vivante — le miroir Go (phase non-stable refusée, migration forward-only, hash artefact = hash phase ∀ phase, ordre déterministe, reproductibilité byte-identique). Reste pour le front (additif, `omitempty`-safe) le greffage de `lib/deploy.ts` + `DeployPanel` à la nouvelle section `order` optionnelle.
