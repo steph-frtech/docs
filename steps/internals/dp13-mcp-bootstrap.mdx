@@ -1,0 +1,49 @@
+---
+title: "DP13 · Internals — les cinq outils MCP en routage pur, Pact par outil, le mur côté serveur"
+description: "Le journal de build de DP13 : les cinq opérations bootstrap/profile (stack.emit, stack.select_profile, stack.bootstrap, stack.resolve_ports, stack.print_urls) exposées comme outils MCP via le Go MCP SDK sur la passerelle MCP-over-HTTP (S58), le serveur en ROUTAGE PUR (chaque handler appelle la fonction gelée de DP05/DP11/DP12, aucun LLM n'entre), le scaffold MCP du pré-vol ACTIVÉ ici. Le mur appliqué côté serveur : scopeCheck (projectwall.Classify, la même que la passerelle + RLS) sur chaque appel below-the-line, et stack.engrave_manifest la porte fencée d'écriture-vérité qui REFUSE net avec GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET. Le miroir : un contrat Pact par outil + provider-verification (le HTTP honore le MCP), un Godog round-trip stack.bootstrap jusqu'à une stack qui tourne, Testcontainers prouvant qu'un essai d'écriture-vérité renvoie un BlockReason (pas de bypass des GRANTs), une property de reproductibilité du routage."
+keywords: ["aidos", "krd", "DP13", "internals", "MCP", "Go MCP SDK", "ADR 0009", "un op un outil", "passerelle", "MCP-over-HTTP", "S58", "stack.emit", "stack.select_profile", "stack.bootstrap", "stack.resolve_ports", "stack.print_urls", "stack.engrave_manifest", "routage pur", "zéro LLM", "scopeCheck", "projectwall.Classify", "RLS", "le mur côté serveur", "BlockReason", "GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET", "ChangeSet", "Pact", "provider-verification", "Godog round-trip", "Testcontainers", "property reproductibilité", "scaffold activé", "MCP mort", "deux plans", "ADR 0040", "app émise", "DP05", "DP11", "DP12"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP13 — Bootstrap & profiles en outils MCP](/steps/concept/dp13-mcp-bootstrap).</Note>
+
+## Implémentation
+
+### Les cinq outils — un handler par op, en routage pur
+
+DP13 ajoute cinq outils au serveur MCP de provisioning (`back/mcp/provision/`, monté via le **Go MCP SDK** et fronté par la passerelle MCP-over-HTTP de S58). Chaque outil est un `mcp.AddTool(srv, …, handler)` dont le handler **route** un appel vers la fonction pure déjà gelée — il ne réimplémente rien :
+
+- **`stack.emit`** → `stackemit.EmitStack` (DP05) : ré-émet la stack complète d'une phase (docker-compose · `.env.example` · scripts de démarrage · `traefik.dynamic.yml`), byte-identique par phase.
+- **`stack.select_profile`** → `composeemit.FilterByProfile` (DP11) : filtre le manifest par profile déclaré ; un profile hors ensemble clos rend `UNKNOWN_PROFILE`, et `non-prod`×`prod` rend `DOLTGRES_NOT_ALLOWED_IN_PROD` (la porte DP06, jamais forkée).
+- **`stack.bootstrap`** → `bootstrap.EmitBootstrapSequence` (DP12) : émet la séquence one-shot comme plan-données (aucun docker réel) ; un secret requis manquant rend `MISSING_SECRET_AT_BOOT`.
+- **`stack.resolve_ports`** → `bootstrap.ResolvePort` (DP12) : premier port libre ≥ base, fonction pure de l'union `ss` ∪ `docker ps` photographiée une fois.
+- **`stack.print_urls`** → la marche `urls-printed` de DP12 : les `${VAR}` se résolvent au déploiement, jamais un hôte en dur.
+
+Le serveur ne contient **aucun LLM** : un appel est routé déterministement vers sa fonction, le résultat est sérialisé et renvoyé. La logique d'amorçage vit dans les pistes précédentes ; DP13 n'apporte que la porte protocolaire.
+
+### Le scaffold activé — un MCP scaffoldé non activé est mort
+
+Le scaffolding MCP du provisioning avait été posé au pré-vol des steps S00–S01 (le batch d'accrétion d'artefacts, ADR 0009). DP13 est le step qui l'**active** : c'est ici que les cinq outils sont effectivement enregistrés sur le serveur, fronté par la passerelle, et fault-injectés par le miroir. Un MCP scaffoldé mais jamais activé ni testé serait du code mort — DP13 le rend vivant, à l'exact step qui en a besoin.
+
+### Le mur côté serveur — `scopeCheck` et la porte fencée
+
+Chaque handler below-the-line commence par `scopeCheck`, qui appelle `projectwall.Classify` — **la même** fonction de mur que la passerelle et que les GRANTs/RLS Postgres appliquent (jamais une règle forkée). Sur un appel hors-projet, il renvoie un `blockOut` (l'adaptation du `BlockReason` au schéma de sortie MCP) ; sur un appel en scope, il rend `nil` et le handler procède vers l'émetteur. L'isolation par projet n'est donc pas une affaire de politesse de l'appelant : elle est **appliquée côté serveur**.
+
+L'outil **`stack.engrave_manifest`** est la **porte fencée** : il modélise une tentative d'écrire un `StackManifest` (une vérité au-dessus du mur) directement par le provisioning. Il ne l'exécute **jamais** — il renvoie `truthWriteBlock()`, le refus canonique `GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET`. Le serveur ne détient **aucun GRANT** pour écrire le kernel ; ce refus est le miroir-bord de cette absence de droit. La vérité ne bouge que par idée → miroir → /goal → ChangeSet.
+
+## Méta
+
+- **Le miroir d'abord — Pact par outil, Godog round-trip, Testcontainers sur le mur.** La nature de DP13 est une **frontière de protocole**, donc le miroir canonique est un **contrat Pact par outil exposé** + une **provider-verification** : le contrat épingle la forme entrée/sortie de chaque outil, et la vérification prouve que l'implémentation HTTP **honore** le contrat MCP. À côté, un **Godog round-trip N0** : `stack.bootstrap` appelé à travers la passerelle jusqu'à la séquence d'une stack qui tourne (le journey acceptance). Et un test **Testcontainers** qui prouve que le mur n'est pas contournable — un essai d'écriture-vérité (`stack.engrave_manifest`, ou un appel hors-scope) ne franchit **pas** les GRANTs : il revient en `BlockReason`, jamais en `admitted`. Une **property** ferme la boucle déterministe : le routage est reproductible (même appel → même réponse), car le serveur ne fait que router vers des fonctions pures déjà byte-stables.
+
+- **Enrober, jamais redoubler.** Le réflexe paresseux aurait été de réimplémenter la résolution de ports, le filtre de profile ou la séquence d'amorçage dans le handler MCP. Le geste juste est de faire de chaque handler un **mince adaptateur** sur la fonction gelée de DP05/DP11/DP12 : DP13 ne prouve que la *porte* (le routage, la sérialisation, le scope-check, le refus d'écriture-vérité), pas le *moteur* (déjà prouvé par ses miroirs en amont). La byte-stabilité des émetteurs est héritée gratuitement, jamais re-prouvée.
+
+- **`above`/`below` the line, jusque dans le protocole.** Les cinq projections sont below-the-line : elles émettent des données et agissent direct. La seule opération qui *toucherait* une vérité — graver un manifest — est above-the-line et reste fencée. La frontière du mur ne s'efface pas quand une op devient un outil ; elle se **transporte** intacte à travers la passerelle, appliquée par `scopeCheck` et par le refus de `stack.engrave_manifest`.
+
+## Méta-méta
+
+- **ADR 0009 — chaque op backend = un outil MCP, sans exception.** DP13 est l'application littérale de cette règle aux cinq opérations de bootstrap/profile. Une capacité qui resterait une fonction Go non exposée serait une **capacité sans tête** — inaccessible aux agents et à l'app émise, donc invisible au système. Exposer un outil par op, ni plus ni moins, garde la surface honnête : on lit la passerelle et on voit exactement ce qu'AIDOS sait faire en provisioning. Un op caché serait un monstre ; un outil orphelin (sans op derrière) le serait tout autant.
+
+- **MCP des deux plans — l'outillage qui code AIDOS ET l'app émise.** Le contrat impose de penser MCP des deux côtés de la frontière (§6, ADR 0009/0040). DP13 active le plan **outillage** (l'usine à apps amorce une stack sans clavier) et établit le motif que le plan **app émise** héritera : chaque opération de l'application qu'AIDOS construit portera elle aussi son outil MCP. Le même réflexe « un op = un outil » traverse les deux plans ; DP13 le prouve sur le premier et le grave pour le second.
+
+- **Un MCP scaffoldé mais jamais activé est mort.** La règle de l'honnêteté des artefacts (§5) vaut pour les MCP comme pour les hooks : un serveur posé au pré-vol mais jamais enregistré, jamais fault-injecté, est du code mort qui ment sur sa fonction. DP13 active le scaffold à l'exact step qui en a besoin, et le miroir Pact + Testcontainers prouve que l'outil *fait* ce qu'il prétend — y compris refuser ce qu'il doit refuser. Un outil qui n'a jamais été appelé une seule fois pour de vrai n'a rien prouvé ; DP13 le fait vivre, ou il n'existe pas.
+
+- **Déterminisme-first — un routage, jamais un jugement.** La tentation d'une passerelle MCP serait d'y glisser de l'intelligence : un serveur qui « comprend » l'intention de l'appel et choisit l'outil. Ici le serveur est un **routage pur** — un appel nommé est dispatché vers une fonction pure, sans LLM, et la property de reproductibilité l'épingle. Ce qui *peut* être une fonction (le transport, le scope-check, la sérialisation) **est** une fonction. Le LLM, s'il intervient, est l'appelant *au-dessus* de la passerelle, jamais *dans* le serveur — la frontière exacte que le mandat §6 trace entre le générateur et le routeur.

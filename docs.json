@@ -581,7 +581,9 @@
        "steps/concept/dp11-compose-profiles",
        "steps/internals/dp11-compose-profiles",
        "steps/concept/dp12-bootstrap-oneshot",
-       "steps/internals/dp12-bootstrap-oneshot"
+       "steps/internals/dp12-bootstrap-oneshot",
+       "steps/concept/dp13-mcp-bootstrap",
+       "steps/internals/dp13-mcp-bootstrap"
       ]
      }
     ]

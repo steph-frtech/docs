@@ -1,0 +1,61 @@
+---
+title: "DP13 · Bootstrap & profiles en outils MCP — chaque op d'amorçage est un outil sur la passerelle"
+description: "DP13 expose chaque opération de bootstrap et de profile comme un OUTIL MCP (ADR 0009, un op = un outil, sans exception), fronté par la passerelle MCP-over-HTTP : stack.emit ré-émet la stack complète d'une phase, stack.select_profile filtre le manifest par profile déclaré, stack.bootstrap émet la séquence one-shot, stack.resolve_ports calcule le port libre, stack.print_urls rend les URLs live. Les outils sont pour LES DEUX PLANS — l'outillage qui code AIDOS (les agents, l'usine à apps) ET l'app émise (ses propres MCP, ADR 0040). Le serveur est un routage PUR : aucun LLM n'y entre, il n'écrit aucune vérité. Le mur est appliqué côté serveur : les projections below-the-line agissent direct, et une écriture-vérité directe (stack.engrave_manifest) est refusée net avec un BlockReason — la vérité ne bouge que par idée → miroir → /goal → ChangeSet."
+keywords: ["aidos", "krd", "DP13", "MCP", "outil MCP", "ADR 0009", "un op un outil", "passerelle", "MCP-over-HTTP", "stack.emit", "stack.select_profile", "stack.bootstrap", "stack.resolve_ports", "stack.print_urls", "stack.engrave_manifest", "deux plans", "outillage AIDOS", "app émise", "ADR 0040", "routage pur", "zéro LLM", "le mur", "BlockReason", "below-the-line", "above-the-line", "ChangeSet", "GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET", "project-scopé", "RLS", "Pact", "provider-verification", "Godog round-trip", "piste DP", "DP11", "DP12", "S58"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP13](/steps/internals/dp13-mcp-bootstrap).</Note>
+
+## En une phrase
+
+DP13 prend les opérations d'amorçage que DP11 et DP12 ont rendues déterministes et les **branche sur la passerelle MCP** : lever la stack, choisir un profile, résoudre un port, imprimer les URLs — chacune devient un **outil** qu'un agent appelle, sans clavier, à travers un protocole, exactement comme l'usine à apps en aura besoin.
+
+## Le problème que ça résout
+
+DP12 a transformé l'amorçage en une **séquence pure** : une fonction qui émet le plan d'une stack qui monte, zéro prompt. Mais une fonction Go n'est pas appelable par un agent distant ni par l'app émise. Il manquait la **porte** — le moyen, pour un agent ou pour un autre service, de dire « lève cette stack » ou « filtre-moi le profile `core` » à travers un protocole stable.
+
+C'est exactement le rôle de **MCP** (Model Context Protocol) dans AIDOS, et c'est une règle du contrat sans exception (ADR 0009) : **chaque opération backend est exposée comme un outil MCP**. Une capacité qui n'a pas son outil est une capacité borgne, inaccessible au reste du système. DP13 prend les cinq opérations de bootstrap/profile et leur donne chacune leur outil sur la **passerelle** (la même passerelle MCP-over-HTTP de S58).
+
+## Les cinq outils — un op, un outil
+
+La passerelle expose ces cinq outils, un par opération déjà gelée dans les pistes précédentes :
+
+| Outil MCP | Ce qu'il fait | Origine |
+|---|---|---|
+| **`stack.emit`** | ré-émet la stack **complète** d'une phase stable (compose · `.env.example` · scripts de démarrage · `traefik.dynamic.yml`) | DP05 |
+| **`stack.select_profile`** | filtre le manifest par un profile **déclaré** (`core`, `docs`, `observability`, …, `full`) ; un profile hors ensemble → `UNKNOWN_PROFILE` | DP11 |
+| **`stack.bootstrap`** | émet la **séquence one-shot** d'un bundle (réseau → … → URLs imprimées) ; un secret requis manquant → `MISSING_SECRET_AT_BOOT` | DP12 |
+| **`stack.resolve_ports`** | calcule le port libre **déterministe** à partir de l'état observé de l'hôte | DP12 |
+| **`stack.print_urls`** | rend les URLs d'accès que le bootstrap imprime ; les `${VAR}` se résolvent au déploiement, jamais un hôte en dur | DP12 |
+
+DP13 n'écrit aucune nouvelle logique d'amorçage : il **enrobe** des fonctions déjà prouvées dans des outils. Le travail de la piste est la *porte*, pas le *moteur*.
+
+## Pour les deux plans — l'outillage ET l'app émise
+
+Une particularité du contrat AIDOS : on pense MCP pour **deux plans à la fois**.
+
+- **L'outillage qui code AIDOS** — les agents, l'usine à apps, le cockpit — appelle ces outils pour amorcer une stack sans intervention humaine. Un agent n'a pas de clavier ; il a un protocole.
+- **L'app émise** — l'application qu'AIDOS construit — porte **ses propres** MCP (ADR 0040). Chaque opération de l'app devient elle aussi un outil. Le même réflexe « un op = un outil » s'applique des deux côtés de la frontière.
+
+DP13 active le plan outillage ; il établit le motif que l'app émise héritera. La passerelle est le point unique où ces outils sont servis sur HTTP.
+
+## Le mur tient à travers la passerelle
+
+Exposer une opération comme outil ne dissout **jamais** le mur. La passerelle applique la même règle que partout ailleurs dans AIDOS :
+
+- Les outils **below-the-line** (les projections — `stack.emit`, `stack.select_profile`, `stack.bootstrap`, `stack.resolve_ports`, `stack.print_urls`) **agissent directement** : ils émettent des données, ils n'écrivent aucune vérité.
+- Une **écriture-vérité directe** — tenter de graver un `StackManifest` (une vérité au-dessus du mur) — est **refusée net**. L'outil `stack.engrave_manifest` existe précisément pour le prouver : il renvoie un `BlockReason` clair (`GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET`) au lieu d'écrire. La vérité ne bouge que par **idée → miroir → /goal → ChangeSet**, jamais par une écriture de provisioning en passant.
+
+De plus, chaque appel est **project-scopé** : un projet ne peut pas amorcer ou lire la stack d'un autre (l'isolation RLS de la passerelle). Le mur et la frontière de projet sont appliqués **côté serveur**, pas par politesse de l'appelant.
+
+## Un serveur sans LLM — un routage pur
+
+Le serveur MCP de DP13 est **déterministe** : aucun LLM n'y entre. Quand un agent appelle `stack.bootstrap`, le serveur ne « comprend » rien — il route l'appel vers la fonction pure de DP12 et renvoie son résultat. Le même appel rend la même réponse, à chaque fois. La décision est dans le code des pistes précédentes ; la passerelle ne fait que **transporter** l'appel et **garder le mur**.
+
+## Ce que vous voyez à l'écran
+
+La route **`/bootstrap`** du Workbench est désormais **câblée à la passerelle** : déclencher l'amorçage depuis l'écran appelle réellement l'outil `stack.bootstrap` à travers MCP-over-HTTP, et la séquence émise revient pour s'afficher. Choisir un profile appelle `stack.select_profile` ; le refus d'un profile inconnu remonte son `BlockReason` jusqu'à l'écran. Un e2e Playwright prouve que déclencher `stack.bootstrap` depuis l'écran exécute vraiment l'outil — pas une maquette, l'appel réel.
+
+## Ce que ça prépare
+
+DP13 ferme l'EPIC C (bootstrap) : la séquence d'amorçage est désormais **appelable par un agent**, à travers un protocole, sans humain dans la boucle. L'EPIC D bâtira les services-substrat (datastore, Valkey, Windmill, NATS, observabilité…) que les profiles de DP11 sélectionnent et que `stack.bootstrap` lèvera ; chacun de ces services portera son profile et, le moment venu, ses propres outils MCP — des deux plans, sans exception.
