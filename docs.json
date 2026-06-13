@@ -611,7 +611,9 @@
        "steps/concept/dp26-deploy-pipeline",
        "steps/internals/dp26-deploy-pipeline",
        "steps/concept/dp27-custom-domains-tls",
-       "steps/internals/dp27-custom-domains-tls"
+       "steps/internals/dp27-custom-domains-tls",
+       "steps/concept/dp28-environments-rollback",
+       "steps/internals/dp28-environments-rollback"
       ]
      }
     ]

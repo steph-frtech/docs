@@ -1,0 +1,113 @@
+---
+title: "DP28 · Internals — envrollback ÉTENDU (additif, S98 préservé) : type HumanValidation{ID, Env, PhaseHash, Validated, By} (l'événement validation_humaine, append-only, content-adressé, décision HITL RUNTIME below-the-line, JAMAIS authority.Decide, calque ConnectorRuntimeApproval A2) + HumanValidationInput + RecordHumanValidation (pure, records.Hash+Canonicalize, By défaut « human ») ; (*HumanValidation).covers(phaseHash) (set-membership PURE fail-closed, calque connectorenforce.covers) ; PromoteInput ÉTENDU avec DevValidation *HumanValidation ; Promote() gagne la porte APRÈS le stop-gate, AVANT la ré-émission (Env==EnvStaging && !DevValidation.covers(phaseHash) ⇒ DEV_NOT_HUMAN_VALIDATED) ; Promote/Rollback/Provenance/ENV_PROMOTE_NOT_STABLE/ROLLBACK_NOT_EARLIER/RollbackProducesReProjection INCHANGÉS (preview/prod ungated, rollback re-projection DP05+DP12 untouched) ; BlockReason CodeDevNotHumanValidated (FR + 4 how_to_fix) ; MCP env-rollback tool record_validation + promote mis à jour (ADR 0009) ; miroir Go fixture+property(rapid)+Godog RED-first ; backend-only, below-the-line, le mur tient ; rollback re-projette jamais write-to-kernel"
+description: "Le journal de build de DP28 : envrollback.go ÉTENDU (S98 préservé) + blockreason.go + le tool MCP record_validation + 3 fichiers miroir étendus (fixture+property+Godog RED-first). envrollback.go gagne : type HumanValidation struct{ID, Env Environment, PhaseHash, Validated bool, By string} — l'événement validation_humaine, ID content-adressé, append-only, décision HITL RUNTIME below-the-line, JAMAIS authority.Decide (calque ConnectorRuntimeApproval A2) ; HumanValidationInput ; func RecordHumanValidation(in HumanValidationInput) HumanValidation (PURE, content-adressée via records.Hash+Canonicalize, By défaut « human ») ; (*HumanValidation).covers(phaseHash) bool (set-membership PURE fail-closed, calque connectorenforce.covers : nil-safe, exige Validated && PhaseHash==phaseHash) ; helpers canonOrEmpty + devNotHumanValidatedBlock. PromoteInput ÉTENDU avec le champ DevValidation *HumanValidation (json dev_validation, omitempty). Promote() gagne la porte APRÈS le stop-gate (stabilité S98), AVANT la ré-émission : `if in.Env == EnvStaging && !in.DevValidation.covers(phaseHash)` ⇒ refuse DEV_NOT_HUMAN_VALIDATED. INCHANGÉS (S98) : Promote/Rollback/Provenance signatures, ENV_PROMOTE_NOT_STABLE, ROLLBACK_NOT_EARLIER, RollbackProducesReProjection — seuls les sauts prod/preview restent non gatés ; la logique de rollback re-projection (hash N-1, vert antérieur intact, append-only, rien restaure stale) untouched. blockreason.go : CodeDevNotHumanValidated Code = « DEV_NOT_HUMAN_VALIDATED » (const + entrée registre FR Explanation + 4 HowToFix + codeOrder), additif. mcp/env-rollback/main.go : tool record_validation (HumanValidationInput → HumanValidation) + promote tool/schema/header mis à jour (ADR 0009 : chaque op un tool). Miroirs écrits D'ABORD (RED confirmé via « undefined: HumanValidation/RecordHumanValidation/DevValidation », puis VERT) : envrollback.feature +4 scénarios Godog ; envrollback_bdd_test.go steps câblés (recordValidation true/false, promoteWithValidation with/without, staging serves re-emit) ; envrollback_property_test.go +4 props (TestPromoteToStagingRequiresHumanValidation forall, TestStagingValidationIsPerPhase, TestStagingValidationRefusedIsFailClosed, TestHumanValidationReproducible) + helper devValidationFor + 2 props S98 patchées (TestPromoteReproducible, TestPromoteLiveURLDeterministicAndHTTPS — rattachent une dev validation quand env==staging, comportement préservé) ; envrollback_fixture_test.go +3 fixtures (TestPromoteToStagingHumanGateFixtures 4 sous-cas, TestPromoteToProdAndPreviewNotGatedByDevValidation, TestRecordHumanValidationIsAppendOnlyDecision) + cas « stable phase promotes to staging » patché. EXACT : envrollback = 17 fonctions de test top-level (10 S98 + 7 DP28), Godog 9 scénarios / 70 steps verts (était 5, +4), `go test ./archive/envrollback/ -v` = 80 lignes RUN, TOUT VERT. GATE GOTOOLCHAIN=local go1.25.10 cwd back/ : go build ./... = 0 ; go test ./runtime/... ./kernel/... ./archive/... = 0 aucun FAIL ; envrollback+blockreason+env-rollback verts ; gofmt -l propre ; go vet propre ; aucun ELF parasite (fichiers testdata/rapid/*.fail des runs RED retirés). Front untouched (git status front/ vide). Backend-only ; la validation_humaine = décision HITL RUNTIME below-the-line provenancée JAMAIS authority.Decide ; le rollback re-projette (jamais write-to-kernel) ; append-only §9 ; le mur tient."
+keywords: ["aidos", "krd", "DP28", "internals", "back/archive/envrollback", "envrollback.go", "envrollback_fixture_test.go", "envrollback_property_test.go", "envrollback_bdd_test.go", "back/tests/archive/envrollback.feature", "back/runtime/blockreason", "blockreason.go", "CodeDevNotHumanValidated", "DEV_NOT_HUMAN_VALIDATED", "BlockReason", "back/mcp/env-rollback", "main.go", "record_validation", "promote tool", "ADR 0009", "chaque op un tool MCP", "every op an MCP tool", "Go MCP SDK", "HumanValidation", "HumanValidationInput", "RecordHumanValidation", "ID", "Env", "PhaseHash", "Validated", "By", "By défaut human", "By defaults human", "validation_humaine", "événement", "event", "append-only", "§9", "content-adressé", "content-addressed", "records.Hash", "Canonicalize", "canonOrEmpty", "devNotHumanValidatedBlock", "covers", "(*HumanValidation).covers", "set-membership", "pure", "fn pure", "pure function", "fail-closed", "nil-safe", "Validated && PhaseHash==phaseHash", "calque connectorenforce.covers", "connectorenforce", "calque ConnectorRuntimeApproval", "ConnectorRuntimeApproval", "A2", "HITL", "HITL RUNTIME", "human-in-the-loop", "below-the-line", "JAMAIS authority.Decide", "NEVER authority.Decide", "authority.Decide", "PromoteInput", "DevValidation", "DevValidation *HumanValidation", "dev_validation", "omitempty", "Promote", "porte APRÈS le stop-gate", "gate after the stop-gate", "AVANT la ré-émission", "before re-emission", "in.Env == EnvStaging", "EnvStaging", "EnvProd", "EnvPreview", "Environment", "envRank", "Environments", "Rollback", "RollbackInput", "RollbackDecision", "RollbackProducesReProjection", "Provenance", "ENV_PROMOTE_NOT_STABLE", "ROLLBACK_NOT_EARLIER", "signatures inchangées", "signatures unchanged", "preview/prod ungated", "preview prod non gatés", "rollback re-projection", "re-projection", "re-projette", "re-projects", "hash N-1", "vert antérieur intact", "prior green intact", "rien restaure stale", "restores nothing stale", "jamais un artefact stale", "never a stale artifact", "DP05", "DP12", "re-émet l'app", "re-emits the app", "RE-ÉMISSION", "checkout phase antérieure", "checkout earlier phase", "ÉTEND S98", "extends S98", "ne casse pas", "does not break", "ne duplique pas", "does not duplicate", "additif", "additive", "PRÉSERVÉS untouched", "preserved untouched", "anti-overwrite", "miroir Go", "miroir fixture", "miroir property", "miroir Godog", "rapid", "fixture", "N2", "N1", "N0", "Godog", "state command events", "RED-first", "écrit RED-first", "écrits D'ABORD", "written first", "RED confirmé", "RED confirmed", "undefined: HumanValidation", "undefined: RecordHumanValidation", "undefined: DevValidation", "puis VERT", "then green", "TestPromoteToStagingRequiresHumanValidation", "TestStagingValidationIsPerPhase", "TestStagingValidationRefusedIsFailClosed", "TestHumanValidationReproducible", "TestPromoteToStagingHumanGateFixtures", "TestPromoteToProdAndPreviewNotGatedByDevValidation", "TestRecordHumanValidationIsAppendOnlyDecision", "TestPromoteReproducible", "TestPromoteLiveURLDeterministicAndHTTPS", "devValidationFor", "recordValidation", "promoteWithValidation", "staging serves re-emit", "stable phase promotes to staging", "2 props S98 patchées", "comportement préservé", "behaviour preserved", "17 fonctions de test", "17 test funcs", "10 S98", "7 DP28", "9 scénarios", "9 scenarios", "70 steps", "était 5 +4 DP28", "was 5 +4", "80 lignes RUN", "80 RUN lines", "TOUT VERT", "all green", "porte humaine forall", "human gate forall", "validation per-phase", "par-phase", "valider N-1 ne débloque pas N", "validating N-1 does not unblock N", "refusé fail-closed", "reproductibilité", "reproducibility", "GATE", "GOTOOLCHAIN=local", "go1.25.10", "cwd back/", "go build", "go test", "go vet", "gofmt", "exit 0", "aucun FAIL", "0 FAIL", "aucun ELF parasite", "no parasite ELF", "testdata/rapid/*.fail", "front untouched", "front non touché", "git status front/ vide", "DeployPanel", "front/web/app/deploy", "URL live", "live URL", "VALIDER", "REFUSER", "promote-gaté", "gated promote", "tâche front", "front task", "le mur", "§2", "kernel", "mirrors", "fitness", "rollback != write-to-kernel", "rollback is not a write-to-kernel", "re-projette pas write", "déterminisme-first", "§6", "§8", "no LLM", "zéro LLM", "le code juge", "code judges", "jamais un LLM", "never an LLM", "ADR 0007", "réutilise jamais réinvente", "reuses never reinvents", "ADR 0052", "porte de déploiement gatée", "gated deploy gate", "S98", "S94", "RealityMirror", "E12", "load-bearing", "by-design forward dep", "OpenQuestion", "EPIC F", "Mintlify", "Promotion", "stable phase", "phase stable", "PhaseInput", "servedAppHash"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP28 — Les environnements + le rollback + la porte de validation humaine sur le dev](/steps/concept/dp28-environments-rollback).</Note>
+
+## Implémentation
+
+### Le paquet — `envrollback` (étendu) + `blockreason` + le tool MCP
+
+DP28 **étend** la promotion d'environnements de S98 par la **porte de validation humaine** sur le dev, **additivement**, sans le casser. Tâche **backend-only** ; le mur tient (la `validation_humaine` est une décision HITL runtime below-the-line, jamais une vérité gravée).
+
+Les fichiers touchés :
+
+- `back/archive/envrollback/envrollback.go` — **ÉTENDU** (S98 préservé) : `HumanValidation`, `HumanValidationInput`, `RecordHumanValidation`, `(*HumanValidation).covers`, `PromoteInput.DevValidation`, et la porte dans `Promote()`.
+- `back/runtime/blockreason/blockreason.go` — **+1 code** `DEV_NOT_HUMAN_VALIDATED` (FR + 4 `HowToFix`).
+- `back/mcp/env-rollback/main.go` — **+1 tool** `record_validation` + `promote` mis à jour (ADR 0009 : chaque op un tool MCP).
+- `back/archive/envrollback/envrollback_fixture_test.go` + `envrollback_property_test.go` + `envrollback_bdd_test.go` + `back/tests/archive/envrollback.feature` — les **miroirs étendus** (fixture + property + Godog), **écrits RED-first**.
+
+### L'événement `validation_humaine` — `HumanValidation` (append-only, content-adressé)
+
+Le cœur de l'extension : la validation humaine devient un **événement enregistré**, append-only et content-adressé :
+
+```go
+type HumanValidation struct {
+  ID        string      // content-adressé via records.Hash(Canonicalize(...))
+  Env       Environment // l'env que l'humain a VU et validé (typiquement EnvPreview — le dev)
+  PhaseHash string      // la phase exacte validée
+  Validated bool        // le verdict humain : oui / non
+  By        string      // l'auteur, défaut « human »
+}
+
+func RecordHumanValidation(in HumanValidationInput) HumanValidation
+```
+
+`RecordHumanValidation` est **PURE** : l'`ID` est dérivé de `records.Hash` + `Canonicalize` (content-adressé ⇒ reproductible), et `By` vaut `"human"` par défaut. C'est une **décision HITL RUNTIME** below-the-line — provenancée, append-only — qui n'appelle **jamais** `authority.Decide` (calque `ConnectorRuntimeApproval`, A2).
+
+### `covers` — set-membership PURE, fail-closed (le code juge)
+
+```go
+// covers reports whether this validation is a fresh, VALIDATED authorisation for the EXACT phase.
+func (v *HumanValidation) covers(phaseHash string) bool
+```
+
+Une **comparaison de set-membership pure**, **fail-closed** (calque `connectorenforce.ConnectorRuntimeApproval.covers`, A2) : `nil`-safe (pas de validation ⇒ `false`), exige `Validated == true` **et** `PhaseHash == phaseHash`. C'est le mur (§2) : le **code** *vérifie* que la décision humaine couvre la phase exacte — **jamais** un LLM. L'humain *décide* ; le code *juge la couverture*.
+
+### `PromoteInput.DevValidation` + la porte dans `Promote()`
+
+`PromoteInput` est **étendu** d'un seul champ :
+
+```go
+type PromoteInput struct {
+  // ... (champs S98 inchangés)
+  DevValidation *HumanValidation `json:"dev_validation,omitempty"` // gate EnvStaging uniquement
+}
+```
+
+La porte est insérée dans `Promote()` **APRÈS** le stop-gate de stabilité (S98), **AVANT** la ré-émission :
+
+```go
+if in.Env == EnvStaging && !in.DevValidation.covers(phaseHash) {
+  br := devNotHumanValidatedBlock(phaseHash, in.DevValidation)
+  return Promotion{}, br
+}
+```
+
+Promouvoir vers **staging** est **refusé** (`DEV_NOT_HUMAN_VALIDATED`) tant qu'une `HumanValidation{Env: preview, PhaseHash == phase promue, Validated: true}` n'est pas portée. Fail-closed : `nil` / autre-phase / `validated=false` ⇒ refuse. **Per-phase** : valider N-1 ne débloque pas N. Les sauts vers **prod** et **preview** ne sont **pas** gatés (seul `EnvStaging` l'est).
+
+### Ce qui est PRÉSERVÉ untouched (S98)
+
+`Promote`/`Rollback`/`Provenance` **signatures inchangées** ; `ENV_PROMOTE_NOT_STABLE`, `ROLLBACK_NOT_EARLIER` intacts ; `RollbackProducesReProjection` **inchangé** — le rollback re-projette toujours une phase antérieure (hash N-1, vert antérieur intact, append-only, **rien** restauré stale ; DP05 + DP12). DP28 **étend** S98, il ne le **casse** ni ne le **duplique** pas.
+
+### `DEV_NOT_HUMAN_VALIDATED` — le BlockReason
+
+`blockreason.go` gagne `CodeDevNotHumanValidated Code = "DEV_NOT_HUMAN_VALIDATED"` (severity blocking), avec une `Explanation` en **français** et **4** `HowToFix` actionnables (entrée registre + `codeOrder`) — additif.
+
+### Le tool MCP `record_validation` (ADR 0009)
+
+`mcp/env-rollback/main.go` gagne le tool `record_validation` (`HumanValidationInput → HumanValidation`, renvoie `{ ok, validation }`), et le tool `promote` est mis à jour (schéma + header). C'est la **porte capability** above-the-line : chaque op de backend est exposée en tool MCP — *no exception*.
+
+### Les miroirs — RED-first (confirmé RED, puis VERT)
+
+Écrits **D'ABORD** ; le RED a été confirmé via les `undefined: HumanValidation / RecordHumanValidation / DevValidation`, puis amené au VERT :
+
+1. **`envrollback.feature` + `envrollback_bdd_test.go` (Godog, N0)** — **+4 scénarios** : staging sans validation ⇒ `DEV_NOT_HUMAN_VALIDATED` ; avec ⇒ permise + le staging sert l'app re-émise ; per-phase (valider N-1 ne débloque pas N) ; `validated=false` ⇒ refuse. Steps câblés (`recordValidation` true/false, `promoteWithValidation` with/without, `staging serves re-emit`).
+2. **`envrollback_property_test.go` (property, rapid, N1)** — **+4 propriétés** : `TestPromoteToStagingRequiresHumanValidation` (porte humaine `forall`), `TestStagingValidationIsPerPhase`, `TestStagingValidationRefusedIsFailClosed`, `TestHumanValidationReproducible` (+ helper `devValidationFor`). Et **2 propriétés S98 patchées** (`TestPromoteReproducible`, `TestPromoteLiveURLDeterministicAndHTTPS`) — elles rattachent une dev validation quand l'env tiré est `staging` : le comportement S98 est **préservé** sous la nouvelle loi.
+3. **`envrollback_fixture_test.go` (fixture, N2, `state → command → events`)** — **+3 tests** : `TestPromoteToStagingHumanGateFixtures` (**4 sous-cas**), `TestPromoteToProdAndPreviewNotGatedByDevValidation`, `TestRecordHumanValidationIsAppendOnlyDecision`. Le cas « stable phase promotes to staging » patché pour porter la dev validation.
+
+### La GATE (GOTOOLCHAIN=local go1.25.10, cwd `back/`)
+
+- `go build ./...` : **exit 0**.
+- `go test ./runtime/... ./kernel/... ./archive/...` : **exit 0, aucun FAIL** ; `envrollback` + `blockreason` + `env-rollback` verts.
+- paquet `envrollback` : **17** fonctions de test top-level (**10** S98 + **7** DP28) ; Godog **9** scénarios / **70** steps verts (était 5, **+4** DP28) ; `go test ./archive/envrollback/ -v` = **80** lignes RUN, **TOUT VERT**.
+- `gofmt -l` : **propre** ; `go vet` : **propre** ; scan ELF parasite `back/` : **aucun** (les fichiers `testdata/rapid/*.fail` des runs RED ont été retirés).
+- **Front untouched** (`git status front/` vide) — le wiring `DeployPanel` (un écran qui *montre* l'URL live du dev, un bouton **VALIDER**/**REFUSER** appelant `record_validation`, puis un **promote-vers-staging gaté**) est la tâche **front** : la porte MCP + les types sont en place.
+
+## Méta
+
+- **Le miroir Go est l'épreuve `dev validé avant staging`, ∀ — et `rollback ⇒ re-projection de N-1`, ∀.** Le miroir property mesure le cœur déterministe : il épingle que la promotion vers staging est **refusée** `forall` tant que le dev n'est pas validé (`TestPromoteToStagingRequiresHumanValidation`), que la validation est **per-phase** (`TestStagingValidationIsPerPhase` — valider N-1 ne débloque pas N), que `validated=false` / `nil` / autre-phase **refusent** (`TestStagingValidationRefusedIsFailClosed`), et que `RecordHumanValidation` est **reproductible** (`TestHumanValidationReproducible` — même input → même `ID` content-adressé). Les fixtures (N2) épinglent les 4 sous-cas de la porte, le fait que prod/preview ne sont **pas** gatés, et que la validation est une décision append-only ; le Godog (N0) tient en mots-métier. Que le staging *exige le « oui » humain sur cette phase précise* n'est pas une promesse — c'est une propriété prouvée.
+
+- **Déterminisme-first (§6/§8) : enregistrer une validation, juger sa couverture, gater une promotion sont des fonctions pures, donc du code.** DP28 n'invite **aucun** LLM : `RecordHumanValidation` est pure (content-adressée via `records.Hash` + `Canonicalize`), `covers` est une **comparaison de set-membership** pure et fail-closed, la porte dans `Promote()` est un `if` déterministe. L'humain *décide* (il valide ou refuse au runtime) ; le **code** *vérifie* que la décision couvre la phase exacte. Aucune horloge, aucun RNG, aucune I/O, aucun jugement flou. Même input ⇒ même verdict (le miroir de reproductibilité le pin).
+
+- **Réutiliser plutôt que réinventer (ADR 0007), sur S98 + le calque A2.** DP28 n'invente **ni** un nouveau moteur de promotion, **ni** un nouveau mécanisme d'approbation : il **réutilise** la machinerie d'environnements de S98 (`Promote`, `Rollback`, `RollbackProducesReProjection`, le stop-gate de stabilité) et **calque** le motif `ConnectorRuntimeApproval.covers` (A2) pour la couverture par-phase fail-closed. Et il **étend** S98 — il ne le **duplique pas** : pas un second moteur de promotion à côté, mais **un champ** (`DevValidation`) + **un `if`** + **un événement** (`validation_humaine`), avec les sauts preview/prod et le rollback re-projection intacts.
+
+## Méta-méta
+
+- **La `validation_humaine` est une décision HITL RUNTIME below-the-line — provenancée, append-only, JAMAIS `authority.Decide`.** C'est la frontière fine du mur (§2). L'humain qui **valide** le dev *autorise un mouvement de runtime* (une promotion vers staging) — il ne **gouverne aucune vérité**. `RecordHumanValidation` n'écrit **rien** dans `kernel`, `mirrors` ou `fitness` ; elle n'appelle **jamais** `authority.Decide` (qui, lui, gouverne la truth). C'est exactement le calque de `ConnectorRuntimeApproval` (A2) : un humain approuve un **acte d'exécution**, pas une vérité. L'agent n'a aucun GRANT pour graver une vérité ; la seule porte vers le kernel reste idée → mirror → `/goal` → approbation humaine.
+
+- **Le rollback re-projette, il n'est PAS un write-to-kernel — append-only §9, rien restauré stale.** Revenir en arrière (`Rollback`) ne *réécrit* aucune vérité : il fait le **checkout d'une phase antérieure** du DAG (hash N-1) qui **re-émet** l'app (DP05 + DP12), le vert antérieur intact. La vérité n'est jamais touchée ; seule la **projection servie** change. `RollbackProducesReProjection` le **prouve** : la sortie est la re-projection de la phase cible, **jamais** un artefact stale tiré d'un cache. C'est l'append-only (§9) gravé jusqu'au déploiement : rien n'est restauré d'un fige, tout est re-projeté depuis une vérité déjà établie.
+
+- **DP28 ÉTEND S98, il ne le CASSE ni ne le DUPLIQUE pas — la porte gravée dans une comparaison pure.** La règle (§9) est nette : `Promote`/`Rollback`/`Provenance` (signatures), `ENV_PROMOTE_NOT_STABLE`, `ROLLBACK_NOT_EARLIER`, `RollbackProducesReProjection` restent **untouched** ; les sauts preview/prod restent non gatés ; le rollback re-projette toujours. La porte est **un seul `if`** dans `Promote()`, posée **après** le stop-gate, **avant** la ré-émission. Les 2 propriétés S98 patchées (`TestPromoteReproducible`, `TestPromoteLiveURLDeterministicAndHTTPS`) prouvent que le comportement S98 est **préservé** sous la nouvelle loi (elles rattachent simplement une dev validation quand l'env tiré est staging). La loi de complétude veille : un geste sans miroir serait un **monstre** — l'extension ne vit que parce qu'elle porte sa preuve vivante (fixture + property + Godog, RED-first, confirmé RED via « undefined: HumanValidation/RecordHumanValidation/DevValidation »). C'est l'anti-overwrite poussé jusqu'à la promotion : on **ajoute** une porte, on **n'altère** rien de l'existant.
