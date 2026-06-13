@@ -1,0 +1,67 @@
+---
+title: "DP14 · La palette substrat 2026, validée par mesure — 11 go, 1 no-go"
+description: "DP14 SONDE le substrat des apps qu'AIDOS émet : les 12 services de la spec open-source-stack-2026 (PostgreSQL, Valkey, PgBouncer, Windmill, NATS, OTel Collector, SigNoz, GlitchTip, Forgejo, Plane, Better-Auth, Docs) sont chacun amorcés par la mesure — boot du conteneur, healthcheck vert, port joignable — AVANT toute gravure en fragment StackManifest. Le verdict est une MESURE, jamais un avis : go = booté + sain + joignable ; no-go = indisponible, ENREGISTRÉ jamais deviné. Comptes : 11 go / 1 no-go. Le seul no-go est Windmill — son image ghcr.io était refusée en sandbox (indisponibilité-de-registre, PAS un défaut de service) ; il reste le moteur de workflows validé du slot, l'alternative Temporal explicitement refusée (contrainte dure). Les contraintes dures sont honorées : Coolify out, Drizzle non imposé, Windmill jamais Temporal, Postgres prod / Doltgres non-prod. Spike T0, ratchet OFF, zone /spike, aucune écriture-vérité, 0 conteneur laissé. Conséquence : seuls les services go deviennent des fragments StackManifest (DP15+)."
+keywords: ["aidos", "krd", "DP14", "palette substrat", "open-source-stack-2026", "spike", "ratchet OFF", "T0", "verdict mesuré", "go", "no-go", "PostgreSQL", "Valkey", "PgBouncer", "Windmill", "NATS", "OpenTelemetry", "SigNoz", "GlitchTip", "Forgejo", "Plane", "Better-Auth", "Fumadocs", "Scalar", "Pagefind", "StackManifest", "fragment", "DP15", "mandatory", "replaceable", "Coolify out", "Drizzle", "Temporal", "Doltgres", "ADR 0006", "ADR 0068", "indisponibilité-de-registre", "ghcr.io", "le mur", "harvest", "honnêteté", "un no-go réduit le sujet", "DP13", "DP11", "DP12"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP14](/steps/internals/dp14-substrate-spike).</Note>
+
+## En une phrase
+
+DP14 prend la liste des services dont les apps qu'AIDOS émet auront besoin — base de données, cache, files de jobs, observabilité, git, tickets, auth, docs — et **les boote vraiment, un par un**, pour ne graver dans le substrat que ce qui démarre réellement : **11 go, 1 no-go**, chaque verdict prouvé par un boot, jamais par un README.
+
+## Le problème que ça résout
+
+La spec `open-source-stack-2026` déclare une **palette** : les services-substrat que les profiles de DP11 sélectionnent et que `stack.bootstrap` (DP12/DP13) lèvera pour une app émise. Mais une déclaration n'est pas une preuve. Un service écrit dans une spec qui ne boote pas est un **vœu** — et la règle d'honnêteté d'AIDOS interdit de graver un vœu dans la vérité.
+
+DP14 répond par la mesure : avant que le moindre service ne devienne un **fragment StackManifest** (la marche DP15+), chacun est **sondé**. On lève le conteneur, on regarde son healthcheck passer au vert, on vérifie que son port répond depuis un autre conteneur. Le résultat n'est pas une opinion sur la qualité du service — c'est un fait observé, daté, reproductible.
+
+## Le verdict est une mesure, jamais un avis
+
+Deux verdicts, deux définitions strictes :
+
+- **`go`** — le service a **booté**, son **healthcheck est vert**, son **port est joignable** (ou il est déjà conteneurisé et sain sur l'hôte, ce que `docker ps` mesure). Un go est un fait observé.
+- **`no-go`** — le service n'a **pas pu être amorcé** dans la fenêtre du spike. Un no-go est **enregistré, jamais deviné** : le code ne fabrique pas un vert qu'il n'a pas vu.
+
+Le principe d'honnêteté (§8) tient ici sa forme la plus nette : **un no-go réduit le sujet, il ne le devine pas.** On ne grave pas un service qu'on n'a pas pu booter — mais on n'invente pas non plus un succès absent pour « compléter » la palette.
+
+## La palette mesurée — 12 services, jeu clos
+
+| Service | Couche | Slot | Verdict | La preuve |
+|---|---|---|---|---|
+| **PostgreSQL** | data | mandatory | **GO** | conteneurs `postgres:16-alpine` healthy, `pg_isready` accepte les connexions |
+| **Valkey** | cache | mandatory | **GO** | `valkey-cli ping` → PONG |
+| **PgBouncer** | cache | replaceable | **GO** | « PgBouncer 1.25.2 listening on 5432 », joignable cross-container |
+| **Windmill** | workflow_async | mandatory | **NO-GO** | image ghcr.io refusée en sandbox — indispo-registre, pas un défaut |
+| **NATS** | messaging | mandatory | **GO** | monitor `/varz` répond, 4222 joignable |
+| **OpenTelemetry Collector** | observability | replaceable | **GO** | « Everything is ready », OTLP 4317/4318 joignables |
+| **SigNoz** | observability | replaceable | **GO** | « Query server listening on 8080 », joignable |
+| **GlitchTip** | errors | replaceable | **GO** | « Cache/Queue: Valkey », worker démarré, 8080 joignable |
+| **Forgejo** | git_ci_registry | replaceable | **GO** | `/api/healthz` → `{status: pass}` |
+| **Plane** | tickets | replaceable | **GO** | Next.js « Ready in 99ms », 3000 joignable |
+| **Better-Auth** | auth | mandatory | **GO** | conteneur déjà sain sur l'hôte, sert du HTML |
+| **Docs** (Fumadocs + Scalar + Pagefind) | documentation | mandatory | **GO** | librairies npm qui résolvent (servies par l'app docs) |
+
+**Comptes : 11 go · 1 no-go · 5 mandatory · 7 replaceable.** Le seul no-go est Windmill.
+
+## Le seul no-go — Windmill, et pourquoi il reste
+
+Windmill est le moteur de workflows/jobs du substrat. Son boot **n'a pas pu être observé** : l'image officielle (`ghcr.io/windmill-labs/windmill:main`) n'existe que sur ghcr.io, et ce registre était **refusé en sandbox** (le jeton d'accès était expiré, le pull anonyme bloqué — le même refus a frappé d'autres images du registre). Le **contrat** du service, lui, est confirmé par sa documentation officielle (mode serveur, port 8000, healthcheck `GET /api/health`).
+
+C'est donc une **indisponibilité-de-registre, pas un défaut de service**. Conséquences enregistrées :
+
+- Windmill **reste dans la palette** comme no-go honnête : on ne le grave pas en fragment tant que son boot n'a pas été re-mesuré, mais on n'invente pas non plus un go qu'on n'a pas vu.
+- **Temporal reste explicitement refusé** — c'est une contrainte dure de la spec : le slot workflow_async est Windmill, **jamais** Temporal. Le no-go de Windmill n'ouvre aucune porte vers une alternative ; il signale seulement un boot à refaire quand le registre redevient accessible.
+
+## Les contraintes dures, honorées
+
+La spec porte des choix non négociables ; la palette les respecte par construction :
+
+- **Pas de Coolify** — Docker et Traefik sont déjà là, aucun orchestrateur en plus.
+- **Pas de Drizzle imposé** — accès SQL léger (driver + repository), jamais un ORM forcé.
+- **Windmill, jamais Temporal** — le slot des workflows reste Windmill.
+- **PostgreSQL = la prod, Doltgres = hors prod uniquement** (ADR 0006) — Postgres est mesuré go ; Doltgres reste l'alternative non-prod du slot data, jamais en production.
+
+## Ce que ça prépare
+
+DP14 ouvre l'EPIC D (le substrat émis). La palette mesurée est la **base de ce qui se grave ensuite** : à partir de DP15, **seuls les services `go` deviennent des fragments StackManifest** — les briques que le manifest d'une app assemble selon son profile. Le no-go Windmill attend une re-mesure (quand ghcr.io redevient accessible) avant de pouvoir être gravé à son tour. Et comme toute vérité dans AIDOS, la gravure ne se fait pas en passant : le spike laisse une **donnée + son test**, le harvest en fait une **idée**, et la promotion passe par **/goal** — jamais une écriture directe.

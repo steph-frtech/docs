@@ -1,0 +1,57 @@
+---
+title: "DP14 · Internals — le spike substrat, la matrice gravée, le verdict-comme-mesure"
+description: "Le journal de build de DP14 : le spike /spike (ratchet OFF, T0) qui boote chacun des 12 services-substrat de la spec open-source-stack-2026 (boot conteneur + healthcheck vert + port joignable docker_internal), puis grave le résultat comme DONNÉE pure et close — front/web/lib/substrate-palette.ts (type SubstrateService{key,name,layer,verdict,proof,alternative,slot,level}, SUBSTRATE_PALETTE[12], paletteCounts(), verdictOf()), jumelé aux conventions StackService de lib/v3/instance.ts. Son miroir T0 substrate-palette.test.ts asserte la matrice gravée + sa forme (jeu clos, chaque entrée a un verdict, comptes 11 go / 1 no-go) et NE boote rien — le boot a eu lieu au spike. GATE : vitest 10/10 vert, biome propre, instance.test.ts 6/6 toujours vert (anti-overwrite). Le verdict est une MESURE jamais un avis ; le no-go Windmill est une indispo-registre (ghcr.io refusé), enregistrée jamais devinée. Le mur : aucune écriture-vérité, 0 conteneur laissé ; le harvest → ADR 0068 est la marche suivante."
+keywords: ["aidos", "krd", "DP14", "internals", "spike", "ratchet OFF", "T0", "substrate-palette", "SUBSTRATE_PALETTE", "paletteCounts", "verdictOf", "SubstrateService", "matrice gravée", "donnée pure", "jeu clos", "miroir T0", "verdict mesuré", "go", "no-go", "boot conteneur", "healthcheck", "docker_internal", "port joignable", "Windmill", "ghcr.io", "indisponibilité-de-registre", "Temporal refusé", "contrainte dure", "Coolify out", "Drizzle", "Doltgres", "ADR 0006", "ADR 0068", "StackManifest", "fragment", "DP15", "lib/v3/instance.ts", "anti-overwrite", "biome", "vitest", "le mur", "harvest", "honnêteté", "un no-go réduit le sujet", "déterminisme-first"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP14 — La palette substrat 2026, validée par mesure](/steps/concept/dp14-substrate-spike).</Note>
+
+## Implémentation
+
+### Le spike — booter les 12 services, mesurer le verdict
+
+DP14 est un **SPIKE-gate** (zone `/spike`, ratchet OFF, rigueur T0) : la roadmap exige de prouver par boot que chaque service-substrat de la spec `open-source-stack-2026` démarre, **avant** de graver le moindre service en fragment StackManifest. La sonde, jetable, a amorcé chacun des 12 services et observé son état :
+
+- Pour les services conteneurisables : `docker run` de l'image canonique, healthcheck vert (log « ready / listening », `pg_isready`, `valkey-cli ping`, `/varz`, `/api/healthz`, …), et port joignable **cross-container** (`docker_internal`).
+- Pour ceux déjà sains sur l'hôte (PostgreSQL, Better-Auth) : `docker ps` health=healthy compte comme mesure.
+- Pour Docs (Fumadocs + Scalar + Pagefind) : librairies npm servies par l'app Next docs (pas des conteneurs autonomes) — la mesure est la résolution sur le registre npm.
+
+Chaque boot est démonté à la fin : **0 conteneur spike laissé** (teardown complet). Le boot a eu lieu **au spike** ; il en sort une donnée + son test.
+
+### La matrice gravée — `front/web/lib/substrate-palette.ts`
+
+Le résultat du spike est gravé comme une **donnée pure et close** : `front/web/lib/substrate-palette.ts`. Le type `SubstrateService{key, name, layer, verdict, proof, alternative, slot, level}` est **aligné sur les conventions `StackService`** de `lib/v3/instance.ts` (mêmes clés stables, même grammaire de slot). La constante `SUBSTRATE_PALETTE[12]` porte chaque service avec son **verdict mesuré + sa preuve** (le port / le healthcheck / le `docker ps` / la cause exacte du no-go). Deux fonctions pures et totales l'accompagnent :
+
+- `paletteCounts()` → `{total: 12, go: 11, noGo: 1, mandatory: 5, replaceable: 7}` — un comptage pur sur le jeu clos.
+- `verdictOf(key)` → `"go" | "no-go" | undefined` — le verdict d'un service par sa clé (undefined hors palette).
+
+La forme exacte du fragment exposée au front : `SUBSTRATE_PALETTE: readonly {key, name, layer, verdict:"go"|"no-go", proof, alternative, slot:"mandatory"|"replaceable", level:1|2|3}[]`.
+
+### Le miroir T0 — `substrate-palette.test.ts`
+
+Le miroir `front/web/lib/substrate-palette.test.ts` asserte la **matrice gravée + sa forme** : jeu clos de 12, chaque entrée porte un verdict, les comptes (`paletteCounts()` = 11 go / 1 no-go / 5 mandatory / 7 replaceable), `verdictOf("windmill")` = no-go, `verdictOf` hors palette = undefined. Il **ne boote rien** — le boot a déjà eu lieu au spike, le test grave et vérifie la donnée. 10/10 vert via `npx vitest run`.
+
+### La GATE
+
+- `vitest run` : **10/10 vert** sur `substrate-palette.test.ts`.
+- `biome check --write` : **propre**.
+- Anti-overwrite : `lib/v3/instance.test.ts` **6/6 toujours vert** (la palette s'ajoute, ne remplace rien — § anti-overwrite).
+- TS uniquement ; **Go non touché**.
+
+## Méta
+
+- **Le verdict est une MESURE, jamais un avis.** La nature de DP14 est un **gate par boot** : un service ne reçoit `go` que parce qu'il a été observé booter, healthcheck vert, port joignable — jamais parce qu'un LLM « pense » qu'il fonctionne. La preuve (`proof`) accompagne chaque verdict précisément pour qu'on puisse re-mesurer : un port, un log de healthcheck, une bannière. Le miroir T0 fige la matrice mesurée ; il ne re-boote pas (le boot était l'acte du spike, le test est l'acte de gravure). La frontière est nette — la mesure produit le verdict, le code le grave, le test l'asserte, aucun jugement ne s'intercale.
+
+- **La palette jumelle `instance.ts` — pas un nouveau vocabulaire.** Le type `SubstrateService` réutilise les conventions `StackService` de `lib/v3/instance.ts` au lieu d'inventer un schéma parallèle. Le réflexe juste : un service du substrat a les mêmes coordonnées (clé, couche, slot, niveau) qu'un service déjà nommé ailleurs dans le front V3 ; la palette les **partage**, elle ne les redouble pas. Ce qui se grave ensuite en fragment StackManifest héritera de cette grammaire commune.
+
+- **Le mur, même en spike.** Ratchet OFF ne veut pas dire mur ouvert : la zone `/spike` n'écrit **aucune vérité** (`kernel`/`mirrors`/`fitness`), ne persiste rien, et démonte ses conteneurs (0 laissé). Le spike produit une donnée jetable et son test ; la gravure en vérité (les fragments StackManifest) est la marche **suivante**, et elle passe par le harvest → idée → /goal → ChangeSet. Aucune écriture en passant.
+
+## Méta-méta
+
+- **Spike T0, ratchet OFF — la rigueur déplacée, pas abolie.** Le SPIKE-gate (§ spike) suspend le cliquet pour rendre une intention floue falsifiable : ici, « la palette boote-t-elle ? ». La rigueur n'est pas abolie, elle est **déplacée** vers la mesure — le boot/healthcheck est le juge, pas un avis. Le code du spike est jetable ; ce qui survit est la **donnée mesurée + son miroir**, exactement ce qu'un harvest peut promouvoir. Le verdict 11 go / 1 no-go est content-adressable, daté, reproductible : un gate honnête, pas une déclaration de confiance.
+
+- **Un no-go réduit le sujet, il ne le devine pas.** C'est la forme la plus nette de l'honnêteté (§8). Windmill n'a pas pu booter (registre ghcr.io refusé) ; le code **enregistre** ce no-go avec sa cause exacte — il ne fabrique pas un vert absent pour « compléter » la palette, et il ne supprime pas Windmill pour cacher l'échec. Le no-go signale précisément ce qu'on **n'a pas** prouvé : on ne gravera pas Windmill en fragment tant que son boot n'a pas été re-mesuré. Réduire le sujet à ce qui est mesuré, c'est refuser le faux-vert — la racine de l'anti-Goodhart.
+
+- **La contrainte dure tient même sous le no-go.** Le no-go de Windmill aurait pu, par paresse, justifier un repli sur Temporal. Le contrat l'interdit : Windmill reste le moteur du slot, **jamais** Temporal — une contrainte dure de la spec. Un no-go d'indisponibilité ne réécrit pas une décision d'architecture ; il signale un boot à refaire. De même Coolify reste out, Drizzle non imposé, Postgres prod / Doltgres non-prod (ADR 0006) : la palette ne devient jamais une porte dérobée pour contourner un choix gelé.
+
+- **Harvest → ADR — le spike ne grave pas, il propose.** Le mur interdit l'écriture-vérité depuis un spike : DP14 laisse une **donnée + son test**, et la marche suivante est le harvest (ADR 0068, accepté — verdict mesuré) qui ouvre une idée (proposes = fragments StackManifest, provenance human, has_mirror=false). La promotion reste **/goal**. Le spike falsifie ; l'ADR enregistre la décision ; la vérité ne bouge qu'au bout de la chaîne idée → miroir → /goal → ChangeSet — jamais en passant, même sous ratchet OFF.

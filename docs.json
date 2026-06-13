@@ -583,7 +583,9 @@
        "steps/concept/dp12-bootstrap-oneshot",
        "steps/internals/dp12-bootstrap-oneshot",
        "steps/concept/dp13-mcp-bootstrap",
-       "steps/internals/dp13-mcp-bootstrap"
+       "steps/internals/dp13-mcp-bootstrap",
+       "steps/concept/dp14-substrate-spike",
+       "steps/internals/dp14-substrate-spike"
       ]
      }
     ]
