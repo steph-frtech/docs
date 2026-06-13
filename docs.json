@@ -595,7 +595,9 @@
        "steps/concept/dp18-substrate-app-services",
        "steps/internals/dp18-substrate-app-services",
        "steps/concept/dp19-connector-governance",
-       "steps/internals/dp19-connector-governance"
+       "steps/internals/dp19-connector-governance",
+       "steps/concept/dp20-connector-sources",
+       "steps/internals/dp20-connector-sources"
       ]
      }
     ]

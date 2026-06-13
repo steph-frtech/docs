@@ -1,0 +1,114 @@
+---
+title: "DP20 · Internals — le type ConnectorSource (jeux clos + Validate pur-total + content-address S02), l'invariant IA-jamais-direct-DB par set-membership déclarée, calqué sur agentlayer.AgentSpec, réutilise S15/S16/S37"
+description: "Le journal de build de DP20 : le paquet back/kernel/connector (3 fichiers, les seules additions — anti-overwrite respecté). ConnectorSource est une SOURCE Kernel content-adressée (above the line), calquée VERBATIM sur agentlayer.AgentSpec : jeux clos {Kind, Classification, AccessScope, Target, Layer} + Validate pur-total fail-closed + ContentID via S02 (records.Hash(Canonicalize(body)), egress-order-independent, Version exclue du hash). Validate refuse dans un ordre FIXE : UNKNOWN_CONNECTOR_KIND, name, UNKNOWN_CONNECTOR_CLASS, UNKNOWN_CONNECTOR_SCOPE, UNKNOWN_CONNECTOR_TARGET, puis l'invariant porteur AI_DIRECT_DB_ACCESS_FORBIDDEN (ClassAI + un hôte de DatastoreHosts en egress ⇒ refus ; un connecteur non-IA avec le même hôte PASSE — la frontière anti-faux-positif), puis CONNECTOR_RW_REQUIRES_AUTHORITY (read_write exige authority.Validate S16 ; read_only n'en exige aucune), puis above-the-line, puis les sous-qualifiers S16/S15 well-formed. IsDatastoreHost est une pure set-membership (Contains case-insensitive) sur le jeu clos DÉCLARÉ datastoreHosts (postgres://…doltgres://). ToRecord est un constructeur writer-role (KindLayer, records.Validate-clean) — l'agent n'écrit AUCUNE instance (aucun GRANT). RÉUTILISE S15 scope.Validate / S16 authority.Validate / S37 db.DataTruthScope / S02 records.Hash·Canonicalize·NewRecord — aucun forké. Miroir : connector_property_test.go (N1 rapid, écrit EN PREMIER, RED avant l'impl, round-trip + reproductibilité + 4 refus, chaque prop = 100 cas) + connector_fixture_test.go (instance canonique). 13 tests PASS (7 fixture + 6 property). GATE : go build ./... exit 0 ; go vet ./kernel/... ./runtime/... clean ; gofmt -l kernel/connector/ clean ; broad gate GOTOOLCHAIN=local go test ./kernel/... ./runtime/... → 128 packages ok, 0 failures ; 0 ELF parasite. Tâche backend-only : front intact (vitest/e2e inchangés)."
+keywords: ["aidos", "krd", "DP20", "internals", "back/kernel/connector", "connector.go", "connector_property_test.go", "connector_fixture_test.go", "ConnectorSource", "type Kernel", "source déclarée", "content-adressé", "above the waterline", "LayerAbove", "LayerBelow", "agentlayer", "AgentSpec", "CoucheAgent", "calqué verbatim", "jeux clos", "Kind", "KindConnector", "KindSkill", "KindMCPServer", "Kinds", "IsKnownKind", "kindOrder", "Classification", "ClassInternal", "ClassExternal", "ClassAI", "ClassCloud", "Classifications", "IsKnownClassification", "AccessScope", "ScopeReadOnly", "ScopeReadWrite", "AccessScopes", "IsKnownScope", "Target", "TargetGmail", "TargetDrive", "TargetGitHub", "TargetPostgresRO", "TargetSnowflake", "TargetERP", "TargetCRM", "TargetSIRH", "TargetSlack", "Targets", "IsKnownTarget", "EgressHosts", "allow-list egress", "Validate", "pur total", "fail-closed", "ordre fixe", "ErrUnknownKind", "ErrUnknownClassification", "ErrUnknownScope", "ErrUnknownTarget", "ErrAIDirectDBForbidden", "ErrRWRequiresAuthority", "ErrEmptyName", "ErrNotAboveTheLine", "UNKNOWN_CONNECTOR_KIND", "UNKNOWN_CONNECTOR_CLASS", "UNKNOWN_CONNECTOR_SCOPE", "UNKNOWN_CONNECTOR_TARGET", "AI_DIRECT_DB_ACCESS_FORBIDDEN", "CONNECTOR_RW_REQUIRES_AUTHORITY", "invariant porteur", "IA jamais en direct sur la DB", "AI-never-direct-to-DB", "set-membership déclarée", "DatastoreHosts", "datastoreHosts", "IsDatastoreHost", "postgres://", "postgresql://", "mysql://", "mongodb://", "redis://", "snowflake://", "jdbc:", "truth-store", "db.internal", "doltgres://", "frontière anti-faux-positif", "anti-false-positive frontier", "connecteur non-IA passe", "ContentID", "records.Hash", "records.Canonicalize", "S02", "egress-order-independent", "sortStrings", "Version exclue du hash", "canonicalBody", "CanonicalBody", "ToRecord", "records.NewRecord", "records.Validate", "KindLayer", "writer-role constructor", "aucun GRANT", "le mur", "§2", "idée → miroir → /goal → approbation", "aidos CLI", "isZeroAuthority", "réutilise jamais réinvente", "ADR 0007", "ADR 0009", "S15", "scope.Validate", "scope.TruthScope", "scope.StatusActive", "S16", "authority.Validate", "authority.AuthorityGraph", "S37", "db.DataTruthScope", "miroir property", "N1", "rapid", "écrit en premier", "RED avant l'impl", "round-trip", "reproductibilité", "100 cas", "13 PASS", "7 fixture", "6 property", "go test ./kernel/connector/", "go build", "go vet", "gofmt", "GOTOOLCHAIN=local", "128 packages ok", "0 failures", "0 ELF parasite", "backend-only", "front intact", "anti-overwrite", "déterminisme-first", "§6", "§8", "monstre", "loi de complétude", "DP19", "promotion du modèle spike", "EPIC E"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP20 — Les connecteurs comme sources déclarées](/steps/concept/dp20-connector-sources).</Note>
+
+## Implémentation
+
+### Le paquet — `back/kernel/connector` (3 fichiers, les seules additions)
+
+DP20 promeut le modèle gouvernance du spike DP19 (`back/runtime/spike/dp19connectorgov`, verdict `go`) en un **vrai type Kernel**. Tâche **backend-only** ; le front est intact (vitest / e2e inchangés). Trois fichiers — et **seulement** ces trois (anti-overwrite respecté, §9) :
+
+- `back/kernel/connector/connector.go` — l'implémentation.
+- `back/kernel/connector/connector_property_test.go` — le **miroir property N1** (rapid), **écrit EN PREMIER, RED avant l'impl**.
+- `back/kernel/connector/connector_fixture_test.go` — la fixture d'instance canonique.
+
+Le type est calqué **VERBATIM** sur la discipline `agentlayer.AgentSpec` : des **jeux clos**, un `Validate` **pur-total**, une **adresse de contenu S02**. Comme `agentlayer.CoucheAgent`, il **compose** S15/S16/S37 — il n'en **forke aucun**.
+
+```go
+type ConnectorSource struct {
+  Layer          Layer              // ALWAYS LayerAbove (une SOURCE est une vérité)
+  Kind           Kind               // connector | skill | mcp_server (triade close)
+  Name           string             // non-vide
+  Classification Classification     // internal | external | ai | cloud (jeu clos)
+  Scope          AccessScope        // read_only | read_write (jeu clos)
+  EgressHosts    []string           // allow-list d'egress
+  Target         Target             // jeu clos de 9 cibles
+  DataTruthScope db.DataTruthScope  // S37 réutilisé
+  Authority      authority.AuthorityGraph // S16 réutilisé (REQUIS si RW)
+  TruthScope     scope.TruthScope   // S15 réutilisé
+  Version        string             // == ContentID, posé à la gravure (exclu du hash)
+}
+
+func Validate(c ConnectorSource) error                 // PUR, TOTAL, fail-closed
+func ContentID(c ConnectorSource) string               // S02 : Hash(Canonicalize(body))
+func CanonicalBody(c ConnectorSource) ([]byte, error)
+func ToRecord(c ConnectorSource) (records.Record, error) // constructeur writer-role
+func IsDatastoreHost(host string) bool                 // pure set-membership déclarée
+```
+
+### `Validate` — pur, total, fail-closed, dans un ordre FIXE
+
+`Validate` est une **fonction pure et totale** de son entrée — aucune base, aucune horloge, aucun aléa, aucune I/O. L'ordre des refus est **fixé** pour que la sortie soit déterministe :
+
+1. **KIND clos** — `Kind ∈ {connector, skill, mcp_server}` sinon `UNKNOWN_CONNECTOR_KIND` (`ErrUnknownKind`).
+2. **NOM** — non-vide (`ErrEmptyName`).
+3. **CLASSIFICATION close** — `∈ {internal, external, ai, cloud}` sinon `UNKNOWN_CONNECTOR_CLASS` (`ErrUnknownClassification`).
+4. **SCOPE clos** — `∈ {read_only, read_write}` sinon `UNKNOWN_CONNECTOR_SCOPE` (`ErrUnknownScope`).
+5. **TARGET clos** — une cible déclarée sinon `UNKNOWN_CONNECTOR_TARGET` (`ErrUnknownTarget`).
+6. **IA-JAMAIS-DIRECT-DB** — une source `ClassAI` dont `EgressHosts` contient **un** hôte de datastore ⇒ `AI_DIRECT_DB_ACCESS_FORBIDDEN` (`ErrAIDirectDBForbidden`). Pure set-membership, **DÉCLARÉE**.
+7. **RW-EXIGE-AUTORITÉ** — une source `ScopeReadWrite` doit porter un graphe S16 well-formed (sinon `CONNECTOR_RW_REQUIRES_AUTHORITY`, `ErrRWRequiresAuthority`) ; un `read_only` n'en exige aucune.
+8. **AU-DESSUS DE LA LIGNE** — une `ConnectorSource` est une SOURCE (`Layer == LayerAbove`, sinon `ErrNotAboveTheLine`).
+9. **SOUS-QUALIFIERS** — quand ils sont présents, l'autorité S16 et le scope S15 sont well-formed (une source de connecteur est une vérité **ACTIVE**, donc un scope vide est rejeté par S15 ; un `read_only` peut porter un graphe d'autorité vide, le zéro, via `isZeroAuthority`).
+
+`Validate` compose les qualifiers réutilisés S15/S16/S37 ; il n'en forke aucun. Même entrée ⇒ même verdict (le miroir property l'épingle).
+
+### L'invariant porteur — `IsDatastoreHost`, set-membership sur un jeu DÉCLARÉ
+
+```go
+var datastoreHosts = []string{
+  "postgres://", "postgresql://", "mysql://", "mongodb://", "redis://",
+  "snowflake://", "jdbc:", "truth-store", "db.internal", "doltgres://",
+}
+
+func IsDatastoreHost(host string) bool {
+  h := strings.ToLower(strings.TrimSpace(host))
+  if h == "" { return false }
+  for _, d := range datastoreHosts {
+    if strings.Contains(h, d) { return true }
+  }
+  return false
+}
+```
+
+Le jeu `datastoreHosts` est **DÉCLARÉ** ici, au-dessus de la ligne, jamais inféré : un hôte est un datastore **si et seulement si** il correspond à un préfixe/substring déclaré (match case-insensitive). `DatastoreHosts()` rend une **copie fraîche** — la légende Workbench et le miroir property lisent cette **source unique**, jamais une liste réinventée. L'invariant §6 (étape 6 de `Validate`) ne s'arme que pour `ClassAI` : un connecteur **non-IA** avec le même hôte **PASSE** — c'est la **frontière anti-faux-positif**, prouvée par une property dédiée.
+
+### Le content-address — `ContentID` réutilise S02, egress-order-independent
+
+`ContentID(c)` = `records.Hash(records.Canonicalize(canonicalBody(c)))` — il **réutilise** le schéma S02, jamais un RNG, jamais forké. `canonicalBody` **trie** l'allow-list d'egress (`sortStrings`) avant de hacher, donc l'id ne dépend **pas** de l'ordre où les hôtes ont été écrits ; et le champ `Version` est **exclu** du corps haché (un record ne hache jamais son propre id, S02). Même source ⇒ **même id** (byte-stable) ; tout changement d'un champ porteur ⇒ **id différent** (une nouvelle version, une nouvelle ligne, jamais une mutation en place — KRD §44.1). Pur, total, déterministe — il ne *panique* que sur un bug interne de marshalling (le corps est une struct fixe), exactement comme `db.DataTruthScope.ID`.
+
+### `ToRecord` — constructeur writer-role, l'agent n'écrit AUCUNE instance
+
+`ToRecord(c)` construit le `records.Record` content-adressé (`KindLayer`) d'une source, sous le **même** schéma d'adresse S02 que tout autre layer ; le record rendu passe toujours `records.Validate`. Mais c'est un **constructeur pour le rôle d'écriture du CLI `aidos`** — il **n'écrit PAS** dans la base. **Le mur** (§2) : l'agent n'a **aucun GRANT** pour insérer une source réelle. Un vrai connecteur naît par idée → miroir → /goal → approbation ; un *seed* Workbench est une fixture/projection en dessous de la ligne.
+
+### Les miroirs — N1 property (écrit EN PREMIER, RED) + fixture canonique
+
+- **`connector_property_test.go`** — le miroir **N1** (rapid), **écrit AVANT l'impl, RED d'abord** : round-trip (`ContentID` stable + egress-order-independent), reproductibilité (même entrée ⇒ même verdict / même id), et les **4 refus** déclarés. **6 fonctions property**, chaque `rapid` prop = **100 cas**.
+- **`connector_fixture_test.go`** — la fixture d'instance canonique. **7 fonctions fixture**.
+- Total : **13 tests PASS** (7 fixture + 6 property). `go test ./kernel/connector/` → `ok`.
+
+### La GATE
+
+- `go build ./...` : **exit 0** · `gofmt -l kernel/connector/` : clean (gofmt -w appliqué une fois, reflow du bloc de commentaire neuf uniquement) · `go vet ./kernel/... ./runtime/...` : exit 0.
+- Gate large : `GOTOOLCHAIN=local go test ./kernel/... ./runtime/...` → **128 packages ok, 0 failures** (anti-overwrite intact).
+- **0 ELF parasite** (`find back -type f -executable` → rien hors module cache).
+- **Backend-only** : le front (`/data/dev/aidos/front/`) est intact — vitest / e2e inchangés.
+
+## Méta
+
+- **Le type est du code, l'instance est une vérité — et c'est exactement la discipline AgentSpec.** Définir `ConnectorSource`, son `Validate` pur et son `ContentID`, c'est du **code** permis au build, comme on a défini `agentlayer.AgentSpec`. Le miroir property N1 prouve que ce code est **déterministe** : même entrée ⇒ même verdict, même id (la reproductibilité §6 épinglée par rapid). Le `Validate` n'a rien à « juger » — il *exécute* une suite de tests de set-membership sur des jeux clos, dans un ordre fixe, et rend un refus nommé ou `nil`. C'est le déterminisme-first (§6/§8) : décider si une source de connecteur est bien formée est une **fonction pure** de ses champs déclarés, donc c'est du **code**, jamais un agent.
+
+- **L'invariant IA-jamais-direct-DB est encodé au niveau de la SOURCE, pas seulement au runtime.** DP19 l'avait prouvé par un gate runtime ; DP20 le remonte dans `Validate` — une source IA dangereuse **ne peut jamais être gravée**. La property dédiée mesure les **deux côtés** de la frontière : une source `ClassAI` avec un hôte de `DatastoreHosts` en egress **rougit** (`AI_DIRECT_DB_ACCESS_FORBIDDEN`), et une source **non-IA** avec le **même** hôte **passe**. La frontière anti-faux-positif n'est pas une intuition : c'est une property à 100 cas. L'invariant est **DÉCLARÉ** (le jeu `datastoreHosts` est une liste, pas une heuristique) et **jamais inféré**.
+
+- **Réutiliser plutôt que réinventer (ADR 0007), sur les qualifiers.** Le type n'invente ni un schéma de scope, ni un graphe d'autorité, ni un qualifier de données : le scope est `scope.TruthScope` (S15, validé `StatusActive`), l'autorité `authority.AuthorityGraph` (S16, `authority.Validate`), le qualifier de données `db.DataTruthScope` (S37), l'adresse de contenu `records.Hash`/`Canonicalize`/`NewRecord` (S02). DP20 n'ajoute que la **composition** (les jeux clos kind/classification/scope/target + l'invariant IA + le content-address) — exactement comme `agentlayer.CoucheAgent` compose les mêmes briques. Aucun fork.
+
+## Méta-méta
+
+- **Les vérités au-dessus de la ligne s'écrivent par idée → miroir → /goal — l'agent reste sans GRANT.** C'est le mur (§2) appliqué aux connecteurs. DP20 grave le **type** (du code), mais **aucune instance** : `ToRecord` est un constructeur pour le rôle d'écriture du CLI `aidos`, pas une porte d'écriture pour l'agent. Un vrai connecteur — un accès Postgres, un connecteur Slack — est une vérité ; il ne naît que par l'**unique porte** (idée → miroir → /goal → approbation). Un *seed* Workbench reste une fixture/projection en dessous de la ligne. On peut décrire la **forme** d'une vérité sans jamais **écrire** la vérité.
+
+- **La séparation interne/externe/IA/cloud est une contrainte de la SOURCE, jamais une décision de runtime opaque.** Le plan qu'un connecteur franchit ne se déduit pas de son comportement au runtime — il est **déclaré** dans la source, content-adressé, auditable. C'est ce qui rend l'invariant IA-jamais-direct-DB **statiquement vérifiable** : puisque la classification est une propriété gravée de la source, `Validate` peut refuser une source IA dangereuse **avant** la gravure, sans jamais observer un runtime. La confiance n'est plus dispersée dans le code d'intégration ; elle est **lue dans la déclaration**.
+
+- **Un layer connector sans miroir est un monstre.** La loi de complétude (Mandat A, §5) s'applique à la nouvelle source comme à toute vérité : la source `ConnectorSource` ne *vit* que parce qu'elle porte sa preuve vivante — le miroir property N1 (round-trip + reproductibilité + 4 refus, écrit EN PREMIER, RED avant l'impl) et la fixture canonique. Une source déclarée sans miroir serait un **monstre** que la loi de complétude interdit. Le miroir N'EST PAS un test que l'agent écrirait pour se satisfaire (la circularité §8 est bannie) : c'est la preuve déterministe que le type fait ce qu'il dit — même entrée, même verdict, frontière anti-faux-positif comprise.
