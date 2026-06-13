@@ -591,7 +591,9 @@
        "steps/concept/dp16-substrate-async",
        "steps/internals/dp16-substrate-async",
        "steps/concept/dp17-substrate-observability",
-       "steps/internals/dp17-substrate-observability"
+       "steps/internals/dp17-substrate-observability",
+       "steps/concept/dp18-substrate-app-services",
+       "steps/internals/dp18-substrate-app-services"
       ]
      }
     ]

@@ -1,0 +1,105 @@
+---
+title: "DP18 · Internals — l'émetteur de fragments applicatifs, Better-Auth câblé sur S80 via l'Expand unique S76, la propriété auth-app ≠ auth-AIDOS"
+description: "Le journal de build de DP18 : le paquet NEW additif back/runtime/appservicefragments/ — jumeau applicatif de DP15/DP16/DP17, qui clôt l'EPIC D. Réutilise un type ServiceFragment structurellement identique à datafragments.ServiceFragment (struct nommée, PAS un alias, pour attacher WritesTruth/Capabilities) + records.Canonicalize/records.Hash (S02 via DP15). SubstrateAppServiceFragments(projectID, env) ([]ServiceFragment, error) émet un jeu CLOS de trois fragments dont les images sont la mesure DP14 : forgejo (git/git/3300, codeberg.org/forgejo/forgejo:9, opt-in) + plane (tickets/tickets/3100, makeplane/plane-frontend:latest, depends_on postgres, opt-in) + better-auth (auth/core/3200, IMAGE VIDE car ÉMISE du boilerplate /data/dockers/boilerplates/better-auth node:22-alpine Hono, depends_on postgres, core). Isolation via la MÊME datafragments.IsolationToken (DP15 réutilisé, jamais forké) → A != B byte-distinct. EmittedAppAuthBinding(projectID) (AppAuthBinding, error) CÂBLE l'auth : appelle appauth.ExpandAppAuth (S80, l'UNIQUE expansion app-auth) et porte son ExpansionID BYTE-IDENTIQUE, puis behavior.Expand(ownable@User) (S76, l'Expand UNIQUE jamais dupliqué) et porte son ExpansionID ; mappe les rôles vers AuthorityGraphScopeEmittedApp = 'emitted-app-runtime', JAMAIS aidos-approvers. CheckAppAccess(role, operation) (appauth.Decision, error) délègue VERBATIM à appauth.CheckAccess (S80) : viewer→manageRoles DENY, admin ALLOW, code jamais LLM. LA PROPRIÉTÉ CAPITALE : WritesTruth()==false sur chaque fragment ET le binding ; l'auth de l'app != l'auth d'AIDOS (scope emitted-app-runtime, jamais aidos-approvers). Miroir fixture/acceptance appservicefragments_fixture_test.go (5 Test) + miroir property appservicefragments_property_test.go (7 Test rapid) écrits D'ABORD (RED via fault-injection ExpansionID+FAULT → fixture+property ROUGE, puis revert → VERT) : 12 PASS. GATE : go build/vet/gofmt propres ; échec PRÉ-EXISTANT non lié kernel/mirror/library TestScopeNeverLeaksAnotherProject (flaky, prouvé sans DP18). S80 + S76 réutilisés, jamais dupliqués."
+keywords: ["aidos", "krd", "DP18", "internals", "appservicefragments", "ServiceFragment", "datafragments.ServiceFragment", "struct nommée pas alias", "SubstrateAppServiceFragments", "EmittedAppAuthBinding", "CheckAppAccess", "AppAuthBinding", "RoleGrant", "WritesTruth", "Capabilities", "IsTruthWriteCapability", "oracle du mur", "fault-injection", "CanonicalFragment", "HashFragment", "Keys", "Forgejo", "codeberg.org/forgejo/forgejo:9", "role git", "profile git", "3300", "opt-in", "Plane", "makeplane/plane-frontend:latest", "role tickets", "profile tickets", "3100", "depends_on postgres", "Better-Auth", "image vide", "émise du boilerplate", "/data/dockers/boilerplates/better-auth", "node:22-alpine", "Hono", "role auth", "profile core", "3200", "core", "jeu clos", "palette mesurée", "DP14", "appauth.ExpandAppAuth", "S80", "l'unique expansion app-auth", "ExpansionID", "byte-identique", "câblage byte-identique", "behavior.Expand", "ownable@User", "S76", "l'Expand unique", "jamais dupliqué", "appauth.CheckAccess", "appauth.Decision", "appauth.Role", "ALLOW", "DENY", "viewer", "admin", "manageRoles", "rôle insuffisant", "opération protégée", "code jamais LLM", "AuthorityGraphScopeEmittedApp", "emitted-app-runtime", "jamais aidos-approvers", "auth de l'app != auth d'AIDOS", "séparation", "E3", "S61", "S62", "S63", "propriété capitale", "zéro écriture-vérité", "le mur", "above-the-line", "below-the-line", "isolation par projet", "datafragments.IsolationToken", "records.Hash", "byte-distinct", "device", "env-var", "jamais chemin en dur", "healthcheck", "depends_on", "profile", "project_id", "miroir fixture", "miroir property", "rapid", "RED", "VERT", "TestFixture_BetterAuthCablesOnAppAuthByteIdenticalViaExpand", "TestProp_AuthCablingByteIdenticalViaExpand", "go build", "go vet", "gofmt", "kernel/mirror/library", "TestScopeNeverLeaksAnotherProject", "flaky pré-existant", "anti-overwrite", "déterminisme-first", "EPIC D", "clôt l'EPIC D", "DP15", "DP16", "DP17", "ADR 0007"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP18 — Les services applicatifs optionnels](/steps/concept/dp18-substrate-app-services).</Note>
+
+## Implémentation
+
+### Le paquet — `back/runtime/appservicefragments/` (NEW, additif)
+
+DP18 grave les services **applicatifs optionnels** de la palette mesurée (DP14) en fragments StackManifest. Le paquet est **NEW et additif** : `back/runtime/appservicefragments/` — rien d'existant n'est touché ni cassé. C'est le **jumeau applicatif** de DP15 (données), DP16 (asynchrone) et DP17 (observabilité), et la **dernière brique du substrat** — il **clôt l'EPIC D**.
+
+```go
+type ServiceFragment struct {
+  Key       string                   // forgejo | plane | better-auth (palette close)
+  ProjectID string
+  Service   stackmanifest.Service
+  Volumes   []stackmanifest.Volume
+} // struct NOMMÉE, PAS un alias — pour attacher WritesTruth/Capabilities
+
+func (ServiceFragment) WritesTruth() bool        // TOUJOURS false (le mur §2)
+func (f ServiceFragment) Capabilities() []string // capacités de l'app, jamais write:vérité
+
+func SubstrateAppServiceFragments(projectID string, env scope.Environment) ([]ServiceFragment, error)
+func Keys() []string // palette close [forgejo plane better-auth]
+
+type RoleGrant struct { Operation string; MinRole appauth.Role }
+type AppAuthBinding struct { /* ExpansionID de S80 + de S76, Grants, AuthorityGraphScope */ }
+func (AppAuthBinding) WritesTruth() bool // TOUJOURS false
+
+func EmittedAppAuthBinding(projectID string) (AppAuthBinding, error)
+func CheckAppAccess(role appauth.Role, operation string) (appauth.Decision, error)
+
+func IsTruthWriteCapability(cap string) bool // l'oracle du mur (write:kernel|mirrors|fitness)
+func CanonicalFragment / HashFragment        // S02 réutilisé via DP15
+
+const AuthorityGraphScopeEmittedApp = "emitted-app-runtime"
+```
+
+Comme pour DP15/DP16/DP17, `ServiceFragment` est une **struct nommée distincte**, **structurellement identique** à `datafragments.ServiceFragment` — **pas** un type-alias. C'est ce qui permet d'**attacher les méthodes capacité** (`WritesTruth`/`Capabilities`) qui épinglent le mur ; identique en forme, elle se greffe et se convertit librement aux côtés des fragments data/async/observabilité. Les oracles d'adresse de contenu (`records.Canonicalize`/`records.Hash`, S02) sont **réutilisés via DP15**, jamais forkés.
+
+### Le jeu clos — trois fragments, images = mesure DP14
+
+Trois fragments **APPLICATIFS** déterministes, jeu **clos**, dont les images sont **exactement la mesure DP14** :
+
+- `forgejo` — role `git`, profile `git`, port interne **3300** (natif 3000, remappé hors du serveur émis), `codeberg.org/forgejo/forgejo:9` (DP14 : `GET /api/healthz → { status: pass }`). **Opt-in** : le git auto-hébergé de l'app.
+- `plane` — role `tickets`, profile `tickets`, port interne **3100** (remappé pour éviter la collision serveur/forgejo), `makeplane/plane-frontend:latest` (DP14 : Next.js « Ready »), `depends_on` postgres. **Opt-in** : le suivi de tickets de l'app.
+- `better-auth` — role `auth`, profile **`core`**, port interne **3200**, image **VIDE** car **émise** du boilerplate `/data/dockers/boilerplates/better-auth` (`node:22-alpine` Hono, healthcheck `/health`), `depends_on` postgres. **Core** : l'auth des utilisateurs de l'app tourne toujours.
+
+Chaque fragment porte : image (ou vide pour le build) + port interne **remappé** (3300/3100/3200, off du serveur émis à 3000) + **volume bind** (device = env-var, **jamais un chemin en dur**) + healthcheck + `depends_on` + profile + `project_id`. Forgejo/Plane sont sous leur propre profile (`git`/`tickets`, **off par défaut**) ; Better-Auth est `core`.
+
+### Better-Auth émis du boilerplate — construit, jamais pinné
+
+L'image de Better-Auth est **délibérément vide** : à la différence de Forgejo et Plane (images épinglées tirées d'un registre), Better-Auth est **construit** du boilerplate `/data/dockers/boilerplates/better-auth` — un `node:22-alpine` Hono déjà éprouvé. Le boilerplate est **réutilisé verbatim**, jamais reforgé : DP18 ne recode pas une auth, il pose la brique qui **émet** celle du boilerplate.
+
+### Le câblage de l'auth — `EmittedAppAuthBinding` réutilise S80 et S76, byte-identique
+
+`EmittedAppAuthBinding(projectID)` est le câblage capital. Il ne réinvente **aucune** logique d'auth — il **transporte** celle de S80 :
+
+- il appelle `appauth.ExpandAppAuth` (**S80**, l'**unique** expansion d'app-auth) et porte son **`ExpansionID` byte-identique** dans le binding — l'identité calculée par S80 est recopiée à l'octet près, jamais re-dérivée ;
+- il appelle `behavior.Expand` sur la shape `ownable@User` (**S76**, l'**Expand unique** jamais dupliqué) et porte là aussi son **`ExpansionID` byte-identique** ;
+- il dérive les `Grants` (`RoleGrant{Operation, MinRole}`) des policies de l'app-auth de S80 ;
+- il fixe `AuthorityGraphScope = AuthorityGraphScopeEmittedApp` (`"emitted-app-runtime"`) — **jamais** `aidos-approvers`.
+
+`CheckAppAccess(role, operation)` **délègue verbatim** à `appauth.CheckAccess` (S80) : il ne juge pas l'accès, il transporte le verdict de l'app-auth. Un `viewer` qui vise `manageRoles` reçoit `DENY` ; un `admin` reçoit `ALLOW`. Du **code, jamais un LLM** : la décision d'autorisation est une fonction pure de S80, déterministe.
+
+### L'isolation par projet — `datafragments.IsolationToken` réutilisé
+
+Comme DP15/DP16/DP17, l'isolation par projet réutilise **le même** token que DP15 (`datafragments.IsolationToken`, jamais forké). Ce token marque le **nom du volume** et la **variable d'environnement** du device de chaque service. Conséquence : pour deux projets A et B, les fragments applicatifs sont **byte-distincts** (A ≠ B) — aucun croisement possible : le git, les tickets et les comptes utilisateurs du projet A ne se croisent jamais avec ceux du projet B. Un seul schéma d'isolation pour tout le substrat (DP15 → DP18).
+
+### Les miroirs — fixture/acceptance + property, écrits D'ABORD (RED → VERT)
+
+Les deux miroirs sont **écrits d'abord** (mirror-first, RED confirmée) puis VERT. **12 fonctions Test, 12 PASS** (5 + 7).
+
+La RED a été **prouvée par fault-injection** : injecter `SubsystemExpansionID + "FAULT"` (via Edit) a viré **en ROUGE** le fixture `TestFixture_BetterAuthCablesOnAppAuthByteIdenticalViaExpand` **et** le property `TestProp_AuthCablingByteIdenticalViaExpand` — le miroir est **porteur**, non vacant — puis le revert a tout repassé **VERT**.
+
+Miroir **fixture / acceptance** — `appservicefragments_fixture_test.go` (**5 Test**) couvre : le câblage **byte-identique** de Better-Auth sur l'app-auth via `Expand` ; le **refus runtime** d'un rôle insuffisant (`viewer→manageRoles` DENY, `admin` ALLOW) ; les **fragments byte-identiques** ; Forgejo en profile `git`, Plane en profile `tickets` ; la **séparation** auth-app ≠ auth-AIDOS ; le **mur** (aucune écriture de vérité AIDOS) ; le manifest greffé valide (DP15 + DP18).
+
+Miroir **property ∀ (rapid)** — `appservicefragments_property_test.go` (**7 Test**) couvre les invariants : émission byte-identique pour le même `(projectID, env)`, palette close, isolation A ≠ B byte-distincte, câblage d'auth byte-identique via Expand, et la **propriété capitale** (`WritesTruth()` false partout, scope `emitted-app-runtime` jamais `aidos-approvers`).
+
+### La GATE
+
+- `GOTOOLCHAIN=local go build ./...` (go1.25.10) : **exit 0**.
+- `go vet ./runtime/... ./kernel/...` : **clean** · `gofmt -l` : **clean**.
+- Nouveau paquet : **12 tests, tous PASS** (5 fixture/acceptance + 7 property rapid). S80 `appauth` + S76 `behavior` + DP15 `datafragments` toujours verts, **réutilisés jamais dupliqués**.
+- Un seul FAIL au sweep, **pré-existant et NON LIÉ** : `kernel/mirror/library` `TestScopeNeverLeaksAnotherProject` (property rapid **flaky** : collision `mid` entre app-A/app-B). **Prouvé pré-existant** en déplaçant le paquet DP18 de côté → l'échec persiste sans le code DP18 (3 runs FAIL) ; `kernel/mirror/library` n'importe pas `appservicefragments`. **Aucune régression introduite par DP18.**
+- Nettoyage : suppression de l'artefact rapid `testdata/rapid/*.fail` laissé par la fault-injection (sinon il rejoue une seed obsolète). Aucun binaire ELF parasite (scan paquet + `back/` vide). Tests existants intacts.
+
+## Méta
+
+- **L'émission de fragments et le câblage d'auth sont purs — donc ils se rejouent à l'identique.** `SubstrateAppServiceFragments` dérive ses trois briques d'une table close et du hash de DP15 ; `EmittedAppAuthBinding` transporte les `ExpansionID` de S80 et S76 et dérive ses grants des policies de l'app-auth. Aucune n'a d'horloge, d'aléa, ni de LLM. C'est le déterminisme-first (§6) : émettre une topologie applicative et câbler son auth sont des transformations pures des entrées, donc c'est du code, jamais un agent. Le property `TestProp_AuthCablingByteIdenticalViaExpand` asserte que deux appels rendent un câblage à l'octet près identique.
+
+- **Le câblage byte-identique n'est pas une affirmation, c'est une mesure — et son garde est fault-injecté.** Que Better-Auth soit câblé sur l'app-auth de S80 ne se déclare pas, ça se **prouve** : le miroir vérifie que le binding porte le `ExpansionID` **byte-identique** de `appauth.ExpandAppAuth` et de `behavior.Expand`. Mieux : injecter `+"FAULT"` dans le `ExpansionID` fait rougir **et** le fixture **et** le property — le miroir est porteur, pas vacant. Un câblage n'est réel que si un test rougit quand on le débranche.
+
+- **Refuser un rôle insuffisant est du code, pas un jugement d'agent.** `CheckAppAccess` ne *décide* pas l'accès : il **délègue verbatim** à `appauth.CheckAccess` (S80). L'autorisation d'une opération protégée de l'app (`viewer→manageRoles` DENY, `admin` ALLOW) est une fonction pure et déterministe de l'app-auth déjà éprouvée. Aucun LLM n'entre dans la boucle d'autorisation du runtime de l'app : si une décision peut être une fonction pure, elle **doit** l'être (§8).
+
+## Méta-méta
+
+- **L'auth de l'app mappe l'AuthorityGraph DU RUNTIME, jamais les approbateurs d'AIDOS.** C'est la distinction qui tient tout DP18, et c'est le mur (§2). Il y a deux authentifications dans le système : l'auth d'**AIDOS** garde le mur (qui approuve un ChangeSet, écrit une vérité — les **approbateurs d'AIDOS**, E3/S61-S63), l'auth de l'**app construite** garde le **produit de l'utilisateur** (qui lit un document, gère une équipe dans l'app émise). DP18 fixe le scope du binding **explicitement** à `emitted-app-runtime` et **jamais** à `aidos-approvers` : les deux graphes d'autorité ne se croisent **jamais**. Confondre « les utilisateurs de l'app construite » et « les approbateurs du noyau d'AIDOS » serait percer le mur par la porte de service ; le miroir l'interdit, le scope le nomme.
+
+- **Sous la ligne — aucune écriture above-the-line.** L'AST `Service` est une **source** stack_manifest above-the-line (DP02) ; ce paquet en **projette** la tranche applicative **sous la ligne** (un fragment régénérable pour `back/gen/<app>/`). Il n'écrit **jamais** le noyau, les miroirs, ni la fitness d'AIDOS : `WritesTruth()` est `false` sur chaque fragment **et** sur le binding d'auth. Une app peut avoir son git, ses tickets et ses utilisateurs ; rien de cela ne grave un invariant dans AIDOS. Faire évoluer la vérité d'AIDOS reste l'affaire de l'unique porte (idée → miroir → /goal → approbation d'un approbateur d'AIDOS), gardée par le mur — jamais un utilisateur de l'app émise.
+
+- **Réutiliser S80, S76, DP15 et le boilerplate — ne rien dupliquer (ADR 0007), et clore l'EPIC D.** DP18 n'ajoute que deux choses neuves : l'**assemblage** des trois fragments applicatifs en jeu clos et le **câblage** du binding d'auth. Tout le reste est réutilisé : l'**unique** expansion app-auth de **S80** (`appauth.ExpandAppAuth`/`CheckAccess`), l'**Expand unique** de **S76** (`behavior.Expand`, jamais dupliqué), le type et l'isolation de **DP15**, les oracles d'adresse de contenu de **S02**, et le **boilerplate Better-Auth** (émis, jamais reforgé). Réutiliser plutôt que réinventer, sur les deux plans. Avec les données (DP15), l'asynchrone (DP16), l'observabilité (DP17) et les services applicatifs (DP18), la palette mesurée par DP14 est entièrement gravée : **DP18 clôt l'EPIC D** du provisioning.
