@@ -1,0 +1,55 @@
+---
+title: "DP15 · Les fragments de données — Postgres prod, Doltgres opt-in hors prod, Valkey, PgBouncer, par projet"
+description: "DP15 GRAVE les services de DONNÉES de la palette mesurée (DP14) en fragments StackManifest déterministes : un jeu CLOS de quatre briques — PostgreSQL (datastore, core, prod), Doltgres (datastore, opt-in HORS PROD seulement), Valkey (cache, core), PgBouncer (pooler, core, depends_on postgres). Chaque fragment porte image + port interne + volume bind (device = env-var, jamais un chemin en dur) + healthcheck + depends_on + profile + project_id. L'isolation par projet réutilise le motif provision.isolation (token = Hash(\"datafragments/v1:\"+projectID)[:12], jamais forké) → deux projets A et B sont byte-distincts. La règle Postgres prod / Doltgres non-prod n'est PAS reforgée : elle DÉLÈGUE à la porte DP06 existante (envbindings.ValidateDatastore) qui refuse Doltgres en prod avec DOLTGRES_NOT_ALLOWED_IN_PROD, surfacé verbatim. Deux portes : SubstrateDataFragments (porte pleine, gate prod) et SubstrateCoreFragments (slice légale, omet Doltgres en prod sans erreur). Le DDL reste rendu par l'émetteur Atlas gen/db, son round-trip déjà prouvé par S89. Le miroir property prouve l'émission ; rien d'existant cassé."
+keywords: ["aidos", "krd", "DP15", "fragments de données", "ServiceFragment", "StackManifest", "PostgreSQL", "Doltgres", "Valkey", "PgBouncer", "datastore", "cache", "pooler", "core", "non-prod", "opt-in", "isolation par projet", "provision.isolation", "records.Hash", "byte-distinct", "volume bind", "env-var", "device", "healthcheck", "depends_on", "profile", "project_id", "SubstrateDataFragments", "SubstrateCoreFragments", "porte pleine", "slice légale", "DP06", "envbindings", "ValidateDatastore", "DOLTGRES_NOT_ALLOWED_IN_PROD", "gate délégué", "jamais forké", "Atlas", "gen/db", "DDL", "round-trip", "S89", "S95", "miroir property", "byte-identique", "déterminisme-first", "jeu clos", "ADR 0006", "DataTruthScope", "S37", "ADR 0040", "DP14", "DP16"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP15](/steps/internals/dp15-substrate-data).</Note>
+
+## En une phrase
+
+DP15 prend les services de **données** que DP14 a mesurés `go` — la base, le cache, le pooler — et les **grave en briques réutilisables** : quatre fragments StackManifest déterministes, **provisionnés par projet** (deux projets ne partagent jamais un volume), avec la règle dure **Postgres = la prod, Doltgres = hors prod uniquement** non pas recopiée mais **déléguée** à la porte qui la garde déjà.
+
+## Le problème que ça résout
+
+DP14 a mesuré la palette : la base PostgreSQL boote, Valkey répond `PONG`, PgBouncer écoute. Mais une mesure n'est pas encore une **brique posable** dans le manifest d'une app. Il faut transformer ces verdicts en **fragments StackManifest** — des morceaux de topologie compose (image, port, volume, healthcheck, dépendances) que le manifest d'une application assemble selon son profile.
+
+Le piège serait d'écrire chaque fragment à la main, avec un chemin de volume en dur, une règle Postgres/Doltgres recopiée dans un coin, un nom de service partagé entre tous les projets. Trois dérives garanties : des montages qui se marchent dessus entre projets, une règle de prod dupliquée qui finira par diverger de l'originale, des chemins gravés qui cassent au premier déploiement ailleurs.
+
+DP15 répond par une **fonction pure** : à partir d'un `projectID` et d'un environnement, elle émet le jeu clos des fragments de données — déterministe (même entrée → mêmes octets), isolé par projet, et sans jamais reforger une règle qui existe déjà ailleurs.
+
+## Les quatre fragments — un jeu clos
+
+| Fragment | Rôle | Profile | Port interne | Image | Disponibilité |
+|---|---|---|---|---|---|
+| **PostgreSQL** | datastore | `core` | 5432 | `postgres:16-alpine` | toujours (la prod) |
+| **Doltgres** | datastore | `non-prod` | 5433 | `dolthub/doltgresql:latest` | **opt-in, hors prod seulement** |
+| **Valkey** | cache | `core` | 6379 | `valkey/valkey:8-alpine` | toujours |
+| **PgBouncer** | pooler | `core` | 6432 | `edoburu/pgbouncer:latest` | toujours (`depends_on` postgres) |
+
+Le jeu est **clos** : ces quatre-là, pas un de plus, pas un de moins. Les images sont exactement celles que DP14 a mesurées `go` — la gravure ne réintroduit aucun service que la mesure n'a pas vu booter. Chaque fragment porte image, port interne, volume bind, healthcheck, dépendances, profile et `project_id`.
+
+## La règle de prod n'est pas recopiée — elle est déléguée
+
+La spec porte une contrainte dure (ADR 0006 et son addendum) : **PostgreSQL = la prod, Doltgres = hors prod uniquement.** DP15 ne **reforge pas** cette règle. Elle l'a déjà : c'est la porte DP06, `envbindings.ValidateDatastore`, qui refuse Doltgres en prod avec le code clos `DOLTGRES_NOT_ALLOWED_IN_PROD`.
+
+DP15 **délègue** à cette porte existante, et en surface le refus **verbatim** — aucune nouvelle règle, aucun second juge. Deux portes d'émission en découlent :
+
+- **`SubstrateDataFragments`** — la **porte pleine** : elle demande les quatre fragments. En `prod`, elle bute sur le gate DP06 et **renvoie le refus** `DOLTGRES_NOT_ALLOWED_IN_PROD` — exactement le message de la porte d'origine.
+- **`SubstrateCoreFragments`** — la **slice légale** : elle **omet** proprement Doltgres en `prod` (trois fragments core) **sans erreur**. Hors prod, l'opt-in Doltgres est admis (quatre fragments).
+
+C'est la même règle vue de deux côtés : l'une affirme que demander Doltgres en prod est une faute (et le dit avec le code de DP06), l'autre livre simplement ce qui est légal pour l'environnement.
+
+## L'isolation par projet — deux projets, jamais le même volume
+
+Un fragment de données sans isolation serait un piège : deux applications émises pointeraient sur le même volume, et l'une écraserait les données de l'autre. DP15 isole **par projet**, en réutilisant le motif `provision.isolation` (jamais forké) : un token déterministe dérivé du `projectID` (les douze premiers caractères du hash de `"datafragments/v1:" + projectID`) marque le **nom du volume** et la **variable d'environnement** du device.
+
+Conséquence prouvée : pour deux projets A et B, les fragments sont **byte-distincts** — les volumes ne se croisent jamais. Et le device est toujours une **référence d'env-var** (`${SVC}_{TOKEN}_DATA_PATH`), **jamais un chemin en dur** : le même fragment se déploie sur n'importe quelle machine sans réécriture.
+
+## Le schéma, lui, passe par Atlas
+
+DP15 émet la **topologie** des services de données — quelle base tourne, sur quel port, avec quel volume. Il n'émet **pas** le schéma SQL (le DDL) de vos tables : celui-ci reste rendu par l'**émetteur Atlas** (`gen/db`), inchangé, et son **round-trip réel** (DDL appliqué + CRUD vérifié sur une vraie base) est déjà prouvé par l'étape S89 (Testcontainers). DP15 ne re-prouve pas ce round-trip — ce serait une duplication ; il pose les services **dans** lesquels ce schéma vivra.
+
+## Ce que ça prépare
+
+DP15 livre la signature `ServiceFragment` que le front (DP16+) consomme pour montrer les services de données d'un projet et leur isolation. La gravure des autres couches de la palette (workflow, observabilité, git, tickets, auth) suivra le même motif : fonction pure, jeu clos, gate délégué, isolation par projet. Et comme toute vérité dans AIDOS, le passage de Doltgres en prod ou la migration des données restent **human-gated** (le `DataTruthScope` de S37) — jamais une écriture en passant.

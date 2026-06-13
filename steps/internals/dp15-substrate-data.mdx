@@ -1,0 +1,96 @@
+---
+title: "DP15 · Internals — l'émetteur de fragments de données, le gate délégué, l'isolation par projet"
+description: "Le journal de build de DP15 : le paquet NEW additif back/runtime/datafragments/ — type ServiceFragment{Key, ProjectID, Service stackmanifest.Service, Volumes []stackmanifest.Volume}, la fonction pure SubstrateDataFragments(projectID, env) ([]ServiceFragment, error) (porte pleine, gate prod) + SubstrateCoreFragments (slice légale, omet Doltgres en prod sans erreur) + CanonicalFragment / HashFragment (S02 réutilisé) + Keys(). Jeu CLOS de quatre fragments dont les images sont la mesure DP14 : postgres (datastore/core/5432), doltgres (datastore/non-prod/5433, opt-in), valkey (cache/core/6379), pgbouncer (pooler/core/6432, depends_on postgres). Chaque fragment = image + port interne + volume bind (device = env-var, jamais un chemin en dur) + healthcheck + depends_on + profile + project_id. Isolation par projet via records.Hash(\"datafragments/v1:\"+projectID)[:12] (motif provision.isolation, jamais forké) → A != B byte-distinct. Le gate Doltgres-prod DÉLÈGUE à envbindings.ValidateDatastore EXISTANT (DP06) → DOLTGRES_NOT_ALLOWED_IN_PROD surfacé verbatim, aucune règle propre. Le miroir property datafragments_property_test.go (écrit D'ABORD, RED « no non-test Go files » confirmé) : 9 Test, 9 PASS. DDL inchangé via gen/db Atlas, round-trip déjà prouvé S89 (pas de re-boot). GATE : go build/vet/gofmt propres, sweep runtime+kernel sans FAIL, front intact (vitest 2201), ADR 0006 préservée."
+keywords: ["aidos", "krd", "DP15", "internals", "datafragments", "ServiceFragment", "SubstrateDataFragments", "SubstrateCoreFragments", "CanonicalFragment", "HashFragment", "Keys", "stackmanifest", "fonction pure", "porte pleine", "slice légale", "gate prod", "jeu clos", "postgres:16-alpine", "dolthub/doltgresql", "valkey", "edoburu/pgbouncer", "datastore", "cache", "pooler", "core", "non-prod", "opt-in", "volume bind", "device", "env-var", "jamais chemin en dur", "healthcheck", "depends_on", "profile", "project_id", "isolation par projet", "provision.isolation", "records.Hash", "byte-distinct", "byte-identique", "envbindings", "ValidateDatastore", "DP06", "DOLTGRES_NOT_ALLOWED_IN_PROD", "gate délégué", "jamais forké", "miroir property", "rapid", "RED", "VERT", "Atlas", "gen/db", "DDL", "round-trip", "S89", "S95", "Testcontainers", "anti-overwrite", "go build", "go vet", "gofmt", "ADR 0006", "DataTruthScope", "S37", "ADR 0040", "déterminisme-first", "le mur", "DP14", "DP16"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP15 — Les fragments de données](/steps/concept/dp15-substrate-data).</Note>
+
+## Implémentation
+
+### Le paquet — `back/runtime/datafragments/` (NEW, additif)
+
+DP15 grave les services de **données** de la palette mesurée (DP14) en fragments StackManifest. Le paquet est **NEW et additif** : `back/runtime/datafragments/` — rien d'existant n'est touché ni cassé. La fonction pure principale :
+
+```go
+type ServiceFragment struct {
+  Key       string                 `json:"key"`        // postgres|doltgres|valkey|pgbouncer
+  ProjectID string                 `json:"project_id"`
+  Service   stackmanifest.Service  `json:"service"`    // image/role/internal_port/profile/healthcheck/depends_on
+  Volumes   []stackmanifest.Volume `json:"volumes"`    // name + device_var (env-var ref)
+}
+
+func SubstrateDataFragments(projectID string, env scope.Environment) ([]ServiceFragment, error) // porte pleine (gate prod)
+func SubstrateCoreFragments(projectID string, env scope.Environment) ([]ServiceFragment, error) // slice légale
+func CanonicalFragment(f ServiceFragment) ([]byte, error)
+func HashFragment(f ServiceFragment) (string, error)
+func Keys() []string
+```
+
+`ServiceFragment` est aligné sur les conventions `stackmanifest` (le `Service` et le `Volume` sont ceux du kernel StackManifest, pas un schéma parallèle) — la gravure hérite de la grammaire déjà nommée à DP02.
+
+### Le jeu clos — quatre fragments, images = mesure DP14
+
+Quatre fragments DONNÉE déterministes, jeu **clos**, dont les images sont **exactement la mesure DP14** :
+
+- `postgres` — role=datastore, profile=`core`, port interne 5432, `postgres:16-alpine`
+- `doltgres` — role=datastore, profile=`non-prod`, port interne 5433, `dolthub/doltgresql:latest` — **OPT-IN hors prod**
+- `valkey` — role=cache, profile=`core`, port interne 6379, `valkey/valkey:8-alpine`
+- `pgbouncer` — role=pooler, profile=`core`, port interne 6432, `edoburu/pgbouncer:latest`, `depends_on` postgres
+
+Chaque fragment porte : image + port interne + **volume bind** (device = env-var `${SVC}_{TOKEN}_DATA_PATH`, **jamais un chemin en dur**) + healthcheck + `depends_on` + profile + `project_id`.
+
+### L'isolation par projet — motif `provision.isolation` réutilisé
+
+L'isolation par projet réutilise le motif `provision.isolation`, **jamais forké** : le token est `records.Hash("datafragments/v1:" + projectID)[:12]`. Ce token marque le **nom du volume** et la **variable d'environnement** du device. Conséquence : pour deux projets A et B, les fragments sont **byte-distincts** (A ≠ B) — aucun croisement de volume possible.
+
+### Les deux portes — pleine et slice légale
+
+- `SubstrateDataFragments` (**porte pleine**) — demande les quatre fragments ; en `prod` elle renvoie le `*Refusal` `DOLTGRES_NOT_ALLOWED_IN_PROD`.
+- `SubstrateCoreFragments` (**slice légale**) — omet proprement Doltgres en `prod` (trois fragments core) **sans erreur** ; hors prod, l'opt-in Doltgres est admis (quatre fragments).
+
+### Le gate DP06 délégué, jamais forké
+
+Doltgres en prod est refusé par `envbindings.ValidateDatastore(env, doltgres)` **EXISTANT** (DP06) → `DOLTGRES_NOT_ALLOWED_IN_PROD`, le `*Refusal` **surfacé verbatim**. **Aucun nouveau code, aucune règle propre** : DP15 appelle la porte d'origine et renvoie son refus tel quel.
+
+### Le DDL reste Atlas — pas de re-boot
+
+DP15 émet des **FRAGMENTS DE SERVICE** (topologie compose), **pas du DDL**. Le DDL (`TargetPgDDL` inchangé) est rendu par le **même émetteur Atlas `gen/db`**, réutilisé par S89 (provision) et S95 (datamigrate). Le round-trip DDL+CRUD réel est **déjà prouvé** par S89 `provision_apply_test.go` (Testcontainers `postgres:16-alpine`, opt-in `AIDOS_RUN_PROVISION_APPLY=1`). Le re-prouver ici **dupliquerait S89** (interdit) ; le boot a été mesuré à DP14 — pas de re-boot inutile. **Le miroir property sur l'émission de fragment EST la preuve DP15.**
+
+### Le miroir T0 — `datafragments_property_test.go` (écrit D'ABORD)
+
+Le miroir property est **écrit d'abord** : la RED a été confirmée par « no non-test Go files » (le test existe avant l'implémentation), puis VERT. **9 fonctions Test, 9 `--- PASS`** :
+
+- `TestL1ByteIdentique` — même entrée → mêmes octets (en prod : refus déterministe).
+- `TestL2PaletteClose` — jeu clos de 4 peuplé.
+- `TestL3DoltgresProdRefused` — Doltgres en prod refusé (porte pleine).
+- `TestL3OnlyDoltgresGatedInProd` — seuls les 3 core légaux en prod (slice).
+- `TestL4DoltgresNonProdAccepted` — Doltgres hors prod accepté, profile non-prod.
+- `TestL5Isolation` — A ≠ B byte-distinct.
+- `TestL6Profiles` — profils core / non-prod corrects.
+- `TestL7GraftedManifestValid` — manifest greffé valide.
+- `TestCanonicalIsRecordsCanonical` — `CanonicalFragment` = fixpoint `records.Canonicalize`.
+
+### La GATE
+
+- `GOTOOLCHAIN=local go build ./...` : **propre**.
+- `go vet ./runtime/datafragments` : **propre** · `gofmt` : **clean**.
+- `go test ./runtime/datafragments ./kernel/stackmanifest ./runtime/composeemit ./runtime/envbindings` : **tous OK**.
+- Sweep `./runtime/... ./kernel/...` : **AUCUN FAIL/panic** (anti-overwrite — rien de cassé).
+- Front **non touché** (vitest 2201, e2e intacts). **ADR 0006 préservée**. Toolchain Go 1.25.10 `GOTOOLCHAIN=local`.
+
+## Méta
+
+- **Le fragment est une fonction pure — la même entrée donne les mêmes octets.** L'émission est entièrement déterministe : `SubstrateDataFragments(projectID, env)` ne consulte aucun LLM, aucune horloge, aucun aléa — elle dérive ses fragments d'une table close et d'un hash. `TestL1ByteIdentique` le prouve : appelée deux fois, elle rend des octets identiques. C'est le déterminisme-first (§6) appliqué à la topologie : graver des services est une transformation pure, donc c'est du code, jamais un agent. `CanonicalFragment` réutilise `records.Canonicalize` (le fixpoint S02), `HashFragment` réutilise `records.Hash` — l'adresse de contenu est partagée avec tout le reste de la vérité.
+
+- **Le gate délègue — un seul juge pour Doltgres-prod.** DP15 ne reforge pas la règle « Postgres = prod, Doltgres = hors prod ». Cette règle vit déjà dans la porte DP06 (`envbindings.ValidateDatastore`). DP15 l'**appelle** et **surface son refus verbatim** (`DOLTGRES_NOT_ALLOWED_IN_PROD`). Le bon réflexe : ne jamais dupliquer un juge — un second juge finit par diverger du premier, et la divergence est un monstre. Le miroir (`TestL3DoltgresProdRefused`, `TestL3OnlyDoltgresGatedInProd`) asserte que c'est bien le code de DP06 qui ressort, pas un message recopié.
+
+- **L'isolation est mesurée byte-distincte, pas affirmée.** Deux projets ne partagent jamais un volume — mais ça ne se déclare pas, ça se **prouve** : `TestL5Isolation` émet les fragments de A et de B et vérifie qu'ils sont byte-distincts. Le motif `provision.isolation` est réutilisé, **jamais forké** : le token vient du même `records.Hash` que partout ailleurs, et le device reste toujours une env-var (`${SVC}_{TOKEN}_DATA_PATH`), jamais un chemin gravé. La portabilité du fragment et son isolation tombent du même choix : ne rien mettre en dur.
+
+## Méta-méta
+
+- **Postgres prod, Doltgres non-prod — la contrainte dure tient par délégation (ADR 0006).** L'ADR 0006 grave que les apps émises versionnent leurs données avec Doltgres (git-for-data) là où l'on itère, mais que la **prod est PostgreSQL**. DP15 honore cette contrainte non pas en la recopiant, mais en **déléguant** au seul gardien de la règle (DP06). C'est la forme architecturale de l'anti-duplication : une contrainte dure a **un** juge, et toute couche qui la rencontre l'appelle au lieu de la réinventer. La porte pleine bute, la slice légale omet — deux comportements, une seule source de vérité.
+
+- **La migration des données reste human-gated (DataTruthScope, S37).** DP15 pose les services de données, mais ne touche jamais à la **migration** de données réelles ni au passage d'un datastore à l'autre. Cela relève du `DataTruthScope` (S37) : un changement à impact historique (les données déjà écrites) est **human-gated** — il passe par idée → miroir → /goal → ChangeSet, jamais par une écriture en passant. Le fragment décrit *où* la donnée vit ; *bouger* la donnée est une décision enregistrée, gardée par le mur. Le DDL lui-même reste rendu par l'émetteur Atlas (`gen/db`, expand-contract, forward-only), inchangé.
+
+- **Le client TS est un slot replaceable (ADR 0040).** Le fragment grave la topologie des services ; la manière dont le code de l'app émise *parle* à ces services — le client TypeScript, le driver, le repository — est un **slot replaceable** (ADR 0040), choisi par l'app-builder dans le cadre gelé, jamais imposé par DP15. La frontière est nette : DP15 fige *quels* services tournent et *comment ils sont isolés* (mandatory, déterministe), il laisse *comment on les requête* ouvert au slot. Réutiliser plutôt que réinventer (ADR 0007) : le DDL via Atlas, le round-trip via S89, l'isolation via `provision.isolation` — DP15 n'ajoute qu'une chose neuve, l'assemblage des fragments de données en jeu clos.
