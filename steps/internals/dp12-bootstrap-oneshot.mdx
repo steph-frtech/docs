@@ -1,0 +1,47 @@
+---
+title: "DP12 · Internals — EmitBootstrapSequence : une séquence pure, un jeu clos d'événements, le miroir N2"
+description: "Le journal de build de DP12 : EmitBootstrapSequence(bundle, état) — une FONCTION PURE qui émet la séquence d'amorçage (network → volumes → .env → secrets-check → ResolvePort → start ordonné par rang déclaré → healthchecks → print-URLs) comme un jeu CLOS de d-events, la résolution de ports réutilisée verbatim de DP10 (fonction pure de ss+docker ps), un secret requis absent → MISSING_SECRET_AT_BOOT fail-closed ; le miroir fixture N2 state→command→events écrit d'abord et rouge puis vert + une property ∀ (même bundle + même état → même séquence), le jumeau TS épinglé par parité de hash, la route /bootstrap et ses e2e Playwright. Remplace le geste interactif deploy.sh (7 prompts) par un émetteur déterministe."
+keywords: ["aidos", "krd", "DP12", "internals", "EmitBootstrapSequence", "bootstrap", "one-shot", "jeu clos d-events", "BootEvent", "network-created", "volumes-created", "env-materialized", "secrets-checked", "ResolvePort", "StartOrder", "healthchecks", "urls-printed", "MISSING_SECRET_AT_BOOT", "fonction pure", "fixture N2", "state-command-events", "Operation DSL", "property", "rapid", "fast-check", "miroir rouge-vert", "jumeau TS", "parité de hash", "above-the-line", "below-the-line", "secrets dans l'appliance", "jamais en git", "déterminisme-first", "deploy.sh", "/bootstrap", "Playwright", "DP10", "DP11"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP12 — Le bootstrap one-shot](/steps/concept/dp12-bootstrap-oneshot).</Note>
+
+## Implémentation
+
+### `EmitBootstrapSequence` — une fonction pure du bundle + de l'état observé
+
+Le cœur de DP12 est un **émetteur pur** : `EmitBootstrapSequence(bundle, observed) → (Sequence, error)`. Il ne touche rien — il **émet un plan-données** : la liste ordonnée des étapes d'amorçage, inspectable avant tout effet, exactement comme `BuildPlan` du spike DP10. L'exécution effective (le runner docker effectful) est séparée du calcul ; la vérité prouvée est la **séquence émise**, pas l'effet.
+
+L'émetteur compose des briques déjà gelées : la **résolution de ports** est `ResolvePort(occupied, base)` réutilisée verbatim de DP10 (le premier port libre au-dessus de la base, fonction pure de l'union `ss` ⊎ `docker ps` capturée une fois) ; l'**ordre de démarrage** est `StartOrder` sur le rang déclaré de l'ensemble clos `{traefik:0, datastore:1, …, server:N}` (tie-break par nom, stable par permutation). DP12 ne réinvente ni le port ni l'ordre : il les **chaîne** dans la séquence d'amorçage complète.
+
+### Le jeu CLOS de `BootEvent`
+
+La séquence est une suite d'événements tirés d'un **ensemble clos, énumérable** (le motif de l'ensemble clos `Profiles()` de DP11 et `scope.Environment` de DP06) :
+
+`network-created → volumes-created → env-materialized → secrets-checked → ports-resolved → <service>-up / healthy:<service> (×N, dans l'ordre des rangs) → urls-printed`
+
+Chaque membre est un `BootEvent` déclaré ; un événement hors ensemble n'existe pas. La clôture rend la séquence **lisible d'un coup d'œil et testable** : la fixture N2 énumère exactement les transitions attendues. Le `start ordonné` déplie le `StartOrder` en paires `<service>-up` puis `healthy:<service>` — traefik d'abord (rien ne s'y branche sans lui), le datastore avant le serveur (le serveur ne se connecte qu'à un datastore sain).
+
+### `MISSING_SECRET_AT_BOOT` — fail-closed, jamais deviné
+
+L'étape `secrets-checked` est totale et fail-closed. `CheckSecrets(bundle, env)` calcule l'ensemble des secrets requis du bundle moins l'ensemble présent dans l'`.env` matérialisé ; si le reste est non vide, l'émission **s'arrête** sur `MISSING_SECRET_AT_BOOT` en **nommant** le(s) secret(s) absent(s) — un code de refus **package-local** (motif DP02/DP03/DP11 — l'enum gelé `blockreason` n'est jamais touché). Aucune valeur par défaut n'est devinée ; aucune séquence partielle n'est émise. Un secret manquant est une condition d'arrêt nommée, pas un défaut silencieux.
+
+### La résolution de ports, pure
+
+`ResolvePort` est rejouée de DP10 sans modification : l'état de l'hôte est **photographié une fois** comme données (`ss -ltn` + `docker ps -a` parsés), `Occupied` fait l'union, et le port résolu est le premier libre ≥ base. Là où `deploy.sh` affichait « Entrez un nouveau port » et bloquait sur un `read -rp`, DP12 **calcule** — même snapshot → même port. C'est le geste interactif transformé en fonction sur l'état observé : la leçon centrale du verdict GO de DP10.
+
+## Méta
+
+- **Le miroir d'abord (rouge → vert), forme N2.** La nature de DP12 est un **workflow** (`state → command → events`), donc le miroir canonique est une **fixture N2** (Operation DSL interprété en Go, stack §3) écrite AVANT `EmitBootstrapSequence` — fonction absente → compile fail, c'est le rouge —, puis verte. La fixture épingle : l'état initial (bundle + hôte observé), la commande `bootstrap`, et le **jeu clos d'événements attendu dans l'ordre exact** (`network-created … urls-printed`). À côté, une **property ∀ N1** (rapid en Go) : ∀ bundle, ∀ état observé valide, deux émissions → **séquence identique** (reproductibilité, le motif `output_hash` de DP03/DP11) ; le `start` respecte toujours le rang (traefik < datastore < serveur) ; un secret requis retiré → `MISSING_SECRET_AT_BOOT` qui nomme l'absent, jamais une séquence partielle ; le port résolu n'est jamais occupé ni sous la base. Le jumeau TS reproduit l'émetteur et le jeu d'événements octet pour octet ; le miroir vitest (fast-check) épingle le hash Go autoritatif — toute divergence d'un octet rougit — et porte les mêmes lois côté twin.
+
+- **Chaîner les briques gelées, jamais les redoubler.** Le réflexe paresseux aurait été de réécrire la résolution de ports et l'ordre de démarrage dans DP12. Le geste juste est de **réutiliser `ResolvePort` et `StartOrder` de DP10 verbatim** et de ne faire de DP12 que le **chaînage** des huit étapes en une séquence. La byte-stabilité de ces briques est ainsi héritée gratuitement, jamais re-prouvée séparément — DP12 prouve uniquement la composition (l'ordre des événements, le fail-close des secrets, l'idempotence de la séquence).
+
+- **Le plan-données avant l'effet.** Comme le spike DP10 séparait `BuildPlan` (pur) de `Bootstrap` (effectful), DP12 émet une **séquence inspectable** que le runner exécute ensuite. La vérité testée est le plan ; l'effet docker est un adaptateur N5. Cela rend le miroir N2 entièrement pur (aucun daemon requis pour le rouge → vert) et confine l'effet réel à la frontière où il appartient.
+
+## Méta-méta
+
+- **Le déterminisme-first remplace le geste interactif — c'est tout le sens de l'étape.** DP12 est l'incarnation exacte du mandat §6 : `deploy.sh` mettait ses décisions dans des **effets interactifs** (`select` pour le boilerplate, `read -rp` pour le port, la confirmation), donc non-reproductibles et inutilisables par un agent. DP12 transforme chacun de ces gestes en **fonction pure sur l'état observé** : le port n'est plus demandé, il est calculé ; l'ordre n'est plus implicite, il est un rang déclaré ; le secret n'est plus supposé présent, il est vérifié et nommé s'il manque. Ce qui *peut* être une fonction pure **DOIT** être code — et ici tout le chemin l'est. L'agent écrit l'émetteur au build ; il n'est dans aucune boucle d'amorçage à l'exécution.
+
+- **Above/below the line, jusque dans l'amorçage.** La *séquence d'amorçage* — l'ordre des étapes, le jeu clos d'événements, la logique de résolution — est du **code** (un émetteur pur, regénérable, versionné en git). Les *valeurs* qu'elle consomme — les secrets, le `.env` de l'appliance — vivent **dans l'appliance déployée, jamais dans le dépôt** : le bootstrap les matérialise et les vérifie au moment de l'amorçage, il ne les commit nulle part. Confondre les deux — committer un `.env` avec ses secrets, ou inversement coder en dur une valeur sensible dans l'émetteur — serait la faute. Le *comment amorcer* est vérité versionnée ; le *avec quels secrets* est l'affaire de l'environnement d'exécution. Le secrets-check fail-closed est le gardien de cette frontière : il prouve à l'amorçage que les valeurs attendues sont là, sans jamais les graver dans le code.
+
+- **Un refus honnête vaut mieux qu'une pile bancale.** `MISSING_SECRET_AT_BOOT` incarne la préférence du KRD pour l'arrêt nommé sur le défaut silencieux. Une stack amorcée avec un secret manquant deviné par défaut échouerait plus tard, de façon obscure, loin de la cause. Refuser d'amorcer en nommant ce qui manque transforme une panne future opaque en un message clair, à l'instant exact où la cause est connue — la même philosophie fail-closed que la porte DP06 (`prod` + Doltgres refusé) appliquée aux secrets de l'amorçage.

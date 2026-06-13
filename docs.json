@@ -579,7 +579,9 @@
        "steps/concept/dp10-bootstrap-spike",
        "steps/internals/dp10-bootstrap-spike",
        "steps/concept/dp11-compose-profiles",
-       "steps/internals/dp11-compose-profiles"
+       "steps/internals/dp11-compose-profiles",
+       "steps/concept/dp12-bootstrap-oneshot",
+       "steps/internals/dp12-bootstrap-oneshot"
       ]
      }
     ]

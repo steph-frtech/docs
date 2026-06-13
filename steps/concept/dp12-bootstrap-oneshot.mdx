@@ -1,0 +1,56 @@
+---
+title: "DP12 · Le bootstrap one-shot — lever toute la stack en une fois, déterministe"
+description: "DP12 émet le vrai bootstrap one-shot (verdict GO de DP10) : la chaîne deploy.sh interactive réécrite comme une SÉQUENCE PURE — réseau → volumes → .env → secrets-check → résolution de ports → démarrage ordonné traefik → datastore → … → serveur → healthchecks bloquants → print-URLs. Une seule commande lève la pile entière, sans un seul prompt. La résolution de ports est une fonction pure de l'état observé ; un secret manquant à l'amorçage est refusé net (MISSING_SECRET_AT_BOOT) — jamais deviné, jamais un défaut silencieux. Le bootstrap remplace les sept prompts interactifs de deploy.sh : un agent n'a pas de clavier, une usine à apps n'attend pas une touche, un déploiement reproductible ne tolère pas un choix humain au milieu."
+keywords: ["aidos", "krd", "DP12", "bootstrap", "one-shot", "deploy.sh", "séquence d'amorçage", "EmitBootstrapSequence", "réseau", "volumes", ".env", "secrets-check", "MISSING_SECRET_AT_BOOT", "résolution de ports", "ss", "docker ps", "démarrage ordonné", "traefik", "datastore", "serveur", "healthchecks", "print-URLs", "déterminisme", "above-the-line", "below-the-line", "secrets dans l'appliance", "jamais en git", "/bootstrap", "piste DP", "DP10", "DP11"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP12](/steps/internals/dp12-bootstrap-oneshot).</Note>
+
+## En une phrase
+
+DP12 transforme l'amorçage d'une stack en **une seule commande** : vous dites « lève la pile » et tout monte dans l'ordre — réseau, volumes, `.env`, vérification des secrets, ports, puis traefik, le datastore, le serveur, healthchecks, et enfin les URLs s'impriment. **Zéro prompt, zéro touche, deux fois la même séquence.**
+
+## Le problème que ça résout
+
+`deploy.sh` amorçait déjà les stacks de `/data/dockers` — il fonctionnait. Mais il fonctionnait **avec un humain dans la boucle** : un menu pour choisir le boilerplate, des questions pour nommer l'instance, confirmer, et surtout **choisir un port de remplacement** quand le port voulu était pris. DP10 l'a mesuré sur ses octets : **sept prompts interactifs**, trois références en dur à `/data/dockers`. Le spike a rendu son verdict **GO** — un bootstrap émis bat sa réutilisation directe.
+
+Pourquoi ? Parce qu'un agent ne peut pas presser des touches ; une usine à apps émises ne peut pas attendre une réponse au clavier ; et un déploiement qui dépend d'un choix humain au milieu **n'est jamais reproductible**. DP12 réécrit cette chaîne comme une **séquence pure** : chaque décision qui était un prompt devient une **fonction sur l'état observé**.
+
+## La séquence d'amorçage — un ordre déclaré, jamais deviné
+
+Le bootstrap n'improvise pas l'ordre. La séquence est **déclarée**, et chaque maillon est franchi avant le suivant :
+
+| Étape | Ce qu'elle fait |
+|---|---|
+| **réseau** | crée le réseau dédié de la stack (jamais le réseau partagé par accident) |
+| **volumes** | crée les volumes persistants déclarés |
+| **`.env`** | matérialise le fichier d'environnement de l'appliance |
+| **secrets-check** | vérifie que chaque secret requis est présent — sinon **refus net** |
+| **ports** | résout les ports en **fonction pure** de l'état observé (`ss` + `docker ps`) |
+| **démarrage ordonné** | traefik d'abord, puis le datastore, … puis le serveur — un rang déclaré |
+| **healthchecks** | chaque service est attendu **sain** (bloquant) avant le suivant |
+| **print-URLs** | imprime les URLs live de la stack montée |
+
+L'ordre n'est pas une opinion : traefik doit exister avant que quoi que ce soit s'y branche, le datastore doit être sain avant que le serveur tente de s'y connecter. C'est un **rang déclaré, stable** quel que soit l'ordre d'entrée des services.
+
+## La résolution de ports est une fonction pure — là où deploy.sh demandait
+
+Le cœur de ce que DP12 remplace : quand un port voulu est pris, `deploy.sh` affichait « Entrez un nouveau port » et attendait. DP12 **photographie l'état de l'hôte une fois** (les ports occupés, les conteneurs en cours) et **calcule** le port libre — premier port disponible au-dessus de la base. Même état observé → même port résolu, sur chaque machine, à chaque exécution. Le choix qui était un geste humain interactif est devenu une **fonction déterministe**.
+
+## Un secret manquant à l'amorçage est refusé net — jamais deviné
+
+L'étape **secrets-check** est fail-closed. Si un secret requis manque au moment d'amorcer, le bootstrap **s'arrête** avec un code clair — `MISSING_SECRET_AT_BOOT` — et nomme le secret absent. Il ne **devine pas** une valeur par défaut, il ne démarre pas une pile à moitié configurée qui échouera plus tard de façon obscure. Un secret manquant est une condition d'arrêt honnête, pas un avertissement qu'on franchit.
+
+C'est l'inverse exact du défaut silencieux : mieux vaut refuser d'amorcer en nommant ce qui manque que lever une stack bancale.
+
+## Où vivent les secrets et le `.env` — dans l'appliance, jamais en git
+
+Les secrets et le `.env` de l'appliance vivent **dans l'appliance déployée** — sur la machine qui héberge la stack — et **jamais dans le dépôt git**. Le bootstrap les **matérialise** au moment de l'amorçage, les **vérifie** (secrets-check), mais il ne les **commit** nulle part. La séquence d'amorçage, elle, est du code (un émetteur pur, regénérable) ; les valeurs sensibles qu'elle consomme restent l'affaire de l'environnement d'exécution. La frontière est nette : le *comment amorcer* est versionné ; le *avec quels secrets* ne l'est pas.
+
+## Ce que vous voyez à l'écran
+
+La route **`/bootstrap`** du Workbench rend la séquence : les huit étapes dans l'ordre, le port résolu en regard de l'état observé, le résultat du secrets-check (vert, ou le refus `MISSING_SECRET_AT_BOOT` nommant le secret absent), le log de démarrage ordonné, les healthchecks franchis, et les URLs imprimées. Un contrôle exécutable (re-émettre la séquence) prouve que la même entrée rend la même séquence — la reproductibilité tient sous vos yeux. Rien n'est écrit : la séquence émise est une projection, pas une mutation de la vérité.
+
+## Ce que ça prépare
+
+DP12 ferme la dette interactive de `deploy.sh`. DP13 exposera la séquence comme **outils MCP** (un outil = une opération, ADR 0009) pour que l'usine à apps amorce sans clavier ; l'EPIC D bâtira les services-substrat que les profiles de DP11 sélectionnent et que le bootstrap lève. Le traefik jetable du spike DP10 n'avait jamais touché la vraie route — brancher l'URL live `https://<projet>-dev.sagedesk.fr` à travers le vrai traefik, c'est désormais l'affaire du bootstrap.
