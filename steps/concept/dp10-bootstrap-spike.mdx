@@ -1,0 +1,35 @@
+---
+title: "DP10 · Le spike du bootstrap one-shot — mesurer avant d'émettre"
+description: "DP10 est un SPIKE-gate (ratchet OFF, T0) : avant d'écrire DP11-DP13, il prouve PAR MESURE qu'un bootstrap déterministe one-shot émis (réseau → résolution de ports → démarrage ordonné traefik→datastore→serveur → healthchecks → print-URLs) bat l'appel direct de /data/dockers/deploy.sh. Deux runs docker RÉELS et reproductibles, une résolution de ports qui est une fonction pure de l'état observé (ss + docker ps) — jamais un prompt —, trois candidats scorés sur des critères déclarés. Verdict mesuré : GO (natif Go 5/5, wrapper 1/5, deploy.sh direct 0/5)."
+keywords: ["aidos", "krd", "DP10", "spike", "SPIKE-gate", "bootstrap", "one-shot", "deploy.sh", "résolution de ports", "ss", "docker ps", "démarrage ordonné", "traefik", "datastore", "healthchecks", "print-URLs", "déterminisme", "verdict mesuré", "go/no-go", "harvest", "piste DP", "/bootstrap-spike"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP10](/steps/internals/dp10-bootstrap-spike).</Note>
+
+## En une phrase
+
+DP10 répond par **mesure** à une question qui aurait pu tuer trois étapes : faut-il émettre un **bootstrap one-shot déterministe** (DP12), ou réutiliser directement le script `deploy.sh` qui amorce déjà les stacks de `/data/dockers` ? Le verdict est **GO** — et il n'est pas un avis : c'est une conjonction booléenne sur des faits mesurés.
+
+## Le problème que ça résout
+
+`deploy.sh` fonctionne — il copie un boilerplate, fusionne le `.env`, résout les conflits de port, substitue les placeholders, génère le `start.sh`. Mais il fonctionne **avec un humain dans la boucle** : un menu `select` pour choisir le boilerplate, des `read -rp` pour nommer l'instance, confirmer, et surtout **choisir un port de remplacement** quand le port voulu est pris. Sept prompts interactifs au total, mesurés sur ses octets. Un agent ne peut pas presser des touches ; une usine à apps émises ne peut pas attendre une réponse au clavier ; et un déploiement qui dépend d'un choix humain au milieu n'est jamais reproductible.
+
+La question honnête n'était pas « le script est-il mauvais ? » mais « un bootstrap émis bat-il sa réutilisation directe ? ». Un SPIKE-gate existe exactement pour cela : **ratchet OFF**, code jetable confiné à la zone `/spike`, et un verdict qui RÉDUIT le sujet s'il est négatif — DP11-DP13 ne se seraient pas écrits.
+
+## Ce que le spike a réellement fait
+
+Le spike n'a pas raisonné — il a **démarré une vraie pile, deux fois** :
+
+1. il a photographié l'état de l'hôte **une seule fois** comme données (`ss -ltn` + `docker ps -a`), puis a résolu le port en **fonction pure** : premier port libre ≥ 18080 — là où deploy.sh aurait demandé « Entrez un nouveau port » ;
+2. il a calculé l'**ordre de démarrage** purement : traefik d'abord, le datastore avant le serveur — un rang déclaré, stable quel que soit l'ordre d'entrée ;
+3. il a **exécuté le plan** sur le daemon Docker local : réseau jetable, traefik → postgres → caddy, healthchecks **bloquants** (tcp, `pg_isready`, running), puis l'URL imprimée a répondu **200 à travers le traefik jetable** ;
+4. il a tout démonté, et **recommencé** : mêmes neuf événements ordonnés, même port résolu — la reproductibilité n'est pas promise, elle est constatée ;
+5. il a comparé **trois candidats** sur cinq critères déclarés (zéro prompt dans le chemin, invocation non-interactive, indépendance de /data/dockers, le plan-est-données, portabilité future_cloud) : émetteur natif Go **5/5**, wrapper non-interactif autour de deploy.sh **1/5**, appel direct **0/5**. Un compte de features, jamais une opinion.
+
+## Ce que le verdict débloque
+
+**GO** : DP12 émettra le vrai bootstrap one-shot — la chaîne deploy.sh **réécrite comme code pur** (réseaux, volumes, `.env`, secrets-check, ports, ordre, healthchecks, URLs), DP11 les profils de compose, DP13 les outils MCP. Le traefik jetable du spike n'a jamais touché `traefik_default` : brancher la vraie route `https://<projet>-dev.sagedesk.fr` est précisément l'affaire de DP12.
+
+## Ce que vous voyez à l'écran
+
+La route `/bootstrap-spike` du Workbench rend la mesure : le verdict GO avec ses sept conjoints, le **log de démarrage réel** (les neuf événements ordonnés du run), les URLs imprimées, les faits mesurés sur deploy.sh (7 prompts, 3 références en dur), la table des trois candidats, et le record de récolte — une **proposition DRAFT**, car un spike propose, il ne grave jamais : la promotion reste `idée → miroir → /goal`.

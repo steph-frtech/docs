@@ -575,7 +575,9 @@
        "steps/concept/dp08-endpoint-fitness",
        "steps/internals/dp08-endpoint-fitness",
        "steps/concept/dp09-environments-cockpit",
-       "steps/internals/dp09-environments-cockpit"
+       "steps/internals/dp09-environments-cockpit",
+       "steps/concept/dp10-bootstrap-spike",
+       "steps/internals/dp10-bootstrap-spike"
       ]
      }
     ]

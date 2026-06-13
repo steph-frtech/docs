@@ -1,0 +1,35 @@
+---
+title: "DP10 · Internals — spike/bootstrap : deux runs docker réels, un verdict conjonctif"
+description: "Le journal de build de DP10 : le module Go jetable spike/bootstrap (résolution de ports pure sur ss+docker ps, ordre de démarrage par rang déclaré, runner docker effectful traefik→postgres→caddy avec healthchecks bloquants et probe HTTP 200, verdict = conjonction content-adressée a2f23a64…), le jumeau TS pur lib/bootstrap-spike.ts épinglé par parité de hash, le miroir vitest 9/9 écrit d'abord et rouge, la route /bootstrap-spike et ses 4 e2e Playwright, l'ADR 0067 et la récolte."
+keywords: ["aidos", "krd", "DP10", "internals", "spike/bootstrap", "ResolvePort", "StartOrder", "BuildPlan", "ScoreCandidates", "MeasureScript", "Decide", "Reproducible", "Harvest", "dp10spike", "traefik", "pg_isready", "caddy", "verdict hash", "parité", "fast-check", "vitest", "Playwright", "ADR 0067", "déterminisme-first"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP10 — Le spike du bootstrap one-shot](/steps/concept/dp10-bootstrap-spike).</Note>
+
+## Implémentation
+
+### La sonde Go jetable (`spike/bootstrap`, module autonome)
+
+Confinée à `/spike` (ratchet OFF, T0), un `go.mod` à part pour ne jamais polluer `back/`. Le cœur est **pur** : `ParseSS`/`ParseDockerPS` parsent les sorties capturées comme données, `Occupied` fait l'union, `ResolvePort(occupied, 18080)` rend le premier port libre — même snapshot → même port, jamais un prompt. `StartOrder` trie par rang déclaré sur l'ensemble clos `{traefik:0, datastore:1, server:2}` (tie-break par nom — stable par permutation, prouvé par 50 shuffles seedés). `BuildPlan(bundle, état)` compose le tout en **plan-données** inspectable avant tout effet.
+
+Le seul fichier effectful est `runner.go` : `SnapshotObserved()` capture l'état UNE fois, `Bootstrap(bundle, plan)` exécute le plan (réseau `dp10spike_net` — jamais `traefik_default` —, conteneurs `dp10spike-*` : traefik:latest publié `127.0.0.1:<port-résolu>:80` avec constraint `Label(dp10.spike.expose)`, postgres:16-alpine dont le mot de passe jetable vient d'une variable d'environnement, caddy:2-alpine routé par labels), healthchecks **bloquants** (tcp / `pg_isready` / running, deadline 60 s), probe `GET http://127.0.0.1:<port>/` avec `Host: dp10spike.localhost` → 200, `Teardown` idempotent. `cmd/verdict` exécute le run **deux fois** et imprime le JSON ; exit 0 = go.
+
+### La mesure réelle (2026-06-13)
+
+Les deux runs ont produit les **neuf mêmes événements ordonnés** — `network-created → traefik-up → healthy:traefik → datastore-up → healthy:postgres → server-up → healthy:server → url-probed → urls-printed` — et le **même port résolu** (18080). Les octets de `/data/scripts/dockers/deploy.sh` (322 lignes) mesurent **7 prompts** (1 `select` + 6 `read -rp`) et **3 références `/data/dockers` en dur**. Les trois candidats scorent natif Go **5/5**, wrapper **1/5**, deploy.sh direct **0/5** sur les cinq critères déclarés. `Decide` est la conjonction des 7 conjoints, content-adressée : `a2f23a64ab7769597ed983eb6413239db526995233924b27c4b3122288662dd0` — **GO**. Le JSON mesuré est gardé dans `spike/bootstrap/verdict-measured.json`.
+
+### Le miroir d'abord (rouge → vert)
+
+`front/web/lib/bootstrap-spike.test.ts` écrit AVANT le jumeau — rouge prouvé (module absent, compile fail), puis vert **9/9** : property fast-check ∀ ensembles occupés (résolution pure, jamais un port occupé, jamais sous la base), permutation-stabilité de l'ordre, **parité d'adresse exacte** avec le hash Go mesuré (le jumeau TS re-dérive `a2f23a64…` depuis la forme canonique identique), conjonction (un fait basculé → no-go + autre adresse), reproductibilité (mesurer deux fois → même adresse), score = compte de features, récolte DRAFT (has_mirror=false, content-adressée). Côté Go : `measure_test.go` 7/7 sur le cœur pur.
+
+### L'écran et les e2e
+
+`/bootstrap-spike` (composants `page.tsx` + `BootstrapSpikePanel`, thémé ADR 0010, bilingue ADR 0011 — namespace `bootstrapSpike`, ~30 clés fr+en) rend le verdict et ses sept conjoints, le log de démarrage réel, les URLs, les faits deploy.sh, la table des candidats, la récolte. Un contrôle (« re-mesurer », ui-completeness) re-décide purement par server action et compare les adresses — `data-equal="true"`. Les 4 e2e Playwright (`tests/e2e/bootstrap-spike.spec.ts`, port :3210, prod :3000 intouchée) prouvent verdict + conjoints, les 9 événements ordonnés à l'écran, les scores 5/5–1/5–0/5, et le contrôle exécutable. Anti-overwrite : vitest **2162/2162** (baseline 2153 + 9), e2e 4/4.
+
+## Méta
+
+Le geste de l'étape est le **SPIKE-gate** lui-même : quand une intention (« émettre un bootstrap ») pourrait coûter trois étapes pour rien, on la rend falsifiable AVANT de graver — code jetable, cliquet OFF, et un verdict qui est une **mesure de la réalité** (un vrai daemon Docker, une vraie pile, deux fois) plutôt qu'une comparaison sur papier. La forme du verdict est héritée de DP01 : conjonction booléenne content-adressée + candidats scorés par critères DÉCLARÉS — le motif est maintenant un patron réutilisable de la piste DP (DP14 et DP19 le rejoueront). La récolte ne grave rien : un record DRAFT (proposes=operation) avec ses quatre OpenQuestions, dont la plus importante — le traefik de PROD est l'affaire de DP12, pas du spike.
+
+## Méta-méta
+
+Même à T0, le mandat **déterminisme-first tient intégralement** : la tentation d'un spike est de « juger à l'œil » (le LLM regarde le log et dit go) — ici CHAQUE décision est une fonction pure mesurée par miroir, et l'agent n'est dans aucune boucle d'exécution. La leçon profonde du verdict : ce qui rend deploy.sh non-réutilisable n'est pas sa logique (elle est correcte) mais le fait que ses décisions vivent dans des **effets interactifs** (`select`, `read`, `sed`) au lieu de fonctions sur l'état observé — exactement la frontière que le KRD trace entre un geste humain et un émetteur. Le spike prouve aussi une règle d'hygiène du mur appliquée à l'infrastructure : une sonde qui touche le VRAI substrat (docker) peut rester inoffensive si son périmètre est **namespacé et démontable** (réseau propre, préfixe de conteneurs, teardown idempotent) — la version infrastructurelle de « zone /spike, aucune écriture-vérité ».
