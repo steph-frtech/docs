@@ -1,0 +1,132 @@
+---
+title: "DP22 · Internals — AuditConnectorAction (enforce DP21 → DeriveConnectorBOM → Append) réutilise agentrun/ledger.go GV03 (ContentHash + ChainRoot + 5 TamperKinds single-sourced, aucun fork Merkle), ConnectorDecisionBOM drift-free load-bearing, chaîné par hash S02 jamais par timestamp, trace OTel DP17 dérivée, miroir property + fixture écrits RED-first"
+description: "Le journal de build de DP22 : le paquet back/runtime/connectorenforce/connectoraudit (3 fichiers neufs) + back/runtime/agentrun/ledger.go (modifié, additif + byte-stable). Les primitives GV03 ont été EXTRAITES en deux fonctions pures EXPORTÉES — ContentHash(v any) (string, error) (le hash canonique S01/S02, records.Canonicalize+Hash) et ChainRoot(priorRoot, entryHash string) (string, error) (le fold de préfixe) — pour qu'un 2nd plan d'audit les réutilise au lieu de forker ; les corps canoniques {index,bom} et {prior_root,entry_hash} sont INCHANGÉS, les roots AgentRun restent identiques (governance + dp19connectorgov + agentrun toujours verts). connectoraudit.AuditConnectorAction(ledger, source, identity, action) → ([]LedgerEntry, error) est la porte : enforce via connectorenforce.EnforceConnectorAction (UNIQUE source du verdict), DeriveConnectorBOM (drift-free, code = decision.Code jamais re-dérivé), Append à la chaîne. PUR, TOTAL, append-only (copy-on-grow), sans horloge/aléa/I/O. LedgerEntry{index, bom, prior_root, entry_hash, root} : entry_hash = ContentHash({index,bom}) ; root = ChainRoot(prior_root, entry_hash) — chaîné par HASH jamais par timestamp. Verify rejoue la chaîne (OK ou le 1er TamperKind) — re-implémenté sur la forme BOM connecteur (agentrun.Verify est typé sur le BOM AgentRun, non appelable direct) mais la MATH de chaîne + les 5 TamperKinds sont réutilisés single-sourced. Re-exportés single-sourced : GenesisRoot, TamperKind (+None/Index/EntryHash/PriorRoot/Root), VerifyResult. Miroir property (6 : Reproducible_And_Verifiable, Alter_TurnsRed, Delete_TamperEvident, Reorder_TurnsRed, BOM_DriftFree, Append_IsAppendOnly) + fixture (5 : FiveActions_EachVerifiableWithBOM, Alter_TurnsRed_EntryHashMismatch, Delete_TurnsRed, Reorder_TurnsRed, Reproducible_TipRoot), écrits RED-first : 11 fonctions PASS. Below-the-line : aucune version, aucun champ mirror, n'écrit aucune vérité ; OTel DP17 = projection dérivée, le ledger est la source. GATE : go build ./... exit 0 ; go test ./runtime/... ./kernel/... exit 0 ; gofmt clean ; go vet clean ; 0 ELF parasite. Backend-only ; le mur tient (aucun GRANT)."
+keywords: ["aidos", "krd", "DP22", "internals", "back/runtime/connectorenforce/connectoraudit", "connectoraudit.go", "connectoraudit_property_test.go", "connectoraudit_fixture_test.go", "back/runtime/agentrun/ledger.go", "agentrun/ledger.go", "AuditConnectorAction", "DeriveConnectorBOM", "ConnectorDecisionBOM", "DecisionBOM", "drift-free", "Append", "BuildLedger", "Root", "Verify", "VerifyResult", "LedgerEntry", "AuditedAction", "Identity", "subject", "entry_hash", "entryHash", "prior_root", "root", "tip root", "ContentHash", "ChainRoot", "GenesisRoot", "records.Canonicalize", "records.Hash", "hash canonique", "S01", "S02", "hash S02", "content-addressed", "chaîné par hash", "jamais par timestamp", "byte-stable", "byte-identique", "additif", "corps canoniques inchangés", "{index, bom}", "{prior_root, entry_hash}", "roots AgentRun identiques", "extraction de primitives", "deux primitives pures exportées", "réutilise jamais réinvente", "ADR 0007", "single-sourced", "aucun fork", "no fork", "aucun fork Merkle", "no Merkle fork", "anti-duplication", "agentrun", "ledger AgentRun", "agentrun.Verify", "agentrun.ContentHash", "agentrun.ChainRoot", "agentrun.GenesisRoot", "agentrun.TamperKind", "agentrun.VerifyResult", "re-exporté", "TamperKind", "TamperNone", "TamperIndex", "TamperEntryHash", "TamperPriorRoot", "TamperRoot", "cinq TamperKinds", "5 TamperKinds", "altération", "alter", "delete", "reorder", "tamper-evident", "première ligne brisée", "OK false", "rejoue la chaîne", "branché sur DP21", "connectorenforce", "EnforceConnectorAction", "unique source du verdict", "l'audit ne re-juge jamais", "DP21", "enforcer", "Decision", "decision.Code", "code jamais re-dérivé", "block_reason_code", "ConnectorSource", "connector.ConnectorSource", "DP20", "connector_version", "scope", "read_only", "read_write", "classification", "internal", "external", "ai", "cloud", "op", "read", "write", "target", "host", "permitted", "PUR", "TOTAL", "append-only", "copy-on-grow", "sans horloge", "sans aléa", "sans I/O", "même entrée même root", "déterminisme-first", "§6", "§8", "reproductibilité", "DP17", "OTel", "OpenTelemetry", "projection dérivée", "source d'audit", "below-the-line", "en dessous de la ligne", "aucune version", "aucun champ mirror", "n'écrit aucune vérité", "kernel", "mirrors", "fitness", "le mur", "§2", "aucun GRANT", "miroir property", "rapid", "Reproducible_And_Verifiable", "Alter_TurnsRed", "Delete_TamperEvident", "Reorder_TurnsRed", "BOM_DriftFree", "Append_IsAppendOnly", "miroir fixture", "N2", "state command events", "FiveActions_EachVerifiableWithBOM", "Alter_TurnsRed_EntryHashMismatch", "Delete_TurnsRed", "Reproducible_TipRoot", "écrit RED-first", "RED avant l'impl", "11 fonctions", "6 property", "5 fixture", "5 formes d'action", "RO read", "RW approved", "RW refused", "egress refused", "ai datastore refused", "GATE", "go build", "go test", "go vet", "gofmt", "GOTOOLCHAIN=local", "go1.25.10", "exit 0", "0 ELF parasite", "backend-only", "anti-overwrite", "§9", "loi de complétude", "monstre", "EPIC E", "load-bearing"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP22 — L'audit tamper-evident des actions de connecteur](/steps/concept/dp22-connector-audit-ledger).</Note>
+
+## Implémentation
+
+### Le paquet — `back/runtime/connectorenforce/connectoraudit` (3 fichiers) + une extraction byte-stable
+
+DP22 pose le **ledger d'audit** des actions de connecteur **au-dessus de l'enforcer DP21** (`back/runtime/connectorenforce.EnforceConnectorAction`), en **réutilisant** la chaîne de Merkle GV03 du ledger AgentRun — **aucun fork**. Tâche **backend-only** ; le mur tient (aucun GRANT).
+
+Trois fichiers neufs (anti-overwrite respecté, §9) :
+
+- `back/runtime/connectorenforce/connectoraudit/connectoraudit.go` — l'implémentation : la porte `AuditConnectorAction`, la projection `DeriveConnectorBOM`, `Append` / `BuildLedger` / `Root` / `Verify`, et les types `Identity` / `ConnectorDecisionBOM` / `LedgerEntry` / `AuditedAction`.
+- `connectoraudit_property_test.go` — le **miroir property ∀** (rapid), **écrit RED-first**.
+- `connectoraudit_fixture_test.go` — le **miroir fixture N2** (`state → command → events`), **écrit RED-first**.
+
+Et **un** fichier modifié — `back/runtime/agentrun/ledger.go` (modification **additive + byte-stable**) : la mathématique GV03 a été **extraite** en deux primitives pures **exportées**, pour qu'un second plan d'audit les **réutilise** au lieu de forker la chaîne :
+
+```go
+// ContentHash — le hash canonique S01/S02 (records.Canonicalize + Hash). L'adresse d'intégrité
+// d'une ligne. Pure : même valeur ⇒ même hash.
+func ContentHash(v any) (string, error)
+
+// ChainRoot — le fold de préfixe : replie le root précédent DANS le nouveau. Pure.
+func ChainRoot(priorRoot, entryHash string) (string, error)
+```
+
+`entryHash`, `chainRoot`, `Append`, `Verify`, `DeriveBOM`, `LedgerEntry` du plan **AgentRun** **délèguent** désormais à ces deux primitives. Les **corps canoniques** restent **inchangés** — `{"index", "bom"}` pour l'entrée, `{"prior_root", "entry_hash"}` pour le fold — donc les roots du ledger AgentRun sont **byte-identiques** : `governance`, `dp19connectorgov` et `agentrun` restent **verts**.
+
+### `AuditConnectorAction` — la porte, l'enforcer comme unique source du verdict
+
+```go
+func AuditConnectorAction(
+  ledger []LedgerEntry,
+  source connector.ConnectorSource,
+  identity Identity,
+  action connectorenforce.ConnectorAction,
+) ([]LedgerEntry, error)
+```
+
+La porte fait trois choses, dans cet ordre — et **rien de plus** :
+
+1. **Enforce** — elle appelle `connectorenforce.EnforceConnectorAction(source, action)` (DP21) : l'enforcer est la **seule source du verdict**. L'audit ne re-juge **jamais**.
+2. **Dérive** le `ConnectorDecisionBOM` via `DeriveConnectorBOM(source, identity, action, decision, reason)` — une **projection drift-free** : elle ne lit **que** des champs enregistrés, et le `block_reason_code` vient de `decision.Code`, **jamais re-dérivé**.
+3. **Append** le BOM à la chaîne (`Append(ledger, bom)`).
+
+Elle est **pure, totale, append-only** : elle grossit le ledger par **copy-on-grow** (jamais une mutation en place), ne consulte **aucune horloge**, n'utilise **aucun aléa**, ne fait **aucune I/O**. Même entrée ⇒ même ledger, même tip-root.
+
+### La forme de l'entrée — chaînée par hash S02, jamais par timestamp
+
+```go
+type LedgerEntry struct {
+  index      int                  // le rang dans la chaîne
+  bom        ConnectorDecisionBOM // la photographie drift-free de l'action
+  prior_root string               // le root de l'entrée précédente (GenesisRoot pour la première)
+  entry_hash string               // = ContentHash({index, bom})  — l'adresse d'intégrité de la ligne
+  root       string               // = ChainRoot(prior_root, entry_hash) — le fold de préfixe
+}
+
+type ConnectorDecisionBOM struct {
+  connector         string // nom (== source.Name)
+  connector_version string // l'identité de contenu DP20 (content-id @version)
+  scope             string // read_only | read_write
+  classification    string // internal | external | ai | cloud
+  identity          string // Identity.Subject — QUI
+  op                string // read | write — QUOI
+  target            string // gmail | drive | … — la cible
+  host              string // l'hôte joint
+  permitted         bool   // le résultat de l'enforcer
+  block_reason_code string // le code DP21 sur un deny ; "" sur une admission
+}
+```
+
+`entry_hash` est le **hash canonique S02** du couple `{index, bom}` ; `root` replie le `prior_root` **dans** cette empreinte. La chaîne est donc liée **par hash, jamais par timestamp** — l'ordre est garanti par la mathématique du hash, pas par une horloge. Modifier un BOM change l'`entry_hash` et tous les roots suivants ; supprimer une entrée rompt le fold ; réordonner deux entrées casse l'index et le chaînage.
+
+`Append` calcule `prior` = le `root` du tip (ou `GenesisRoot` pour un ledger vide), puis ajoute l'entrée `{len(ledger), bom, prior, ContentHash({index, bom}), ChainRoot(prior, entry_hash)}` — via les **primitives extraites** d'`agentrun`, jamais une mathématique réinventée.
+
+### `Verify` — rejouer la chaîne, nommer la première altération
+
+`Verify(ledger)` rejoue la chaîne du genesis au tip : à chaque entrée il recalcule l'`entry_hash` et le `root`, et compare. Si tout concorde ⇒ `VerifyResult{OK: true, Tamper: TamperNone, AtIndex: -1}`. Sinon il rend `OK: false` avec le **`TamperKind`** de la première ligne brisée et sa position :
+
+- `TamperIndex` — un index hors séquence (réordonnancement) ;
+- `TamperEntryHash` — l'`entry_hash` ne correspond plus au BOM (BOM modifié) ;
+- `TamperPriorRoot` — le `prior_root` ne correspond plus au root précédent (suppression / réordre) ;
+- `TamperRoot` — le `root` stocké ne se recalcule pas.
+
+La boucle de `Verify` est **re-implémentée** sur la forme du BOM **connecteur** : `agentrun.Verify` est typé sur le BOM **AgentRun** et ne peut être appelé directement. Mais la **mathématique de chaîne** (`ContentHash` + `ChainRoot`) et les **cinq TamperKinds** sont **réutilisés single-sourced** — il n'y a **aucun fork Merkle**, seulement une boucle de re-jeu sur une autre forme de payload.
+
+### Le re-export single-sourced (aucune duplication)
+
+```go
+const GenesisRoot = agentrun.GenesisRoot
+type TamperKind  = agentrun.TamperKind   // + TamperNone/Index/EntryHash/PriorRoot/Root
+type VerifyResult = agentrun.VerifyResult
+```
+
+`GenesisRoot`, le type `TamperKind` (et ses cinq valeurs), `VerifyResult` sont **re-exportés** d'`agentrun` — un alias de type, pas une copie. Le vocabulaire d'altération est **unique** : les deux plans d'audit parlent les mêmes cinq TamperKinds.
+
+### Les miroirs — property + fixture, écrits RED-first
+
+- **`connectoraudit_property_test.go`** — le miroir **∀** (rapid), **6 fonctions** : `Reproducible_And_Verifiable` (même entrée ⇒ même root ∧ `Verify().OK`), `Alter_TurnsRed` (modifier un BOM ⇒ `OK=false`), `Delete_TamperEvident` (supprimer une entrée ⇒ rouge), `Reorder_TurnsRed` (réordonner ⇒ rouge), `BOM_DriftFree` (le BOM ne lit que des champs enregistrés), `Append_IsAppendOnly` (copy-on-grow, jamais de mutation en place).
+- **`connectoraudit_fixture_test.go`** — le miroir **N2** (`state → command → events`), **5 fonctions** : `FiveActions_EachVerifiableWithBOM` (les 5 formes d'action, chacune une entrée vérifiable avec son BOM), `Alter_TurnsRed_EntryHashMismatch`, `Delete_TurnsRed`, `Reorder_TurnsRed`, `Reproducible_TipRoot`.
+- Les **5 formes d'action** couvrent la grammaire DP21 amont : **RO read** (admise), **RW approved** (admise), **RW refused** (sans approbation), **egress refused** (hors allow-list), **ai→datastore refused** (l'IA en direct sur la DB) — chacune yield une entrée **vérifiable**.
+- Total : **11 fonctions PASS** (6 property + 5 fixture), écrites **RED-first** (le miroir avant l'impl).
+
+### La GATE (GOTOOLCHAIN=local go1.25.10)
+
+- `go build ./...` : **exit 0**.
+- `go test ./runtime/... ./kernel/...` : **exit 0** — `agentrun`, `governance`, `dp19connectorgov` **inchangés** (roots byte-identiques) ; le nouveau paquet : **11 fonctions PASS**.
+- `gofmt -l` : clean sur les deux répertoires touchés · `go vet` : clean.
+- **0 ELF parasite** (scanné avant + après, aucun trouvé/créé).
+- **Backend-only** : reste pour plus tard (hors-scope de la tâche) le panneau /v2 Workbench d'audit + son e2e Playwright, et la persistance Postgres du ledger (forward-dep de bootstrap / OpenQuestion).
+
+## Méta
+
+- **Le miroir property prouve les quatre garanties d'un audit tamper-evident.** Écrit RED-first, il mesure que le ledger est **reproductible** (même entrée ⇒ même root — la reproductibilité §6), **vérifiable** (`Verify().OK` sur une chaîne intacte), et **tamper-evident sur les trois falsifications** : altérer un BOM, supprimer une entrée, réordonner deux entrées ⇒ chacune `OK=false`. La cinquième et la sixième property gardent le **BOM drift-free** (il ne lit que des champs enregistrés) et l'**append-only** (copy-on-grow). C'est le déterminisme-first (§6/§8) : graver, hacher, chaîner et vérifier sont des **fonctions pures**, donc du **code**, jamais un agent.
+
+- **Le miroir fixture épingle les cinq formes d'action comme `state → command → events`.** `FiveActions_EachVerifiableWithBOM` est la done-criteria : les cinq verdicts DP21 amont (RO read, RW approved, RW refused, egress refused, ai→datastore refused) deviennent cinq entrées, chacune **vérifiable avec son BOM**. Chaque cas est un workflow N2 (`state` = le ledger + la source + l'identité + l'action, `command` = `AuditConnectorAction`, `events` = la nouvelle entrée + son root + son verdict de vérification). La trace n'est pas un log mutable : c'est une chaîne dont chaque maillon est prouvé.
+
+- **Réutiliser plutôt que réinventer (ADR 0007), sur la mathématique de chaîne.** DP22 n'invente **aucune** mathématique de Merkle : il **extrait** d'`agentrun` deux primitives pures (`ContentHash` + `ChainRoot`), les rend exportées, et les **réutilise** single-sourced — l'extraction est **additive et byte-stable** (les corps canoniques sont inchangés, les roots AgentRun restent identiques). Les cinq TamperKinds et `VerifyResult` sont **re-exportés** (un alias, pas une copie). Seule la boucle de `Verify` est re-implémentée — non par fork, mais parce qu'`agentrun.Verify` est typé sur un autre payload. Deux plans d'audit, **une** chaîne GV03.
+
+## Méta-méta
+
+- **Le ledger est un artefact d'audit below-the-line — jamais une vérité Kernel.** Le mur (§2) tient avec une ligne nette : le ledger **n'a aucune version**, **aucun champ mirror**, et n'écrit **rien** dans `kernel`, `mirrors` ou `fitness`. C'est une **télémétrie d'audit**, pas un truth-store. L'agent n'a **aucun GRANT** pour graver une vérité ; DP22 enregistre l'**effet** d'actions déjà gouvernées par DP21, il ne crée aucune vérité. L'OTel (DP17) est une **projection dérivée** de cette trace ; le **ledger en est la source d'audit** — la trace est canonique, l'observabilité en découle.
+
+- **Chaîné par hash, jamais par timestamp — l'inviolabilité ne repose pas sur une horloge.** L'ordre et l'intégrité du ledger sont garantis par la **mathématique du hash** (`entry_hash` = `ContentHash({index, bom})`, `root` = `ChainRoot(prior_root, entry_hash)`), pas par un champ temporel qu'on pourrait reculer, fabriquer ou réordonner. Un audit chaîné par timestamp serait falsifiable par une horloge complaisante ; un audit chaîné par hash ne l'est pas — toute falsification casse le fold de préfixe et `Verify` la nomme (son `TamperKind`, sa position).
+
+- **Réutiliser la chaîne GV03 est de l'anti-duplication — et chaque action auditable est load-bearing.** Deux plans d'audit qui forkeraient chacun sa mathématique de Merkle divergeraient un jour (un bug corrigé d'un côté, pas de l'autre). En **extrayant** et **réutilisant** la même chaîne (`ContentHash` + `ChainRoot` + les cinq TamperKinds, single-sourced), DP22 garantit qu'il n'existe **qu'une** mathématique d'audit dans AIDOS — l'anti-duplication du déterminisme-first. Et la loi de complétude (Mandat A, §5) veille : un ledger sans miroir serait un **monstre**. L'enjeu porteur de DP22 est que **chaque action de connecteur soit auditable** — c'est *load-bearing* : sans cette trace tamper-evident, un verdict de l'enforcer DP21 ne laisserait aucune preuve, et un audit sans preuve fiable n'est pas un audit.

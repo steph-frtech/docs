@@ -1,0 +1,68 @@
+---
+title: "DP22 · L'audit tamper-evident de chaque action de connecteur — un ledger Merkle GV03 qui grave qui/quoi/quand/scope/target/résultat, chaîné par hash (jamais par timestamp), vérifiable de bout en bout, toute altération détectée (en dessous de la ligne, jamais une vérité Kernel), branché sur l'enforcer DP21 comme unique source du verdict, réutilisant la même chaîne GV03 que l'AgentRun (aucun fork Merkle)"
+description: "DP22 pose le LEDGER d'audit des actions de connecteur au-dessus de l'enforcer DP21 : chaque action gouvernée laisse une trace tamper-evident dans une chaîne de Merkle GV03 — la MÊME chaîne que le ledger AgentRun (S01/S02), réutilisée single-sourced, aucun fork. La porte est `AuditConnectorAction(ledger, source, identity, action)` : elle enforce d'abord via `connectorenforce.EnforceConnectorAction` (UNIQUE source du verdict — l'audit ne re-juge jamais), dérive le ConnectorDecisionBOM (qui/quoi/quand/scope/classification/target/host/permis/code-de-refus), puis Append à la chaîne. Chaque entrée porte entry_hash = ContentHash({index, bom}) (le hash canonique S02) et root = ChainRoot(prior_root, entry_hash) (le fold de préfixe) — la chaîne est liée par HASH, JAMAIS par timestamp. Verify(ledger) rejoue la chaîne : OK=true si intacte ; toute altération (modifier un BOM, supprimer une entrée, réordonner) ⇒ OK=false avec un TamperKind (TamperIndex/EntryHash/PriorRoot/Root) pointant la première ligne brisée. Le BOM est drift-free : il ne lit QUE les champs enregistrés (code = decision.Code, jamais re-dérivé). PUR, TOTAL, append-only (copy-on-grow), sans horloge/aléa/I/O ; même entrée ⇒ même root. Le ledger est de l'audit BELOW-THE-LINE — aucune version, aucun champ mirror, n'écrit AUCUNE vérité Kernel/mirrors/fitness ; OTel (DP17) est une projection dérivée, le ledger est la source d'audit. Miroir property (reproductible+vérifiable, alter⇒rouge, delete tamper-evident, reorder⇒rouge, BOM drift-free, append-only) + fixture (5 formes d'action, chacune vérifiable avec son BOM, altération/suppression/réordre ⇒ rouge, tip-root reproductible), écrits RED-first : 11 fonctions PASS. Tâche backend-only ; le mur tient (aucun GRANT). Réutilise agentrun ContentHash + ChainRoot + les 5 TamperKinds single-sourced (la chaîne mathématique GV03 n'est jamais forkée)."
+keywords: ["aidos", "krd", "DP22", "audit", "ledger", "ledger d'audit", "audit ledger", "tamper-evident", "tamper-proof", "inviolable", "Merkle", "chaîne de Merkle", "GV03", "GV03 Merkle", "connecteur", "action de connecteur", "connector action", "audit de connecteur", "EPIC E", "back/runtime/connectorenforce/connectoraudit", "connectoraudit", "AuditConnectorAction", "DeriveConnectorBOM", "ConnectorDecisionBOM", "DecisionBOM", "BOM", "bill of materials", "drift-free", "sans dérive", "Append", "BuildLedger", "Root", "Verify", "VerifyResult", "LedgerEntry", "AuditedAction", "Identity", "entry_hash", "entryHash", "prior_root", "root", "tip root", "ContentHash", "ChainRoot", "GenesisRoot", "hash canonique", "S01", "S02", "hash S02", "canonicalize", "records.Hash", "content-addressed", "chaîné par hash", "chained by hash", "jamais par timestamp", "never by timestamp", "qui quoi quand", "who what when", "scope", "read_only", "read_write", "classification", "internal", "external", "ai", "cloud", "identity", "subject", "op", "read", "write", "target", "host", "permitted", "permis", "block_reason_code", "code de refus", "TamperKind", "TamperNone", "TamperIndex", "TamperEntryHash", "TamperPriorRoot", "TamperRoot", "cinq TamperKinds", "5 TamperKinds", "altération détectée", "alteration detected", "altérer un BOM", "supprimer une entrée", "réordonner", "reorder", "delete", "alter", "vérifiable", "verifiable", "Verify().OK", "rejoue la chaîne", "replay", "première ligne brisée", "first broken row", "branché sur DP21", "wired on DP21", "connectorenforce", "EnforceConnectorAction", "unique source du verdict", "single source of the verdict", "l'audit ne re-juge jamais", "audit never re-judges", "DP21", "enforcer", "source DP20", "ConnectorSource", "DP20", "DP17", "OTel", "OpenTelemetry", "projection dérivée", "derived projection", "source d'audit", "audit source", "PUR", "TOTAL", "append-only", "copy-on-grow", "sans horloge", "sans aléa", "sans I/O", "même entrée même root", "déterminisme-first", "§6", "§8", "reproductibilité", "reproductible", "réutilise jamais réinvente", "ADR 0007", "agentrun", "agentrun/ledger.go", "ledger AgentRun", "single-sourced", "aucun fork", "no fork", "aucun fork Merkle", "no Merkle fork", "anti-duplication", "GV03 anti-duplication", "miroir property", "miroir fixture", "écrit RED-first", "RED avant l'impl", "11 fonctions", "6 property", "5 fixture", "backend-only", "le mur", "§2", "aucun GRANT", "aucune vérité écrite", "below-the-line", "en dessous de la ligne", "jamais une vérité Kernel", "never a Kernel truth", "loi de complétude", "monstre", "5 formes d'action", "RO read", "RW approved", "RW refused", "egress refused", "ai datastore refused", "chaque action auditable", "every action auditable", "load-bearing"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP22](/steps/internals/dp22-connector-audit-ledger).</Note>
+
+## En une phrase
+
+DP22 pose le **ledger d'audit** des actions de connecteur **au-dessus de l'enforcer DP21** : chaque action gouvernée — admise ou refusée — laisse une trace **tamper-evident** dans une **chaîne de Merkle GV03**, gravant **qui / quoi / quand / scope / target / résultat**, **chaînée par hash et jamais par timestamp**, **vérifiable de bout en bout**, où toute altération (modifier, supprimer, réordonner) est **détectée** — et ce, **en dessous de la ligne**, sans jamais écrire une vérité du Kernel.
+
+## Le problème que ça résout
+
+DP21 a donné aux connecteurs une **gouvernance vivante** : l'enforcer décide, à l'exécution, si une action est admise ou refusée (scope, egress, IA, approbation runtime). Mais un verdict qui ne laisse **aucune trace** est un verdict qu'on ne peut **ni auditer, ni prouver après coup**. Quand un connecteur a écrit dans Gmail, quand une action IA a été refusée d'accéder à la DB, quand un RW a obtenu son approbation humaine — il faut une **trace fiable** : qui a tenté quoi, dans quel scope, vers quelle cible, avec quel résultat, et dans quel **ordre**.
+
+Le réflexe naïf serait un **fichier de logs** : facile à écrire, facile à **falsifier silencieusement**. On peut éditer une ligne, en supprimer une, en réordonner deux — et personne ne le saurait. Un log mutable n'est pas un audit, c'est une **suggestion**. DP22 pose la règle inverse : la trace est un **ledger tamper-evident**, une chaîne de Merkle où **chaque entrée est liée à la précédente par un hash**, de sorte que toute altération **casse la chaîne** et **se détecte**.
+
+## Un ledger Merkle GV03 — chaîné par hash, jamais par timestamp
+
+Le cœur de DP22 est la **chaîne GV03** : chaque action auditée devient une **entrée** du ledger, et chaque entrée porte deux empreintes :
+
+- un **`entry_hash`** = le hash canonique S02 de son contenu (`{index, bom}`) — l'adresse d'intégrité de la ligne ;
+- un **`root`** = le **fold de préfixe** `ChainRoot(prior_root, entry_hash)` — qui replie le root précédent **dans** le nouveau.
+
+Ainsi chaque entrée **dépend** de toutes celles qui la précèdent. La chaîne est liée **par hash**, **jamais par timestamp** : l'ordre est garanti par la mathématique du hash, pas par une horloge qu'on pourrait reculer. Modifier le contenu d'une entrée change son `entry_hash`, donc tous les roots suivants ; supprimer une entrée brise le fold ; réordonner deux entrées brise l'index et le chaînage. Aucune de ces falsifications ne passe inaperçue.
+
+C'est **exactement la même chaîne** que le ledger des AgentRuns (S01/S02) : DP22 **réutilise** la mathématique GV03 — `ContentHash` (le hash canonique) et `ChainRoot` (le fold) — **single-sourced**, sans **aucun fork Merkle**. Deux plans d'audit, une seule mathématique de chaîne.
+
+## Le ConnectorDecisionBOM — qui / quoi / quand / scope / target / résultat
+
+Chaque entrée grave un **BOM de décision** (un *bill of materials* de l'action) — la photographie complète, et **drift-free**, de ce qui s'est passé :
+
+- **qui** — l'identité (`identity`, le sujet de l'action) ;
+- **quoi** — l'opération (`op` : read | write) et la cible (`target` : gmail, drive, …), l'hôte joint (`host`) ;
+- **le scope** déclaré du connecteur (`scope` : read_only | read_write) et sa **classification** (`classification` : internal | external | ai | cloud) ;
+- **le connecteur** lui-même (`connector` + `connector_version`, l'identité de contenu DP20 `@version`) ;
+- **le résultat** — `permitted` (admis ou non) et, sur un refus, le `block_reason_code` (le code DP21 du verdict ; vide sur une admission).
+
+Le BOM est **drift-free** : il ne lit **que des champs enregistrés**. Le code de refus vient de la décision de l'enforcer (`decision.Code`), il n'est **jamais re-dérivé** — pas de seconde interprétation qui pourrait diverger du verdict réel. Ce que le BOM grave est, mot pour mot, ce que l'enforcer a décidé.
+
+## La porte — `AuditConnectorAction`, l'enforcer comme unique source du verdict
+
+L'audit ne **re-juge jamais**. La porte unique, `AuditConnectorAction`, fait trois choses, dans cet ordre :
+
+1. elle **enforce** l'action via `EnforceConnectorAction` (DP21) — l'enforcer est la **seule source du verdict** ;
+2. elle **dérive** le `ConnectorDecisionBOM` à partir de la source, de l'identité, de l'action et de la **décision rendue** ;
+3. elle **Append** le BOM à la chaîne de Merkle.
+
+C'est une seule fonction **pure, totale, append-only** : elle ne mute jamais le ledger existant (elle grossit par copie, *copy-on-grow*), ne consulte aucune horloge, n'utilise aucun aléa, ne fait aucune I/O. Le verdict d'audit est donc une **reproduction exacte** du verdict d'enforcement, jamais un second avis. L'audit **observe** ; l'enforcer **décide**.
+
+## Vérifier — et détecter toute altération
+
+`Verify(ledger)` **rejoue** la chaîne du genesis jusqu'au tip : si chaque `entry_hash` et chaque `root` se recalcule à l'identique, le verdict est **`OK = true`**. Sinon, `Verify` rend **`OK = false`** avec un **`TamperKind`** qui nomme **la nature** de l'altération et **la position** de la première ligne brisée :
+
+- un **BOM modifié** ⇒ l'`entry_hash` ne correspond plus (`TamperEntryHash`) ;
+- une **entrée supprimée** ⇒ le fold de préfixe est rompu (le ledger est tamper-evident) ;
+- deux **entrées réordonnées** ⇒ l'index ou le chaînage casse (`TamperIndex` / `TamperPriorRoot` / `TamperRoot`).
+
+Ce sont les **cinq mêmes TamperKinds** que le ledger AgentRun (`TamperNone / Index / EntryHash / PriorRoot / Root`), **re-exportés single-sourced** — un vocabulaire d'altération unique, jamais forké. Un audit qui ne sait pas dire **où** et **comment** il a été falsifié ne vaut rien ; DP22 le dit précisément.
+
+## Le mur — un audit n'est pas une vérité
+
+DP22 respecte le mur (§2) avec une ligne nette : le ledger est une **télémétrie d'audit en dessous de la ligne**. Il **n'a aucune version**, **aucun champ mirror**, et **n'écrit aucune** vérité — ni dans `kernel`, ni dans `mirrors`, ni dans `fitness`. C'est une trace, pas un truth-store. L'OTel (DP17) est une **projection dérivée** de cette trace ; le ledger en est la **source d'audit**. L'agent n'a **aucun GRANT** pour écrire une vérité : DP22 ne grave rien dans le Kernel, il **enregistre l'effet** d'actions déjà gouvernées par DP21.
+
+## Ce que ça autorise — et ce que ça interdit
+
+DP22 transforme chaque verdict de l'enforcer en une **trace prouvable** : ce que ça **autorise**, c'est de reconstituer après coup l'histoire complète et **fiable** des actions de connecteur — toute lecture RO, toute écriture RW approuvée ou refusée, tout egress refusé, toute action IA bloquée vers la DB — chacune avec son BOM vérifiable. Ce que ça **interdit**, c'est la **falsification silencieuse** : on ne peut pas modifier, supprimer ou réordonner une entrée sans que `Verify` ne le détecte. Et la loi de complétude veille : un ledger sans miroir serait un **monstre** — il ne vit que parce qu'il porte sa preuve vivante (le miroir property qui prouve reproductibilité, détection d'altération et BOM drift-free, + le miroir fixture des cinq formes d'action chacune vérifiable).

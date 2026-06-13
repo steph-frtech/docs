@@ -599,7 +599,9 @@
        "steps/concept/dp20-connector-sources",
        "steps/internals/dp20-connector-sources",
        "steps/concept/dp21-connector-enforcement",
-       "steps/internals/dp21-connector-enforcement"
+       "steps/internals/dp21-connector-enforcement",
+       "steps/concept/dp22-connector-audit-ledger",
+       "steps/internals/dp22-connector-audit-ledger"
       ]
      }
     ]
