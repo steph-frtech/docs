@@ -1,0 +1,121 @@
+---
+title: "DP16 · Internals — l'émetteur de fragments asynchrones, le scheduler pur, l'outbox S73 réutilisé"
+description: "Le journal de build de DP16 : le paquet NEW additif back/runtime/asyncfragments/ — jumeau asynchrone de DP15. Réutilise type ServiceFragment = datafragments.ServiceFragment (jamais forké) + CanonicalFragment / HashFragment (S02 via DP15). SubstrateAsyncFragments(projectID, env) ([]ServiceFragment, error) émet un jeu CLOS de deux fragments dont les images sont la mesure DP14 : windmill (workflow/core/8000, ghcr.io/windmill-labs/windmill:main, GET /api/health, depends_on postgres, JAMAIS Temporal) + nats (bus/core/4222, nats:2.10-alpine). Aucun env-gating (≠ Doltgres DP15) ; seul un environnement hors-set échoue fermé UNKNOWN_ENVIRONMENT. Isolation via la MÊME datafragments.IsolationToken (records.Hash(\"datafragments/v1:\"+projectID)[:12], DP15 exporté en additif §9, jamais forké) → A != B byte-distinct. RealizeScheduled(op, async, clock, outbox, sink) ([]DispatchEvent, error) tique le scheduler S73 sur l'horloge INJECTÉE (operation.Tick, jamais time.Now) ; à l'échéance écrit chaque effet dans l'outbox puis dispatche via operation.Dispatch (S73 réutilisé) ; exactly-once relatif via EffectID adressé au contenu ; avant échéance : ni écriture ni événement. Workers app émise restent TS (ADR 0040, S74 relemit.EmitWorker). Miroir fixture N2 asyncfragments_fixture_test.go (9 Test) + miroir property asyncfragments_property_test.go (7 Test) écrits D'ABORD (RED) puis VERT : 16 PASS. GATE : go build/vet/gofmt propres, sweep runtime+kernel sans FAIL, front intact (vitest 2201). Go 1.25.10 GOTOOLCHAIN=local."
+keywords: ["aidos", "krd", "DP16", "internals", "asyncfragments", "ServiceFragment", "datafragments.ServiceFragment", "SubstrateAsyncFragments", "RealizeScheduled", "DispatchEvent", "OutboxWriter", "ErrOutboxNotWritable", "CanonicalFragment", "HashFragment", "Keys", "Windmill", "ghcr.io/windmill-labs/windmill", "NATS", "nats:2.10-alpine", "Temporal", "jamais Temporal", "WindmillNeverTemporal", "workflow", "bus", "core", "jeu clos", "outbox transactionnel", "exactly-once relatif", "scheduler", "S73", "operation.Tick", "operation.Clock", "FixedClock", "operation.Due", "operation.Dispatch", "operation.Outbox", "operation.Sink", "horloge injectée", "jamais time.Now", "EffectID", "adressé au contenu", "replay sans doublon", "ReplayAfterCrashNeverDuplicates", "ScheduledRealizesAtEcheance", "UNKNOWN_ENVIRONMENT", "pas d'env-gating", "isolation par projet", "provision.isolation", "IsolationToken", "records.Hash", "byte-distinct", "byte-identique", "device", "env-var", "jamais chemin en dur", "healthcheck", "depends_on", "profile", "project_id", "miroir fixture N2", "miroir property", "rapid", "RED", "VERT", "workers TS", "ADR 0040", "S74", "relemit", "EmitWorker", "go build", "go vet", "gofmt", "anti-overwrite", "déterminisme-first", "le mur", "DP14", "DP15"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP16 — Les fragments d'asynchrone](/steps/concept/dp16-substrate-async).</Note>
+
+## Implémentation
+
+### Le paquet — `back/runtime/asyncfragments/` (NEW, additif)
+
+DP16 grave les services **asynchrones** de la palette mesurée (DP14) en fragments StackManifest. Le paquet est **NEW et additif** : `back/runtime/asyncfragments/` — rien d'existant n'est touché ni cassé. C'est le **jumeau asynchrone** de DP15 : il **réutilise** le type `ServiceFragment` de `datafragments` au lieu d'en forger un parallèle.
+
+```go
+type ServiceFragment = datafragments.ServiceFragment // alias, JAMAIS forké
+
+func SubstrateAsyncFragments(projectID string, env scope.Environment) ([]ServiceFragment, error)
+func Keys() []string // palette close [windmill nats]
+
+func RealizeScheduled(
+  op operation.Operation, async operation.Async,
+  clock operation.Clock, outbox operation.Outbox, sink operation.Sink,
+) ([]DispatchEvent, error)
+
+type DispatchEvent struct {
+  Operation string
+  EffectID  string
+  Kind      operation.TriggerKind
+  Target    string
+}
+
+type OutboxWriter interface { Write(operation.OutboxEntry) } // facet write du seam outbox S73
+var ErrOutboxNotWritable error
+
+var CanonicalFragment = datafragments.CanonicalFragment // S02 réutilisé via DP15
+var HashFragment      = datafragments.HashFragment
+```
+
+Pour que la réutilisation du token de DP15 soit propre, `datafragments.isolationToken` a été **exporté** en `IsolationToken` — un changement **additif** (§9), les appelants internes de DP15 mis à jour, ses tests toujours verts. DP16 réutilise donc l'**exact** token par projet de DP15, sans schéma forké.
+
+### Le jeu clos — deux fragments, images = mesure DP14
+
+Deux fragments ASYNCHRONES déterministes, jeu **clos**, dont les images sont **exactement la mesure DP14** :
+
+- `windmill` — role=workflow, profile=`core`, port interne 8000, `ghcr.io/windmill-labs/windmill:main`, healthcheck `GET /api/health`, `depends_on` postgres — **JAMAIS Temporal**.
+- `nats` — role=bus, profile=`core`, port interne 4222, `nats:2.10-alpine`.
+
+Chaque fragment porte : image + port interne + **volume bind** (device = env-var, **jamais un chemin en dur**) + healthcheck + `depends_on` + profile + `project_id`.
+
+### Pas d'env-gating — fermeture sur l'inconnu
+
+Contrairement à DP15 (Doltgres opt-in hors prod), DP16 **n'a aucun env-gating** : la palette asynchrone est `core` dans **tous** les environnements. Il n'y a donc **aucune porte de gate** à déléguer. La seule défense : un environnement **hors du jeu déclaré** échoue **fermé** avec `UNKNOWN_ENVIRONMENT`. Pour `(projectID, env)` valide, l'émission est **byte-identique** d'un appel à l'autre.
+
+### L'isolation par projet — `datafragments.IsolationToken` réutilisé
+
+L'isolation par projet réutilise **le même** token que DP15 (`provision.isolation`, jamais forké) : `records.Hash("datafragments/v1:" + projectID)[:12]`, désormais exposé via `datafragments.IsolationToken`. Ce token marque le **nom du volume** et la **variable d'environnement** du device. Conséquence : pour deux projets A et B, les fragments asynchrones sont **byte-distincts** (A ≠ B) — aucun croisement de volume possible. Un seul schéma d'isolation pour toute la substrate.
+
+### Le scheduler pur sur horloge injectée — `RealizeScheduled`
+
+`RealizeScheduled` réutilise le **scheduler de S73 verbatim** (`operation.Tick`, `operation.Clock`/`FixedClock`, `operation.Due`, `operation.Effect`/`EffectID`, `operation.OutboxEntry`/`Outbox`/`Sink`/`Dispatch`, `ValidateAsync`, l'ancre `SendReminder`) — **rien n'est forké**.
+
+- Le scheduler tique sur l'**horloge INJECTÉE** (`operation.Tick`) — **jamais `time.Now`**, jamais d'aléa.
+- **Avant l'échéance** : ni écriture ni événement.
+- **À l'échéance** : chaque effet est d'abord **écrit dans l'outbox**, puis **dispatché** via `operation.Dispatch` (S73, réutilisé pas forké).
+- **Exactly-once relatif** : le `EffectID` est **adressé au contenu** ; un replay après crash retrouve l'`EffectID` dans l'outbox et **supprime** le doublon — le dispatch ne part qu'une fois.
+
+`OutboxWriter` est la **facet write** du seam outbox de S73 (**ajoutée**, pas une mutation de S73) ; un outbox non inscriptible rend `ErrOutboxNotWritable` (erreur **typée**, pas un panic).
+
+### Les workers restent TS — pas un worker de runtime
+
+DP16 émet des **FRAGMENTS DE SERVICE** (topologie compose) + le **planificateur au build**, **pas** les workers de l'app émise. Les **workers asynchrones de l'application émise restent en TypeScript** (ADR 0040), rendus par l'émetteur S74 (`relemit.EmitWorker`). Ce paquet Go est la **réalisation au build** et le **scheduler**, jamais un worker dans la boucle de runtime — le re-coder en Go **dupliquerait S74** (interdit).
+
+### Les miroirs — fixture N2 + property, écrits D'ABORD (RED → VERT)
+
+Les deux miroirs sont **écrits d'abord** (mirror-first, RED confirmée) puis VERT. **16 fonctions Test, 16 PASS** (`grep -c func Test` = 9 + 7).
+
+Miroir **fixture N2** — `asyncfragments_fixture_test.go` (**9 Test**) :
+
+- `TestFixture_ScheduledRealizesAtEcheance` — à l'échéance, l'effet est réalisé (écrit + dispatché).
+- `TestFixture_ReplayAfterCrashNeverDuplicates` — rejouer ne duplique jamais (EffectID).
+- `TestFixture_MalformedAsyncIsTypedFailure` — un `Async` malformé est une erreur typée.
+- `TestFixture_NonWritableOutboxErrorIsTyped` — outbox non inscriptible → `ErrOutboxNotWritable`.
+- `TestFixture_AsyncPaletteIsWindmillAndNats` — la palette est exactement `[windmill nats]`.
+- `TestFixture_WindmillNeverTemporal` — **Windmill, jamais Temporal** (contrainte dure).
+- `TestFixture_UnknownEnvironmentRefused` — environnement hors-set refusé `UNKNOWN_ENVIRONMENT`.
+- (+ `ScheduledRealizesAtEcheance` avant échéance : ni écriture ni événement ; helper `containsCI` non compté.)
+
+Miroir **property ∀ (rapid)** — `asyncfragments_property_test.go` (**7 Test**) :
+
+- `TestL1ByteIdentique` — même `(projectID, env)` → mêmes octets.
+- `TestL2PaletteClose` — jeu clos de 2 peuplé.
+- `TestL3NoEnvGate` — aucun env-gating (palette core partout).
+- `TestL4Isolation` — A ≠ B byte-distinct.
+- `TestL5SharedIsolationToken` — token partagé avec DP15 (`IsolationToken`).
+- `TestL6DeterministicScheduling` + `TestL6ReplayExactlyOnce` — planification déterministe, replay exactly-once.
+- `TestL7GraftedManifestValid` + `TestCanonicalIsRecordsCanonical` — manifest greffé valide ; `CanonicalFragment` = fixpoint `records.Canonicalize`.
+
+### La GATE
+
+- `GOTOOLCHAIN=local go build ./...` : **exit 0**.
+- `go vet ./runtime/... ./kernel/...` : **exit 0** · `gofmt -l` sur les deux paquets : **clean**.
+- `go test ./runtime/... ./kernel/...` : **exit 0** (aucun FAIL ; seulement des lignes `[no test files]`).
+- Nouveau paquet : **16 tests, tous PASS**. DP15 `datafragments` toujours vert après l'export additif.
+- Front **non touché** (vitest 2201, e2e intacts). Toolchain Go 1.25.10 `GOTOOLCHAIN=local`.
+
+## Méta
+
+- **Le scheduler est pur sur une horloge injectée — donc il se rejoue à l'identique.** `RealizeScheduled` ne consulte **ni `time.Now`, ni aléa, ni LLM** : elle reçoit son `Clock` en paramètre et tique dessus. C'est le déterminisme-first (§6) appliqué au temps : planifier est une transformation pure des seams injectés, donc c'est du code, jamais un agent. `TestL6DeterministicScheduling` le prouve. Et l'émission de fragments est elle aussi pure : `SubstrateAsyncFragments` dérive ses deux briques d'une table close et du hash de DP15 — `TestL1ByteIdentique` asserte que deux appels rendent des octets identiques.
+
+- **L'exactly-once n'est pas affirmé, il est mesuré au replay.** La garantie dure de l'asynchrone — un effet planifié part une seule fois même après un crash — ne se déclare pas, elle se **prouve** : `TestFixture_ReplayAfterCrashNeverDuplicates` rejoue la réalisation et vérifie qu'aucun doublon ne sort. Le mécanisme est l'`EffectID` **adressé au contenu** : l'outbox connaît déjà l'effet, le dispatch est supprimé. C'est l'outbox transactionnel canonique — écrire avant de dispatcher, dédupliquer par identité de contenu — et il est **réutilisé de S73**, jamais reforgé.
+
+- **Réutiliser un type plutôt qu'en jumeler un.** DP16 ne forge pas son propre `ServiceFragment` : il **alias** celui de DP15 (`type ServiceFragment = datafragments.ServiceFragment`) et réutilise son token d'isolation, ses oracles `CanonicalFragment`/`HashFragment` (S02). Le bon réflexe : deux couches qui décrivent la même forme (un fragment de service) doivent partager **le** type, pas en maintenir deux qui finiront par diverger. `TestL5SharedIsolationToken` asserte que le token est bien celui de DP15, pas une copie locale.
+
+## Méta-méta
+
+- **Windmill, jamais Temporal — une contrainte dure assertée par le miroir.** La spec grave un choix d'orchestrateur : l'asynchrone des apps émises passe par **Windmill**, et **Temporal est refusé**. DP16 ne se contente pas de l'écrire en commentaire : le miroir `TestFixture_WindmillNeverTemporal` **asserte** que la palette ne contient jamais Temporal — émettre un fragment Temporal ferait virer le miroir au rouge. Une contrainte dure n'est réelle que si un test la garde ; sinon c'est un vœu (un monstre). Le jeu clos `[windmill nats]` est la forme exécutable de ce choix.
+
+- **Sous la ligne — aucun worker n'écrit la vérité.** DP16 pose les services asynchrones et planifie leurs effets, mais il vit **entièrement sous la ligne** : il n'écrit **jamais** le noyau, les miroirs ni la fitness. Le scheduler et le dispatcher sont **purs** au-dessus de seams injectés (clock, outbox, sink) ; aucun effet planifié ne remonte écrire une vérité. Le mur reste intact : un worker peut envoyer un rappel, jamais graver un invariant. Bouger la vérité reste une décision enregistrée (idée → miroir → /goal → ChangeSet), gardée par le mur.
+
+- **Réutiliser S73 et S74, ne pas les dupliquer (ADR 0007, ADR 0040).** DP16 n'ajoute qu'une chose neuve : l'**assemblage** des fragments asynchrones en jeu clos et leur **réalisation** au build. Tout le reste est réutilisé : le scheduler/outbox/dispatch de **S73** (verbatim, l'`OutboxWriter` n'est qu'une facet *ajoutée* au seam, pas une mutation), le type et l'isolation de **DP15**, les oracles d'adresse de contenu de **S02**. Et la frontière des plans est nette : DP16 fige *quels* services asynchrones tournent et *comment ils sont isolés* (mandatory, déterministe, Go au build) ; les **workers** de l'app émise — *comment le code de l'app exécute son async* — restent **TS** (ADR 0040, S74 `relemit.EmitWorker`), un slot que DP16 ne touche pas. Réutiliser plutôt que réinventer, sur les deux plans.

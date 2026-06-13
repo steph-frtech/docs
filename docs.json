@@ -587,7 +587,9 @@
        "steps/concept/dp14-substrate-spike",
        "steps/internals/dp14-substrate-spike",
        "steps/concept/dp15-substrate-data",
-       "steps/internals/dp15-substrate-data"
+       "steps/internals/dp15-substrate-data",
+       "steps/concept/dp16-substrate-async",
+       "steps/internals/dp16-substrate-async"
       ]
      }
     ]

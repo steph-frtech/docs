@@ -1,0 +1,58 @@
+---
+title: "DP16 · Les fragments d'asynchrone — Windmill (jamais Temporal), NATS, l'outbox transactionnel, workers TS"
+description: "DP16 GRAVE les services ASYNCHRONES de la palette mesurée (DP14) en fragments StackManifest déterministes : un jeu CLOS de deux briques — Windmill (workflow, core, ghcr.io/windmill-labs/windmill:main, port 8000, GET /api/health, depends_on postgres) et NATS (bus, core, nats:2.10-alpine, port 4222). Le jumeau asynchrone de DP15 : même type ServiceFragment réutilisé (jamais forké), même token d'isolation par projet provision.isolation (Hash(\"datafragments/v1:\"+projectID)[:12]) — deux projets A et B byte-distincts. Aucun env-gating (≠ Doltgres de DP15) : la palette async est core dans tous les environnements ; seul un environnement hors-set échoue fermé avec UNKNOWN_ENVIRONMENT. La contrainte DURE : Windmill JAMAIS Temporal — assertée par le miroir. RealizeScheduled tique le scheduler S73 sur l'HORLOGE INJECTÉE (operation.Tick, jamais time.Now), écrit chaque effet dans l'outbox à l'échéance puis dispatche (S73 réutilisé) — exactly-once relatif, replay supprimé par EffectID adressé au contenu. Les workers de l'app émise restent TS (ADR 0040, S74 relemit.EmitWorker). Le miroir fixture N2 prouve l'échéance + le replay sans doublon ; le miroir property prouve le déterminisme ; rien d'existant cassé."
+keywords: ["aidos", "krd", "DP16", "fragments asynchrones", "ServiceFragment", "StackManifest", "Windmill", "NATS", "Temporal", "jamais Temporal", "workflow", "bus", "core", "asynchrone", "outbox transactionnel", "exactly-once relatif", "scheduler", "S73", "RealizeScheduled", "DispatchEvent", "operation.Tick", "operation.Clock", "horloge injectée", "jamais time.Now", "EffectID", "adressé au contenu", "replay sans doublon", "isolation par projet", "provision.isolation", "records.Hash", "byte-distinct", "byte-identique", "volume bind", "env-var", "device", "healthcheck", "depends_on", "profile", "project_id", "SubstrateAsyncFragments", "jeu clos", "UNKNOWN_ENVIRONMENT", "pas d'env-gating", "OutboxWriter", "ErrOutboxNotWritable", "workers TS", "ADR 0040", "S74", "relemit", "EmitWorker", "miroir fixture", "miroir property", "déterminisme-first", "DP14", "DP15", "le mur"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP16](/steps/internals/dp16-substrate-async).</Note>
+
+## En une phrase
+
+DP16 prend les services **asynchrones** que DP14 a mesurés `go` — l'orchestrateur de workflows, le bus de messages — et les **grave en briques réutilisables** : deux fragments StackManifest déterministes, **provisionnés par projet** (le jumeau asynchrone de DP15, même type, même isolation), avec une contrainte dure — **Windmill, jamais Temporal** — et une réalisation de l'asynchrone qui n'écrit **jamais deux fois** le même effet, parce qu'elle passe par un **outbox transactionnel** et une horloge **injectée**.
+
+## Le problème que ça résout
+
+DP14 a mesuré la palette : l'orchestrateur de workflows boote, le bus répond. Mais une mesure n'est pas encore une **brique posable** dans le manifest d'une app, et l'asynchrone pose un piège que les services de données n'avaient pas : **le temps**. Un effet planifié (« envoyer le rappel dans trois jours ») doit se déclencher à l'échéance — et **exactement une fois**, même si le processus crashe et redémarre entre-temps.
+
+Le piège serait triple : choisir un orchestrateur lourd et propriétaire au lieu de la brique légère que la palette a mesurée ; câbler l'échéance sur l'horloge système (`time.Now`), ce qui rend le comportement impossible à rejouer et à tester ; et dispatcher l'effet sans garde-fou, ce qui le duplique au premier redémarrage. Trois dérives garanties : une dépendance qu'on ne voulait pas, un planificateur non déterministe, des rappels envoyés deux fois.
+
+DP16 répond par le même motif que DP15 — une **fonction pure** qui émet le jeu clos des fragments asynchrones — **plus** un planificateur qui tique sur une **horloge injectée** et écrit chaque effet dans un **outbox** avant de le dispatcher, de sorte que rejouer après un crash ne produit **jamais** de doublon.
+
+## Les deux fragments — un jeu clos
+
+| Fragment | Rôle | Profile | Port interne | Image | Dépendance |
+|---|---|---|---|---|---|
+| **Windmill** | workflow | `core` | 8000 | `ghcr.io/windmill-labs/windmill:main` | `depends_on` postgres |
+| **NATS** | bus | `core` | 4222 | `nats:2.10-alpine` | — |
+
+Le jeu est **clos** : ces deux-là, pas un de plus, pas un de moins. Les images sont exactement celles que DP14 a mesurées `go`. Chaque fragment porte image, port interne, volume bind, healthcheck (`GET /api/health` pour Windmill), dépendances, profile et `project_id`.
+
+Et une absence est aussi importante qu'une présence : **Temporal n'y figure pas, et ne peut pas y figurer.** C'est une contrainte dure de la spec, et le miroir l'asserte explicitement (`WindmillNeverTemporal`) — émettre un fragment Temporal serait une faute.
+
+## Pas d'env-gating — l'asynchrone est core partout
+
+DP15 portait une règle d'environnement : Doltgres était opt-in **hors prod uniquement**. DP16 **n'a pas** cet équivalent : la palette asynchrone est `core` dans **tous** les environnements — la prod a besoin de ses workflows et de son bus autant que le développement. Il n'y a donc **aucune porte de gate** à déléguer ici.
+
+La seule défense est la fermeture sur l'inconnu : un environnement **hors du jeu** déclaré échoue **fermé** avec le code `UNKNOWN_ENVIRONMENT`. Demander les fragments pour un environnement valide rend toujours les deux briques ; demander un environnement qui n'existe pas est refusé, jamais deviné.
+
+## L'isolation par projet — le même token que DP15
+
+Un fragment asynchrone sans isolation serait le même piège que pour les données : deux applications partageraient un volume de workflows, l'une écraserait l'état de l'autre. DP16 isole **par projet**, en réutilisant **exactement** le token de DP15 (`provision.isolation`, jamais forké) : les douze premiers caractères du hash de `"datafragments/v1:" + projectID` marquent le **nom du volume** et la **variable d'environnement** du device.
+
+Le choix est délibéré : DP16 ne **forge pas** son propre schéma de token, il réutilise celui de DP15 verbatim — un seul schéma d'isolation pour toute la substrate. Conséquence prouvée : pour deux projets A et B, les fragments asynchrones sont **byte-distincts**, et le device reste toujours une **référence d'env-var**, jamais un chemin en dur.
+
+## L'outbox transactionnel — exactly-once relatif
+
+C'est le cœur de DP16. Réaliser un effet planifié, c'est répondre à une question dure : comment garantir qu'un rappel programmé pour dans trois jours part **une seule fois**, même si la machine redémarre entre la planification et l'échéance ?
+
+DP16 réutilise le **scheduler de S73** (jamais forké) et le tique sur une **horloge injectée** : `RealizeScheduled` ne consulte **jamais** `time.Now`, elle reçoit son `Clock` en paramètre. Avant l'échéance, **rien** ne se passe — aucune écriture, aucun événement. À l'échéance, chaque effet est d'abord **écrit dans l'outbox**, puis **dispatché**.
+
+La garantie est l'**exactly-once relatif** : chaque effet porte un `EffectID` **adressé au contenu** (un hash). Si le processus crashe et rejoue, l'`EffectID` déjà présent dans l'outbox **supprime** le doublon — le dispatch ne part qu'une fois. Le miroir le prouve directement (`ReplayAfterCrashNeverDuplicates`).
+
+## Les workers, eux, restent en TypeScript
+
+DP16 émet la **topologie** des services asynchrones — quel orchestrateur tourne, sur quel port, et le planificateur qui tique côté build. Il n'émet **pas** les **workers** de l'application émise : ceux-ci restent du **TypeScript**, rendus par l'émetteur S74 (`relemit.EmitWorker`), conformément à l'ADR 0040. La frontière est nette : ce paquet Go est la **réalisation au build** et le **planificateur**, pas un worker de runtime.
+
+## Ce que ça prépare
+
+DP16 livre la signature `ServiceFragment` (la même que DP15) et les `DispatchEvent` que le front consomme pour montrer les services asynchrones d'un projet, leur isolation et leur planification. La gravure des autres couches de la palette (observabilité, git, tickets, auth) suivra le même motif : fonction pure, jeu clos, isolation par projet. Et comme toute vérité dans AIDOS, aucun worker n'écrit la vérité du noyau : l'asynchrone vit **sous la ligne**, le mur reste intact.
