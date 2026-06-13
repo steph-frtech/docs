@@ -1,0 +1,63 @@
+---
+title: "DP19 · La gouvernance des connecteurs — un Connector/Skill/MCP gouverné par le mur EXISTANT : scopes RO/RW, approbation humaine pour écrire, ledger Merkle, et l'IA jamais en direct sur la DB"
+description: "DP19 ouvre l'EPIC E (la couche connecteurs) par un SPIKE-gate (T0, zone /spike, ratchet OFF, code jetable) qui prouve PAR MESURE une seule question : la gouvernance des connecteurs TIENT-elle avec le mur EXISTANT, sans ajouter un nouveau point de confiance unique ? Un Connector/Skill/serveur MCP est une SOURCE DÉCLARÉE — une base interne en lecture, un SaaS externe en écriture, une infra cloud — gouvernée par les CINQ AXES déjà construits (les enforcers agentimpl : ToolAllowed/EgressAllowed, set-membership pur fail-closed) + le LEDGER MERKLE d'audit (agentrun.Verify().OK). Le spike n'AJOUTE que des gardes runtime (§5, ADD never REMOVE) : scope RO/RW (une écriture par un connecteur RO n'a aucune porte) ; Amendement A2 — l'écriture par un connecteur RW exige une approbation HUMAINE runtime (ConnectorRuntimeApproval, PAS authority.Decide : le Kernel gate la vérité, jamais un effet runtime) ; Amendement A3 — l'IA jamais en direct sur la DB (AI_DIRECT_DB_ACCESS_FORBIDDEN, set-membership fail-closed ; le seul chemin IA→DB légal passe par un connecteur Postgres-RO contrôlé) ; et la séparation des plans interne/externe/IA/cloud. Le verdict est une MESURE (jamais un LLM-juge) : 6 cellules toutes pass, ledger de 6 entrées vérifiable (root a5f508e2…), verdict global COMPUTÉ go. No-go reproductible prouvé (surface non-liée ou cellule en échec ⇒ no-go). AUCUN nouveau mur, AUCUN nouveau point de confiance unique, AUCUN nouveau BlockReason canonique (les codes du spike sont jetables, promotion par idée→miroir→/goal). Miroir T0 Go 13 PASS + jumeau vitest 11 PASS."
+keywords: ["aidos", "krd", "DP19", "gouvernance des connecteurs", "couche connecteurs", "EPIC E", "Connector", "Skill", "serveur MCP", "source déclarée", "mur existant", "agentimpl", "ToolAllowed", "EgressAllowed", "cinq axes", "set-membership", "fail-closed", "ledger Merkle", "agentrun", "Verify", "BuildLedger", "tamper-evident", "scope RO/RW", "ScopeRO", "ScopeRW", "lecture seule", "écriture", "approbation humaine", "approbation runtime", "ConnectorRuntimeApproval", "HITL", "human-in-the-loop", "Amendement A2", "authority.Decide", "le Kernel gate la vérité jamais un effet runtime", "Amendement A3", "IA jamais en direct sur la DB", "AI_DIRECT_DB_ACCESS_FORBIDDEN", "connecteur Postgres-RO contrôlé", "seul chemin IA→DB légal", "séparation des plans", "interne", "externe", "IA", "cloud", "Confinement", "PlaneInternal", "PlaneExternal", "PlaneAI", "PlaneCloud", "egress", "slack.com", "verdict mesuré", "jamais un LLM-juge", "matrice mesurée", "6 cellules", "toutes pass", "ledger_length", "ledger_ok", "ledger root", "a5f508e2", "verdict global computé", "go", "no-go reproductible", "surface non-liée", "Tools=nil", "aucun nouveau mur", "aucun nouveau point de confiance unique", "aucun nouveau BlockReason canonique", "CONNECTOR_WRITE_NOT_APPROVED", "CONNECTOR_SCOPE_READ_ONLY", "CONNECTOR_TOOL_NOT_BOUND", "CONNECTOR_EGRESS_NOT_ALLOWED", "codes jetables", "idée→miroir→/goal", "ADD a guardrail never REMOVE", "§5", "§8", "le mur", "§2", "SPIKE-gate", "T0", "ratchet OFF", "zone /spike", "code jetable", "miroir T0", "13 PASS", "11 PASS", "vitest", "déterminisme-first", "ADR 0069", "DP20"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP19](/steps/internals/dp19-connector-governance).</Note>
+
+## En une phrase
+
+DP19 ouvre l'**EPIC E** — la **couche connecteurs** — par une question, et une seule, **prouvée par mesure** : un **Connector / Skill / serveur MCP** peut-il être **gouverné par le mur EXISTANT**, sans ajouter un nouveau point de confiance unique ? La réponse mesurée est **oui** : scopes RO/RW, approbation **humaine** pour écrire, **ledger Merkle** vérifiable, et l'**IA jamais en direct sur la DB**.
+
+## Le problème que ça résout
+
+Une app émise — et l'agent qui la construit — doit **toucher le monde** : lire une base interne, écrire dans un SaaS externe comme Slack, joindre une infra cloud. Chacun de ces points de contact est un **connecteur** : un Connector, un Skill, un serveur MCP. Et chaque connecteur est un **pouvoir** — donc un risque. Le réflexe naïf serait de bâtir une **nouvelle** couche de sécurité pour les gouverner : un nouveau gardien, un nouveau registre d'autorisations, un nouveau point où toute la confiance se concentre. Mais un **nouveau point de confiance unique**, c'est précisément ce qu'AIDOS refuse — c'est une nouvelle surface à percer, un nouveau mur à défendre.
+
+DP19 pose donc la question à l'envers : et si la gouvernance des connecteurs **tenait déjà**, avec le mur **existant** ? AIDOS a déjà cinq enforcers qui gardent ce qu'un agent peut faire (`agentimpl` : la capability est-elle liée ? l'egress est-il autorisé ?) — du **set-membership pur, fail-closed**. Il a déjà un **ledger Merkle** qui rend chaque action **vérifiable et infalsifiable** (`agentrun`). La question DP19 n'est pas « comment construire la sécurité des connecteurs » mais « la sécurité des connecteurs est-elle un **cas particulier** de la sécurité déjà construite ». Et un spike ne **déclare** pas la réponse — il la **mesure**.
+
+## La gouvernance — quatre garde-fous sur le mur existant
+
+Un connecteur est une **source déclarée** : il dit son serveur, sa (ou ses) capability, son **scope**, le **plan** qu'il franchit (interne / externe / IA / cloud), et — s'il est externe — l'hôte qu'il joint. La gouvernance se lit alors comme quatre garde-fous, dont **deux sont déjà le mur** et **deux sont des ajouts** (§5, « on ADD un garde-fou, on n'en RETIRE jamais ») :
+
+1. **La capacité (le mur existant).** La capability du connecteur doit être **liée** dans l'implémentation gouvernée. Non liée ⇒ refusée. C'est `agentimpl.ToolAllowed`, du set-membership pur.
+2. **Le confinement / egress (le mur existant).** L'hôte d'un connecteur externe (Slack → `slack.com`) doit être dans l'**allow-list d'egress**. Hors liste ⇒ refusé. C'est `agentimpl.EgressAllowed`.
+3. **Le scope RO/RW (l'ajout).** Un connecteur **RO** ne peut que lire. Une écriture par un connecteur RO n'a **aucune porte** — refus avant tout le reste.
+4. **L'approbation humaine pour écrire (l'ajout — Amendement A2).** Une écriture par un connecteur **RW** exige une **approbation runtime, accordée par un humain** (une `ConnectorRuntimeApproval` fraîche). Absente ⇒ l'écriture est refusée.
+
+Et le tout est **séparé par plan** : un connecteur déclare s'il franchit le plan **interne**, **externe**, **IA** ou **cloud** — la matrice l'enregistre, et les plans ne se confondent pas.
+
+## L'approbation pour écrire — humaine au runtime, PAS le Kernel (Amendement A2)
+
+C'est une distinction de fond, et elle est **load-bearing**. AIDOS a déjà un gardien d'autorisations : le **truth-admitter du Kernel** (`authority.Decide`). Mais celui-là gouverne si une **vérité** peut changer — qui approuve un ChangeSet, qui valide un /goal. Il ne doit **jamais** gater un **effet runtime**, comme « poster ce message Slack ».
+
+DP19 trace donc la ligne nette : une écriture de connecteur est admise par une **approbation runtime jetable, accordée par un humain dans la boucle** (HITL), **et non** par `authority.Decide`. Le Kernel gate la **vérité** ; l'approbation runtime gate l'**effet**. Confondre les deux serait faire approuver un post Slack par les approbateurs du noyau d'AIDOS — un mélange des genres que A2 interdit explicitement.
+
+## L'IA jamais en direct sur la DB (Amendement A3)
+
+Le second garde-fou ajouté est un **invariant** — et lui aussi est load-bearing. L'**IA** (l'agent qui construit ou anime l'app) **ne touche jamais la base de données en direct**. Tout chemin IA→DB **doit** passer par un **connecteur contrôlé**.
+
+Concrètement : une tentative d'appel **direct** IA→DB est **refusée** — `AI_DIRECT_DB_ACCESS_FORBIDDEN` — par le même mécanisme set-membership fail-closed : la cible directe n'est **jamais** membre de la surface de connecteurs autorisée de l'IA. Le **seul** chemin IA→DB **légal** est de passer par un connecteur **Postgres-RO contrôlé** — qui est alors gouverné par les mêmes axes (capacité, scope, plan). L'IA ne se voit jamais accorder une porte directe vers la donnée ; elle passe toujours par un connecteur qui, lui, est gouverné et journalisé.
+
+## Le ledger Merkle — chaque action vérifiable
+
+Dernier pilier, et il est **réutilisé tel quel** : **chaque action de connecteur** — qu'elle soit **admise OU refusée** — produit **une entrée dans le ledger Merkle d'audit** existant (`agentrun`). On n'enregistre pas seulement les succès : un refus est lui aussi une trace infalsifiable. Le ledger se **vérifie** (`Verify().OK`) ; toute altération d'une entrée fait rougir la chaîne. La gouvernance n'est donc pas seulement préventive (le gate refuse), elle est **auditable** (le ledger prouve ce qui a été tenté).
+
+## Le verdict — une mesure, jamais un avis
+
+Le spike a sondé deux connecteurs jetables (un RO Postgres-RO interne, un RW Slack externe) et la tentative IA→DB directe, en **six cellules**. Le verdict de chaque cellule est une **mesure** — l'action a-t-elle été admise/refusée **comme attendu** ? — jamais un avis d'un LLM (§8) :
+
+| Cas mesuré | Verdict | Pourquoi |
+|---|---|---|
+| RW Slack écriture **sans** approbation | **REFUSÉ** | A2 : pas d'approbation humaine runtime |
+| RW Slack écriture **avec** approbation | **ADMIS** | A2 : approbation fraîche + entrée ledger |
+| IA→DB **direct** | **REFUSÉ** | A3 : l'IA jamais en direct sur la DB |
+| IA→DB **via** connecteur Postgres-RO | **ADMIS** | le seul chemin IA→DB légal |
+| RO Postgres-RO **lecture** | **ADMIS** | un RO peut lire |
+| RO Postgres-RO **écriture** | **REFUSÉ** | scope RO : aucune porte d'écriture |
+
+Les six cellules **passent** ; les six actions produisent six **entrées ledger vérifiables** (root `a5f508e2…`). Le **verdict global est COMPUTÉ** — toutes cellules `pass` ∧ le ledger se vérifie ⇒ **go** — **jamais déclaré**. Et le **no-go est reproductible** : une surface non-liée ou une seule cellule en échec fait basculer le verdict en **no-go**, le ledger restant vérifiable — un no-go ne fabrique jamais un vert absent, il **nomme** la cellule fautive.
+
+## Ce que ça autorise — et ce que ça interdit
+
+Le `go` autorise l'EPIC E (DP20+) à **graver** la couche connecteurs en n'**ajoutant que des gardes**, **jamais un nouveau point de confiance unique**. **Aucun nouveau mur**, aucun nouveau gardien, aucun nouveau `BlockReason` canonique : les codes du spike (`AI_DIRECT_DB_ACCESS_FORBIDDEN`, `CONNECTOR_WRITE_NOT_APPROVED`…) restent **jetables** tant que la couche n'est pas promue par l'**unique porte** — idée → miroir → /goal → approbation. Le code du spike vit en zone `/spike`, ratchet OFF ; il prouve, puis il s'efface. Ce qui reste, c'est la **certitude mesurée** que la gouvernance des connecteurs tient sur le mur qu'AIDOS a déjà.

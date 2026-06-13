@@ -1,0 +1,99 @@
+---
+title: "DP19 · Internals — le gate de gouvernance des connecteurs (réutilise les 5 enforcers agentimpl + le ledger Merkle agentrun), A2 approbation runtime, A3 IA-jamais-direct-DB, verdict computé"
+description: "Le journal de build de DP19 : le paquet jetable back/runtime/spike/dp19connectorgov (zone /spike, ratchet OFF, T0) + son jumeau TS front/web/lib/connector-governance.ts. GateConnectorAction est un gate PUR, TOTAL, fail-closed qui RÉUTILISE les enforcers existants — agentimpl.ToolAllowed (capacité) + agentimpl.EgressAllowed (confinement/egress), set-membership pur — et n'AJOUTE que : (3) scope RO/RW (écriture RO ⇒ CONNECTOR_SCOPE_READ_ONLY, aucune porte) ; (4) A2 ConnectorRuntimeApproval (écriture RW ⇒ approbation HUMAINE runtime fraîche, PAS authority.Decide ⇒ CONNECTOR_WRITE_NOT_APPROVED). GateAIDataAccess = A3 : via==nil ou target==AIDirectDBTarget ⇒ AI_DIRECT_DB_ACCESS_FORBIDDEN (set-membership fail-closed) ; via un connecteur contrôlé ⇒ défère au même gate. ActionToRun+LedgerFor RÉUTILISENT agentrun.BuildLedger/Verify : chaque action (admise OU refusée) ⇒ 1 entrée ledger Merkle. BuildMatrix grave 6 cellules comme DONNÉE + COMPUTE le verdict (toutes pass ∧ ledger Verify().OK ⇒ go ; ledger_length=6, ledger_ok=true, root a5f508e2804d9e592b241aae5231b58b957dca58fc7e9ab0d7a0ccef992738ab). Les codes de refus sont des SpikeCode JETABLES, jamais l'enum blockreason.Code canonique. Miroir T0 connectorgov_fixture_test.go 13 PASS (4 done-criteria + axes réutilisés + déterminisme + no-go reproductible + tamper-evidence Merkle) ; jumeau front connector-governance.test.ts 11 vitest PASS (MEASURED_MATRIX gravée). GATE : go build/vet/gofmt clean ; go test dp19connectorgov + agentimpl + agentrun GREEN (anti-overwrite intact) ; vitest GREEN ; biome clean ; ELF parasite back/aidosdatafragments supprimé."
+keywords: ["aidos", "krd", "DP19", "internals", "dp19connectorgov", "back/runtime/spike", "spike", "ratchet OFF", "T0", "code jetable", "GateConnectorAction", "GateAIDataAccess", "BuildMatrix", "Matrix", "MatrixRow", "Verdict", "VerdictGo", "VerdictNoGo", "GateOutcome", "Connector", "Scope", "ScopeRO", "ScopeRW", "Op", "OpRead", "OpWrite", "Confinement", "PlaneInternal", "PlaneExternal", "PlaneAI", "PlaneCloud", "ConnectorRuntimeApproval", "approvalFor", "approbation humaine runtime", "Amendement A2", "authority.Decide", "le Kernel gate la vérité jamais un effet runtime", "Amendement A3", "AIDirectDBTarget", "AI_DIRECT_DB_ACCESS_FORBIDDEN", "IA jamais en direct sur la DB", "ActionToRun", "LedgerFor", "agentimpl", "ToolAllowed", "EgressAllowed", "PathAllowed", "5 enforcers", "set-membership", "fail-closed", "agentrun", "BuildLedger", "Record", "Verify", "Root", "ledger Merkle", "tamper-evident", "réutilise jamais réinvente", "ADR 0007", "ADR 0009", "SpikeCode", "CodeOK", "CodeAIDirectDBForbidden", "CodeConnectorWriteNotApproved", "CodeConnectorScopeReadOnly", "CodeConnectorToolNotBound", "CodeConnectorEgressNotAllowed", "jetable", "jamais blockreason.Code", "canonique", "postgres-ro", "slackRW", "slack.com", "egress allow-list", "verdict computé", "jamais déclaré", "§8", "no-go reproductible", "Tools=nil", "surface non-liée", "miroir T0", "connectorgov_fixture_test.go", "13 PASS", "TestSpike_BuildMatrix_AllPass_LedgerVerifies_VerdictGo", "TestSpike_UngovernedSurface_VerdictNoGo", "TestSpike_LedgerTamper_GoesRed", "TestSpike_BuildMatrix_Deterministic", "connector-governance.ts", "connector-governance.test.ts", "MEASURED_MATRIX", "jumeau TS", "11 vitest", "parité Go", "ledgerRoot", "ledgerOK", "ledgerLength", "a5f508e2", "go build", "go vet", "gofmt", "biome", "TABS", "anti-overwrite", "ELF parasite", "aidosdatafragments", "déterminisme-first", "§6", "le mur", "§2", "§5", "ADD never REMOVE", "idée→miroir→/goal", "EPIC E", "DP20", "couche connecteurs"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP19 — La gouvernance des connecteurs](/steps/concept/dp19-connector-governance).</Note>
+
+## Implémentation
+
+### Le paquet — `back/runtime/spike/dp19connectorgov` (jetable, zone /spike)
+
+DP19 est un **SPIKE-gate** (T0, ratchet OFF, **zone `/spike`** : code jetable, aucune écriture `kernel`/`mirrors`/`fitness`, aucune persistance). Il ouvre l'EPIC E en répondant **par mesure** à une seule question : la gouvernance des connecteurs **tient-elle avec le mur EXISTANT, sans nouveau point de confiance unique** ? Le paquet `back/runtime/spike/dp19connectorgov` porte le gate pur ; son jumeau TS `front/web/lib/connector-governance.ts` grave la matrice mesurée pour le front.
+
+```go
+type Connector struct {
+  Name, Server, ReadTool, WriteTool string
+  Scope      Scope        // ScopeRO | ScopeRW
+  Plane      Confinement  // PlaneInternal | PlaneExternal | PlaneAI | PlaneCloud
+  EgressHost string       // hôte externe (PlaneExternal)
+}
+
+type ConnectorRuntimeApproval struct { Connector string; Op Op; Granted bool; By string } // A2, PAS authority.Decide
+
+func GateConnectorAction(impl agentimpl.AgentImplementation, c Connector, op Op, approvals []ConnectorRuntimeApproval) GateOutcome
+func GateAIDataAccess(impl agentimpl.AgentImplementation, via *Connector, target string, op Op, approvals []ConnectorRuntimeApproval) GateOutcome // A3
+func ActionToRun(c Connector, op Op, outcome GateOutcome, idx string) agentrun.AgentRun // réutilise agentrun
+func LedgerFor(runs []agentrun.AgentRun) ([]agentrun.LedgerEntry, error)                // réutilise agentrun.BuildLedger
+
+func BuildMatrix(impl ImplFixture) Matrix // 6 cellules gravées comme DONNÉE + verdict COMPUTÉ
+
+const AIDirectDBTarget = "postgres://truth-store/direct"
+```
+
+### `GateConnectorAction` — réutilise les 5 enforcers, n'ajoute que scope + A2
+
+Le gate est **pur, total, fail-closed** — aucune base, aucune horloge, aucun aléa, aucune I/O. Il **réutilise** les enforcers existants (`agentimpl`, set-membership pur) et n'**ajoute** que deux gardes (§5 : on ADD, on ne RETIRE jamais) :
+
+1. **Scope (l'ajout)** — `op == OpWrite && c.Scope == ScopeRO` ⇒ refus `CONNECTOR_SCOPE_READ_ONLY` **avant tout le reste** : un connecteur RO n'a aucune porte d'écriture.
+2. **Capacité (le mur existant)** — `agentimpl.ToolAllowed(impl, c.Server, tool)` ; non liée ⇒ `CONNECTOR_TOOL_NOT_BOUND`.
+3. **Confinement / egress (le mur existant)** — pour `PlaneExternal`, `agentimpl.EgressAllowed(impl, c.EgressHost)` ; hors liste ⇒ `CONNECTOR_EGRESS_NOT_ALLOWED`.
+4. **A2 — approbation runtime (l'ajout)** — `op == OpWrite && c.Scope == ScopeRW` ⇒ exige `approvalFor(approvals, c.Name, OpWrite)` (une `ConnectorRuntimeApproval` fraîche, `Granted` par un humain) ; absente ⇒ `CONNECTOR_WRITE_NOT_APPROVED`. C'est **set-membership fail-closed**, **PAS** `authority.Decide`.
+
+Une lecture ne requiert que (2)+(3). `GateOutcome` a exactement deux formes — admise, ou refusée avec un `SpikeCode` — la **même** forme fail-closed que les `ToolDecision`/`EgressDecision` existants.
+
+### `GateAIDataAccess` — A3, l'IA jamais en direct sur la DB
+
+```go
+if via == nil || target == AIDirectDBTarget {
+  return GateOutcome{Admitted: false, Code: CodeAIDirectDBForbidden}
+}
+return GateConnectorAction(impl, *via, op, approvals) // le seul chemin IA→DB légal
+```
+
+A3 est set-membership fail-closed : une cible directe (`AIDirectDBTarget`, ou tout `via == nil`) est refusée `AI_DIRECT_DB_ACCESS_FORBIDDEN` — la cible directe n'est **jamais** membre de la surface autorisée de l'IA. Le **seul** chemin IA→DB légal passe par un connecteur contrôlé, qui **défère** alors au même `GateConnectorAction` (capacité + scope + approbation).
+
+### Le ledger Merkle — `ActionToRun` + `LedgerFor` réutilisent `agentrun`
+
+Chaque action — **admise OU refusée** — est projetée en `agentrun.AgentRun` (`ResultGreen` si admise, `ResultBlocked` sinon), `agentrun.Record`-ée, puis pliée dans le **ledger Merkle existant** via `agentrun.BuildLedger`. Les horodatages sont **fournis** (pas d'horloge arg-less — déterminisme). `LedgerFor` rend un ledger dont `agentrun.Verify().OK` est vrai ssi la chaîne est intacte. **Aucune nouvelle chaîne** : le tamper-evidence est celui d'`agentrun`.
+
+### `BuildMatrix` — 6 cellules gravées comme DONNÉE, verdict COMPUTÉ
+
+`BuildMatrix` sonde deux connecteurs jetables (`postgresRO()` interne RO, `slackRW()` externe RW egress `slack.com`) + la tentative IA→DB directe, en six `probeStep`. Chaque pas produit un `MatrixRow{case, connector, scope, plane, op, approvalRequired, expectAdmitted, measuredAdmitted, measuredCode, ledgerEntry, pass}` où `pass = (measured == expect) && ledgerEntry`. Le verdict global est **COMPUTÉ** (jamais déclaré, §8) : `VerdictGo` ssi **toutes** les cellules `pass` ∧ `agentrun.Verify(ledger).OK` ; sinon `VerdictNoGo`. Mesuré : `ledger_length = 6`, `ledger_ok = true`, root `a5f508e2804d9e592b241aae5231b58b957dca58fc7e9ab0d7a0ccef992738ab`, verdict **go**.
+
+### Les codes de refus — `SpikeCode` JETABLES, jamais canoniques
+
+`AI_DIRECT_DB_ACCESS_FORBIDDEN`, `CONNECTOR_WRITE_NOT_APPROVED`, `CONNECTOR_SCOPE_READ_ONLY`, `CONNECTOR_TOOL_NOT_BOUND`, `CONNECTOR_EGRESS_NOT_ALLOWED` sont des **constantes `SpikeCode` jetables** de zone `/spike`. Elles ne sont **jamais** promues dans l'enum `blockreason.Code` (vérité, au-dessus de la ligne) hors d'**idée → miroir → /goal**.
+
+### Le jumeau TS — `connector-governance.ts`
+
+`front/web/lib/connector-governance.ts` est le twin pur : il grave `MEASURED_MATRIX` (forme `Matrix{rows, ledgerRoot, ledgerOK, ledgerLength, verdict}`, `MatrixRow{case, connector, scope, plane, op, approvalRequired, expectAdmitted, measuredAdmitted, measuredCode, ledgerEntry, pass}`) — la donnée exacte que le front rend, en **parité** avec le Go autoritaire (même root, même verdict).
+
+### Les miroirs — T0, RED → VERT
+
+- **Go** — `connectorgov_fixture_test.go` : **13 fonctions Test, 13 PASS**. Les 4 done-criteria (cellules a/a', b/b', c/c', d-ledger) ; les axes capacité/confinement réutilisés (`TestSpike_UnboundCapability_Refused`, `TestSpike_ExternalConnector_UnallowedHost_Refused`) ; le déterminisme (`TestSpike_BuildMatrix_Deterministic`) ; le **no-go reproductible** (`TestSpike_UngovernedSurface_VerdictNoGo` : `Tools=nil` ⇒ no-go) ; la **tamper-evidence Merkle** réutilisée (`TestSpike_LedgerTamper_GoesRed`).
+- **TS** — `connector-governance.test.ts` : **11 tests vitest PASS** (la matrice gravée + sa forme + la parité avec le Go).
+
+### La GATE
+
+- `go build ./...` : **GREEN** · `gofmt -l` : clean · `go vet` : clean.
+- `go test ./runtime/spike/dp19connectorgov/... ./runtime/agentimpl/... ./runtime/agentrun/...` : **GREEN** (13 + la suite `agentimpl` + la suite `agentrun`). **Anti-overwrite** : les tests existants `agentimpl`/`agentrun` sont **intacts** (aucun modifié).
+- `vitest` : **GREEN** (11) · `biome check` : clean (TABS).
+- Nettoyage : binaire ELF parasite `back/aidosdatafragments` supprimé ; **0 ELF parasite restant**.
+
+## Méta
+
+- **Le verdict est une mesure, jamais un avis — et le miroir T0 le prouve en trois mesures.** D'abord, `BuildMatrix` n'a **rien à déclarer** : il *exécute* le gate sur six cellules et **observe** chaque sortie (`measuredAdmitted`/`measuredCode`), puis pose `pass = (measured == expect) && ledgerEntry`. Le verdict global est la **conjonction** des `pass` ∧ `Verify(ledger).OK` — du booléen pur, computé, jamais un LLM-juge (§8). Ensuite, le **déterminisme** est lui-même mesuré (`TestSpike_BuildMatrix_Deterministic` : même `impl` ⇒ même matrice) — le gate n'a ni horloge, ni aléa, ni I/O. Enfin, le **ledger** est mesuré : six entrées, `Verify().OK`, root content-adressé `a5f508e2…` — chaque action est vérifiable, et `TestSpike_LedgerTamper_GoesRed` prouve qu'altérer une entrée fait rougir la chaîne.
+
+- **Le no-go est reproductible, pas une absence de go.** `TestSpike_UngovernedSurface_VerdictNoGo` injecte une surface non-liée (`Tools=nil`) et **mesure** que le verdict bascule en `no-go` — le ledger restant vérifiable. Un no-go ne fabrique jamais un vert absent : il **nomme** la cellule fautive. C'est l'honnêteté §8 appliquée au gate lui-même : un go n'est crédible que si le même code peut, sous d'autres entrées, produire un no-go observable.
+
+- **Réutiliser plutôt que réinventer (ADR 0007), sur les deux plans.** Le gate n'invente ni un enforcer ni une chaîne d'audit : la capacité est `agentimpl.ToolAllowed`, l'egress `agentimpl.EgressAllowed`, le ledger `agentrun.BuildLedger`/`Verify`. DP19 n'ajoute que la **composition** (le scope RO/RW, l'approbation A2, l'invariant A3) — du set-membership de la même forme fail-closed. C'est le déterminisme-first (§6) : décider d'admettre ou refuser une action de connecteur est une **fonction pure** de ses entrées déclarées, donc c'est du **code**, jamais un agent.
+
+## Méta-méta
+
+- **Aucun nouveau mur, aucun nouveau point de confiance unique.** C'est la réponse mesurée à la question DP19, et c'est le mur (§2) appliqué à la couche connecteurs. Le réflexe naïf — bâtir un nouveau gardien des connecteurs — créerait une nouvelle surface de confiance à percer. DP19 prouve l'inverse : la gouvernance des connecteurs est un **cas particulier** de la sécurité déjà construite. Les enforcers existants gardent la capacité et l'egress ; le ledger existant rend tout vérifiable ; on n'**AJOUTE** que des gardes (§5, « ADD a guardrail, never REMOVE one »), jamais un nouveau mur ni un nouveau `BlockReason` canonique. EPIC E (DP20+) ne pourra que continuer d'ajouter des gardes sur ce socle.
+
+- **L'IA jamais en direct sur la DB est load-bearing.** A3 n'est pas un confort, c'est un invariant porteur : si l'IA pouvait joindre la base en direct, toute la gouvernance (scope, approbation, ledger) serait contournable par la porte de derrière. Le gate ferme cette porte par set-membership fail-closed — la cible directe n'est jamais membre de la surface autorisée — et n'ouvre que le chemin médié par un connecteur **contrôlé** (donc gouverné et journalisé). L'IA construit le code au build-time ; elle ne s'assoit pas dans la boucle runtime à faire ce qu'un connecteur gouverné doit faire.
+
+- **A2 : le Kernel gate la vérité, jamais un effet runtime.** C'est la distinction la plus fine de DP19. AIDOS a déjà un truth-admitter (`authority.Decide`) — mais il gouverne si une **vérité** peut changer (approuver un ChangeSet, valider un /goal). Une écriture de connecteur (« poster ce message Slack ») est un **effet runtime**, pas un changement de vérité. A2 la fait admettre par une **approbation humaine runtime jetable** (`ConnectorRuntimeApproval`), **jamais** par `authority.Decide`. La mention d'`authority.Decide` dans les critères antérieurs est explicitement **SUPERSEDED** : confondre l'admission d'une vérité et l'admission d'un effet serait faire approuver un post Slack par les approbateurs du noyau. Tout cela en zone `/spike`, ratchet OFF — le code prouve puis s'efface ; la promotion de la couche reste l'affaire de l'unique porte (idée → miroir → /goal). Le verdict mesuré est gravé dans l'ADR 0069.

@@ -593,7 +593,9 @@
        "steps/concept/dp17-substrate-observability",
        "steps/internals/dp17-substrate-observability",
        "steps/concept/dp18-substrate-app-services",
-       "steps/internals/dp18-substrate-app-services"
+       "steps/internals/dp18-substrate-app-services",
+       "steps/concept/dp19-connector-governance",
+       "steps/internals/dp19-connector-governance"
       ]
      }
     ]
