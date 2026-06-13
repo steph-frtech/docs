@@ -1,0 +1,120 @@
+---
+title: "DP21 · Internals — EnforceConnectorAction (pur, total, fail-closed, ordre fixe des 5 verdicts), réutilise agentimpl.EgressAllowed + connector.IsDatastoreHost + le registre blockreason, ConnectorRuntimeApproval (A2), miroir fixture N2 écrit EN PREMIER + property set-membership"
+description: "Le journal de build de DP21 : le paquet back/runtime/connectorenforce (4 fichiers, additions) + 4 codes BlockReason additifs dans back/runtime/blockreason. EnforceConnectorAction(source, action) → (Decision, *BlockReason) est PUR, TOTAL, fail-closed — set-membership sur jeux clos, jamais un jugement ; ordre FIXE : (1) A3 ai∩datastore=∅ via connector.IsDatastoreHost → AI_DIRECT_DB_ACCESS_FORBIDDEN ; (2) scope RO+write → CONNECTOR_READ_ONLY ; (3) egress via agentimpl.EgressAllowed RÉUTILISÉ (allow-list = source.EgressHosts verbatim, allow-list vide refuse tout) → EGRESS_NOT_ALLOWED ; (4) RW+write sans approbation accordée → CONNECTOR_RW_NEEDS_APPROVAL ; sinon admis. ConnectorRuntimeApproval (A2, below-the-line, qui/quand/quel-effet) admet une écriture par covers(connector, op) — set-membership fail-closed, JAMAIS authority.Decide. Promeut le spike DP19 GateConnectorAction (dp19connectorgov, verdict go) en runtime non-jetable. 4 codes additifs au registre blockreason (extension d'enum fermé) : CONNECTOR_READ_ONLY, CONNECTOR_RW_NEEDS_APPROVAL, EGRESS_NOT_ALLOWED, AI_DIRECT_DB_ACCESS_FORBIDDEN — chacun avec explication FR + how_to_fix non-vide, enregistrés dans reasons ET codeOrder. RÉUTILISE agentimpl.EgressAllowed (non-forké), connector.IsDatastoreHost + DatastoreHosts (jeu clos déclaré), le registre blockreason — aucun forké. Miroir : connectorenforce_fixture_test.go (N2 state→cmd→events, les 5 verdicts + RW-avec-approbation, écrit EN PREMIER, RED avant l'impl) + connectorenforce_property_test.go (∀ rapid, set-membership pur fail-closed déterministe) + fixture_test.go (fixtures DP20 partagées). 10 fonctions PASS dans connectorenforce + 5 dans blockreason ; spike DP19 toujours vert. GATE : go build ./... exit 0 ; gofmt -l clean ; go vet clean ; go test ./runtime/… ./kernel/… → 129 packages ok, 0 FAIL ; 0 ELF parasite. Backend-only : front intact (vitest 2221 / e2e)."
+keywords: ["aidos", "krd", "DP21", "internals", "back/runtime/connectorenforce", "connectorenforce.go", "connectorenforce_fixture_test.go", "connectorenforce_property_test.go", "fixture_test.go", "EnforceConnectorAction", "ConnectorAction", "ConnectorRuntimeApproval", "Decision", "Op", "OpRead", "OpWrite", "covers", "refuse", "pur total fail-closed", "ordre fixe", "set-membership", "jeux clos", "cinq verdicts", "5 verdicts", "A3", "ai∩datastore=∅", "connector.IsDatastoreHost", "DatastoreHosts", "AI_DIRECT_DB_ACCESS_FORBIDDEN", "CodeAIDirectDBAccessForbidden", "scope", "ScopeReadOnly", "ScopeReadWrite", "CONNECTOR_READ_ONLY", "CodeConnectorReadOnly", "egress", "agentimpl.EgressAllowed", "agentimpl.AgentImplementation", "AllowedNetworkHosts", "EgressDecision", "allow-list vide refuse tout", "EGRESS_NOT_ALLOWED", "CodeEgressNotAllowed", "A2", "ConnectorRuntimeApproval", "approbation runtime", "human-in-the-loop", "qui quand quel-effet", "Granted", "By", "CONNECTOR_RW_NEEDS_APPROVAL", "CodeConnectorRWNeedsApproval", "jamais authority.Decide", "deux portes", "DÉCLARATION above-the-line", "S85", "S110", "connector.Validate", "EXÉCUTION below-the-line", "deux couches", "RLS S55", "back/runtime/blockreason", "blockreason.go", "registre blockreason", "reasons", "codeOrder", "extension enum fermé", "additif", "how_to_fix", "BlockReason", "For", "render", "round-trip", "promotion spike", "DP19", "GateConnectorAction", "back/runtime/spike/dp19connectorgov", "verdict go", "non-jetable", "ConnectorSource", "DP20", "back/kernel/connector", "Classification", "ClassAI", "miroir fixture", "N2", "state → command → events", "écrit en premier", "RED avant l'impl", "TestFixture_FiveVerdicts", "t.Run", "RWWithApproval_OnlyForThatConnector", "RWWithDeniedApproval_Refused", "ROReadWithinScope_Admitted", "ScopeBeatsEgress", "miroir property", "rapid", "TotalAndClosedVerdict", "Deterministic", "ROWriteAlwaysRefused", "RWWriteNoApprovalAlwaysRefused", "AIDatastoreAlwaysForbidden", "reproductibilité", "même entrée même verdict", "10 fonctions", "5 fonctions", "go test ./runtime/connectorenforce/", "go build", "go vet", "gofmt", "GOTOOLCHAIN=local", "go1.25.10", "129 packages ok", "0 FAIL", "0 ELF parasite", "backend-only", "front intact", "vitest 2221", "anti-overwrite", "réutilise jamais réinvente", "ADR 0007", "déterminisme-first", "§6", "§8", "le mur", "§2", "aucun GRANT", "aucune vérité écrite", "monstre", "loi de complétude", "EPIC E"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP21 — L'enforcement des scopes connecteurs](/steps/concept/dp21-connector-enforcement).</Note>
+
+## Implémentation
+
+### Le paquet — `back/runtime/connectorenforce` (4 fichiers) + 4 codes additifs
+
+DP21 promeut le gate du spike DP19 (`back/runtime/spike/dp19connectorgov`, verdict `go`) — jetable par construction — en un **enforcer de runtime non-jetable** posé au-dessus de la source déclarée DP20 (`back/kernel/connector.ConnectorSource`). Tâche **backend-only** ; le front est intact (vitest 2221 / e2e inchangés).
+
+Quatre fichiers neufs (anti-overwrite respecté, §9) :
+
+- `back/runtime/connectorenforce/connectorenforce.go` — l'implémentation.
+- `back/runtime/connectorenforce/connectorenforce_fixture_test.go` — le **miroir fixture N2** (`state → command → events`), **écrit EN PREMIER, RED avant l'impl** : les 5 verdicts + RW-avec-approbation.
+- `back/runtime/connectorenforce/connectorenforce_property_test.go` — le **miroir property ∀** (rapid) : set-membership pur fail-closed déterministe.
+- `back/runtime/connectorenforce/fixture_test.go` — les fixtures DP20 partagées (`roPostgres` / `rwSlack` / `aiConnector`).
+
+Et **un** fichier modifié — `back/runtime/blockreason/blockreason.go` : **4 codes additifs** (extension d'un enum fermé, §9), aucun ne préexistait dans le registre canonique.
+
+```go
+// Op — le jeu clos à deux membres {read, write} (promu du spike DP19, plus jetable).
+type Op string
+const ( OpRead Op = "read"; OpWrite Op = "write" )
+
+// ConnectorRuntimeApproval — l'autorisation A2 de runtime, en dessous de la ligne,
+// humaine-dans-la-boucle (qui/quand/quel-effet). JAMAIS authority.Decide.
+type ConnectorRuntimeApproval struct {
+  Connector string  // nom du connecteur (== source.Name)
+  Op        Op      // OpWrite (une lecture n'exige aucune approbation)
+  Granted   bool    // true SSI un humain l'a accordée
+  By        string  // qui a approuvé (trace d'audit, jamais consulté pour le verdict)
+}
+
+type ConnectorAction struct {
+  Op       Op                        // read | write
+  Host     string                    // l'hôte d'egress joint
+  Approval *ConnectorRuntimeApproval // l'approbation A2 d'une écriture (nil pour une lecture)
+}
+
+type Decision struct {
+  Admitted bool             // true SSI l'effet est permis
+  Code     blockreason.Code // le code de refus sur un deny ; vide sur une admission
+}
+
+func EnforceConnectorAction(source connector.ConnectorSource, action ConnectorAction) (Decision, *blockreason.BlockReason)
+```
+
+### `EnforceConnectorAction` — pur, total, fail-closed, dans un ordre FIXE
+
+L'enforcer est une **fonction pure et totale** de ses entrées — aucune base, aucune horloge, aucun aléa, aucune I/O. Il gouverne l'effet d'un connecteur par les **cinq axes agentlayer existants resserrés par le scope déclaré de la source** : il n'ajoute **aucun** nouveau modèle de permission et ne **forke aucun** axe. L'ordre des refus est **fixé** pour que la sortie soit déterministe (le miroir property l'épingle) :
+
+1. **A3 — IA∩DATASTORE=∅** (checké **en premier**). Une source `connector.ClassAI` dont l'action joint un hôte de datastore (`connector.IsDatastoreHost`, le jeu **clos déclaré**) ⇒ `AI_DIRECT_DB_ACCESS_FORBIDDEN`. L'IA ne joint jamais la DB en direct, quel que soit le scope ou l'approbation — l'invariant porteur, jumeau runtime de la déclaration DP20.
+2. **SCOPE** — une écriture (`OpWrite`) à travers une source `ScopeReadOnly` ⇒ `CONNECTOR_READ_ONLY`. Checké **avant** l'egress, pour que le refus de scope soit stable (un RO n'a aucune porte d'écriture).
+3. **EGRESS** — l'hôte de l'action doit être dans l'allow-list d'egress de la source. **RÉUTILISE** `agentimpl.EgressAllowed` verbatim : l'enforcer fabrique un probe `agentimpl.AgentImplementation{AllowedNetworkHosts: source.EgressHosts}` et délègue la set-membership à l'axe existant — une allow-list **vide** refuse **tout** hôte (fail-closed). Un hôte hors liste ⇒ `EGRESS_NOT_ALLOWED`.
+4. **A2 — APPROBATION RUNTIME** — une écriture à travers une source `ScopeReadWrite` exige une `ConnectorRuntimeApproval` **fraîche et accordée** pour `(connector, write)` (via `Approval.covers(source.Name, OpWrite)`). Absente, refusée, ou pour un autre connecteur/op ⇒ `CONNECTOR_RW_NEEDS_APPROVAL`. **JAMAIS** `authority.Decide`.
+5. **Sinon** ⇒ `Decision{Admitted: true}, nil`. Une lecture RO dans le scope, une écriture RW avec approbation accordée : permises.
+
+Une lecture n'exige que les étapes (1) + (3). L'enforcer rend `(Decision, *BlockReason)` : le `BlockReason` est `nil` sur une admission, et la raison canonique actionnable sur un refus (le mur n'est pas une prison, §44.5).
+
+### `ConnectorRuntimeApproval.covers` — set-membership fail-closed, jamais une inférence
+
+```go
+func (a *ConnectorRuntimeApproval) covers(connector string, op Op) bool {
+  return a != nil && a.Connector == connector && a.Op == op && a.Granted
+}
+```
+
+`covers` est une **set-membership** pure : une approbation `nil`, pour un autre connecteur, une autre op, ou non accordée (`Granted == false`) **ne couvre pas** l'écriture. C'est l'amendement A2 en une fonction : l'enforcer consulte l'**approbation runtime** (qui/quand/quel-effet), jamais le graphe d'autorité S16. Le champ `By` est une trace d'audit — **jamais** consulté pour le verdict. Une property dédiée prouve qu'une approbation pour un connecteur **ne couvre pas** un autre (`RWWithApproval_OnlyForThatConnector`).
+
+### Les 4 codes BlockReason additifs (extension d'enum fermé)
+
+Le prompt mentionnait `AI_DIRECT_DB_ACCESS_FORBIDDEN` comme préexistant dans `blockreason` ; en réalité il n'existait que comme constante jetable du spike `dp19connectorgov` — le **registre canonique n'en portait aucun**. DP21 enregistre donc **quatre** codes (extension additive, §9), chacun avec une explication FR complète + un `how_to_fix` non-vide, dans **`reasons`** ET **`codeOrder`** :
+
+- `CONNECTOR_READ_ONLY` — un RO a tenté une écriture.
+- `CONNECTOR_RW_NEEDS_APPROVAL` — un RW a écrit sans approbation runtime accordée.
+- `EGRESS_NOT_ALLOWED` — l'hôte joint est hors de l'allow-list d'egress.
+- `AI_DIRECT_DB_ACCESS_FORBIDDEN` — une source IA a tenté de joindre un hôte de datastore en direct.
+
+`refuse(code)` construit la paire fail-closed `(Decision, *BlockReason)` à partir du registre (`blockreason.For` — il panique sur un code inconnu ; les codes ici sont le jeu clos DP21, tous enregistrés). Le vocabulaire de refus est le **registre canonique réutilisé**, jamais forké.
+
+### La RÉUTILISATION — aucun fork
+
+- **`agentimpl.EgressAllowed`** — l'allow-list d'hôtes (set-membership, fail-closed) est l'axe existant, **non forké** : l'enforcer lui fournit `source.EgressHosts` verbatim.
+- **`connector.IsDatastoreHost` + `DatastoreHosts`** — le jeu **clos déclaré** des hôtes de datastore (DP20), la **même source unique** que la déclaration.
+- **le registre `blockreason`** — le vocabulaire de refus canonique, étendu de 4 codes additifs.
+
+DP21 n'ajoute que la **composition** (l'ordre fixe des cinq verdicts + l'approbation runtime A2) ; il **promeut** le spike DP19 en runtime durable et **forke** zéro axe.
+
+### Les miroirs — N2 fixture (écrit EN PREMIER, RED) + property set-membership
+
+- **`connectorenforce_fixture_test.go`** — le miroir **N2** (`state → command → events`), **écrit AVANT l'impl, RED d'abord** : `TestFixture_FiveVerdicts` porte **5 sous-tests `t.Run`** (les 5 verdicts de la done-criteria), plus `RWWithApproval_OnlyForThatConnector`, `RWWithDeniedApproval_Refused`, `ROReadWithinScope_Admitted`, `ScopeBeatsEgress`.
+- **`connectorenforce_property_test.go`** — le miroir **∀** (rapid) : `TotalAndClosedVerdict`, `Deterministic`, `ROWriteAlwaysRefused`, `RWWriteNoApprovalAlwaysRefused`, `AIDatastoreAlwaysForbidden` — set-membership pur fail-closed, même entrée ⇒ même verdict.
+- Total : **10 fonctions de test PASS** dans `connectorenforce` + **5** dans `blockreason` (chaque nouveau code porte un `how_to_fix` non-vide, `render` round-trip, `For` déterministe). Le spike DP19 reste **vert** (inchangé).
+
+### La GATE
+
+- `go build ./...` : **exit 0** · `gofmt -l` : clean (aucun fichier signalé) · `go vet` : clean sur les deux paquets.
+- Gate large : `GOTOOLCHAIN=local go test ./runtime/... ./kernel/...` (go1.25.10) → **129 packages ok, 0 FAIL** (anti-overwrite intact).
+- **0 ELF parasite** (scanné, rien trouvé).
+- **Backend-only** : le front (`/data/dev/aidos/front/`) est intact — vitest 2221 / e2e inchangés. Les nouveaux types sont prêts pour un panneau /v2 à consommer.
+
+## Méta
+
+- **Le miroir fixture N2 épingle les CINQ verdicts comme `state → command → events`.** Le miroir a été **écrit EN PREMIER, RED avant l'impl** : `TestFixture_FiveVerdicts` est la done-criteria de DP21, ses cinq `t.Run` sont les cinq verdicts de la grammaire fermée. Chaque cas est un workflow N2 (`state` = la source déclarée + l'action + l'éventuelle approbation, `command` = `EnforceConnectorAction`, `events` = la `Decision` + le `BlockReason`). C'est le déterminisme-first (§6/§8) : décider si un effet de connecteur est admis est une **fonction pure** de la source déclarée et de l'action de runtime, donc c'est du **code**, jamais un agent.
+
+- **La property prouve la set-membership fail-closed déterministe — les deux côtés de chaque frontière.** Le miroir property ∀ (rapid) mesure que le verdict est **total et clos** (toute entrée retombe dans l'un des cinq), **déterministe** (même entrée ⇒ même verdict — la reproductibilité §6), et que les invariants tiennent sur **tous** les chemins : un RO en écriture est **toujours** refusé, un RW sans approbation est **toujours** refusé, une source IA vers un datastore est **toujours** refusée. La frontière anti-faux-positif (une approbation pour un connecteur ne couvre pas un autre) n'est pas une intuition : c'est une property à 100 cas.
+
+- **Réutiliser plutôt que réinventer (ADR 0007), sur les axes.** L'enforcer n'invente ni une allow-list d'egress, ni un jeu d'hôtes de datastore, ni un vocabulaire de refus : l'egress est `agentimpl.EgressAllowed` (non forké, nourri de `source.EgressHosts`), les datastores sont `connector.IsDatastoreHost` (DP20, jeu clos déclaré), les refus sont le registre `blockreason` (étendu de 4 codes additifs). DP21 n'ajoute que la **composition** (l'ordre fixe + l'approbation A2) — il **promeut** le spike DP19 en runtime non-jetable. Aucun fork.
+
+## Méta-méta
+
+- **L'amendement A2 — deux portes distinctes — est la ligne fine du mur appliquée à l'exécution.** La DÉCLARATION d'un connecteur (source/scope) est une **vérité** : elle naît au-dessus de la ligne par propose → ChangeSet → approbation (S85/S110, `connector.Validate`), et c'est là que l'admetteur de vérités du Kernel (S16) gouverne. L'EXÉCUTION d'une écriture est un **effet** : une autorisation de runtime, en dessous de la ligne, humaine-dans-la-boucle (`ConnectorRuntimeApproval` — qui/quand/quel-effet), **JAMAIS** `authority.Decide`. L'enforcer consulte l'approbation runtime, jamais le graphe S16. Confondre les deux portes ferait de chaque appel d'écriture une modification de vérité — exactement ce que le mur interdit. On **déclare** au-dessus, on **exécute** en dessous, et l'autorisation d'exécution est jetable, datée, attribuée (le champ `By`).
+
+- **Deux couches — l'enforcer ET le RLS S55.** DP21 est la **première** barrière (ce qu'une action a le droit de faire : scope, egress, IA, approbation) ; le **RLS S55** est la **seconde** (quelles lignes une requête a le droit de voir — l'isolation par projet au niveau de la base). Les deux couches sont indépendantes et se cumulent : un effet doit passer l'enforcer **et** rester dans son périmètre RLS. La défense en profondeur n'est pas un slogan ici : ce sont deux fonctions distinctes, à deux niveaux distincts, dont aucune ne remplace l'autre.
+
+- **Un enforcer sans miroir est un monstre — et l'enforcer n'écrit aucune vérité.** La loi de complétude (Mandat A, §5) s'applique : l'enforcer ne *vit* que parce qu'il porte sa preuve vivante — le miroir fixture N2 des cinq verdicts (écrit EN PREMIER, RED) et la property set-membership fail-closed. Et le mur (§2) tient : `EnforceConnectorAction` est une **fonction pure** qui ne consulte **aucun** truth-store et n'**écrit aucune** vérité ; l'agent n'a **aucun GRANT**. Une lecture RO est en dessous de la ligne (lecture libre dans le scope) ; une écriture RW est gatée par l'approbation runtime, jamais par une écriture de vérité. DP21 **gouverne l'effet** d'un connecteur déjà déclaré — il ne grave rien.

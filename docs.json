@@ -597,7 +597,9 @@
        "steps/concept/dp19-connector-governance",
        "steps/internals/dp19-connector-governance",
        "steps/concept/dp20-connector-sources",
-       "steps/internals/dp20-connector-sources"
+       "steps/internals/dp20-connector-sources",
+       "steps/concept/dp21-connector-enforcement",
+       "steps/internals/dp21-connector-enforcement"
       ]
      }
     ]
