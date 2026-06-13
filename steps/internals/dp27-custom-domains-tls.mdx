@@ -1,0 +1,124 @@
+---
+title: "DP27 · Internals — domainbind ÉTENDU (additif, S97 préservé) : composeemit.go extrait TraefikHTTPSLabels(router, host, certResolver, redirectMiddleware, port) []TraefikLabel (la SOURCE UNIQUE des labels HTTPS, renderTraefikLabels DP03 délègue, sortie byte-identique) ; envdomain.go NEUF (DP27) ajoute EnvDomainBinding (forme front), ResolveInEnvironment (fn PURE : résout le domaine pour l'env via normalizeDomain/validDomain S97 + envbindings.BindingsFor DP06, émet les labels via TraefikHTTPSLabels port 0, règle TLS fail-closed : local refuse HTTPS, env inconnu refusé), EnvServesHTTPS (délègue ServesHTTPS S97 — le code juge), ProposeEnvironmentDomain (propose→ChangeSet pattern DP24 : DRAFT S20 changeset.Open spec_delta(env_domain_binding)+mirror_delta, TOUJOURS StatusDraft jamais APPLIED — le mur) ; Bind/DOMAIN_ALREADY_BOUND/IsInjective/ServesHTTPS/routerNameOf/DefaultCertResolver PRÉSERVÉS ; miroir Go fixture+property(rapid)+Godog RED-first ; backend-only, below-the-line OU DRAFT ChangeSet, le mur tient ; Traefik OWNS réseau/ports, DP27 n'émet que des labels"
+description: "Le journal de build de DP27 : composeemit.go ÉTENDU (extrait la SOURCE UNIQUE) + envdomain.go + 3 fichiers miroir NEUFS (fixture+property+Godog RED-first). composeemit.go gagne UNE fonction pure exportée TraefikHTTPSLabels(router, host, certResolver, redirectMiddleware string, port int) []TraefikLabel (+ type TraefikLabel{Key,Value string}) ; renderTraefikLabels (DP03 YAML) DÉLÈGUE désormais à elle — SORTIE BYTE-IDENTIQUE (composeemit tests verts, byte-identité préservée). C'est la SOURCE UNIQUE des labels HTTPS : compose YAML + domainbind en dérivent, jamais un 2e jeu divergent. envdomain.go (DP27, étend S97 sans le casser) ajoute : EnvDomainBinding{Environment, Domain, Project, URL, RouterName, RedirectMiddleware, CertResolver, TLS bool, Managed bool, Labels []Label} (la forme pour le front) ; ResolveInEnvironment(b Binding, env scope.Environment) (EnvDomainBinding, *blockreason.BlockReason) — fn PURE : (a) résout le domaine pour l'env (réutilise normalizeDomain/validDomain S97 + envbindings.BindingsFor DP06), (b) émet les labels via composeemit.TraefikHTTPSLabels (port 0, route vers service déclaré) ; RÈGLE TLS fail-closed : local (sans TLS) refuse un domaine HTTPS, env inconnu refusé ; réutilise routerNameOf S97 ; CertResolver=DefaultCertResolver. EnvServesHTTPS(b EnvDomainBinding) bool délègue au ServesHTTPS S97 (le mur : code juge, jamais LLM). ProposeEnvironmentDomain(b Binding, env scope.Environment) (changeset.ChangeSet, error) — chemin MUR propose→ChangeSet (pattern DP24 connectordeclare) : le domaine DANS l'Environment = vérité ⇒ DRAFT ChangeSet (S20 changeset.Open) spec_delta(env_domain_binding)+mirror_delta complet (pas de monstre), content-addressé/reproductible, TOUJOURS StatusDraft (jamais APPLIED — le mur), refuse (pas de DRAFT) si binding invalide ou env sans TLS. PRÉSERVÉS untouched (S97) : Bind, DOMAIN_ALREADY_BOUND, IsInjective, ServesHTTPS, normalizeDomain, validDomain, routerNameOf, DefaultCertResolver=letsencrypt. Miroirs écrits D'ABORD (RED confirmé via go vet « undefined: ResolveInEnvironment », puis VERT) : envdomain_fixture_test.go (N2) 8 cas ResolveInEnvironment + 4 sous-cas ProposeEnvironmentDomain ; envdomain_property_test.go (rapid N1) 6 propriétés (reproductibilité, HTTPS sur tout env TLS, local refuse HTTPS, unicité-source DP03 labels==composeemit.TraefikHTTPSLabels, injectivité préservée) ; envdomain_bdd_test.go + tests/runtime/envdomain.feature (Godog N0) 5 scénarios (prod/staging HTTPS, local refusé, env inconnu refusé, propose DRAFT reproductible). EXACT : domainbind = 15 fonctions de test top-level (7 S97 intactes + 8 DP27), 49 lignes RUN (avec sous-tests/scénarios), TOUT VERT ; composeemit = vert, byte-identité préservée ; front vitest lib/domainbind.test.ts 6/6 verts (lib front NON touchée). GATE GOTOOLCHAIN=local go1.25.10 cwd back/ : go build ./... = 0 ; go test ./runtime/... ./kernel/... = 0 aucun FAIL ; gofmt -l runtime/ kernel/ archive/ propre ; go vet ./runtime/domainbind/ ./runtime/composeemit/ = 0 ; scan ELF parasite back/ = aucun. Backend-only ; le binding domaine = below-the-line (résolution PURE) OU ChangeSet DRAFT si vérité d'environnement (jamais write direct kernel/mirrors/fitness) ; Traefik OWNS le réseau/ports, DP27 n'émet QUE des labels ; le mur tient."
+keywords: ["aidos", "krd", "DP27", "internals", "back/runtime/domainbind", "envdomain.go", "domainbind.go", "back/runtime/composeemit", "composeemit.go", "TraefikHTTPSLabels", "TraefikLabel", "Key", "Value", "renderTraefikLabels", "délègue", "delegates", "source unique", "single source", "sortie byte-identique", "byte-identical output", "byte-identité préservée", "DP03", "labels Traefik HTTPS", "Traefik HTTPS labels", "compose YAML", "2e jeu divergent", "divergent second set", "jamais un 2e jeu", "EnvDomainBinding", "Environment", "Domain", "Project", "URL", "RouterName", "RedirectMiddleware", "CertResolver", "TLS", "Managed", "Labels", "ResolveInEnvironment", "fn pure", "pure function", "EnvServesHTTPS", "ProposeEnvironmentDomain", "scope.Environment", "scope.EnvProd", "scope.EnvStaging", "scope.EnvLocal", "EnvProd", "EnvStaging", "EnvLocal", "normalizeDomain", "validDomain", "envbindings.BindingsFor", "BindingsFor", "DP06", "routerNameOf", "DefaultCertResolver", "letsencrypt", "certresolver", "ACME", "certificat ACME", "redirect HTTP→HTTPS", "redirectMiddlewareOf", "port 0", "route vers service déclaré", "routes to declared service", "règle TLS", "TLS rule", "fail-closed", "local refuse HTTPS", "local refuses HTTPS", "env inconnu refusé", "unknown env refused", "env sans TLS refusé", "env without TLS refused", "le code juge", "code judges", "jamais un LLM", "never an LLM", "le mur", "§2", "kernel", "mirrors", "fitness", "ServesHTTPS", "délègue au ServesHTTPS S97", "delegates to S97 ServesHTTPS", "propose→ChangeSet", "propose to ChangeSet", "pattern DP24", "connectordeclare", "vérité d'environnement", "environment truth", "domaine DANS l'Environment", "domain in the environment", "DRAFT ChangeSet", "S20", "changeset.Open", "changeset.ChangeSet", "StatusDraft", "TOUJOURS StatusDraft", "jamais APPLIED", "never APPLIED", "spec_delta", "env_domain_binding", "mirror_delta", "pas de monstre", "no monster", "content-addressé", "content-addressed", "reproductible", "reproducible", "refuse si binding invalide", "refuses if binding invalid", "refuse si env sans TLS", "refuses if env without TLS", "PRÉSERVÉS untouched", "preserved untouched", "S97 préservé", "S97 preserved", "Bind", "DOMAIN_ALREADY_BOUND", "IsInjective", "ÉTEND S97", "extends S97", "ne casse pas", "does not break", "ne duplique pas", "does not duplicate", "additif", "additive", "anti-overwrite", "§9", "miroir Go", "miroir fixture", "miroir property", "miroir Godog", "rapid", "fixture", "N2", "N1", "N0", "Godog", "state command events", "RED-first", "écrit RED-first", "écrits D'ABORD", "written first", "RED confirmé", "RED confirmed", "go vet", "undefined: ResolveInEnvironment", "puis VERT", "then green", "envdomain_fixture_test.go", "envdomain_property_test.go", "envdomain_bdd_test.go", "tests/runtime/envdomain.feature", "8 cas ResolveInEnvironment", "4 sous-cas ProposeEnvironmentDomain", "6 propriétés", "reproductibilité", "reproducibility", "HTTPS sur tout env TLS", "HTTPS on every TLS env", "local refuse HTTPS", "unicité-source DP03", "DP03 single-source", "labels==composeemit.TraefikHTTPSLabels", "injectivité préservée", "injectivity preserved", "5 scénarios", "prod staging HTTPS", "local refusé", "env inconnu refusé", "propose DRAFT reproductible", "15 fonctions de test", "15 test funcs", "7 S97 intactes", "8 DP27", "49 lignes RUN", "49 RUN lines", "TOUT VERT", "all green", "composeemit vert", "byte-identité préservée", "front vitest", "lib/domainbind.test.ts", "6/6 verts", "lib front non touchée", "front lib untouched", "GATE", "GOTOOLCHAIN=local", "go1.25.10", "cwd back/", "go build", "go test", "go vet", "gofmt", "exit 0", "aucun FAIL", "0 FAIL", "aucun ELF parasite", "no parasite ELF", "scan ELF", "backend-only", "below-the-line", "résolution pure", "pure resolution", "ChangeSet DRAFT si vérité d'environnement", "jamais write direct", "never a direct write", "Traefik OWNS réseau/ports", "Traefik owns network/ports", "n'émet que des labels", "emits only labels", "/data/dockers", "conventions Traefik", "déterminisme-first", "§6", "§8", "no LLM", "zéro LLM", "ADR 0007", "réutilise jamais réinvente", "reuses never reinvents", "records.Hash", "blockreason", "blockreason.BlockReason", "BlockReason", "Binding", "S13", "load-bearing", "S97", "DP03", "DP06", "DP24", "DomainBindPanel", "lib/domainbind.ts", "view.ts", "front", "onglet par-environnement", "per-environment tab", "by-design forward dep", "OpenQuestion", "EPIC F", "Mintlify"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP27 — Les domaines custom + TLS automatique via Traefik](/steps/concept/dp27-custom-domains-tls).</Note>
+
+## Implémentation
+
+### Les paquets — `composeemit` (étendu) + `domainbind` (étendu)
+
+DP27 **étend** le binding de domaine de S97 par le câblage **domaine→Environment** + l'émission des labels HTTPS, **additivement**, sans le casser. Tâche **backend-only** ; le mur tient (le binding domaine = below-the-line en résolution pure, OU un DRAFT ChangeSet si on fixe une vérité d'environnement).
+
+Les fichiers touchés :
+
+- `back/runtime/composeemit/composeemit.go` — **ÉTENDU** : extrait le vocabulaire des labels Traefik HTTPS dans une fonction pure exportée ; `renderTraefikLabels` (DP03 YAML) **délègue** désormais à elle (sortie **byte-identique**).
+- `back/runtime/domainbind/envdomain.go` — **NEUF** (DP27, étend S97 sans le casser).
+- `back/runtime/domainbind/envdomain_fixture_test.go` + `envdomain_property_test.go` + `envdomain_bdd_test.go` + `back/tests/runtime/envdomain.feature` — les **miroirs NEUFS** (fixture + property + Godog), **écrits RED-first**.
+
+### La source unique — `composeemit.TraefikHTTPSLabels` (DP03 délègue, byte-identique)
+
+Le cœur de l'extension : le vocabulaire des labels Traefik HTTPS devient **UNE fonction pure exportée**, la **source unique** :
+
+```go
+type TraefikLabel struct {
+  Key   string
+  Value string
+}
+
+// TraefikHTTPSLabels rend le jeu CANONIQUE de labels Traefik HTTPS : le routeur,
+// la règle d'hôte, le certresolver ACME, le port de service, et le middleware de redirect HTTP→HTTPS.
+func TraefikHTTPSLabels(router, host, certResolver, redirectMiddleware string, port int) []TraefikLabel
+```
+
+`renderTraefikLabels` (le rendu YAML de DP03) **délègue** désormais à `TraefikHTTPSLabels` — et sa sortie reste **byte-identique** (les tests composeemit restent verts, la byte-identité est préservée). C'est l'unicité-source : le **compose YAML** et le **binding domaine→Environment** dérivent du **même** vocabulaire — **jamais** un 2e jeu de labels divergent.
+
+### La forme front — `EnvDomainBinding`
+
+`envdomain.go` ajoute la forme exposable au front (un onglet `/domain-bind` par-environnement, si on l'ajoute plus tard) :
+
+```go
+type EnvDomainBinding struct {
+  Environment        scope.Environment
+  Domain             string
+  Project            string
+  URL                string // https://<domaine>
+  RouterName         string // routerNameOf S97
+  RedirectMiddleware string
+  CertResolver       string // DefaultCertResolver = "letsencrypt"
+  TLS                bool   // l'env porte-t-il le TLS
+  Managed            bool
+  Labels             []composeemit.TraefikLabel // DP03 réutilisé — TraefikHTTPSLabels
+}
+```
+
+### `ResolveInEnvironment` — la résolution PURE (below-the-line)
+
+```go
+func ResolveInEnvironment(b Binding, env scope.Environment) (EnvDomainBinding, *blockreason.BlockReason)
+```
+
+Une **fonction pure** en deux temps :
+
+1. **résoudre le domaine pour l'env** — réutilise `normalizeDomain`/`validDomain` (S97) + `envbindings.BindingsFor` (DP06) ; un **env inconnu** est **refusé** ; un env **sans TLS** (le `local`) **refuse** un domaine HTTPS (`fail-closed`).
+2. **émettre les labels** — via `composeemit.TraefikHTTPSLabels(router, domain, certResolver, redirect, 0)` (port `0`, route vers le service déclaré). Le `RouterName` réutilise `routerNameOf` (S97) ; le `CertResolver` est le `DefaultCertResolver` (`letsencrypt`).
+
+La **règle TLS est fail-closed** : si l'environnement ne peut pas garantir le HTTPS, il ne sert **pas** le domaine — jamais « en clair par défaut ».
+
+### `EnvServesHTTPS` — le code juge, jamais un LLM
+
+```go
+func EnvServesHTTPS(b EnvDomainBinding) bool // délègue au ServesHTTPS S97
+```
+
+La décision « cet environnement sert-il l'app en HTTPS ? » **délègue** au `ServesHTTPS` de S97 — c'est le mur (§2) : le **code** juge, **jamais** un LLM.
+
+### `ProposeEnvironmentDomain` — le chemin MUR propose→ChangeSet (pattern DP24)
+
+Fixer un domaine **dans** un environnement est une **vérité d'environnement** — donc jamais un write en passant :
+
+```go
+func ProposeEnvironmentDomain(b Binding, env scope.Environment) (changeset.ChangeSet, error)
+```
+
+Le même pattern que DP24 (`connectordeclare`) : ouvre un **DRAFT ChangeSet** (S20 `changeset.Open`) qui porte un `spec_delta(env_domain_binding)` **et** son `mirror_delta` complet (pas de monstre), **content-adressé** et **reproductible**, **toujours** en `StatusDraft` (**jamais** `APPLIED` — le mur). Il **refuse** (pas de DRAFT) si le binding est invalide ou si l'environnement ne porte pas de TLS.
+
+### Ce qui est PRÉSERVÉ untouched (S97)
+
+`Bind`, `DOMAIN_ALREADY_BOUND` (l'injectivité fail-closed), `IsInjective`, `ServesHTTPS`, `normalizeDomain`, `validDomain`, `routerNameOf`, `DefaultCertResolver` (`= "letsencrypt"`) — tous **inchangés**. DP27 **étend** S97, il ne le **casse** ni ne le **duplique** pas.
+
+### Les miroirs — RED-first (confirmé RED, puis VERT)
+
+Écrits **D'ABORD** ; le RED a été confirmé via `go vet` (« undefined: ResolveInEnvironment »), puis amené au VERT :
+
+1. **`envdomain_fixture_test.go` (N2, `state → command → events`)** — **8 cas** `ResolveInEnvironment` + **4 sous-cas** `ProposeEnvironmentDomain`.
+2. **`envdomain_property_test.go` (property, rapid, N1)** — **6 propriétés** : reproductibilité, HTTPS sur **tout** env TLS, **local refuse HTTPS**, **unicité-source DP03** (les labels du binding `== composeemit.TraefikHTTPSLabels`), **injectivité préservée**.
+3. **`envdomain_bdd_test.go` + `tests/runtime/envdomain.feature` (Godog, N0)** — **5 scénarios** : prod/staging HTTPS, local refusé, env inconnu refusé, propose DRAFT reproductible.
+
+### La GATE (GOTOOLCHAIN=local go1.25.10, cwd `back/`)
+
+- `go build ./...` : **exit 0**.
+- `go test ./runtime/... ./kernel/...` : **exit 0, aucun FAIL**.
+- paquet domainbind : **15** fonctions de test top-level (**7** S97 intactes + **8** DP27), **49** lignes RUN (avec sous-tests/scénarios), **TOUT VERT**.
+- paquet composeemit : **vert**, **byte-identité préservée**.
+- front vitest `lib/domainbind.test.ts` : **6/6 verts** (lib front **NON touchée**).
+- `gofmt -l runtime/ kernel/ archive/` : **propre** ; `go vet ./runtime/domainbind/ ./runtime/composeemit/` : **exit 0** ; scan ELF parasite `back/` : **aucun**.
+- **Backend-only** : rien en suspens. Aucun fichier front ni MCP modifié — le front domain-bind S97 (`lib/domainbind.ts`) existait déjà et reste vert ; le câblage env-domain est exposable au front via `EnvDomainBinding` (forme JSON) si un onglet `/domain-bind` par-environnement est ajouté ultérieurement.
+
+## Méta
+
+- **Le miroir Go est l'épreuve `un domaine = un projet`, ∀ — et `labels == source unique`, ∀.** Le miroir property mesure le cœur déterministe : il épingle que le binding reste **injectif** `forall` (un domaine = un seul projet), que **tout** environnement TLS sert le domaine en HTTPS, que le `local` **refuse** un domaine HTTPS, que les labels du binding sont **byte-égaux** à `composeemit.TraefikHTTPSLabels` (l'unicité-source prouvée), et que la résolution est **reproductible** (même domaine + même env → mêmes labels et même binding). Le miroir fixture (N2) épingle l'env inconnu refusé, le DRAFT reproductible ; le Godog (N0) tient en mots-métier. Que le domaine soit *servi en HTTPS dans son env*, *injectif sur le projet* et *déterministe sur les labels* n'est pas une promesse — c'est une propriété prouvée.
+
+- **Déterminisme-first (§6/§8) : normaliser, résoudre, émettre des labels, calculer un binding sont des fonctions pures, donc du code.** DP27 n'invite **aucun** LLM : la normalisation et la validation sont S97, la résolution par-environnement est DP06, l'émission des labels est `composeemit.TraefikHTTPSLabels`, la décision HTTPS **délègue** à `ServesHTTPS` (le code juge). Aucune horloge, aucun RNG, aucune I/O, aucun docker. Même entrée ⇒ même sortie (le miroir de reproductibilité le pin). Câbler un domaine dans un environnement est une **composition de fonctions pures**, pas un jugement flou.
+
+- **Réutiliser plutôt que réinventer (ADR 0007), sur S97 + DP06 + DP03.** DP27 n'invente **ni** normalisation, **ni** validation, **ni** résolution par-environnement, **ni** vocabulaire de labels HTTPS : il **réutilise** `normalizeDomain`/`validDomain`/`routerNameOf`/`ServesHTTPS` (S97), `envbindings.BindingsFor` (DP06), et `composeemit.TraefikHTTPSLabels` (la source unique DP03). Et il **étend** S97 — il ne le **duplique pas** : pas de second binding à côté, mais le câblage `ResolveInEnvironment` + le chemin propose→ChangeSet, avec l'injectivité intacte. Surtout, l'émission des labels devient **une seule source** : le compose YAML **et** le domaine en dérivent — jamais un 2e jeu divergent.
+
+## Méta-méta
+
+- **Le mur sur deux niveaux : résolution PURE below-the-line, ou DRAFT ChangeSet pour une vérité d'environnement.** **Résoudre** un domaine pour un environnement (`ResolveInEnvironment`) est below-the-line (§2) : une résolution **pure** qui ne grave **rien** dans `kernel`, `mirrors` ou `fitness` — elle re-projette ce que S97 et DP06 figent déjà. Mais **fixer** un domaine **dans** un environnement est une **vérité d'environnement** : `ProposeEnvironmentDomain` ne l'écrit **jamais en passant** — il ouvre un **DRAFT ChangeSet** (S20), **toujours** en `StatusDraft`, **jamais** `APPLIED`. L'agent n'a aucun GRANT pour graver une vérité ; la seule porte reste idée → mirror → `/goal` → approbation humaine.
+
+- **Traefik OWNS le réseau et les ports — DP27 n'émet QUE des labels.** Le partage de responsabilité est net : Traefik possède le réseau, les ports, le reverse-proxy et le cycle ACME (les conventions `/data/dockers`). DP27 n'**émet** que les **labels** qui déclarent à Traefik *comment* router le domaine — il ne touche **ni** au réseau, **ni** aux ports, **ni** à l'obtention du certificat. Le binding est une **déclaration** ; Traefik l'**exécute**. C'est la frontière qui empêche AIDOS de réinventer un reverse-proxy.
+
+- **DP27 ÉTEND S97, il ne le CASSE ni ne le DUPLIQUE pas — l'unicité-source gravée dans la fonction pure.** La règle (§9) est nette : `Bind`, `DOMAIN_ALREADY_BOUND`, `IsInjective`, `ServesHTTPS`, `normalizeDomain`, `validDomain` restent **untouched** ; `renderTraefikLabels` (DP03) **délègue** à `TraefikHTTPSLabels` avec une **sortie byte-identique** (la byte-identité est prouvée). Le binding domaine→Environment **dérive** de la **même** source de labels que le compose — jamais un 2e jeu divergent. La loi de complétude veille : un geste sans miroir serait un **monstre** — l'extension ne vit que parce qu'elle porte sa preuve vivante (fixture + property + Godog, RED-first, confirmé RED via « undefined: ResolveInEnvironment »). C'est l'anti-overwrite poussé jusqu'au label : on **ajoute** un câblage, on **n'altère** rien de l'existant.
