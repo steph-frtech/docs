@@ -577,7 +577,9 @@
        "steps/concept/dp09-environments-cockpit",
        "steps/internals/dp09-environments-cockpit",
        "steps/concept/dp10-bootstrap-spike",
-       "steps/internals/dp10-bootstrap-spike"
+       "steps/internals/dp10-bootstrap-spike",
+       "steps/concept/dp11-compose-profiles",
+       "steps/internals/dp11-compose-profiles"
       ]
      }
     ]

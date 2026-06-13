@@ -1,0 +1,57 @@
+---
+title: "DP11 · Les profiles de compose — un seul manifest, neuf vues déterministes"
+description: "DP11 étend le StackManifest (DP02) et l'émetteur compose (DP03) avec des compose profiles déterministes : chaque service porte un ou plusieurs profiles dans l'ensemble CLOS {core, docs, observability, qa, git, tickets, connectors, non-prod, full} ; un sélecteur de profile inclut/exclut les services à l'émission, byte-identique par sélection. core = le serveur Hono + l'interpréteur Go sidecar + le datastore + Valkey/PgBouncer ; non-prod autorise Doltgres en opt-in (jamais en prod, porte DP06) ; full = l'union déterministe de tous les profiles. Un profile hors ensemble = un refus (UNKNOWN_PROFILE). L'émetteur reste PUR : le profile est un paramètre DÉCLARÉ, jamais inféré."
+keywords: ["aidos", "krd", "DP11", "compose profiles", "profile", "StackManifest", "émetteur compose", "ensemble clos", "core", "docs", "observability", "qa", "git", "tickets", "connectors", "non-prod", "full", "sélecteur", "byte-identique", "filtre pur", "UNKNOWN_PROFILE", "Doltgres", "DOLTGRES_NOT_ALLOWED_IN_PROD", "DP06", "déterminisme", "above-the-line", "below-the-line", "/stack-emit", "piste DP"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP11](/steps/internals/dp11-compose-profiles).</Note>
+
+## En une phrase
+
+DP11 donne à votre stack un **sélecteur** : un seul manifest, mais neuf vues possibles. Vous demandez `core` et vous obtenez le compose minimal pour faire tourner l'app ; vous demandez `full` et vous obtenez l'union de tout — et la même sélection produit **toujours les mêmes octets**.
+
+## Le problème que ça résout
+
+Le StackManifest (DP02) décrit **tous** les services qu'une app peut faire vivre — le serveur, le datastore, mais aussi la stack d'observabilité, le runner de QA, le service de docs, le sidecar git, l'intégration de tickets, les connecteurs. Mais on ne déploie pas tout, tout le temps. En dev local on veut le strict minimum ; en prod on veut le cœur plus l'observabilité ; pour une démo on coupe les connecteurs.
+
+Sans sélecteur, ce besoin se résout par la dérive habituelle : on duplique le manifest (un par usage), on commente des lignes à la main, on maintient cinq fichiers compose qui divergent. DP11 ferme cette porte avec le mécanisme le plus simple — une convention que Docker connaît déjà, les **compose profiles** : chaque service porte une étiquette, et l'émission filtre.
+
+## Les neuf profiles — un ensemble CLOS et énumérable
+
+Le sélecteur ne tire pas dans un ensemble ouvert. Les profiles forment un **ensemble clos**, énumérable d'un coup d'œil :
+
+| Profile | Ce qu'il rassemble |
+|---|---|
+| `core` | le serveur Hono + l'interpréteur Go (sidecar) + le datastore + Valkey/PgBouncer — le minimum pour que l'app vive |
+| `docs` | le service de documentation |
+| `observability` | la télémétrie, les métriques, les traces |
+| `qa` | le runner de tests / mirrors |
+| `git` | le sidecar de versionnement |
+| `tickets` | l'intégration de suivi de tickets |
+| `connectors` | les connecteurs externes (Slack, etc.) |
+| `non-prod` | autorise le datastore Doltgres en **opt-in** — jamais en prod |
+| `full` | l'**union déterministe** de tous les profiles ci-dessus |
+
+Demander un profile qui n'est pas dans cette table — `staging`, `debug`, une faute de frappe — n'est pas deviné : c'est **refusé**, avec le code `UNKNOWN_PROFILE`. La clôture n'est pas une rigidité : c'est ce qui rend chaque profile **visible et honnête**. On sait exactement ce qui existe.
+
+## Le sélecteur est un filtre PUR — byte-identique par sélection
+
+C'est ici que la loi DP03 s'étend. L'émission du compose était déjà une **fonction pure** du manifest : même manifest → mêmes octets. DP11 ajoute un second argument — le profile sélectionné — et la garantie tient toujours : **même manifest + même sélection → compose byte-identique**, à chaque exécution, sur chaque machine.
+
+L'inclusion/exclusion d'un service n'est pas un jugement : c'est une **appartenance ensembliste**. Un service est inclus si son profile (ou l'un de ses profiles) appartient à la sélection — un filtre, pas une heuristique. `full` n'est pas « tout ce qui paraît utile » : c'est l'**union** des huit profiles, calculée, jamais opinée. Et le profile n'est **jamais inféré** : il est un **paramètre déclaré**, fourni au sélecteur. Un émetteur qui « devinerait » qu'une app a besoin de l'observabilité serait un trou de déterminisme.
+
+## La porte de DP06 reste en ligne
+
+Le profile `non-prod` autorise Doltgres — le datastore git-for-data — **en opt-in**. Mais la porte gravée en DP06 reste fail-closed : un environnement `prod` qui demanderait Doltgres est **refusé** avec `DOLTGRES_NOT_ALLOWED_IN_PROD`. PostgreSQL = la prod ; Doltgres = hors prod uniquement. Le sélecteur de profiles ne contourne pas le mur : il compose avec la porte d'environnement, il ne l'ouvre pas.
+
+## Où vit le profile par rapport au mur
+
+Le profile d'un service est **déclaré dans la source** `stack_manifest` — au-dessus du mur, là où vit la vérité. La **sélection** d'un profile à l'émission — « émets-moi `core` » — est un acte **below-the-line** : une projection, comme l'émission du compose elle-même. Déclarer qu'un service appartient au profile `qa` est une vérité ; choisir d'émettre la vue `qa` aujourd'hui ne l'est pas. La frontière est nette.
+
+## Ce que vous voyez à l'écran
+
+La route **`/stack-emit`** du Workbench gagne un **sélecteur de profile**. Choisissez `core` : le compose se recalcule, les services hors-cœur disparaissent. Basculez sur `full` : tout réapparaît, dans l'union déterministe. Demandez un profile inconnu : le refus s'affiche avec son code `UNKNOWN_PROFILE`. Et la mesure tient sous vos yeux — émettez deux fois la même sélection, vous obtenez deux fois le même hash. Rien n'est écrit : c'est une mesure, pas une mutation.
+
+## Ce que ça prépare
+
+DP12 émettra le **bootstrap one-shot** (verdict GO de DP10) — la séquence d'amorçage qui démarrera précisément les services qu'un profile sélectionne ; et l'EPIC D (DP15+) bâtira les services-substrat que les profiles `observability`, `qa`, `docs`, `git`, `tickets` et `connectors` rassemblent. Le sélecteur est en place ; les services qu'il regroupe arrivent ensuite.

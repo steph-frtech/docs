@@ -1,0 +1,39 @@
+---
+title: "DP11 · Internals — FilterByProfile : un filtre pur sur un ensemble clos, le miroir ∀"
+description: "Le journal de build de DP11 : l'extension du StackManifest (profiles déclarés par service) + de l'émetteur compose (DP03) avec FilterByProfile — un filtre PUR sur l'ensemble clos {core, docs, observability, qa, git, tickets, connectors, non-prod, full}, full = union déterministe, profile hors ensemble = refus UNKNOWN_PROFILE ; le miroir property ∀ N1 écrit d'abord et rouge puis vert (même manifest + même sélection → byte-identique, full = union, inconnu refusé, prod+Doltgres → DOLTGRES_NOT_ALLOWED_IN_PROD via DP06) ; le jumeau TS épinglé par parité de hash ; la route /stack-emit étendue d'un sélecteur et ses e2e Playwright."
+keywords: ["aidos", "krd", "DP11", "internals", "FilterByProfile", "compose profiles", "ensemble clos", "Profiles()", "IsKnownProfile", "UNKNOWN_PROFILE", "union", "full", "filtre pur", "byte-identique", "property", "rapid", "fast-check", "miroir rouge-vert", "jumeau TS", "parité de hash", "above-the-line", "below-the-line", "DOLTGRES_NOT_ALLOWED_IN_PROD", "DP06", "DP03", "DP02", "déterminisme-first", "/stack-emit", "Playwright"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP11 — Les profiles de compose](/steps/concept/dp11-compose-profiles).</Note>
+
+## Implémentation
+
+### L'ensemble clos, déclaré une fois
+
+Le cœur de DP11 est une **fonction pure de filtrage** par-dessus l'émetteur DP03. L'ensemble des profiles est DÉCLARÉ (jamais appris, §8), sur le motif de l'ensemble clos `scope.Environment` de DP06 : un ordre canonique `Profiles() = {core, docs, observability, qa, git, tickets, connectors, non-prod, full}`, un prédicat total `IsKnownProfile`, et un code de refus **package-local** `UNKNOWN_PROFILE` (motif DP02/DP03 — l'enum gelé `blockreason` n'est jamais touché). La clôture est assertée par cardinalité : `Profiles()` couvre exactement les neuf membres, dans l'ordre.
+
+Chaque service du StackManifest porte désormais un champ `profiles []Profile` — une **vérité déclarée dans la source** `stack_manifest` (above-the-line). `core` rassemble le serveur Hono, l'interpréteur Go sidecar, le datastore et Valkey/PgBouncer ; les autres profiles étiquettent leurs services-substrat respectifs. `full` n'est pas une étiquette portée par un service : c'est une **sélection spéciale** que `FilterByProfile` résout en **union** des huit autres.
+
+### FilterByProfile — le filtre pur
+
+`FilterByProfile(manifest, selection)` est total et pur : il refuse fail-closed une `selection` hors ensemble (`UNKNOWN_PROFILE`, jamais un compose vide deviné) ; sinon il rend le sous-manifest des services dont l'ensemble de profiles **intersecte** la sélection — une appartenance ensembliste, jamais une heuristique de nom. Pour `full`, la sélection est dépliée en l'union de tous les profiles connus avant l'intersection, si bien que `full` = exactement l'ensemble des services du manifest. Le sous-manifest est ensuite passé à l'émetteur DP03 **inchangé** : l'émission reste la même fonction pure, le profile n'ajoute qu'un pré-filtre. Conséquence : **même manifest + même sélection → mêmes octets**, la double adresse `source_hash`/`output_hash` de DP03 réutilisée verbatim.
+
+### La porte DP06, composée jamais contournée
+
+`non-prod` autorise Doltgres en opt-in, mais `FilterByProfile` ne décide rien sur le datastore : la porte `ValidateDatastore(env, ds)` de DP06 reste l'autorité. Le miroir épingle la composition : un manifest dont le datastore est Doltgres, émis pour l'environnement `prod`, est **refusé** par la porte DP06 avec `DOLTGRES_NOT_ALLOWED_IN_PROD` — quel que soit le profile sélectionné. Le profile filtre les services ; il n'ouvre aucune porte d'environnement.
+
+## Méta
+
+- **Le miroir d'abord (rouge → vert).** Le property test ∀ N1 est écrit AVANT `FilterByProfile` (fonction absente → compile fail, c'est le rouge), puis vert. Les lois : (1) l'ensemble clos — `Profiles()` couvre exactement neuf membres, ordre canonique ; (2) reproductibilité — ∀ manifest, ∀ profile connu, deux émissions → `output_hash` identique ; (3) `full` = union — le sous-manifest de `full` = l'ensemble complet des services, et `full` ⊇ tout autre profile ; (4) fail-closed — ∀ chaîne hors ensemble → `UNKNOWN_PROFILE`, jamais deviné ; (5) la porte DP06 — `prod` + Doltgres → `DOLTGRES_NOT_ALLOWED_IN_PROD`, quel que soit le profile ; (6) inclusion ⇔ intersection — un service est dans le filtré ssi ses profiles intersectent la sélection. Le jumeau TS reproduit la table et le filtre octet pour octet ; le miroir vitest (fast-check) épingle le hash Go autoritatif — toute divergence d'un octet rougit — et porte les mêmes lois côté twin.
+
+- **Étendre la fonction pure, pas la doubler.** Le réflexe paresseux aurait été un second émetteur « compose-avec-profiles » à côté de DP03. Le geste juste est un **pré-filtre** qui rend un sous-manifest, puis l'émetteur DP03 inchangé : une seule source de vérité pour les octets émis, le profile n'étant qu'un argument de sélection. La byte-stabilité de DP03 est ainsi héritée gratuitement, jamais re-prouvée séparément.
+
+- **`full` est calculé, jamais étiqueté.** Faire de `full` une étiquette qu'on collerait sur chaque service aurait été un piège de maintenance (un service ajouté sans l'étiquette `full` disparaîtrait silencieusement de l'union). En le résolvant comme **union des profiles connus**, `full` reste correct par construction quand l'ensemble clos s'élargit — l'union suit l'ensemble, pas une liste à tenir à jour.
+
+## Méta-méta
+
+- **Above/below the line, jusque dans la sélection.** DP11 trace la frontière fine que le KRD impose partout : la *déclaration* qu'un service appartient au profile `qa` est une **vérité** (source `stack_manifest`, au-dessus du mur, modifiable seulement par idée → miroir → /goal) ; la *sélection* « émets-moi `core` aujourd'hui » est une **projection** (below-the-line, un acte sans cérémonie). Confondre les deux — laisser une UI « inventer un profile » ou écrire une sélection comme si c'était une vérité — serait une violation du mur. Le profile vit au-dessus ; le choix du profile vit en dessous.
+
+- **Non-prod et prod : la porte de DP06 prouve que les pistes ne se court-circuitent pas.** Le profile `non-prod` pourrait sembler être l'endroit où l'on « autorise » Doltgres. Il ne l'est pas : il **étiquette** des services hors-prod, mais la décision Doltgres-or-not reste à la porte d'environnement DP06. Composer deux portes plutôt que les fusionner est ce qui empêche qu'un profile devienne un trou par lequel une règle d'environnement s'évapore — `prod` + Doltgres reste refusé même quand le profile dit `non-prod`.
+
+- **Déterminisme-first, sans exception.** La tentation d'un sélecteur est de « comprendre l'intention » (l'agent regarde l'app et décide qu'elle a besoin de l'observabilité). Ici chaque décision est une **fonction pure** : l'appartenance à l'ensemble clos est un prédicat, l'inclusion d'un service est une intersection ensembliste, `full` est une union, le refus de l'inconnu est total et fail-closed. Aucun LLM n'entre dans le filtre ; le profile est un paramètre déclaré, jamais inféré. Un sélecteur qui « devinerait » le profile serait exactement le trou de déterminisme que le mandat §6 interdit — un agent faisant ce qu'une fonction pure fait mieux.
