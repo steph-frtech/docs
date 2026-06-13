@@ -1,0 +1,96 @@
+---
+title: "DP24 · Internals — ProposeConnectorDeclaration(source) → ChangeSet DRAFT via S20 (jamais Apply, le mur), COMPOSE DP20 (connector.Validate + CanonicalBody) + S20 (changeset.Open) sans forker, ErrInvalidConnector multi-%w (errors.Is sur ErrInvalidConnector ET le verdict DP20), source invalide ⇒ ChangeSet vide aucun draft, SpecDelta byte-round-trip au corps canonique S02, MirrorDelta garde l'enveloppe complète (SpecHasMirror), id content-adressé records.Hash, ParentPhaseConnectors, miroir Go fixture(5) + property(4×100) RED-first, réutilise S58/S59 + twins TS, projection pure ; backend-only, le mur tient ; CLÔT l'EPIC E"
+description: "Le journal de build de DP24 : le paquet back/runtime/connectordeclare (3 fichiers neufs) — connectordeclare.go (l'op pure), connectordeclare_fixture_test.go (miroir N2, 5 Test funcs), connectordeclare_property_test.go (miroir ∀ rapid, 4 Test funcs × 100 cases). ProposeConnectorDeclaration(source connector.ConnectorSource) (changeset.ChangeSet, error) est PURE/TOTALE (no DB, no clock, no rng, no I/O) : (1) connector.Validate(source) — invalide ⇒ fmt.Errorf(%w: %w, ErrInvalidConnector, verdict) + changeset.ChangeSet{} (aucun draft pour un monstre) ; (2) connector.CanonicalBody(source) → le corps S02 ; (3) changeset.Open(declarationLabel(source), ParentPhaseConnectors, spec, mirror) → ChangeSet DRAFT. JAMAIS changeset.Apply (le mur — aucun GRANT). ErrInvalidConnector wrappe le verdict DP20 en multi-%w : errors.Is sur ErrInvalidConnector ET sur connector.ErrAIDirectDBForbidden / ErrRWRequiresAuthority. ParentPhaseConnectors = \"connectors\" (déclaré, pas inventé par appel — id byte-stable). specDeltaTarget = \"connector_source\" ; mirrorReflects = \"kernel.connector-source\". SpecDelta = &changeset.Delta{Kind:add, Target:connector_source, Body:json.RawMessage(CanonicalBody)} ; MirrorDelta = &changeset.Delta{Kind:add, Target:kernel.connector-source, Body:{reflects, test_kind:invariant}} — garde SpecHasMirror vert (un spec_delta sans mirror_delta = monstre). Le ChangeSet rendu : Status==StatusDraft toujours, AppliedAt==nil, ID = adresse de contenu S20 (records.Hash via changeset.Open, exclut Status/AppliedAt — même source ⇒ même id), Label déterministe \"declare {kind}: {name}\". Composition pure de DP20 + S20, ne forke ni l'un ni l'autre (ADR 0007). Le front : action serveur appelle ProposeConnectorDeclaration et rend le DRAFT ; le jumeau TS connector-source.ts existe déjà ; la porte MCP légale est le changeset_open déjà enregistré de la gateway S58 (aucun nouvel outil). Miroir Go RED-first : fixture (5) déclaration valide RO/RW⇒DRAFT proposé applied_at nil complet content-adressé, ai→DB⇒AI_DIRECT_DB_ACCESS_FORBIDDEN aucun draft, RW-no-authority⇒CONNECTOR_RW_REQUIRES_AUTHORITY aucun draft ; property (4×100) ∀ source valide id déterministe + spec body round-trip + toujours DRAFT jamais APPLIED. GATE GOTOOLCHAIN=local go1.25.10 : go build ./... exit 0 ; go vet runtime/connectordeclare + kernel/connector + archive/changeset exit 0 ; gofmt -l clean ; go test ./runtime/connectordeclare/... ok (9 Test funcs) ; go test ./runtime/... ./kernel/... exit 0 ; 0 ELF parasite. Backend-only ; le mur tient. CLÔT l'EPIC E."
+keywords: ["aidos", "krd", "DP24", "internals", "back/runtime/connectordeclare", "connectordeclare", "connectordeclare.go", "connectordeclare_fixture_test.go", "connectordeclare_property_test.go", "ProposeConnectorDeclaration", "connector.ConnectorSource", "ConnectorSource", "changeset.ChangeSet", "ChangeSet", "fonction pure", "pure totale", "pure function", "no DB", "no clock", "no rng", "no I/O", "déterminisme-first", "§6", "§8", "no LLM", "zéro LLM", "connector.Validate", "DP20", "valider d'abord", "validate first", "set-membership", "jeux clos", "ErrInvalidConnector", "multi-%w", "fmt.Errorf", "%w: %w", "errors.Is", "verdict DP20", "verdict verbatim", "connector.ErrAIDirectDBForbidden", "ErrAIDirectDBForbidden", "ErrRWRequiresAuthority", "AI_DIRECT_DB_ACCESS_FORBIDDEN", "CONNECTOR_RW_REQUIRES_AUTHORITY", "UNKNOWN_CONNECTOR_KIND", "UNKNOWN_CONNECTOR_CLASS", "UNKNOWN_CONNECTOR_SCOPE", "UNKNOWN_CONNECTOR_TARGET", "aucun draft pour un monstre", "no draft for a monster", "ChangeSet vide", "changeset.ChangeSet{}", "empty ChangeSet", "connector.CanonicalBody", "CanonicalBody", "corps canonique", "corps canonique S02", "S02", "canonical body", "json.RawMessage", "byte-round-trip", "round-trip byte-identique", "byte-identique", "changeset.Open", "S20", "changeset.Delta", "Delta", "SpecDelta", "MirrorDelta", "Kind add", "Target", "specDeltaTarget", "connector_source", "mirrorReflects", "kernel.connector-source", "Body", "reflects", "test_kind invariant", "mirror_delta", "spec_delta", "SpecHasMirror", "enveloppe complète", "complete envelope", "monstre", "monster", "no monster", "KRD §33", "loi de complétude", "completeness", "jamais Apply", "never Apply", "changeset.Apply", "le mur", "§2", "aucun GRANT", "no GRANT", "écriture Kernel directe", "never a direct Kernel write", "idée → miroir → /goal → approbation", "writer role", "aidos CLI", "ParentPhaseConnectors", "ParentPhase", "connectors", "phase stable", "stable phase", "déclaré pas inventé par appel", "id byte-stable", "byte-stable", "Status", "StatusDraft", "DRAFT", "jamais APPLIED", "never APPLIED", "AppliedAt", "AppliedAt nil", "non commité", "ID content-adressé", "content-addressed id", "records.Hash", "adresse de contenu", "exclut Status AppliedAt", "même source même id", "same source same id", "déterministe", "deterministic", "Label", "declarationLabel", "declare kind name", "declare connector slack-notify", "composition pure", "compose DP20 + S20", "ne forke ni l'un ni l'autre", "forks neither", "réutilise jamais réinvente", "ADR 0007", "S58", "gateway", "changeset_open", "porte below-the-line", "porte légale", "legal door", "aucun nouvel outil", "no new tool", "S59", "front/web/lib/connector-source.ts", "connector-source.ts", "jumeau TS", "TS twin", "validate", "contentId", "canonicalBody", "action serveur", "server action", "rend le DRAFT", "renders the DRAFT", "amendement A2", "deux portes distinctes", "two doors", "DÉCLARATION above-the-line", "EXÉCUTION below-the-line", "connectorenforce.ConnectorRuntimeApproval", "ConnectorRuntimeApproval", "DP21", "runtime gate", "approbation runtime", "S20 Apply", "human applies", "miroir Go", "miroir fixture", "miroir property", "N2", "state command events", "rapid", "∀", "RED-first", "écrit RED-first", "RED avant l'impl", "9 fonctions", "9 Test funcs", "5 fixture", "5 Test funcs", "4 property", "4 Test funcs", "100 cases", "100 cas", "déclaration valide RO/RW", "RO", "RW", "read_only", "read_write", "DRAFT proposé", "applied_at nil", "complet content-adressé", "ai→DB refusée", "RW-no-authority refusée", "id déterministe", "spec body round-trip", "toujours DRAFT jamais APPLIED", "GATE", "GOTOOLCHAIN=local", "go1.25.10", "go build", "go vet", "gofmt", "go test", "exit 0", "ok", "0 ELF parasite", "backend-only", "anti-overwrite", "§9", "3 fichiers neufs", "projection pure", "load-bearing", "EPIC E", "clôt EPIC E", "closes EPIC E", "DP19", "DP22", "DP23", "twins DP20-23", "ui-completeness", "aucune capacité connecteur headless", "no headless capability", "tout se fait par écran", "everything by screen", "ADR 0009", "un op = un outil MCP"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP24 — Le cockpit connecteurs exécutable](/steps/concept/dp24-connector-cockpit).</Note>
+
+## Implémentation
+
+### Le paquet — `back/runtime/connectordeclare` (3 fichiers)
+
+DP24 pose le **chemin PROPOSE** d'une déclaration de connecteur : la fonction runtime que l'action serveur du cockpit appelle pour graver un connecteur / Skill / serveur MCP — non par une écriture directe du Kernel, mais par un **ChangeSet PROPOSÉ** (`DRAFT`, jamais `APPLIED`). C'est une **composition pure** de deux moteurs existants — DP20 (le modèle de connecteur) et S20 (l'enveloppe transactionnelle) — **sans forker** ni l'un ni l'autre (ADR 0007). Tâche **backend-only** ; le mur tient (aucun GRANT). C'est la pièce qui **clôt l'EPIC E**.
+
+Trois fichiers neufs (anti-overwrite respecté, §9) :
+
+- `back/runtime/connectordeclare/connectordeclare.go` — l'op pure : `ProposeConnectorDeclaration`, `declarationLabel`, `ErrInvalidConnector`, `ParentPhaseConnectors`.
+- `connectordeclare_fixture_test.go` — le **miroir fixture N2** (`state → command → events`), **écrit RED-first** — **5** `Test` funcs.
+- `connectordeclare_property_test.go` — le **miroir property ∀** (rapid), **écrit RED-first** — **4** `Test` funcs × **100** cas.
+
+### `ProposeConnectorDeclaration` — valider (DP20) puis ouvrir un DRAFT (S20)
+
+```go
+func ProposeConnectorDeclaration(source connector.ConnectorSource) (changeset.ChangeSet, error)
+
+const ParentPhaseConnectors = "connectors"
+var  ErrInvalidConnector  error // wraps the DP20 verdict (multi-%w)
+```
+
+La fonction est **pure et totale** — aucun DB, aucune horloge, aucun aléa, aucun I/O — et fait, dans l'ordre :
+
+1. **Valider (DP20)** — `connector.Validate(source)`. Une source invalide retourne `fmt.Errorf("%w: %w", ErrInvalidConnector, err)` **et** un `changeset.ChangeSet{}` **vide** : **aucun draft pour un monstre**. Le double `%w` (multi-%w) permet au front de faire `errors.Is` sur **`ErrInvalidConnector`** *et* sur le verdict DP20 verbatim (`connector.ErrAIDirectDBForbidden`, `ErrRWRequiresAuthority`, …) — le `BlockReason` actionnable est celui de DP20.
+2. **Corps canonique (DP20)** — `connector.CanonicalBody(source)` rend les bytes exacts du corps S02 que le rôle *writer* graverait (réutilisé, jamais re-frappé).
+3. **Ouvrir un DRAFT (S20)** — `changeset.Open(declarationLabel(source), ParentPhaseConnectors, spec, mirror)`. `Open` rend **toujours** `StatusDraft` — la fonction n'a **aucun chemin vers `Apply`** (le mur : l'agent n'applique jamais une vérité).
+
+```go
+spec := &changeset.Delta{
+  Kind:   "add",               // une déclaration AJOUTE une source
+  Target: "connector_source",  // records.KindLayer
+  Body:   json.RawMessage(body), // = connector.CanonicalBody(source), corps S02
+}
+mirror := &changeset.Delta{
+  Kind:   "add",
+  Target: "kernel.connector-source",
+  Body:   json.RawMessage(`{"reflects":"kernel.connector-source","test_kind":"invariant"}`),
+}
+```
+
+Le `MirrorDelta` garde l'enveloppe **COMPLÈTE** (KRD §33) : un `spec_delta` **sans** son `mirror_delta` est un **monstre** que le gate de commit refuse — donc `changeset.SpecHasMirror` ne refuse **jamais** l'enveloppe, et un humain **POURRAIT** l'appliquer via `/goal → approbation`.
+
+### La forme du ChangeSet rendu — pour le front
+
+Le `changeset.ChangeSet` retourné porte **toujours** :
+
+- `Status == changeset.StatusDraft` (`"DRAFT"`) — **jamais** `APPLIED` (le mur ; l'humain applique, via le rôle *writer*, par `/goal → approbation`) ;
+- `AppliedAt == nil` — une enveloppe non appliquée n'a aucune estampille de commit ;
+- `ID` = l'**adresse de contenu S20** (`records.Hash` via `changeset.Open`, qui **exclut** `Status`/`AppliedAt` du hash) — même source ⇒ **même id** ;
+- `Label == "declare {kind}: {name}"` (`declarationLabel`, déterministe — ex. `declare connector: slack-notify`) ;
+- `ParentPhase == "connectors"` (`ParentPhaseConnectors` — déclaré, pas inventé par appel, pour que l'id soit byte-stable) ;
+- un `SpecDelta` non nil (`add` / `connector_source` / le corps S02 — **byte-round-trip** au corps canonique DP20) **et** un `MirrorDelta` non nil (l'enveloppe est committable **si et seulement si** un humain l'applique par le gate).
+
+### Le front, S58 et le jumeau TS — réutilisés, jamais re-frappés
+
+L'**action serveur** du cockpit (« déclarer un connecteur ») appelle `ProposeConnectorDeclaration` et **rend** le `DRAFT` à l'écran (status `"DRAFT"`, jamais appliqué) — c'est le PROPOSE montré. La porte MCP légale par laquelle elle passe est le `changeset_open` **déjà enregistré** de la gateway **S58** (un propose below-the-line, **aucun nouvel outil de gateway**). Le **jumeau TS** existe déjà — `front/web/lib/connector-source.ts` (`validate` / `contentId` / `canonicalBody`, mêmes jeux clos + le verdict `AI_DIRECT_DB_ACCESS_FORBIDDEN`). L'approbation et la seconde approbation RW restent celles de l'**humain** (S20 `Apply` + `connectorenforce.ConnectorRuntimeApproval`), **jamais** l'agent (le greffage UI + son e2e Playwright est l'affaire d'un agent front séparé).
+
+### Les miroirs — fixture + property, écrits RED-first
+
+- **`connectordeclare_fixture_test.go`** — le miroir **N2** (`state → command → events`), **5** `Test` funcs : une déclaration valide **RO** **et** une valide **RW** ⇒ `DRAFT`/proposé, `applied_at` nil, enveloppe **complète** & **content-adressée** ; une source **IA→DB** ⇒ refusée `AI_DIRECT_DB_ACCESS_FORBIDDEN` avec **aucun** draft ; une source **RW-sans-autorité** ⇒ refusée `CONNECTOR_RW_REQUIRES_AUTHORITY` avec **aucun** draft.
+- **`connectordeclare_property_test.go`** — le miroir **∀** (rapid), **4** `Test` funcs × **100** cas : ∀ source valide, la propose est **déterministe** (même source ⇒ même id), le corps `spec_delta` **round-trip** au corps canonique S02, et le ChangeSet est **toujours `DRAFT`, jamais `APPLIED`**.
+- Total : **9** `Test` funcs PASS, écrites **RED-first** (le miroir avant l'op).
+
+### La GATE (GOTOOLCHAIN=local go1.25.10)
+
+- `go build ./...` : **exit 0**.
+- `go vet ./runtime/connectordeclare/...` + `kernel/connector` + `archive/changeset` : **exit 0**.
+- `gofmt -l runtime/connectordeclare/` : clean (vide).
+- `go test ./runtime/connectordeclare/...` : **ok** (9 `Test` funcs ; 4 property × 100 cas).
+- `go test ./runtime/... ./kernel/...` : **exit 0** (aucune régression).
+- **0 ELF parasite** (vérifié avant + après).
+- **Backend-only** : restent pour plus tard (hors-scope) le greffage UI /v2 du cockpit + son e2e Playwright, et la persistance Postgres du ChangeSet proposé (forward-dep de bootstrap / OpenQuestion).
+
+## Méta
+
+- **Le miroir Go est l'épreuve « déclaration ⇒ ChangeSet proposé, jamais appliqué ».** Le miroir fixture épingle les formes d'action comme `state → command → events` : `state` = la source DP20 déclarée, `command` = `ProposeConnectorDeclaration`, `events` = soit le ChangeSet `DRAFT` proposé (RO/RW valides), soit le refus + **aucun** draft (IA→DB, RW-sans-autorité). Le miroir property mesure le cœur déterministe : ∀ source valide, **même id**, **corps round-trip**, et l'invariant capital — **toujours `DRAFT`, jamais `APPLIED`**. C'est l'`ui-completeness` côté preuve : que l'écran propose et ne grave jamais en direct n'est pas une promesse, c'est une propriété prouvée. Et le miroir e2e Playwright du parcours complet (déclarer → basculer RO/RW → approuver une action RW → lire la timeline d'audit → enregistrer un MCP) est l'autre face de ce miroir — le geste exécutable depuis l'écran, prouvé de bout en bout (agent front).
+
+- **Déterminisme-first (§6/§8) : valider et ouvrir sont des fonctions pures, donc du code.** `ProposeConnectorDeclaration` n'invite **aucun** LLM : le verdict de validation est celui de DP20 (set-membership sur des jeux clos, jamais un jugement), l'id du ChangeSet est l'adresse de contenu de S20 (`records.Hash`), le label est dérivé déterministiquement du kind + name. La fonction est pure et totale — aucun DB, aucune horloge, aucun aléa, aucun I/O — donc même source ⇒ même propose (le miroir property le pin). Proposer une déclaration est une **composition de deux moteurs purs**, pas une décision floue.
+
+- **Réutiliser plutôt que réinventer (ADR 0007), sur DP20 + S20.** DP24 n'invente **ni** modèle de connecteur **ni** moteur de changeset : il **réutilise** `connector.Validate` / `connector.CanonicalBody` / `connector.ErrAIDirectDBForbidden` (DP20, composé jamais forké) et `changeset.Open` / `changeset.Delta` / le jeu clos `DRAFT|APPLIED|REVERTED` (S20, importé jamais re-frappé). Le front réutilise le jumeau TS déjà écrit ; la porte MCP réutilise le `changeset_open` déjà enregistré de la gateway S58 (aucun nouvel outil). DP24 n'ajoute que la **glu** : valider-puis-ouvrir, et la référence de miroir qui garde l'enveloppe complète. Un seul modèle de connecteur, un seul moteur de changeset dans tout AIDOS.
+
+## Méta-méta
+
+- **L'écran PROPOSE un ChangeSet — jamais une écriture Kernel directe.** C'est le mur (§2) gravé au cœur du geste : `ProposeConnectorDeclaration` valide puis **ouvre** un `DRAFT`, et n'a **aucun chemin** vers `changeset.Apply`. Elle n'écrit **rien** dans `kernel`, `mirrors` ou `fitness` ; elle ne consulte **aucun** truth-store. L'agent (et l'écran qu'il sert) n'a **aucun GRANT** pour graver une vérité ; la seule porte est `idée → miroir → /goal → approbation`, où c'est l'**humain** (via le rôle *writer* de la CLI `aidos`) qui applique. Le bouton « déclarer un connecteur » ne grave rien — il **propose**, et la déclaration ne devient une vérité que si un humain l'approuve. Les **deux portes** restent distinctes (amendement A2) : la DÉCLARATION above-the-line (propose → ChangeSet → approbation), l'EXÉCUTION below-the-line (`connectorenforce.ConnectorRuntimeApproval`, DP21) — DP24 n'ouvre que la première.
+
+- **`ui-completeness` : aucune capacité connecteur headless — tout se fait par écran.** L'enjeu porteur de DP24, c'est que **chaque** capacité de la couche connecteurs soit atteignable **et exécutable** depuis l'écran (§7) : déclarer (PROPOSE), basculer RO/RW, approuver une action RW au runtime, séparer interne/externe/IA/cloud, lire la timeline d'audit Merkle GV03 (DP22), enregistrer un MCP/Skill (un op = un outil MCP, ADR 0009). Une capacité connecteur qui ne serait atteignable que sans écran serait un **trou headless** qui bloquerait l'étape, au même titre qu'un monstre. *Tout se fait par écran* : un cockpit qui fait tout, pour toute la couche.
+
+- **DP24 clôt l'EPIC E — la couche connecteurs est complète et pilotable.** L'EPIC E a posé les sources (DP20), l'enforcement runtime (DP21), l'audit Merkle (DP22) et l'infra émise (DP23) ; DP24 leur donne enfin un **poste de pilotage exécutable**, sans franchir le mur. La loi de complétude (Mandat A, §5) veille : un geste sans miroir serait un **monstre** — `ProposeConnectorDeclaration` ne vit que parce qu'il porte sa preuve vivante (fixture + property, RED-first). Et c'est *load-bearing* : sans ce cockpit, les briques de l'EPIC E resteraient des moteurs sans poste de commande — gouvernées, auditées, émises, mais **inatteignables par l'humain**. Avec lui, la couche connecteurs est **complète de bout en bout**, et l'EPIC E est clos.

@@ -603,7 +603,9 @@
        "steps/concept/dp22-connector-audit-ledger",
        "steps/internals/dp22-connector-audit-ledger",
        "steps/concept/dp23-emitted-connector-infra",
-       "steps/internals/dp23-emitted-connector-infra"
+       "steps/internals/dp23-emitted-connector-infra",
+       "steps/concept/dp24-connector-cockpit",
+       "steps/internals/dp24-connector-cockpit"
       ]
      }
     ]
