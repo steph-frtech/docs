@@ -615,7 +615,9 @@
        "steps/concept/dp28-environments-rollback",
        "steps/internals/dp28-environments-rollback",
        "steps/concept/dp29-deploy-cockpit",
-       "steps/internals/dp29-deploy-cockpit"
+       "steps/internals/dp29-deploy-cockpit",
+       "steps/concept/dp30-emitted-app-docs",
+       "steps/internals/dp30-emitted-app-docs"
       ]
      }
     ]
