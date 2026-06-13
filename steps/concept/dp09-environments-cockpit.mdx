@@ -1,0 +1,42 @@
+---
+title: "DP09 · Le cockpit des environnements — déclarer un binding sans jamais toucher le Kernel"
+description: "DP09 finalise l'écran /environments en cockpit exécutable : les 5 environnements et leurs bindings (DP06), la matrice service × mode-de-connexion (DP07), le statut du senseur DP08 — et l'action « déclarer/éditer un binding d'environnement » qui PROPOSE un ChangeSet (spec_delta + mirror_delta ensemble, adressé par contenu) que l'humain approuve. À l'approbation, la matrice se recalcule comme projection PURE DP07 — jamais une estimation. Le mur est sondable depuis l'écran : kernel_write par la passerelle S58 est refusé avec GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET."
+keywords: ["aidos", "krd", "DP09", "cockpit", "environnements", "binding", "ChangeSet", "propose", "approbation", "mur", "matrice de connexion", "DP07", "DP08", "senseur", "passerelle", "S58", "kernel_write", "GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET", "DOLTGRES_NOT_ALLOWED_IN_PROD", "projection pure", "piste DP", "/environments"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP09](/steps/internals/dp09-environments-cockpit).</Note>
+
+## En une phrase
+
+DP09 transforme l'écran `/environments` en **cockpit** : tout ce que la piste DP a construit sur les environnements (les 5 bindings DP06, la matrice de connexion DP07, le senseur DP08) y est non seulement visible mais **actionnable** — et la seule action qui touche une vérité, « déclarer/éditer un binding d'environnement », ne l'écrit jamais : elle **propose un ChangeSet** qu'un humain approuve.
+
+## Le problème que ça résout
+
+Un binding d'environnement — « en dev, le datastore par défaut est Doltgres, l'URL suit `https://$\{APP_NAME\}-dev.$\{DOMAIN\}`, le réseau est traefik_default » — est une **vérité** : il gouverne ce que chaque stack émise fera. Si l'écran pouvait l'éditer directement, n'importe quel clic réécrirait le Kernel en passant — exactement ce que le mur interdit. Mais un écran qui ne fait *que* lire est une capacité sans porte : il faudrait passer par la CLI pour le moindre changement.
+
+DP09 tient les deux exigences à la fois : **tout se fait par écran** (aucune capacité headless), et **rien ne traverse le mur**. La forme est celle que le KRD impose à toute écriture-vérité : *propose → ChangeSet → approbation*.
+
+## Les portes dans la porte
+
+Avant même qu'un ChangeSet soit proposé, le brouillon de binding passe des portes **fail-closed** — chacune héritée d'une étape antérieure, aucune inventée ici :
+
+| Porte | Héritée de | Ce qu'elle refuse |
+|---|---|---|
+| A1 | DP06 | `prod` + `doltgres` → `DOLTGRES_NOT_ALLOWED_IN_PROD` (« PostgreSQL = la prod ») |
+| Ensembles clos | DP06 | un environnement, un datastore ou un réseau hors ensemble clos |
+| Datastores autorisés | DP06 | un défaut hors de la liste déclarée de l'environnement |
+| Classifieur d'endpoints | DP08 | un endpoint en dur dans le motif d'URL (`ip_literal`, `url_concrete_host`, …) — références d'env-var uniquement |
+
+Un brouillon admissible devient une **enveloppe S20** : `spec_delta` + `mirror_delta` **ensemble** (un spec sans son miroir est un monstre), statut `DRAFT`, et un id qui est **l'adresse de contenu** du binding. L'approbation re-calcule cette adresse : une proposition altérée entre les deux clics est refusée — on approuve exactement ce qui a été proposé, ou rien.
+
+## La matrice se recalcule — une projection, jamais une estimation
+
+À l'approbation, la matrice service × mode-de-connexion se recalcule **par la même fonction pure que DP07** : le binding effectif (déclaré + delta appliqué) entre dans `resolveConnection`, et chaque service de l'environnement édité ressort avec son mode (`docker_internal`, `traefik_url`, `managed_url`). La loi de parité est épinglée au quanteur ∀ : sans aucun ChangeSet appliqué, la matrice du cockpit hache à **l'adresse Go exacte** de DP07. Passer `dev` en managé et voir chaque ligne basculer en `managed_url` n'est pas une simulation — c'est le calcul que la stack émise ferait.
+
+## Le mur, sondable depuis l'écran
+
+Le cockpit porte un troisième contrôle : « sonder le mur ». Il route l'outil `kernel_write` par la passerelle MCP-over-HTTP (S58) — et montre le refus : `GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET`, avec son explication et ses `how_to_fix`. C'est la démonstration vivante de *pourquoi* le cockpit propose au lieu d'écrire : la porte directe n'existe pas, même pour l'écran.
+
+## Ce que vous voyez à l'écran
+
+Sur `/environments` (thémé ADR 0010, bilingue ADR 0011) : les 5 bindings déclarés et leur adresse (DP06), la matrice commutable par environnement (DP07), la carte **senseur DP08** (vert, à l'adresse de verdict épinglée au Go, avec le lien vers son bac à sable `/endpoints-fitness`) — puis le cockpit : le formulaire de binding (environnement, datastore, réseau, motif d'URL, TLS, managé), le bouton **« proposer le ChangeSet »**, l'enveloppe proposée (id, DRAFT, les deux deltas), le bouton **« approuver »**, la matrice recalculée avec sa nouvelle adresse, et la sonde du mur. Quatre e2e Playwright rejouent tout le critère de done depuis l'écran.

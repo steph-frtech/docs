@@ -573,7 +573,9 @@
        "steps/concept/dp07-connections",
        "steps/internals/dp07-connections",
        "steps/concept/dp08-endpoint-fitness",
-       "steps/internals/dp08-endpoint-fitness"
+       "steps/internals/dp08-endpoint-fitness",
+       "steps/concept/dp09-environments-cockpit",
+       "steps/internals/dp09-environments-cockpit"
       ]
      }
     ]

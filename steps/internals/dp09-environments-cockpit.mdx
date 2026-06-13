@@ -1,0 +1,48 @@
+---
+title: "DP09 · Internals — env-binding-cockpit : propose → ChangeSet → approbation à l'écran"
+description: "Le journal de build de DP09 : le réducteur pur front/web/lib/env-binding-cockpit.ts (validateDraft fail-closed DP06+DP08, proposeBinding → enveloppe S20 adressée par contenu, approveBinding anti-tamper, effectiveBindings, resolveWith parité-épinglé ∀ à DP07, hashCockpitMatrix qui retombe sur l'adresse Go à zéro ChangeSet, sensorStatus DP08), le miroir vitest+fast-check écrit d'abord et rouge (14 tests, 6 lois), le composant BindingCockpit sur /environments (3 contrôles, server actions par la passerelle S58), et les 4 e2e Playwright du critère de done."
+keywords: ["aidos", "krd", "DP09", "internals", "env-binding-cockpit", "BindingDraft", "BindingChangeSet", "proposeBinding", "approveBinding", "verifyProposal", "PROPOSAL_ADDRESS_MISMATCH", "effectiveBindings", "resolveWith", "cockpitMatrix", "parité", "S20", "changeset", "S58", "passerelle", "route", "kernel_write", "GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET", "fast-check", "vitest", "Playwright", "next-intl", "ADR 0010", "ADR 0011"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP09 — Le cockpit des environnements](/steps/concept/dp09-environments-cockpit).</Note>
+
+## Implémentation
+
+### Le miroir d'abord (rouge → vert)
+
+`front/web/lib/env-binding-cockpit.test.ts` (vitest + fast-check) est écrit **avant** le module — le rouge est un compile fail prouvé (le module n'existe pas), le motif DP08 répété. Les **6 lois**, 14 tests :
+
+1. **Parité ∀** — `resolveWith(bindingsFor(env), svc)` ≡ `resolveConnection(svc, env)` sur tout le domaine déclaré (5 environnements × les services démo) : la matrice du cockpit **EST** la projection DP07, jamais une estimation ;
+2. **Épingle du cockpit vide** — zéro ChangeSet appliqué ⇒ `hashCockpitMatrix([])` = l'adresse Go autoritative DP07 `eb382dcf…` exactement ;
+3. **Déterminisme (property)** — même brouillon ⇒ même id d'enveloppe (l'adresse de contenu) ; un champ basculé ⇒ une autre adresse ; même ensemble appliqué ⇒ même adresse de matrice (mesurer deux fois) ;
+4. **Les portes dans la porte** — `prod`+`doltgres` refusé `DOLTGRES_NOT_ALLOWED_IN_PROD` (A1 DP06) ; un endpoint en dur dans le motif d'URL refusé `HARDCODED_ENDPOINT_IN_BINDING` portant la **raison close DP08** (`ip_literal`, `localhost_literal` — sauf `local`, la forme de la table déclarée) ; environnement/datastore/réseau hors ensemble clos refusés ; datastore hors liste autorisée refusé `DATASTORE_NOT_ALLOWED` ;
+5. **L'enveloppe** — propose ⇒ `DRAFT` avec `spec_delta` (`kernel/binding/<env>`) + `mirror_delta` (`mirrors/binding/<env>`) **ensemble** (la machine S20 elle-même admet l'enveloppe) ; approve n'applique qu'un `DRAFT` (`NOT_DRAFT` sinon) ; une proposition altérée est refusée `PROPOSAL_ADDRESS_MISMATCH` (l'adresse re-calculée ne matche plus l'id) ; le delta appliqué change les bindings effectifs, chaque résolution `dev` bascule `managed_url`, les environnements intouchés gardent leurs résolutions DP07 exactes ;
+6. **Le mur par S58** — `route(scope, "changeset_open"/"changeset_apply")` → `route` (below-the-line) ; `route(scope, "kernel_write")` → `refused_truth_write` + `GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET` ; le statut senseur affiché = le verdict DP08 vert à l'adresse Go épinglée `43f2e914…`.
+
+### Le réducteur pur
+
+`front/web/lib/env-binding-cockpit.ts` — zéro I/O, zéro horloge, zéro LLM, et **zéro fork** : il compose les contrats publiés des étapes amont.
+
+- `validateDraft(d)` : `validateDatastore` (DP06, la A1 verbatim) → datastores autorisés déclarés → ensemble clos `NETWORKS` (`traefik_default|default|managed`) → `classifyLiteral` (DP08) sur le `url_pattern` (le `localhost_literal` reste légal pour `local` seulement — la forme de la table déclarée) ;
+- `proposeBinding(d)` : matérialise le binding effectif (les `allowed_datastores` restent déclarés — les élargir est idée → miroir → /goal), id = sha256 des octets canoniques (`records.Canonicalize`/`Hash`, motif S02), enveloppe = le type S20 `ChangeSet` de `lib/changeset.ts` **réutilisé tel quel** ;
+- `approveBinding(cs)` : `verifyProposal` (anti-tamper — re-calcule l'adresse, refuse `PROPOSAL_ADDRESS_MISMATCH`) puis `apply` **de la machine S20** (seul un DRAFT applique), `appliedAt` = l'estampille déterministe `phase-cockpit+1` (le jumeau pur ne lit jamais d'horloge) ;
+- `effectiveBindings` / `resolveWith` / `cockpitMatrix` / `hashCockpitMatrix` : la table DP06 superposée des deltas APPLIED, re-résolue par le jumeau paramétré-par-binding de `resolveConnection` — la parité ∀ (loi 1) et l'épingle du cockpit vide (loi 2) garantissent que c'est LE calcul DP07 ;
+- `sensorStatus()` : re-`sense` de l'arbre émis canonique DP08 + l'adresse du verdict — le bac à sable action-capable (injecter/retirer/mesurer) reste sur `/endpoints-fitness` (l'écran de DP08).
+
+### L'écran et les e2e
+
+`/environments` finalisé (la route DP06/DP07 **étendue, pas réécrite** — composants nouveaux `BindingCockpit.tsx`, `cockpit-actions.ts`, `cockpit-view.ts` ; `EnvironmentsPanel` et `ConnectionsMatrix` intouchés) : la carte senseur DP08 (état + adresse épinglée + lien), le formulaire de binding, et **trois contrôles** (ui-completeness §7) — « proposer le ChangeSet », « approuver (appliquer dans le bac à sable) », « sonder le mur (kernel_write) ». Les server actions passent par la **passerelle S58** (`route` sur `changeset_open`/`changeset_apply` avec le scope projet actif) avant d'appeler le réducteur pur ; la sonde du mur affiche le `BlockReason` complet (code, explication, how_to_fix). Thémé ADR 0010 (tokens uniquement), bilingue ADR 0011 (namespace `environments` +17 clés fr+en).
+
+`tests/e2e/environments-cockpit.spec.ts` — **4/4** sur :3210 : (1) le cockpit rend, senseur **vert** à `43f2e914…`, les trois contrôles joignables ; (2) les portes refusent à l'écran — `DOLTGRES_NOT_ALLOWED_IN_PROD`, puis `HARDCODED_ENDPOINT_IN_BINDING`/`ip_literal` sur `https://1.2.3.4:5432` ; (3) le critère de done verbatim — déclarer (dev managé) → `DRAFT` adressé par contenu → approuver → `APPLIED` → la matrice recalculée (`managed_url` partout en dev, l'adresse diverge de `eb382dcf…`, « non — divergence ») → senseur vert ; (4) `kernel_write` par la passerelle → `GATEWAY_TRUTH_WRITE_NEEDS_CHANGESET`. Anti-overwrite : vitest **2153/2153** (baseline 2139 intacte), e2e voisins environments 4/4 + connections 4/4 + endpoints-fitness 4/4 + v3 16/16 — la prod :3000 intouchée.
+
+## Méta
+
+- **La verticale DP06→DP09 se referme en un seul écran.** DP06 a déclaré, DP07 a résolu, DP08 a surveillé — DP09 ne crée presque aucun calcul neuf : il **compose** les quatre contrats (la A1, la résolution, le classifieur, l'enveloppe S20) et ajoute la seule pièce manquante, la porte d'édition légale. Le coût marginal d'un cockpit est faible précisément parce que chaque étape amont a publié un contrat pur.
+- **La parité ∀ remplace la duplication interdite.** `resolveWith` ressemble à un fork de `resolveConnection` — il ne l'est pas, parce que la loi 1 épingle l'équivalence sur tout le domaine déclaré et la loi 2 épingle l'adresse Go au cockpit vide. Quand on ne peut pas éditer le code d'une autre étape, on **prouve l'identité** au lieu de la promettre.
+- **L'anti-tamper est une adresse, pas une session.** Entre propose et approve, l'enveloppe voyage par le formulaire (l'écran reste sans état serveur) ; ce qui empêche l'altération n'est pas un stockage mais le re-calcul de l'adresse de contenu — le motif content-addressed (S02) appliqué au flux d'approbation lui-même.
+
+## Méta-méta
+
+- **« Tout se fait par écran » et « le mur » ne se négocient pas l'un contre l'autre.** La tentation classique est de sacrifier l'un : un écran read-only (capacité headless) ou un écran qui écrit (mur percé). La forme propose → ChangeSet → approbation est la **troisième voie systématique** — et DP09 la rend littéralement visible : le bouton qui essaie d'écrire le Kernel existe à l'écran, et montre son refus.
+- **Un refus est une pédagogie.** Chaque porte refuse avec un code clos + un message qui nomme le chemin légal (« élargir l'ensemble est idée → miroir → /goal »). Le cockpit enseigne le KRD à son utilisateur à chaque erreur — le BlockReason actionnable comme interface, pas comme exception.
+- **OpenQuestions.** (1) L'apply réel (écrire le binding dans le schéma `changesets` Postgres et faire avancer la tête) reste porté par la porte changeset/CLI — le cockpit applique dans le bac à sable et retourne l'enveloppe exacte ; le câblage bout-en-bout au truth-store est l'affaire des étapes DP aval (DP12/DP13 activent les outils MCP stack.*). (2) Le miroir vitest est matérialisé fichier (exception bootstrap S06 inchangée). (3) Le suivi Linear de l'étape n'a pas pu être poussé depuis l'exécuteur (MCP linear-server non authentifié dans cette session) — à refléter au prochain passage authentifié.
