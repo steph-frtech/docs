@@ -1,0 +1,118 @@
+---
+title: "DP25 · Internals — preview.BuildPlan ÉTENDU (additif, S94 byte-identique) : Input gagne 5 champs optionnels (Profile/Manifest/Host/Secrets/Env), PreviewPlan gagne Profile + Bootstrap *PreviewBootstrap (nil ⇒ clés OMISES de l'adresse de contenu, IDs S94 byte-inchangés, §9), buildBootstrap RÉUTILISE composeemit.FilterByProfile (DP11) + bootstrap.EmitBootstrapSequence (DP12) sans forker, ErrManifestProjectMix sur cross-app, TeardownOf pur (ordre inverse du boot, full ⊇ lean), EmittedAppHash PURE de (phase⊕surface) profile-FREE, miroir Go property(5)+fixture(rapid 100) RED-first ; backend-only, below-the-line, le mur tient ; OUVRE l'EPIC F"
+description: "Le journal de build de DP25 : 2 fichiers exactement — back/runtime/preview/preview.go ÉTENDU (additif, S94 préservé byte-identiquement) + preview_dp25_test.go NEUF (miroir property+fixture RED-first). L'Input GAGNE 5 champs OPTIONNELS — Profile stackmanifest.Profile (défaut DefaultProfile=ProfileCore), Manifest stackmanifest.StackManifest (la source DP02 dont les services sont amorcés — absent ⇒ pur plan S94, aucun bootstrap), Host bootstrap.HostState, Secrets bootstrap.SecretsState, Env scope.Environment (défaut DefaultPreviewEnv=EnvDev, seulement pour le gate doltgres-in-prod DP11). PreviewPlan GAGNE Profile stackmanifest.Profile + Bootstrap *PreviewBootstrap (nil pour un plan S94 — anti-overwrite §9 : profile/bootstrap OMIS de l'adresse de contenu quand nil, donc IDs S94 byte-inchangés). PRÉSERVÉS : EmittedAppHash, ServedMatchesEmitted, URL, Subdomain, StackName, Boot, Teardown, signature BuildPlan (PreviewPlan, *blockreason.BlockReason). PreviewBootstrap{Profile, Sequence bootstrap.Sequence, SequenceHash string, Services []string} — le DP12 amorçage filtré DP11 ; SequenceHash est l'adresse dépendante du profile (se replie dans l'ID du plan). TeardownPlan{StackName, Commands []string, Services []string} + TeardownOf(plan) PUR — services dénoués en ORDRE INVERSE du boot ; full ⊇ lean. buildBootstrap RÉUTILISE verbatim composeemit.FilterByProfile (DP11) + bootstrap.EmitBootstrapSequence (DP12) ; cross-app refusé (ErrManifestProjectMix). Aucun EmitStack DP05 câblé dans BuildPlan (la re-émission est l'affaire de l'exécuteur gaté ; le doc y pointe) — le miroir prouve le PLAN + le hash, le serveur web-preview sert l'app (no real docker). INVARIANT CAPITAL : EmittedAppHash est PURE de (phase⊕surface) — profile-FREE, épinglé ∀ profiles. Miroir preview_dp25_test.go (6 Test top-level, toutes vertes) : TestDP25HashInvariantAcrossProfiles (rapid 100), TestDP25Reproducible (rapid 100), TestDP25LeanVsFull (rapid 100), TestDP25CoreIsBaselineEqualsFull (rapid 100), TestDP25TeardownDeterministic (rapid 100), TestDP25LifecycleFixture + TestDP25BackwardCompatNoManifest (fixtures, 4 refus UNKNOWN_PROFILE/MISSING_SECRET_AT_BOOT/cross-app/DOLTGRES_NOT_ALLOWED_IN_PROD). DP11 finding honnête : une SÉLECTION core garde TOUS les services (ServiceProfiles ajoute core à tous) ⇒ core ≡ full en nombre — core est la baseline toujours-active, PAS une restriction ; le profile qui narrows est git. GATE GOTOOLCHAIN=local go1.25.10 cwd back/ : go build ./... OK ; go test ./runtime/... ./kernel/... 132 packages 0 FAIL ; preview pkg 15 Test top-level (7 S94 INTACTS + 8 DP25) ; gofmt -l clean ; go vet clean ; 0 ELF parasite, aucun .fail rapid, git status = 2 fichiers. Backend-only ; below-the-line (preview ne grave aucune vérité — bootstrap exception, aucune persistance Postgres) ; le mur tient. OUVRE l'EPIC F."
+keywords: ["aidos", "krd", "DP25", "internals", "back/runtime/preview", "preview.go", "preview_dp25_test.go", "preview.BuildPlan", "BuildPlan", "Input", "PreviewPlan", "PreviewBootstrap", "TeardownPlan", "TeardownOf", "buildBootstrap", "Profile", "stackmanifest.Profile", "DefaultProfile", "ProfileCore", "Manifest", "stackmanifest.StackManifest", "StackManifest", "Host", "bootstrap.HostState", "HostState", "Secrets", "bootstrap.SecretsState", "SecretsState", "Env", "scope.Environment", "DefaultPreviewEnv", "EnvDev", "scope.EnvDev", "5 champs optionnels", "5 optional fields", "ÉTEND S94", "extends S94", "additif", "additive", "S94 byte-identique", "S94 byte-identical", "S94 préservé", "preserved byte-identically", "anti-overwrite", "§9", "Bootstrap nil", "clés omises", "keys omitted", "OMIS de l'adresse de contenu", "omitted from content-address", "IDs S94 byte-inchangés", "S94 plan IDs byte-unchanged", "EmittedAppHash", "invariant capital", "capital invariant", "phase ⊕ surface", "phase⊕surface", "profile-FREE", "profile-free", "profile-indépendant", "hash-preview = hash-phase", "ServedMatchesEmitted", "URL", "Subdomain", "StackName", "Boot", "Teardown", "signature préservée", "preserved signature", "blockreason.BlockReason", "BlockReason", "Sequence", "bootstrap.Sequence", "SequenceHash", "Services", "adresse dépendante du profile", "profile-dependent address", "se replie dans l'ID", "folds into plan ID", "Commands", "ordre inverse du boot", "reverse boot order", "full ⊇ lean", "full superset lean", "démontage déterministe", "deterministic teardown", "composeemit.FilterByProfile", "FilterByProfile", "DP11", "filtrage par profile", "bootstrap.EmitBootstrapSequence", "EmitBootstrapSequence", "DP12", "amorçage one-shot", "réutilise verbatim", "reuses verbatim", "sans forker", "without forking", "ne forke pas", "ADR 0007", "réutilise jamais réinvente", "ErrManifestProjectMix", "cross-app refusé", "cross-app manifest refused", "manifest cross-app", "EmitStack", "DP05", "aucun EmitStack câblé", "no EmitStack wired", "re-émission", "re-emission", "re-émission pure", "pure re-emission", "exécuteur gaté", "gated executor", "phase content-adressée", "content-addressed phase", "phase stable", "stable phase", "prouve le plan + le hash", "proves the plan + the hash", "serveur web-preview", "web-preview server", "no real docker", "pas de vrai docker", "miroir Go", "miroir property", "miroir fixture", "rapid", "fixture", "N2", "state command events", "RED-first", "écrit RED-first", "6 Test funcs", "6 top-level tests", "100 cases", "100 cas", "TestDP25HashInvariantAcrossProfiles", "TestDP25Reproducible", "TestDP25LeanVsFull", "TestDP25CoreIsBaselineEqualsFull", "TestDP25TeardownDeterministic", "TestDP25LifecycleFixture", "TestDP25BackwardCompatNoManifest", "hash-invariant", "∀ profiles", "reproductibilité byte-identique", "byte-identical reproducibility", "lean vs full", "git profile", "otel exclu", "core ≡ full", "core equals full", "ServiceProfiles", "core baseline", "core toujours-active", "core always-on baseline", "finding DP11", "DP11 semantic finding", "pas une restriction", "not a restriction", "UNKNOWN_PROFILE", "MISSING_SECRET_AT_BOOT", "DOLTGRES_NOT_ALLOWED_IN_PROD", "gate doltgres-in-prod", "doltgres en prod", "Env prod", "non-prod × prod", "cycle de vie complet", "full lifecycle", "build probe teardown", "4 refus", "4 refusals", "rétro-compat", "backward compat", "sans Manifest", "no manifest", "pur plan S94", "pure S94 plan", "aucun bootstrap", "no bootstrap", "déterminisme-first", "§6", "§8", "no LLM", "zéro LLM", "fonction pure", "pure function", "below-the-line", "en dessous de la ligne", "aucune écriture-vérité", "writes no truth", "WroteKernel false", "bootstrap exception", "aucune persistance Postgres", "no Postgres persistence", "le mur", "§2", "kernel", "mirrors", "fitness", "GATE", "GOTOOLCHAIN=local", "go1.25.10", "go build", "go test", "go vet", "gofmt", "exit 0", "132 packages", "0 FAIL", "15 top-level tests", "7 S94 intacts", "8 DP25", "0 ELF parasite", "aucun .fail rapid", "git status 2 fichiers", "2 fichiers exactement", "backend-only", "load-bearing", "S94", "S96", "DP02", "DP03", "compose-emitter", "DeployPanel", "preview MCP", "front", "by-design forward dep", "OpenQuestion", "EPIC F", "OUVRE EPIC F", "opens EPIC F"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP25 — Le preview éphémère par profile](/steps/concept/dp25-preview-by-profile).</Note>
+
+## Implémentation
+
+### Le paquet — `back/runtime/preview` (2 fichiers exactement)
+
+DP25 **étend** le preview de S94 par profile, **additivement**, sans le dupliquer. Tâche **backend-only** ; le mur tient (preview = below-the-line, aucune écriture-vérité). C'est la pièce qui **ouvre l'EPIC F**.
+
+Deux fichiers, exactement :
+
+- `back/runtime/preview/preview.go` — **ÉTENDU** (additif ; S94 préservé **byte-identiquement**, §9).
+- `back/runtime/preview/preview_dp25_test.go` — le **miroir NEUF** (property + fixture), **écrit RED-first** (avant que le comportement de l'extension soit prouvé).
+
+### L'API étendue — 5 champs d'`Input`, 2 champs de `PreviewPlan`
+
+L'`Input` GAGNE **5 champs OPTIONNELS** ; la forme S94 est inchangée quand le `Manifest` est absent :
+
+```go
+type Input struct {
+  // … champs S94 inchangés …
+  Profile  stackmanifest.Profile      // défaut DefaultProfile = ProfileCore
+  Manifest stackmanifest.StackManifest // la source DP02 amorcée — absent ⇒ pur plan S94, aucun bootstrap
+  Host     bootstrap.HostState
+  Secrets  bootstrap.SecretsState
+  Env      scope.Environment          // défaut DefaultPreviewEnv = EnvDev — seulement pour le gate doltgres-in-prod DP11
+}
+
+const DefaultProfile    = stackmanifest.ProfileCore
+const DefaultPreviewEnv = scope.EnvDev
+```
+
+`PreviewPlan` GAGNE **2 champs** :
+
+```go
+type PreviewPlan struct {
+  // … champs S94 PRÉSERVÉS untouched : EmittedAppHash, ServedMatchesEmitted, URL, Subdomain, StackName, Boot, Teardown …
+  Profile   stackmanifest.Profile
+  Bootstrap *PreviewBootstrap // nil pour un plan S94
+}
+```
+
+La signature de `BuildPlan` est **préservée** : `(PreviewPlan, *blockreason.BlockReason)`. L'**anti-overwrite (§9)** est gravé à la source : quand `Bootstrap` est `nil`, les clés `profile`/`bootstrap` sont **OMISES de l'adresse de contenu** — donc les **IDs de plan S94 existants restent byte-inchangés**.
+
+### Le `PreviewBootstrap` et le `TeardownPlan` — amorçage + démontage
+
+```go
+type PreviewBootstrap struct {
+  Profile      stackmanifest.Profile
+  Sequence     bootstrap.Sequence
+  SequenceHash string   // l'adresse DÉPENDANTE du profile — se replie dans l'ID du plan
+  Services     []string
+}
+
+type TeardownPlan struct {
+  StackName string
+  Commands  []string
+  Services  []string  // ordre INVERSE du boot
+}
+
+func TeardownOf(plan PreviewPlan) TeardownPlan  // pure — démontage déterministe
+```
+
+`buildBootstrap` **réutilise verbatim** (ADR 0007) les deux moteurs de l'EPIC D — il ne **forke** ni l'un ni l'autre :
+
+1. **`composeemit.FilterByProfile`** (DP11) — retient les services que le profile sélectionne ;
+2. **`bootstrap.EmitBootstrapSequence`** (DP12) — émet la séquence d'amorçage one-shot déterministe.
+
+Un **manifest cross-app** (deux projets mélangés) est **refusé** : `ErrManifestProjectMix` (nouvelle erreur).
+
+`TeardownOf` est **pure** : les services se dénouent dans l'**ORDRE INVERSE** du boot ; un démontage **complet** est un **sur-ensemble** d'un démontage **lean** (commandes destroy + stack-rm).
+
+### L'invariant capital — `EmittedAppHash` profile-FREE
+
+`EmittedAppHash` reste une fonction **pure de (phase ⊕ surface)** — **sans profile**. Le miroir l'épingle pour **tous** les profiles : choisir `git`, `core` ou `full` ne change **rien** à l'app servie (`ServedMatchesEmitted` tient), ni à l'URL, au sous-domaine, au nom de stack. Seul l'**amorçage** (`SequenceHash`, et donc l'`ID` du plan) varie avec le profile.
+
+### Pas de re-émission DP05 câblée — par design
+
+Aucun `EmitStack` (DP05) n'est câblé dans `BuildPlan` : la **re-émission** est l'affaire de l'**exécuteur gaté** (le doc y pointe). Le miroir prouve le **PLAN** + le **hash** ; le serveur web-preview sert l'app — **pas de vrai docker**, exactement comme S94.
+
+### Le miroir — `preview_dp25_test.go` (6 Test top-level, RED-first)
+
+1. **`TestDP25HashInvariantAcrossProfiles`** (rapid, 100 cas) — ∀ profiles, app-hash == baseline S94 ; `ServedMatchesEmitted` tient ; URL/sous-domaine/stack profile-indépendants.
+2. **`TestDP25Reproducible`** (rapid 100) — même phase + profile ⇒ ID de plan + `SequenceHash` + teardown **byte-identiques**.
+3. **`TestDP25LeanVsFull`** (rapid 100) — le profile `git` boote **moins** de services que `full` (`otel` exclu), full ⊇ lean, `SequenceHash` + ID de plan **distincts**, MAIS app-hash/URL/stack **identiques**.
+4. **`TestDP25CoreIsBaselineEqualsFull`** (rapid 100) — documente la sémantique DP11 : une sélection `core` est la **baseline toujours-active** (`ServiceProfiles` ajoute `core` à chaque svc ⇒ `core ≡ full` en nombre de services) ; app-hash identique.
+5. **`TestDP25TeardownDeterministic`** (rapid 100) — `TeardownOf` pure ; services = **inverse exact** de l'ordre de boot ; commandes destroy + stack-rm.
+6. **`TestDP25LifecycleFixture`** + **`TestDP25BackwardCompatNoManifest`** (fixtures) — cycle de vie complet build→probe→teardown + **4 refus** (`UNKNOWN_PROFILE`, `MISSING_SECRET_AT_BOOT`, manifest cross-app, `DOLTGRES_NOT_ALLOWED_IN_PROD` via non-prod × prod) ; un Input forme-S94 ne donne **ni** `Profile` **ni** `Bootstrap`, adresse de contenu inchangée.
+
+### La GATE (GOTOOLCHAIN=local go1.25.10, cwd `back/`)
+
+- `go build ./...` : **BUILD OK**.
+- `go test ./runtime/... ./kernel/...` : **132 packages ok, 0 FAIL**.
+- paquet preview : **15** Test top-level passent (**7** existants S94 **INTACTS** + **8** neufs DP25).
+- `gofmt -l` (pinné) clean ; `go vet ./runtime/... ./kernel/...` clean.
+- **0 ELF parasite** ; aucun artefact `.fail` rapid laissé ; `git status` = exactement les **2 fichiers** voulus (`preview.go` modifié, `preview_dp25_test.go` neuf).
+- **Backend-only** : restent pour plus tard (hors-scope / forward-deps by-design) le greffage du `DeployPanel` front à la forme étendue (`PreviewPlan.Profile`/`Bootstrap`/`Teardown`), le pass-through du `Profile` par la gateway MCP preview, et l'absence de persistance Postgres (preview below-the-line, n'écrit aucune vérité).
+
+## Méta
+
+- **Le miroir Go est l'épreuve `hash-preview = hash-phase`, ∀ profiles.** Le miroir property mesure le cœur déterministe : `TestDP25HashInvariantAcrossProfiles` épingle l'invariant capital — ∀ profile, l'`EmittedAppHash` est celui de la baseline S94 ; `TestDP25Reproducible` pin la reproductibilité byte-identique (même phase + profile ⇒ même plan, même `SequenceHash`, même teardown) ; `TestDP25LeanVsFull` prouve que `git` boote moins que `full` **sans** toucher l'app-hash ; `TestDP25TeardownDeterministic` pin le démontage en ordre inverse du boot. Le miroir fixture (N2, `state → command → events`) épingle le cycle de vie complet (build→probe→teardown) et les **4 refus**. Que la preview soit *invariante au profile sur le résultat émis* et *déterministe sur l'amorçage* n'est pas une promesse — c'est une propriété prouvée.
+
+- **Déterminisme-first (§6/§8) : filtrer, amorcer, démonter, hacher sont des fonctions pures, donc du code.** DP25 n'invite **aucun** LLM : le filtrage par profile est DP11 (set-membership sur `ServiceProfiles`), la séquence d'amorçage est DP12 (émission déterministe), le `SequenceHash` est une adresse de contenu, le `TeardownOf` est un renversement pur de l'ordre de boot, l'`EmittedAppHash` est une fonction pure de (phase ⊕ surface). Même entrée ⇒ même sortie (le miroir `TestDP25Reproducible` le pin). Construire un preview par profile est une **composition de moteurs purs**, pas un jugement flou.
+
+- **Réutiliser plutôt que réinventer (ADR 0007), sur DP11 + DP12.** DP25 n'invente **ni** filtrage par profile **ni** amorçage one-shot : il **réutilise verbatim** `composeemit.FilterByProfile` (DP11, composé jamais forké) et `bootstrap.EmitBootstrapSequence` (DP12, importé jamais re-frappé). Et il **étend** S94 — il ne le **duplique pas** : pas de seconde preview à côté, mais 5 champs optionnels + 2 champs de plan, avec l'invariant capital intact. Un seul moteur de preview, un seul filtrage par profile, un seul amorçage dans tout AIDOS.
+
+## Méta-méta
+
+- **Below-the-line : la preview ne grave aucune vérité.** C'est le mur (§2) : prévisualiser l'app n'écrit **rien** dans `kernel`, `mirrors` ou `fitness`, et ne **persiste rien** en Postgres (l'amorçage de preview est éphémère — *bootstrap exception*, `WroteKernel` toujours `false`). La preview est une **re-émission PURE** depuis la **phase content-adressée** : elle ne déclare aucune vérité nouvelle, elle re-projette ce que la phase fige déjà. L'agent n'a aucun GRANT pour graver une vérité ; la preview n'en a pas besoin — elle vit **en dessous de la ligne**.
+
+- **DP25 ÉTEND S94, il ne le DUPLIQUE pas — l'anti-overwrite gravé dans l'adresse de contenu.** L'enjeu porteur, c'est de prévisualiser l'app *par profile* **sans** faire dériver l'empreinte ni casser les IDs de plan existants. La règle (§9) est nette : quand le `Manifest` est absent, la forme S94 est **byte-inchangée** ; quand `Bootstrap` est `nil`, ses clés sont **OMISES de l'adresse de contenu** — les IDs de plan S94 ne bougent **pas**. C'est l'anti-overwrite poussé jusqu'au hash : on **ajoute** un comportement, on n'**altère** rien de l'existant.
+
+- **DP25 ouvre l'EPIC F — la prévisualisation par stack de l'app émise.** La loi de complétude (Mandat A, §5) veille : un geste sans miroir serait un **monstre** — l'extension ne vit que parce qu'elle porte sa preuve vivante (property + fixture, RED-first). Et c'est *load-bearing* : sans le profile, la preview servait une stack fixe ; avec lui, elle amorce **exactement** les services que le profile retient, déterministement, et les démonte proprement — tout en gardant l'invariant capital. La couche de prévisualisation par stack est posée, et l'**EPIC F s'ouvre**.

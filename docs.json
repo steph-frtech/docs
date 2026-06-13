@@ -605,7 +605,9 @@
        "steps/concept/dp23-emitted-connector-infra",
        "steps/internals/dp23-emitted-connector-infra",
        "steps/concept/dp24-connector-cockpit",
-       "steps/internals/dp24-connector-cockpit"
+       "steps/internals/dp24-connector-cockpit",
+       "steps/concept/dp25-preview-by-profile",
+       "steps/internals/dp25-preview-by-profile"
       ]
      }
     ]
