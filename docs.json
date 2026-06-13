@@ -589,7 +589,9 @@
        "steps/concept/dp15-substrate-data",
        "steps/internals/dp15-substrate-data",
        "steps/concept/dp16-substrate-async",
-       "steps/internals/dp16-substrate-async"
+       "steps/internals/dp16-substrate-async",
+       "steps/concept/dp17-substrate-observability",
+       "steps/internals/dp17-substrate-observability"
       ]
      }
     ]

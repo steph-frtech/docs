@@ -1,0 +1,130 @@
+---
+title: "DP17 · Internals — l'émetteur de fragments d'observabilité, l'instrumentation TS projetée, la propriété zéro-écriture-vérité"
+description: "Le journal de build de DP17 : le paquet NEW additif back/runtime/observabilityfragments/ — jumeau observabilité de DP15/DP16. Réutilise un type ServiceFragment structurellement identique à datafragments.ServiceFragment (struct nommée, PAS un alias, pour attacher les méthodes WritesTruth/Capabilities) + records.Canonicalize/records.Hash (S02 via DP15). SubstrateObservabilityFragments(projectID, env) ([]ServiceFragment, error) émet un jeu CLOS de trois fragments dont les images sont la mesure DP14 : otel-collector (observability/observability/4317, otel/opentelemetry-collector-contrib) + signoz (observability/observability/8080, signoz/signoz, volume /var/lib/signoz, depends_on otel-collector) + glitchtip (errortracking/observability/8081, glitchtip/glitchtip, depends_on postgres+valkey). GlitchTip remappé 8080→8081 (collision SigNoz dans le manifest greffé, même discipline DP15 doltgres 5433). Aucun env-gating (≠ Doltgres DP15) ; seul un environnement hors-set échoue fermé UNKNOWN_ENVIRONMENT. Isolation via la MÊME datafragments.IsolationToken (records.Hash(\"datafragments/v1:\"+projectID)[:12], DP15 réutilisé, jamais forké) → A != B byte-distinct. EmittedInstrumentation(projectID, env) (Instrumentation, error) est une PURE projection (DATA, jamais du Go runtime) : paquets @opentelemetry/* + @sentry/node (ADR 0040), OTLPEndpointVar=OTEL_EXPORTER_OTLP_ENDPOINT → otel-collector → signoz, ErrorDSNVar=GLITCHTIP_DSN → glitchtip, ReadOnlyReality toujours true. LA PROPRIÉTÉ CAPITALE : WritesTruth()==false sur chaque fragment ET l'instrumentation ; aucune Capabilities() n'est un scope write:kernel|mirrors|fitness ; l'oracle IsTruthWriteCapability lui-même fault-injecté. Miroir fixture/acceptance observabilityfragments_fixture_test.go (3 Test) + miroir property observabilityfragments_property_test.go (11 Test) écrits D'ABORD (RED) puis VERT : 14 PASS. GATE : go build/vet/gofmt propres, sweep runtime+kernel = 125 ok 0 FAIL, front intact (vitest 2201). S92 opsobservability réutilisé pour le dashboard, jamais dupliqué."
+keywords: ["aidos", "krd", "DP17", "internals", "observabilityfragments", "ServiceFragment", "datafragments.ServiceFragment", "struct nommée pas alias", "SubstrateObservabilityFragments", "EmittedInstrumentation", "Instrumentation", "WritesTruth", "Capabilities", "IsTruthWriteCapability", "oracle du mur", "fault-injection", "CanonicalFragment", "HashFragment", "CanonicalInstrumentation", "HashInstrumentation", "Keys", "OTel Collector", "otel/opentelemetry-collector-contrib", "OTLP", "4317", "SigNoz", "signoz/signoz", "8080", "GlitchTip", "glitchtip/glitchtip", "8081", "remappé 8081", "DUPLICATE_INTERNAL_PORT", "collision de port", "RoleObservability", "RoleErrorTracking", "ProfileObservability", "errortracking", "observability", "jeu clos", "palette mesurée", "DP14", "@opentelemetry/sdk-node", "@opentelemetry/auto-instrumentations-node", "@opentelemetry/exporter-trace-otlp-grpc", "@sentry/node", "ADR 0040", "TS", "JS OTel SDK", "OTEL_EXPORTER_OTLP_ENDPOINT", "GLITCHTIP_DSN", "référence d'env-var", "jamais en dur", "secret", "ReadOnlyReality", "pure projection", "DATA jamais Go runtime", "UNKNOWN_ENVIRONMENT", "pas d'env-gating", "isolation par projet", "datafragments.IsolationToken", "records.Hash", "byte-distinct", "byte-identique", "device", "env-var", "jamais chemin en dur", "healthcheck", "depends_on", "valkey", "postgres", "profile", "project_id", "propriété capitale", "zéro écriture-vérité", "le mur", "above-the-line", "below-the-line", "RealityMirror", "E12", "le seul on-ramp", "pas un senseur du Kernel", "S92", "opsobservability", "réutilise S92", "miroir fixture", "miroir property", "rapid", "RED", "VERT", "TestL6CapitalNoTruthWrite", "TestFixture_OpsObservabilityWritesNoTruth", "go build", "go vet", "gofmt", "anti-overwrite", "déterminisme-first", "DP15", "DP16", "ADR 0007"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP17 — Les fragments d'observabilité](/steps/concept/dp17-substrate-observability).</Note>
+
+## Implémentation
+
+### Le paquet — `back/runtime/observabilityfragments/` (NEW, additif)
+
+DP17 grave les services d'**observabilité d'exploitation** de la palette mesurée (DP14) en fragments StackManifest. Le paquet est **NEW et additif** : `back/runtime/observabilityfragments/` — rien d'existant n'est touché ni cassé. C'est le **jumeau observabilité** de DP15 (données) et DP16 (asynchrone).
+
+```go
+type ServiceFragment struct {
+  Key       string
+  ProjectID string
+  Service   stackmanifest.Service
+  Volumes   []stackmanifest.Volume
+} // struct NOMMÉE, PAS un alias — pour attacher WritesTruth/Capabilities
+
+func (ServiceFragment) WritesTruth() bool      // TOUJOURS false (le mur §2)
+func (f ServiceFragment) Capabilities() []string // observe:* uniquement
+
+func SubstrateObservabilityFragments(projectID string, env scope.Environment) ([]ServiceFragment, error)
+func Keys() []string // palette close [otel-collector signoz glitchtip]
+
+type Instrumentation struct { /* DATA, jamais du Go runtime */ }
+func (Instrumentation) WritesTruth() bool      // TOUJOURS false
+func (Instrumentation) Capabilities() []string // observe:* uniquement
+func EmittedInstrumentation(projectID string, env scope.Environment) (Instrumentation, error)
+
+func IsTruthWriteCapability(cap string) bool // l'oracle du mur (write:kernel|mirrors|fitness)
+
+func CanonicalFragment / HashFragment / CanonicalInstrumentation / HashInstrumentation // S02 réutilisé
+```
+
+Un choix précis : `ServiceFragment` est une **struct nommée distincte**, **structurellement identique** à `datafragments.ServiceFragment` — **pas** un type-alias. Pourquoi ? Parce que c'est ce qui permet d'**attacher les méthodes capacité** (`WritesTruth`/`Capabilities`) qui épinglent le mur ; identique en forme, elle se greffe et se convertit librement aux côtés des fragments data/async. Les oracles d'adresse de contenu (`records.Canonicalize`/`records.Hash`, S02) sont **réutilisés via DP15**, jamais forkés.
+
+### Le jeu clos — trois fragments, images = mesure DP14
+
+Trois fragments d'OBSERVABILITÉ déterministes, jeu **clos**, dont les images sont **exactement la mesure DP14** :
+
+- `otel-collector` — role `observability`, profile `observability`, port interne **4317** (l'OTLP gRPC, la cible d'export de l'app émise), `otel/opentelemetry-collector-contrib`.
+- `signoz` — role `observability`, profile `observability`, port interne **8080**, `signoz/signoz`, volume `/var/lib/signoz`, `depends_on` otel-collector (il reçoit le fan-out du collecteur).
+- `glitchtip` — role `errortracking`, profile `observability`, port interne **8081**, `glitchtip/glitchtip`, `depends_on` postgres + valkey (DP14 mesuré : « Cache/Queue : Valkey »).
+
+Chaque fragment porte : image + port interne + **volume bind** (device = env-var, **jamais un chemin en dur**) + healthcheck + `depends_on` + profile + `project_id`.
+
+### La collision de port — GlitchTip remappé 8080 → 8081
+
+SigNoz et GlitchTip ont été mesurés `go` par DP14 écoutant **tous deux sur 8080** dans leur propre conteneur. Greffés dans **un** manifest, les ports internes doivent être **uniques** (loi `DUPLICATE_INTERNAL_PORT` de `stackmanifest.Validate`). DP17 **remappe** donc le port greffé de GlitchTip à **8081** — la **même discipline** que DP15 pour doltgres (5433 vs le 5432 de Postgres). Le collecteur est gravé à **4317**, son port d'ingest OTLP gRPC (l'endpoint porteur que l'app émise vise). Valeurs **gravées**, déterministes, jamais re-mesurées.
+
+### Pas d'env-gating — fermeture sur l'inconnu
+
+Contrairement à DP15 (Doltgres opt-in hors prod), DP17 **n'a aucun env-gating** : l'observabilité est `observability`-profile dans **tous** les environnements. Il n'y a donc **aucune porte de gate** à déléguer. La seule défense : un environnement **hors du jeu déclaré** échoue **fermé** avec `UNKNOWN_ENVIRONMENT` (le motif DP06, jamais deviné). Pour `(projectID, env)` valide, l'émission est **byte-identique** d'un appel à l'autre.
+
+### L'isolation par projet — `datafragments.IsolationToken` réutilisé
+
+L'isolation par projet réutilise **le même** token que DP15 (`datafragments.IsolationToken`, jamais forké) : `records.Hash("datafragments/v1:" + projectID)[:12]`. Ce token marque le **nom du volume** et la **variable d'environnement** du device (`SIGNOZ_<token>_DATA_PATH`, etc.). Conséquence : pour deux projets A et B, les fragments d'observabilité sont **byte-distincts** (A ≠ B) — aucun croisement de volume possible, le projet A ne lit jamais les traces ou les erreurs du projet B. Un seul schéma d'isolation pour toute la substrate.
+
+### L'instrumentation émise — une pure projection (DATA, jamais du Go runtime)
+
+`EmittedInstrumentation(projectID, env)` rend, **en pure donnée**, comment l'app émise s'instrumente :
+
+- **Paquets TS** (ADR 0040 — SDK OTel JS/TS, **jamais Go**) : `@opentelemetry/sdk-node`, `@opentelemetry/auto-instrumentations-node`, les exporteurs OTLP gRPC (traces/metrics/logs), et `@sentry/node` (GlitchTip est compatible SDK Sentry — DP14 : « GlitchTip = fork léger compatible Sentry SDK »).
+- **`OTLPEndpointVar`** = `OTEL_EXPORTER_OTLP_ENDPOINT` → cible `otel-collector` → dashboard `signoz`. Une **référence d'env-var**, jamais une URL en dur.
+- **`ErrorDSNVar`** = `GLITCHTIP_DSN` → cible `glitchtip`. Un **secret**, en référence d'env-var, jamais en clair.
+- **`ReadOnlyReality`** = **toujours true**.
+
+C'est une **fonction pure du Kernel en lecture seule** : elle projette le câblage, elle ne le décide ni ne le mute. Elle échoue fermée sur `UNKNOWN_ENVIRONMENT` et est byte-identique pour le même `(projectID, env)`.
+
+### La propriété capitale — zéro écriture-vérité, et un oracle fault-injecté
+
+Le cœur du mur (§2) : **aucun** fragment, **aucune** instrumentation ne porte de capacité d'écriture-vérité.
+
+- `WritesTruth()` est **toujours false** — sur chaque `ServiceFragment` et sur l'`Instrumentation`.
+- Toutes les `Capabilities()` sont des `observe:*` (lecture seule sur la réalité) — `observe:otlp-ingest`, `observe:store-traces`, `observe:report-errors`, etc. — **aucune** n'est un scope `write:kernel|mirrors|fitness`.
+- L'**oracle** `IsTruthWriteCapability(cap)` reconnaît le namespace clos `write:{kernel,mirrors,fitness}` ; il est **lui-même fault-injecté** par le miroir : `IsTruthWriteCapability("write:kernel") == true` (il attrape), `IsTruthWriteCapability("observe:store-traces") == false` (il ne fait pas de faux positif) — le garde n'est donc **pas mort**.
+
+### Les workers / le dashboard restent réutilisés, pas dupliqués
+
+DP17 émet des **FRAGMENTS DE SERVICE** (topologie compose) + la **projection d'instrumentation**, **pas** un tableau de bord re-codé. Le **dashboard d'exploitation** par app — ingest de signaux → panneaux latence/taux-d'erreur/feed de logs — est **réutilisé de S92** (`runtime/opsobservability`), référencé dans la doc du paquet, **jamais dupliqué**. Et les instrumentations de runtime de l'app émise restent **TS** (ADR 0040, l'émetteur S74). Ce paquet Go est la **réalisation au build** + la **projection**, jamais une boucle de runtime.
+
+### Les miroirs — fixture/acceptance + property, écrits D'ABORD (RED → VERT)
+
+Les deux miroirs sont **écrits d'abord** (mirror-first, RED confirmée) puis VERT. **14 fonctions Test, 14 PASS** (3 + 11).
+
+Miroir **fixture / acceptance** — `observabilityfragments_fixture_test.go` (**3 Test**) :
+
+- `TestFixture_AppEmitsObservabilitySubstrate` — l'app émet bien le jeu clos `[otel-collector signoz glitchtip]` (rôles, ports, dépendances).
+- `TestFixture_AppInstrumentsWithOTelToSigNozErrorsToGlitchTip` — l'instrumentation câble @opentelemetry/* → otel-collector → signoz, et les erreurs → glitchtip via le DSN.
+- `TestFixture_OpsObservabilityWritesNoTruth` — l'observabilité d'exploitation n'écrit **aucune** vérité (WritesTruth false sur tout, aucune capacité d'écriture-vérité).
+
+Miroir **property ∀ (rapid)** — `observabilityfragments_property_test.go` (**11 Test**) :
+
+- `TestL1ByteIdentique` + `TestL1InstrumentationByteIdentique` — même `(projectID, env)` → mêmes octets (fragments **et** instrumentation).
+- `TestL2PaletteClose` + `TestL2Roles` — jeu clos de 3 peuplé ; rôles bien observability/errortracking.
+- `TestL3NoEnvGate` — aucun env-gating (palette présente dans tout environnement connu).
+- `TestL4Isolation` — A ≠ B byte-distinct.
+- `TestL5SharedIsolationToken` — token partagé avec DP15 (`datafragments.IsolationToken`).
+- `TestL6CapitalNoTruthWrite` — **la propriété capitale ∀** : `WritesTruth()` false partout, aucune `Capabilities()` n'est un truth-write, et l'oracle est fault-injecté.
+- `TestL7GraftedManifestValid` — le manifest greffé (les 3 fragments + leurs volumes) passe `stackmanifest.Validate` (ports uniques après le remap GlitchTip).
+- `TestL8InstrumentationIsPureProjection` — l'instrumentation est une pure projection (DATA : refs d'env-var, jamais d'URL en dur, ReadOnlyReality toujours true).
+- `TestCanonicalIsRecordsCanonical` — `CanonicalFragment` = fixpoint `records.Canonicalize` (S02).
+
+### La GATE
+
+- `GOTOOLCHAIN=local go build ./...` : **exit 0**.
+- `go vet ./...` : **clean** (tout le module) · `gofmt -l` : **clean** (un reflow de doc-comment appliqué).
+- `go test ./runtime/... ./kernel/...` : **125 paquets ok, 0 FAIL** (tests existants intacts — anti-overwrite respecté).
+- Nouveau paquet : **14 tests, tous PASS** (3 fixture/acceptance + 11 property). DP15 `datafragments` + S92 `opsobservability` toujours verts.
+- Front **non touché** (vitest 2201, e2e substrate intacts). Aucun binaire ELF parasite dans `back/` (scan propre).
+
+## Méta
+
+- **L'émission de fragments et l'instrumentation sont pures — donc elles se rejouent à l'identique.** `SubstrateObservabilityFragments` dérive ses trois briques d'une table close et du hash de DP15 ; `EmittedInstrumentation` dérive ses paquets et ses refs d'env-var d'un set déclaré. Aucune n'a d'horloge, d'aléa, ni de LLM. C'est le déterminisme-first (§6) : émettre une topologie d'observabilité est une transformation pure des entrées, donc c'est du code, jamais un agent. `TestL1ByteIdentique` et `TestL1InstrumentationByteIdentique` assertent que deux appels rendent des octets identiques.
+
+- **La propriété capitale n'est pas affirmée, elle est mesurée — et son garde est fault-injecté.** Que l'observabilité d'exploitation n'écrive aucune vérité ne se déclare pas, ça se **prouve** : `TestL6CapitalNoTruthWrite` parcourt **chaque** fragment et l'instrumentation et asserte `WritesTruth()==false` ∧ aucune `Capabilities()` n'est un scope d'écriture-vérité. Mieux : l'oracle `IsTruthWriteCapability` est **lui-même** fault-injecté (`write:kernel` → true, `observe:store-traces` → false), pour qu'il ne puisse pas devenir un garde mort qui dit toujours « non ». Un invariant n'est réel que si un test rougit quand on le casse.
+
+- **Réutiliser une forme et un token plutôt qu'en jumeler.** DP17 ne forge pas un schéma d'isolation neuf : il réutilise `datafragments.IsolationToken` (DP15) verbatim, et ses oracles `records.Canonicalize`/`records.Hash` (S02). La struct `ServiceFragment` reste structurellement identique à celle de DP15 — distincte seulement pour porter les méthodes du mur. `TestL5SharedIsolationToken` asserte que le token est bien celui de DP15, pas une copie locale qui finirait par diverger.
+
+## Méta-méta
+
+- **L'observabilité d'exploitation n'est PAS un senseur du Kernel — le RealityMirror (E12) est le seul on-ramp.** C'est la distinction qui tient tout DP17. Une trace, une métrique, un événement d'erreur sont lus par l'**utilisateur** pour **exploiter** son app émise ; ils ne remontent **jamais** écrire le truth-store d'AIDOS. La seule porte de la réalité de production vers le noyau reste le **RealityMirror** (incident → Idée → miroir → /goal → ChangeSet) — une décision **enregistrée**, gardée par le mur, jamais une écriture en passant. Confondre « observer son app » et « muter la vérité du noyau » serait percer le mur par la porte de service ; le miroir `TestFixture_OpsObservabilityWritesNoTruth` l'interdit.
+
+- **Sous la ligne — aucune écriture above-the-line.** L'AST `Service` est une **source** stack_manifest above-the-line (DP02) ; ce paquet en **projette** la tranche observabilité **sous la ligne** (un fragment régénérable pour `back/gen/<app>/`, l'entrée de composeemit). Il n'écrit **jamais** le noyau, les miroirs, ni la fitness. Le mur reste intact : une instrumentation peut exporter ses propres traces, jamais graver un invariant. Bouger la vérité reste une décision enregistrée, gardée par le mur.
+
+- **Réutiliser S92 et S74, ne pas les dupliquer (ADR 0007, ADR 0040).** DP17 n'ajoute que deux choses neuves : l'**assemblage** des trois fragments d'observabilité en jeu clos et la **projection** de l'instrumentation émise. Tout le reste est réutilisé : le **dashboard d'exploitation** par app de **S92** (`opsobservability`, jamais reforgé), le type et l'isolation de **DP15**, les oracles d'adresse de contenu de **S02**. Et la frontière des plans est nette : DP17 fige *quels* services d'observabilité tournent et *comment ils sont isolés* (mandatory, déterministe, Go au build) ; l'**instrumentation** de l'app émise — *comment le code de l'app s'observe* — reste **TS** (ADR 0040), un slot que DP17 décrit en donnée mais ne code pas en Go. Réutiliser plutôt que réinventer, sur les deux plans.
