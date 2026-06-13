@@ -1,0 +1,134 @@
+---
+title: "DP23 · Internals — SubstrateConnectorInfraFragments (4 fragments byte-stables, profile connectors, fail-closed UNKNOWN_ENVIRONMENT) + RouteTool set-membership pur (TOOL_NOT_REGISTERED, zéro LLM) + RealizeInboundWebhook webhook→op async réutilise S73/DP16 verbatim (outbox + exactly-once idempotency content-addressed, aucun fork), ServiceFragment LOCAL WritesTruth()==false, isolation par token DP15, miroir property + fixture écrits RED-first, blockreason additif CodeToolNotRegistered"
+description: "Le journal de build de DP23 : le paquet back/runtime/connectorinfra (3 fichiers neufs) calqué sur DP15/DP16/DP18 + back/runtime/blockreason/blockreason.go (modifié, additif). SubstrateConnectorInfraFragments(projectID, env scope.Environment) ([]ServiceFragment, error) rend les 4 fragments profile=connectors, role=connector, image vide (ÉMIS, built non pinné), ports 3900/3910/3920/3930, healthcheck /health, volume bind isolé par token DP15 (datafragments.IsolationToken), fail-closed sur env inconnu (UNKNOWN_ENVIRONMENT). mcp-gateway dependsOn [tool-registry], webhook-gateway dependsOn [nats]. Keys() → [mcp-gateway, connector-registry, tool-registry, webhook-gateway] (ordre canonique). ServiceFragment est une struct LOCALE (pas un alias) + (ServiceFragment) WritesTruth() bool {return false} (le mur), comme appservicefragments. CanonicalFragment/HashFragment = oracles S02 (records.Canonicalize/Hash). RouteTool(registry ToolRegistry, toolName string) (Decision, *blockreason.BlockReason) — routage MCP-Gateway PUR set-membership fail-closed, ZÉRO LLM : enregistré⇒(Admitted,nil), absent OU registre vide⇒(refusé, TOOL_NOT_REGISTERED). RealizeInboundWebhook(webhook InboundWebhook, op operation.Operation, async operation.Async, outbox operation.Outbox, sink operation.Sink) ([]DispatchEvent, error) — match op (fail-closed ErrWebhookOperationMismatch), ValidateAsync, écrit les effets dans l'outbox S73 (asyncfragments.OutboxWriter), Dispatch (exactly-once relatif, idempotency key content-addressed). DispatchEvent = asyncfragments.DispatchEvent (réutilisé). blockreason additif : CodeToolNotRegistered = TOOL_NOT_REGISTERED (severity blocking, explanation FR, 3 how_to_fix, ajouté à codeOrder) — couvert auto par le miroir property blockreason existant (tire de Codes()). Miroir property (8 : L1ByteIdentique, L2PaletteClose, L3NoEnvGate, L4Isolation, L5SharedToken, L6RouteToolIsPureSetMembership, L6EmptyRegistryRefusesEverything, L7ManifestRemainsValid) + fixture (7 : InboundWebhookTriggersAsyncOp, InboundWebhookReplayNeverDuplicates, WebhookForWrongOperationRefused, RegisteredToolRoutes, UnregisteredToolRefused, ConnectorInfraPaletteIsFour, KeysAreTheClosedSet), écrits RED-first : 15 fonctions PASS. Below-the-line : WritesTruth()==false partout ; MCP de l'app émise DISTINCTS d'AIDOS (ADR 0040). GATE : go build ./... exit 0 ; go test ./runtime/... ./kernel/... exit 0 ; gofmt clean ; go vet clean ; 0 ELF parasite. Backend-only ; le mur tient (aucun GRANT). Réutilise S73/DP16 (async) + DP20 (connector) sans forker."
+keywords: ["aidos", "krd", "DP23", "internals", "back/runtime/connectorinfra", "connectorinfra.go", "connectorinfra_property_test.go", "connectorinfra_fixture_test.go", "back/runtime/blockreason/blockreason.go", "blockreason.go", "SubstrateConnectorInfraFragments", "Keys", "CanonicalFragment", "HashFragment", "ServiceFragment", "struct locale", "pas un alias", "WritesTruth", "WritesTruth false", "le mur", "§2", "appservicefragments", "stackmanifest.Service", "stackmanifest.Volume", "Service", "Volume", "Name", "Role", "connector", "Image", "image vide", "image émise", "built non pinné", "InternalPort", "Profile", "connectors", "Healthcheck", "/health", "DependsOn", "dependsOn", "tool-registry", "nats", "port 3900", "port 3910", "port 3920", "port 3930", "scope.Environment", "Environment", "fail-closed", "UNKNOWN_ENVIRONMENT", "env inconnu", "jeu clos", "closed set", "quatre fragments", "4 fragments", "ordre canonique", "datafragments.IsolationToken", "token d'isolation", "DP15", "isolation par projet", "byte-distinct", "key-token", "KEY_TOKEN_DATA_PATH", "DeviceVar", "volume bind", "device", "env-var", "jamais chemin en dur", "records.Canonicalize", "records.Hash", "hash S02", "S02", "oracle S02", "content-addressed", "byte-stable", "byte-identique", "ToolRegistry", "NewToolRegistry", "ProjectID", "Tools", "set", "registre d'outils", "registre vide", "RouteTool", "routage MCP-Gateway", "routage pur", "set-membership", "appartenance ensembliste", "zéro LLM", "no LLM", "déterminisme-first", "§6", "§8", "Decision", "Admitted", "Code", "TOOL_NOT_REGISTERED", "CodeToolNotRegistered", "blockreason.Code", "blockreason.BlockReason", "BlockReason", "severity blocking", "explanation FR", "how_to_fix", "3 how_to_fix", "codeOrder", "Codes()", "miroir property blockreason", "TestEveryCodeHasNonEmptyResolutionPath", "RenderRoundTrips", "additif", "anti-overwrite", "§9", "InboundWebhook", "Source", "Operation", "Payload", "RealizeInboundWebhook", "ErrWebhookOperationMismatch", "match op", "ValidateAsync", "operation.Operation", "operation.Async", "operation.Outbox", "operation.Sink", "outbox S73", "S73", "asyncfragments.OutboxWriter", "OutboxWriter", "DispatchEvent", "asyncfragments.DispatchEvent", "type alias", "Dispatch", "exactly-once relatif", "exactly-once", "idempotency key", "idempotency key content-addressed", "replay", "rejeu", "jamais de doublon", "never duplicates", "DP16", "substrate async", "réutilise S73/DP16", "réutilise verbatim", "aucun fork async", "no async fork", "anti-duplication", "réutilise jamais réinvente", "ADR 0007", "DP20", "connector", "ConnectorSource", "MCP de l'app émise distincts d'AIDOS", "ses propres MCP", "ses propres Skills", "MCP + Skills de l'app émise", "distincts d'AIDOS", "ADR 0040", "ADR 0009", "un op = un outil MCP", "MCP additif", "below-the-line", "en dessous de la ligne", "aucune vérité Kernel", "aucun GRANT", "kernel", "mirrors", "fitness", "miroir property", "rapid", "L1ByteIdentique", "L2PaletteClose", "L3NoEnvGate", "L4Isolation", "L5SharedToken", "L6RouteToolIsPureSetMembership", "L6EmptyRegistryRefusesEverything", "L7ManifestRemainsValid", "miroir fixture", "N2", "state command events", "InboundWebhookTriggersAsyncOp", "InboundWebhookReplayNeverDuplicates", "WebhookForWrongOperationRefused", "RegisteredToolRoutes", "UnregisteredToolRefused", "ConnectorInfraPaletteIsFour", "KeysAreTheClosedSet", "écrit RED-first", "RED avant l'impl", "15 fonctions", "7 fixture", "8 property", "GATE", "go build", "go test", "go vet", "gofmt", "GOTOOLCHAIN=local", "go1.25.10", "exit 0", "0 ELF parasite", "backend-only", "loi de complétude", "monstre", "EPIC E", "load-bearing", "DP18", "calqué sur DP15/DP16/DP18"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP23 — L'infra de connecteurs de l'app émise](/steps/concept/dp23-emitted-connector-infra).</Note>
+
+## Implémentation
+
+### Le paquet — `back/runtime/connectorinfra` (3 fichiers) + un blockreason additif
+
+DP23 pose l'**infra de connecteurs de l'app émise** en quatre fragments StackManifest déterministes, **calqué sur** DP15/DP16/DP18 (le motif « fragments below-the-line par projet ») et **réutilisant** S73/DP16 (async) + DP20 (connector) **sans forker**. Tâche **backend-only** ; le mur tient (aucun GRANT).
+
+Trois fichiers neufs (anti-overwrite respecté, §9) :
+
+- `back/runtime/connectorinfra/connectorinfra.go` — l'implémentation : `SubstrateConnectorInfraFragments`, `Keys`, `CanonicalFragment` / `HashFragment`, le `ServiceFragment` local, `RouteTool` / `ToolRegistry` / `Decision`, et `RealizeInboundWebhook` / `InboundWebhook`.
+- `connectorinfra_property_test.go` — le **miroir property ∀** (rapid), **écrit RED-first**.
+- `connectorinfra_fixture_test.go` — le **miroir fixture N2** (`state → command → events`), **écrit RED-first**.
+
+Et **un** fichier modifié — `back/runtime/blockreason/blockreason.go` (modification **additive**) : un nouveau code d'erreur
+
+```go
+CodeToolNotRegistered Code = "TOOL_NOT_REGISTERED"
+```
+
+avec son entrée au registre (severity **blocking**, explanation **FR**, **3** entrées `how_to_fix`) et son ajout à `codeOrder`. Le **miroir property existant** de `blockreason` le couvre **automatiquement** : il tire de `Codes()`, donc `TestEveryCodeHasNonEmptyResolutionPath` et `RenderRoundTrips` restent **verts** avec le nouveau code (un code n'existe que s'il porte un chemin de résolution non vide).
+
+### `SubstrateConnectorInfraFragments` — les quatre fragments byte-stables
+
+```go
+func SubstrateConnectorInfraFragments(
+  projectID string,
+  env scope.Environment,
+) ([]ServiceFragment, error)
+```
+
+Elle rend les **quatre** fragments — un jeu **clos** — sous le profile **`connectors`**, role **`connector`**, **image vide** (le code est **émis**, l'image *built* n'est pas pinnée), healthcheck **`/health`**, et un **volume bind isolé par le token DP15** (`datafragments.IsolationToken`) : deux projets A et B sont **byte-distincts**. Sur un `env` inconnu, elle **fail-closed** (`UNKNOWN_ENVIRONMENT`). Le câblage des dépendances est gravé : **mcp-gateway** `dependsOn [tool-registry]`, **webhook-gateway** `dependsOn [nats]`.
+
+```go
+type ServiceFragment struct {
+  Key       string             // mcp-gateway | connector-registry | tool-registry | webhook-gateway
+  ProjectID string
+  Service   stackmanifest.Service // {Name, Role="connector", Image="", InternalPort, Profile="connectors", Healthcheck, DependsOn}
+  Volumes   []stackmanifest.Volume // [{Name=key-<token>, DeviceVar=KEY_<TOKEN>_DATA_PATH}]
+}
+
+func (ServiceFragment) WritesTruth() bool { return false } // le mur (§2)
+```
+
+`ServiceFragment` est une struct **LOCALE** (pas un alias), exactement comme `appservicefragments` (DP18). Sa méthode `WritesTruth()` rend **toujours `false`** — le mur, asserté à la source. `Keys()` rend l'ordre canonique `[mcp-gateway, connector-registry, tool-registry, webhook-gateway]`. `CanonicalFragment(f)` / `HashFragment(f)` sont les **oracles S02** (`records.Canonicalize` / `records.Hash`) : un fragment re-émis est **byte-identique**.
+
+### `RouteTool` — le MCP-Gateway, un routage pur set-membership
+
+```go
+type ToolRegistry struct {
+  ProjectID string
+  Tools     map[string]struct{}
+}
+func NewToolRegistry(projectID string, names []string) ToolRegistry
+
+type Decision struct {
+  Admitted bool
+  Code     blockreason.Code
+}
+
+func RouteTool(registry ToolRegistry, toolName string) (Decision, *blockreason.BlockReason)
+```
+
+`RouteTool` est le routage du **MCP-Gateway** — **pur**, par **appartenance ensembliste** (*set-membership*), **zéro LLM**, **fail-closed** :
+
+- `toolName` **dans** `registry.Tools` ⇒ `Decision{Admitted: true}`, `*BlockReason = nil` ;
+- `toolName` **absent**, **ou** registre **vide** ⇒ `Decision{Admitted: false, Code: TOOL_NOT_REGISTERED}` + le `*BlockReason` rendu.
+
+Le registre est un simple **set** de noms d'outils ; le routage est un **test d'appartenance**, pas une interprétation. C'est le déterminisme-first (§6/§8) : router un outil est une décision **pure**, donc **code**, jamais un agent. Un registre vide refuse **tout** (la propriété `L6EmptyRegistryRefusesEverything`).
+
+### `RealizeInboundWebhook` — webhook entrant → opération async (réutilise S73/DP16)
+
+```go
+type InboundWebhook struct {
+  Source    string
+  Operation string
+  Payload   map[string]any
+}
+var ErrWebhookOperationMismatch error
+type DispatchEvent = asyncfragments.DispatchEvent // réutilisé, jamais redéfini
+
+func RealizeInboundWebhook(
+  webhook InboundWebhook,
+  op operation.Operation,
+  async operation.Async,
+  outbox operation.Outbox,
+  sink operation.Sink,
+) ([]DispatchEvent, error)
+```
+
+Le **Webhook-Gateway** transforme un webhook entrant en **opération asynchrone**, dans l'ordre :
+
+1. **match l'op** — `webhook.Operation` doit correspondre à `op` ; sinon **refusé** (`ErrWebhookOperationMismatch`, fail-closed) ;
+2. **`ValidateAsync`** (la validation S73) ;
+3. **écrit les effets dans l'outbox S73** (via `asyncfragments.OutboxWriter`) ;
+4. **Dispatch** — délivrance **exactly-once** (relative), portée par une **clé d'idempotence content-addressed** : un rejeu du même webhook ne produit **aucun doublon**.
+
+C'est **S73/DP16 réutilisé verbatim** : le `DispatchEvent` est `asyncfragments.DispatchEvent` (un alias de type, pas une copie), l'outbox est l'outbox de S73, la garantie exactly-once est celle de DP16. **Aucun fork async** — il n'existe **qu'une** mécanique d'outbox + dispatch dans AIDOS.
+
+### Les miroirs — property + fixture, écrits RED-first
+
+- **`connectorinfra_property_test.go`** — le miroir **∀** (rapid), **8 fonctions** : `L1ByteIdentique` (re-émission byte-identique), `L2PaletteClose` (les 4 fragments, jeu clos), `L3NoEnvGate` (aucun gate d'env sur le contenu — fail-closed sur l'inconnu, jamais une variation cachée), `L4Isolation` (deux projets byte-distincts), `L5SharedToken` (le token DP15 partagé/isolant), `L6RouteToolIsPureSetMembership` (routage pur), `L6EmptyRegistryRefusesEverything` (registre vide ⇒ tout refusé), `L7ManifestRemainsValid` (le manifest reste valide).
+- **`connectorinfra_fixture_test.go`** — le miroir **N2** (`state → command → events`), **7 fonctions** : `InboundWebhookTriggersAsyncOp` (un webhook entrant déclenche l'op async), `InboundWebhookReplayNeverDuplicates` (rejeu ⇒ aucun doublon), `WebhookForWrongOperationRefused` (mauvaise op ⇒ refusé), `RegisteredToolRoutes` (outil enregistré ⇒ admis), `UnregisteredToolRefused` (outil absent ⇒ `TOOL_NOT_REGISTERED`), `ConnectorInfraPaletteIsFour` (la palette est de quatre), `KeysAreTheClosedSet` (`Keys()` = le jeu clos canonique).
+- Total : **15 fonctions PASS** (8 property + 7 fixture), écrites **RED-first** (le miroir avant l'impl). Le miroir property `blockreason` reste **vert** avec le nouveau code.
+
+### La GATE (GOTOOLCHAIN=local go1.25.10)
+
+- `go build ./...` : **exit 0**.
+- `go test ./runtime/... ./kernel/...` : **exit 0** — le nouveau paquet : **15 fonctions PASS** ; `blockreason` (`TestEveryCodeHasNonEmptyResolutionPath` / `RenderRoundTrips`) **vert** avec `TOOL_NOT_REGISTERED`.
+- `gofmt -l` : clean (appliqué sur `connectorinfra.go`) · `go vet ./runtime/connectorinfra/...` : clean.
+- **0 ELF parasite** (les 3 fichiers sont UTF-8 text ; aucun fichier non-`.go` dans le paquet).
+- **Backend-only** : restent pour plus tard (hors-scope de la tâche) le panneau /v2 Workbench de l'infra de connecteurs + son e2e Playwright, le scaffold du MCP server, et la persistance Postgres (forward-dep de bootstrap / OpenQuestion).
+
+## Méta
+
+- **Le miroir property prouve les invariants de l'infra de connecteurs.** Écrit RED-first, il mesure que les fragments sont **reproductibles** (`L1ByteIdentique` — re-émission byte-identique), **clos** (`L2PaletteClose` — quatre, pas un de plus), **sans gate d'env caché** (`L3NoEnvGate` — l'env ne fait que fail-closer sur l'inconnu), **isolés par projet** (`L4Isolation` + `L5SharedToken` — le token DP15), et que le **routage est pur** (`L6RouteToolIsPureSetMembership` + `L6EmptyRegistryRefusesEverything`). C'est le déterminisme-first (§6/§8) : émettre un fragment, le hacher, router un outil sont des **fonctions pures**, donc du **code**, jamais un agent — le routage MCP-Gateway n'invite **aucun** LLM.
+
+- **Le miroir fixture épingle les sept formes d'action comme `state → command → events`.** `ConnectorInfraPaletteIsFour` et `KeysAreTheClosedSet` ancrent le jeu clos ; `RegisteredToolRoutes` / `UnregisteredToolRefused` ancrent le routage fail-closed ; et le trio webhook — `InboundWebhookTriggersAsyncOp`, `InboundWebhookReplayNeverDuplicates`, `WebhookForWrongOperationRefused` — ancre la transformation webhook→op async avec sa garantie exactly-once. Chaque cas est un workflow N2 (`state` = le registre / le webhook + l'op + l'outbox, `command` = `RouteTool` ou `RealizeInboundWebhook`, `events` = la décision admise/refusée ou les `DispatchEvent` produits). Un webhook rejoué ne produit **aucun** doublon — la fixture le prouve, ce n'est pas une promesse.
+
+- **Réutiliser plutôt que réinventer (ADR 0007), sur l'async et le connector.** DP23 n'invente **aucune** mécanique d'async : il **réutilise** S73 (l'outbox + le pattern exactly-once) et DP16 (`asyncfragments.OutboxWriter`, `asyncfragments.DispatchEvent`) **verbatim** — `DispatchEvent` est un alias de type, jamais une copie. De même, `ServiceFragment` reprend le motif **local** de DP18 (`appservicefragments`), et l'isolation par projet réutilise le `datafragments.IsolationToken` de DP15. Le `blockreason` n'ajoute qu'un code, couvert automatiquement par le miroir property existant (qui tire de `Codes()`). Un seul outbox, un seul `DispatchEvent`, un seul token d'isolation dans tout AIDOS.
+
+## Méta-méta
+
+- **L'infra de connecteurs est de l'infra émise below-the-line — jamais une vérité Kernel.** Le mur (§2) tient avec une ligne nette : chaque fragment porte `WritesTruth() == false`, et le paquet n'écrit **rien** dans `kernel`, `mirrors` ou `fitness`. C'est de l'**infra de l'app construite**, pas un truth-store. L'agent n'a **aucun GRANT** pour graver une vérité ; DP23 émet les briques qui font tourner les connecteurs de l'app émise, il ne crée aucune vérité d'AIDOS.
+
+- **L'app émise reçoit SES PROPRES MCP + Skills, distincts d'AIDOS (ADR 0040 + 0009).** La règle est structurelle, pas une convention : les MCP de l'app construite **ne sont pas** ceux d'AIDOS. Un connecteur de l'app, par sa porte d'entrée (le MCP-Gateway), ne peut atteindre **que** les outils enregistrés **de l'app** — jamais les outils de l'OS. La règle « un op = un outil MCP » (ADR 0009) vaut pour les deux plans : chaque opération de l'app émise est exposée comme un **outil MCP additif** distinct, derrière le MCP-Gateway, qui n'admet que l'enregistré (`TOOL_NOT_REGISTERED` sur tout le reste). C'est l'ADR 0040 gravé en infra : les MCP + Skills de l'app émise sont **additifs et distincts** d'AIDOS.
+
+- **Réutiliser S73/DP16 + DP20 est de l'anti-duplication — et chaque connecteur exécutable est load-bearing.** Deux plans d'async qui forkeraient chacun son outbox divergeraient un jour (un fix de doublon corrigé d'un côté, pas de l'autre). En **réutilisant** la même mécanique (l'outbox + l'exactly-once de S73, le `DispatchEvent` de DP16, le connector de DP20, le token d'isolation de DP15), DP23 garantit qu'il n'existe **qu'une** mécanique d'async et **qu'un** motif de fragment dans AIDOS — l'anti-duplication du déterminisme-first. Et la loi de complétude (Mandat A, §5) veille : une infra sans miroir serait un **monstre**. L'enjeu porteur de DP23 est que **chaque connecteur de l'app émise soit exécutable et gouverné** — c'est *load-bearing* : sans cette infra (la porte unique du MCP-Gateway, les registries, le webhook→op async), les connecteurs de DP20-DP22 resteraient des sources sans moteur, et une source sans moteur ne fait rien.
