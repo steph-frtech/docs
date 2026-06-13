@@ -571,7 +571,9 @@
        "steps/concept/dp06-environments",
        "steps/internals/dp06-environments",
        "steps/concept/dp07-connections",
-       "steps/internals/dp07-connections"
+       "steps/internals/dp07-connections",
+       "steps/concept/dp08-endpoint-fitness",
+       "steps/internals/dp08-endpoint-fitness"
       ]
      }
     ]

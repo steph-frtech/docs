@@ -1,0 +1,57 @@
+---
+title: "DP08 · Internals — endpointfitness : la passe AST des endpoints émis"
+description: "Le journal de build de DP08 : le package pur back/runtime/endpointfitness (lexer TS à sémantique AST-équivalente, classifieur à quatre raisons closes, Sense/Block/Address content-addressés, SensorArchFit branché sur selfcert S84), la passe AST TS autoritaire front/web/lib/endpoint-fitness.ts (TypeScript compiler API, ADR 0066), le miroir property ∀ N1 (rapid) écrit d'abord et rouge puis vert (6 lois + fixtures), la règle déclarée dans arch-fitness.json (parité épinglée), les adresses Go épinglées (verte 43f2e914…, rouge 5164a99a…), l'écran /endpoints-fitness et les 4 e2e Playwright."
+keywords: ["aidos", "krd", "DP08", "endpointfitness", "internals", "EMITTED_NO_HARDCODED_ENDPOINT", "lexer", "AST", "TypeScript compiler API", "ts.createSourceFile", "TemplateExpression", "sentinelle", "classifieur", "localhost_literal", "ip_literal", "url_concrete_host", "host_port_literal", "rapid", "property", "miroir", "rouge-vert", "fault-injection", "selfcert", "S84", "archfit", "Certify", "BlockReason", "records.Hash", "jumeau TS", "fast-check", "vitest", "Playwright", "arch-fitness.json", "ADR 0066"]
+---
+
+<Note>Page « Pour moi » — le détail complet. Pour le concept, voir [DP08 — Le senseur des endpoints](/steps/concept/dp08-endpoint-fitness).</Note>
+
+## Implémentation
+
+### Le miroir d'abord (rouge → vert)
+
+`back/runtime/endpointfitness/endpointfitness_property_test.go` + `endpointfitness_fixture_test.go` sont écrits **avant** tout code (aucun fichier Go non-test → compile fail, c'est le rouge), puis `endpointfitness.go` les rend verts. Les **6 lois** de la property rapid :
+
+1. **Déterminisme** — même arbre émis → même verdict, mêmes octets canoniques, même adresse (« même arbre → même verdict », le miroir de reproductibilité) ;
+2. **DP07 passe toujours** — ∀ manifests dans les ensembles clos × les 5 environnements : le module `EmitConnectionsModule` réel scanne **vert** ;
+3. **Un endpoint résolu passe toujours** — ∀ `ResolveConnection(service, env)` : le motif `EndpointPattern` embarqué dans du source émis scanne vert (le done-criterion verbatim) ;
+4. **Fault-injection** — injecter un littéral en dur généré (URL-IP `https://a.b.c.d:port`, `localhost:port`, IPv4 nue, `<host>.sagedesk.fr:port`) dans un arbre vert → **rouge** nommant le fichier injecté + BlockReason `EMITTED_NO_HARDCODED_ENDPOINT` (how_to_fix non vide — jamais une prison) ; retirer le littéral → **vert** ;
+5. **Raisons closes** — toute raison de constat ∈ {`localhost_literal`, `ip_literal`, `url_concrete_host`, `host_port_literal`} ;
+6. **La coupe S84 est bloquée** — le verdict rouge projeté en `SensorArchFit` + six senseurs verts → `selfcert.Certify` refuse le green et porte `BUILD_LOOP_SENSOR_RED`.
+
+Les fixtures épinglent la table canonique du classifieur (`${APP_NAME}-db:5432` vert, `${CRM_MANAGED_URL}` vert, `https://${APP_SUBDOMAIN}.${DOMAIN}` vert ; `https://1.2.3.4:5432` → `ip_literal`, `postgres://localhost:5432/app` → `localhost_literal`, `db.sagedesk.fr:5432` → `host_port_literal`), la sémantique du lexer (commentaires ignorés, littéraux DANS les spans `${expr}` scannés, ligne exacte), le module démo DP07 vert sur les 5 environnements, le câblage S84 complet (arbre propre → batterie verte ; leak → batterie bloquée), la **parité arch-fitness.json ↔ code**, et les **adresses épinglées** : verte `43f2e914534d162173904514b6e5e0d916584092df50ce47944564a264a52970`, rouge `5164a99a4a7d189cbbe25d0741ffee776720f841328e4c4c80e86e87d5546a0a`.
+
+### Le package pur
+
+`back/runtime/endpointfitness/endpointfitness.go` — zéro I/O, zéro horloge, zéro LLM :
+
+- `ExtractLiterals(src)` : un lexer TS déterministe à **sémantique AST-équivalente** — strings, templates (parties brutes jointes par la sentinelle `\x00` qui **empoisonne l'adjacence**), spans `${expr}` imbriqués (pile de contextes + comptage d'accolades), commentaires `//` et `/* */` ignorés, total (EOF ferme tout token ouvert) ;
+- `ClassifyLiteral(text)` : les placeholders textuels `${VAR}` sont sentinellisés puis les quatre règles closes s'appliquent en ordre canonique — `localhost` (+ `127.x`, `0.0.0.0`), IPv4 (octets ≤ 255), autorité `scheme://host` au host concret (un host porteur de sentinelle est dérivé de l'env → autorisé), `host:port` concret (port 2–5 chiffres, host avec lettre, jamais adjacent à une sentinelle) ;
+- `Sense(files)` → `Verdict{rule, state, tree_address, findings}` trié et content-addressé (`records.Canonicalize`/`records.Hash`, S02 réutilisé — jamais forké) ; `Block(verdict)` → le BlockReason actionnable (route_endpoint / re_emit / rerun aidos check) ; `SensorArchFit(files)` → le `selfcert.SensorVerdict` du slot **archfit** (fail-closed : un arbre non-canonicalisable est rouge) ;
+- `DemoEmittedTree()` / `LeakPath` / `LeakSource` : l'arbre sandbox canonique (module DP07 + worker), **byte-identique** à la constante du jumeau TS.
+
+Le code de refus `EMITTED_NO_HARDCODED_ENDPOINT` est **package-local** (le motif FN04) — l'enum gelé `blockreason` n'est pas touché. `go test ./...` (back entier) vert ; gofmt/go vet propres.
+
+### La passe AST TS (l'autoritaire du plan émis — A7, ADR 0066)
+
+`front/web/lib/endpoint-fitness.ts` exécute le **vrai compilateur** : `ts.createSourceFile` + walk — `StringLiteral` (texte brut, placeholders sentinellisés), `NoSubstitutionTemplateLiteral` (`rawText`), `TemplateExpression` (head/middles/tails joints par la sentinelle, puis descente dans les `span.expression` — un littéral niché est vu). Tool-search de l'étape : **TypeScript compiler API retenu** (déjà une dépendance, le vrai parseur du langage de la construite), ts-morph rejeté (wrapper sans valeur ici), regex seule rejetée par A7. Le jumeau vitest+fast-check (`endpoint-fitness.test.ts`, 11 tests) rejoue les lois L1–L6 et **épingle les deux adresses Go** — un octet de dérive entre le lexer Go et l'AST TS rougit le miroir. Suite vitest complète : **2139/2139** (la baseline 2128 intacte — anti-overwrite).
+
+### La règle déclarée (above-the-line)
+
+`back/runtime/agentloop/arch-fitness.json` gagne le bloc `emitted_no_hardcoded_endpoint` (rule, sensor=`archfit`, scope, raisons closes, formes autorisées) — le précédent BA14/FN04/EL00 prolongé. Le test de parité Go compare `Reasons()` ↔ la config : l'élargir ou l'adoucir est un changement de vérité (idée → miroir → /goal), jamais une édition silencieuse. L'enforcement suit le routage ADR 0036 : le slot **dependency-cruiser** de l'arbre TS émis est servi par la famille in-process déterministe, dont DP08 est le troisième membre (après `CheckEmittedFunctional` et `CheckLLMIsolation`).
+
+### L'écran et les e2e
+
+`/endpoints-fitness` (route nouvelle, thémée ADR 0010, bilingue ADR 0011 — namespace `endpointsFitness`, ~30 clés fr+en + la clé nav) : la table des endpoints résolus DP07 (prod — `${APP_NAME}-db:5432`, `${CRM_MANAGED_URL}`, `https://${APP_SUBDOMAIN}.${DOMAIN}`) + la carte senseur avec **trois contrôles exécutables** (server actions sur le jumeau pur) : injecter le leak canonique (sandbox), retirer, mesurer. `tests/e2e/endpoints-fitness.spec.ts` — **4/4** sur :3210 : rendu vert à l'adresse Go épinglée (zéro `localhost`, zéro `sagedesk` dans la table) ; injection → rouge nommant `gen/app/leak.ts:2 — https://1.2.3.4:5432 — ip_literal` + BlockReason à l'adresse rouge épinglée ; retrait → vert ; deux mesures → même adresse. Anti-overwrite e2e : connections 4/4, environments 4/4, stack-manifest 4/4, stack-emit 4/4, env-emit 4/4, stack-bundle 4/4, v3 16/16 — la prod :3000 intouchée.
+
+## Méta
+
+- **Le cliquet s'étend une couche plus bas.** Le cliquet comportemental (S05) interdit qu'un miroir vert redevienne rouge ; l'arch-fitness (S102) interdit que la structure pourrisse ; DP08 ajoute le cliquet du **contenu émis** : une classe entière de régressions (l'endpoint gravé) devient structurellement impossible à passer en coupe. La loi DP03–DP07 cesse d'être une discipline d'émetteurs — elle devient un invariant du système.
+- **La sentinelle est l'idée porteuse.** Plutôt que de lister ce qui est permis (fragile), la passe marque ce qui est *dérivé de l'environnement* et déclare une seule loi : un fragment env-dérivé ne complète jamais un host concret. C'est la même inversion que le mur — on ne fait pas confiance au contenu, on trace sa provenance.
+- **Deux juges, une vérité, des adresses.** Le Go (la batterie S84) et le TS (l'écran, le plan émis) doivent juger identiquement ; plutôt qu'une foi en la relecture, la parité est un **hash épinglé** sur un arbre canonique partagé — le motif DP07 (GO_MATRIX_HASH) généralisé au verdict entier, constats compris.
+
+## Méta-méta
+
+- **Un senseur naît avec sa preuve de feu.** La règle « un hook qui ne tire jamais est mort » est appliquée à la lettre : la fault-injection n'est pas un test du senseur, elle EST son miroir — le rouge prouvé (l'injection) précède la confiance dans le vert. Un guardrail dont on n'a jamais vu le rouge n'est qu'une prière.
+- **L'interdiction du LLM dans le chemin du verdict est elle-même gravée.** A7 ne dit pas « préférez le déterministe » — il nomme l'outil exact (la passe AST) et la config déclarée le répète (« NEVER an LLM judge »). Le determinism-first cesse d'être un principe répété pour devenir, règle après règle, un contenu d'arch-fitness vérifiable : la méta-loi se matérialise dans les mêmes fichiers que les lois.
+- **OpenQuestions.** (1) Le lexer Go ne lexe pas les littéraux regex TS — absents de l'arbre émis par construction ; si un émetteur futur en émet, l'étendre est idée → miroir → /goal. (2) Le scan vit dans la batterie S84 et à l'écran ; le brancher aussi en hook PostToolUse sur `gen/` (refus au diff, pas seulement à la coupe) est une accrétion possible pour la piste DP aval. (3) La persistance du miroir dans le schéma Postgres `mirrors` reste portée par la backfill S06 (exception bootstrap inchangée).

@@ -1,0 +1,46 @@
+---
+title: "DP08 · Le senseur des endpoints — aucun host en dur ne passe la coupe"
+description: "DP08 grave l'invariant arch-fitness EMITTED_NO_HARDCODED_ENDPOINT : aucun host, URL, IP ou host:port en dur dans le source émis (handlers Hono, workers, config) — tout endpoint passe par la projection DP07 (resolveConnection → process.env au boot). La détection est une passe AST TypeScript déterministe (jamais un LLM-juge), fail-closed, branchée sur le senseur archfit de l'auto-certification S84 : un littéral injecté rougit le senseur et bloque la coupe ; retiré, le vert revient. L'écran /endpoints-fitness rend le senseur exécutable — injection, retrait, mesure."
+keywords: ["aidos", "krd", "DP08", "EMITTED_NO_HARDCODED_ENDPOINT", "arch-fitness", "senseur", "endpoint", "hardcodé", "localhost", "IP", "AST", "TypeScript", "fail-closed", "fault-injection", "S84", "auto-certification", "archfit", "dependency-cruiser", "resolveConnection", "DP07", "/endpoints-fitness", "piste DP", "cliquet structurel"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → DP08](/steps/internals/dp08-endpoint-fitness).</Note>
+
+## En une phrase
+
+DP08 transforme la loi « aucune URL en dur dans le source émis » — jusqu'ici une convention que DP03–DP07 respectaient — en **senseur enforcé** : une passe déterministe lit chaque littéral de l'arbre TS émis, et si un seul porte un host, une IP, un `localhost` ou un `host:port` concret, le senseur rougit et **la coupe est bloquée**.
+
+## Le problème que ça résout
+
+DP07 a câblé la stack émise proprement : chaque endpoint est une référence `${VAR}`, résolue de `process.env` au boot. Mais une loi tenue par discipline rot en silence — un futur émetteur, une retouche manuelle, un copier-coller suffisent pour réintroduire un `localhost:5432` qui marchera sur une machine et cassera partout ailleurs. Sans senseur, chaque « determinism-first ✓ » continuerait de passer au vert pendant que l'architecture pourrit.
+
+DP08 est le **cliquet structurel** de cette loi : comme le cliquet comportemental interdit qu'un miroir vert redevienne rouge, le cliquet des endpoints interdit qu'un littéral d'endpoint entre dans l'arbre émis. La question « est-ce hardcodé ? » n'a plus d'avis — elle a un calcul.
+
+## Quatre raisons closes, des règles déclarées
+
+Le classifieur applique un ensemble **clos** de quatre raisons — déclarées dans la config arch-fitness, jamais apprises :
+
+| Raison | Ce qu'elle attrape | Exemple |
+|---|---|---|
+| `localhost_literal` | la machine locale gravée | `localhost:3000`, `127.0.0.1` |
+| `ip_literal` | une IPv4 concrète | `https://1.2.3.4:5432` |
+| `url_concrete_host` | `scheme://host` avec un host concret | `https://aidos.sagedesk.fr` |
+| `host_port_literal` | un `host:port` concret hors convention | `alphashop-db:5432` |
+
+Et ce qui **passe**, toujours : `${APP_NAME}-db:5432` (la convention de nom de conteneur — le host dérive de l'environnement), `https://${APP_SUBDOMAIN}.${DOMAIN}` (l'exposition Traefik), `${CRM_MANAGED_URL}` (la référence secret-store S91), tout `requireEnv(...)`/`process.env`. La règle est simple à dire : **un fragment dérivé de l'environnement ne peut jamais compléter un host concret** — la passe AST empoisonne l'adjacence là où une expression `${...}` se tient.
+
+## Le juge est une passe AST, jamais un LLM
+
+La détection lit le **vrai arbre syntaxique** TypeScript : elle distingue un commentaire d'un littéral, voit la frontière exacte des `${...}` dans un template, et scanne même les littéraux nichés à l'intérieur des expressions. Même arbre → même verdict → même adresse de contenu : c'est le **miroir de reproductibilité**, épinglé à l'octet entre le Go autoritatif et le jumeau TS. Un agent qui « jugerait si ça a l'air hardcodé » serait un determinism gap — il n'y en a aucun.
+
+## Un senseur qui bloque la coupe — et qui a prouvé qu'il tire
+
+Le verdict nourrit le senseur **archfit** de la batterie d'auto-certification (S84) : un littéral en dur ⇒ senseur rouge ⇒ la boucle de build ne peut pas déclarer vert — fail-closed, un verdict manquant compte rouge. Et parce qu'un hook qui ne tire jamais est mort, DP08 livre sa **fault-injection** : injecter `https://1.2.3.4:5432` dans un fichier émis → rouge nommant le fichier et la ligne ; retirer le littéral → vert. La preuve est rejouée par la property Go, le jumeau fast-check et l'e2e à l'écran.
+
+## Ce que vous voyez à l'écran
+
+La route `/endpoints-fitness` montre d'abord les **endpoints résolus** par DP07 (que des références — jamais `localhost`, jamais une IP), puis la **carte du senseur** sur l'arbre émis canonique. Trois contrôles exécutables : « injecter un endpoint en dur » ajoute le leak canonique en sandbox — le senseur rougit, nomme `gen/app/leak.ts:2`, affiche le BlockReason qui bloque la coupe ; « retirer le littéral » — le vert revient ; « mesurer le verdict » rejoue le scan — deux mesures, même adresse, toujours. Le mur est intact : l'écran mesure, n'écrit rien ; la règle déclarée vit above-the-line et ne change que par idée → miroir → /goal.
+
+## La suite
+
+DP09 affichera ce statut de senseur dans le cockpit des environnements ; le bootstrap one-shot (DP12) et les connecteurs cloud (EPIC E) émettront **sous** ce cliquet — chaque nouvelle couche de la stack 2026 naît avec l'interdiction structurelle de graver un endpoint.
