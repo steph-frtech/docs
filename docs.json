@@ -613,7 +613,9 @@
        "steps/concept/dp27-custom-domains-tls",
        "steps/internals/dp27-custom-domains-tls",
        "steps/concept/dp28-environments-rollback",
-       "steps/internals/dp28-environments-rollback"
+       "steps/internals/dp28-environments-rollback",
+       "steps/concept/dp29-deploy-cockpit",
+       "steps/internals/dp29-deploy-cockpit"
       ]
      }
     ]
