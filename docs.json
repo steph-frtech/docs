@@ -625,7 +625,9 @@
        "steps/concept/dp33-future-cloud-portability",
        "steps/internals/dp33-future-cloud-portability",
        "steps/concept/dp-pulumi-per-project",
-       "steps/internals/dp-pulumi-per-project"
+       "steps/internals/dp-pulumi-per-project",
+       "steps/concept/pulumi-one-click-deploy",
+       "steps/internals/pulumi-one-click-deploy"
       ]
      }
     ]
