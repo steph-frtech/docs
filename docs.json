@@ -266,6 +266,8 @@
        "steps/internals/s89-provision-datastore",
        "steps/concept/s90-api-surface",
        "steps/internals/s90-api-surface",
+       "steps/concept/emitted-app-runtime",
+       "steps/internals/emitted-app-runtime",
        "steps/concept/s91-secret-store",
        "steps/internals/s91-secret-store",
        "steps/concept/s92-ops-observability",
