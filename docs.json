@@ -618,6 +618,8 @@
        "steps/internals/dp29-deploy-cockpit",
        "steps/concept/dp30-emitted-app-docs",
        "steps/internals/dp30-emitted-app-docs",
+       "steps/concept/dp31-backup-strategy",
+       "steps/internals/dp31-backup-strategy",
        "steps/concept/dp-pulumi-per-project",
        "steps/internals/dp-pulumi-per-project"
       ]
