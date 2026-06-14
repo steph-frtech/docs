@@ -622,6 +622,8 @@
        "steps/internals/dp31-backup-strategy",
        "steps/concept/dp32-per-project-secret-store",
        "steps/internals/dp32-per-project-secret-store",
+       "steps/concept/dp33-future-cloud-portability",
+       "steps/internals/dp33-future-cloud-portability",
        "steps/concept/dp-pulumi-per-project",
        "steps/internals/dp-pulumi-per-project"
       ]
