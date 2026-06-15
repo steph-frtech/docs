@@ -1,0 +1,33 @@
+---
+title: "WB2-29 · Design Lab — Onlook inversé : on habille l'écran, le compilateur le reproduit"
+description: "WB2-29 ajoute le Design Lab à /v3/design (la 9e lentille) : un studio de design visuel à la Onlook, mais INVERSÉ pour AIDOS. Onlook écrit les retouches dans le code source ; AIDOS l'interdit (le mur — gen/ est une projection régénérable). Donc chaque geste de design ne touche jamais au code : il devient un requirement content-adressé (un ScreenDesign), et c'est le COMPILATEUR (les émetteurs déterministes) qui reproduit l'écran, byte-stable, sur les trois enfants (web · mobile · desktop). Découverte fondatrice : l'app émise est DÉJÀ instrumentée à la Onlook, gratuitement — chaque élément porte sa coordonnée-requirement (data-aidos-view/screen/panel/field/col/invoke), donc on lit le DOM live de l'app déployée sans jamais injecter dans la source. Le studio designe sur la VRAIE application en ligne (l'iframe charge l'URL dev du projet) ; le panneau Apparence ne propose que les jetons du thème (ADR 0010) — aucune couleur libre — ; un changement de structure (ajouter/retirer un champ) passe par le chat → une idée → /goal (le mur) ; le chat IA propose mais le code déterministe dispose ; et les versions de design sont des branches du DAG. Le studio ne peut, par construction, qu'émettre des consignes d'apparence — jamais écrire une vérité (ADR 0071)."
+keywords: ["aidos", "krd", "WB2-29", "Design Lab", "Onlook", "Onlook inversé", "studio de design", "/v3/design", "9e lentille", "ScreenDesign", "requirement content-adressé", "le compilateur reproduit", "byte-stable", "trois enfants", "web mobile desktop", "data-aidos", "instrumentation gratuite", "iframe live", "app déployée", "jetons du thème", "ADR 0010", "aucune couleur libre", "le mur", "structure", "idée", "/goal", "chat IA gaté", "le LLM propose le code dispose", "branches de design", "DAG", "ADR 0071", "preview optimiste", "permanence", "reproduce"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → WB2-29](/steps/internals/wb2-29-design).</Note>
+
+## En une phrase
+
+WB2-29 ouvre le **Design Lab** (`/v3/design`) : un studio de design visuel **à la Onlook**, mais **inversé** — on habille un élément **sur la vraie application en ligne**, et le geste ne touche **jamais au code** : il devient un **requirement content-adressé**, et c'est le **compilateur** qui **reproduit** l'écran, byte-stable, sur les **trois enfants** (web · mobile · desktop).
+
+## Le problème que ça résout
+
+[Onlook](https://github.com/onlook-dev/onlook) est l'idéal du design « ce que je vois est ce que je code » : on retouche une app React directement à l'écran, et l'outil **réécrit le code source**. Magnifique — et **interdit chez AIDOS**. Le mur (§2) est clair : `gen/` est une **projection régénérable**, l'agent n'écrit **jamais** la vérité, on ne retouche **jamais** un fichier généré. Un studio qui réécrit la source violerait le cœur de KRD.
+
+La V3 fait quand même la promesse Onlook — en l'**inversant**. Le geste de design n'écrit pas le code : il **capture une consigne d'apparence** (un `ScreenDesign`, content-adressé), et le **compilateur déterministe** — les mêmes émetteurs qui font les trois enfants — **reproduit** l'écran avec la consigne. La source reste une projection ; la consigne devient le requirement.
+
+Une découverte rend tout cela gratuit : l'app émise est **déjà instrumentée à la Onlook**. Chaque élément du DOM porte sa **coordonnée-requirement** (`data-aidos-view`, `data-aidos-screen`, `data-aidos-panel`, `data-aidos-field`, `data-aidos-col`, `data-aidos-invoke`). Là où Onlook doit injecter des identifiants dans la source puis indexer « id → fichier:ligne », AIDOS **lit** déjà le lien élément ↔ requirement — sans toucher à la source.
+
+## Comment on s'en sert
+
+On déploie d'abord son application (sa vraie stack docker monte). Le studio charge alors **l'app en ligne** dans un cadre : on **clique un élément**, on choisit une **couleur** et un **espacement** — et l'écran se redessine. Trois garde-fous, tous des conséquences du mur :
+
+- **Apparence = jetons du thème, jamais une couleur libre.** Le panneau ne propose que le catalogue **fermé** des jetons (ADR 0010 : `fond = carte`, `texte = primaire`, `rayon = lg`…). Un hex inventé est **refusé**.
+- **Changer la structure passe par le chat.** Ajouter/retirer/réordonner un champ ou une section, ce n'est **pas** de l'apparence : c'est une **idée** qu'on capture par le chat (« capture l'idée : … ») → un /goal → l'humain valide. Le studio ne franchit jamais cette porte tout seul.
+- **Le chat IA propose, le déterministe dispose.** « rends le bouton bleu et plus grand » : l'IA **propose** une consigne canonique, **re-jugée** par le code avant capture — une couleur inventée ou un réglage hors-thème est **refusé, jamais appliqué**. IA éteinte, le studio marche toujours.
+
+Et comme tout est content-adressé, **chaque réglage crée un point de sauvegarde** : on peut revenir à une version antérieure ou **repartir d'un ancien point** pour essayer une autre direction — sans rien perdre. Ce sont des **branches** du DAG de versions, pas un undo bricolé.
+
+## Ce que ça garantit
+
+Le studio **ne peut, par construction, qu'émettre des consignes d'apparence — jamais écrire une vérité**. La phrase n'est pas un slogan : c'est une propriété **prouvée**. La capture passe par une idée/consigne content-adressée below-the-line ; la reproduction est l'**émetteur déterministe** (même requirement → mêmes octets sur les trois enfants), jamais une « génération d'écran par IA ». On obtient le confort d'Onlook **et** l'intégrité de KRD : on dessine sur le réel, et c'est le compilateur qui code.
