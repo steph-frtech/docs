@@ -631,7 +631,15 @@
        "steps/concept/dp-pulumi-per-project",
        "steps/internals/dp-pulumi-per-project",
        "steps/concept/pulumi-one-click-deploy",
-       "steps/internals/pulumi-one-click-deploy"
+       "steps/internals/pulumi-one-click-deploy",
+       "steps/concept/dg04-model-adapter",
+       "steps/internals/dg04-model-adapter",
+       "steps/concept/dg05-multimodal-mockup",
+       "steps/internals/dg05-multimodal-mockup",
+       "steps/concept/eg05-evolve-lens",
+       "steps/internals/eg05-evolve-lens",
+       "steps/concept/dg06-bench-completude",
+       "steps/internals/dg06-bench-completude"
       ]
      }
     ]
