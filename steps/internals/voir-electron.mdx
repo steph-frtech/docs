@@ -1,0 +1,59 @@
+---
+title: "Voir Electron · Internals — desktoppreview.Plan (bundle pur content-adressé) + CDPRunner (Xvfb + esbuild + CDP, binaires injectés) + le serveur MCP desktop-preview + le miroir electronlive — ADR 0093"
+description: "Internals de « voir Electron » (ADR 0093). (1) Le cœur PUR back/runtime/desktoppreview/desktoppreview.go : Plan(honoemit.DesktopChild) → Bundle {Project, MasterHash, SourceHash, Entry main.js, RendererBundle renderer.js, Files []File (chemins relatifs, octets verbatim), BundleHash (sha256 path-sorted)} ; strip du préfixe gen/<project>/desktop/, UNE réécriture de prép-lancement (index.html ./renderer.tsx → ./renderer.js) ; enfant vide/incomplet → BlockReason CodeOutOfScope, jamais partiel. Miroir de reproductibilité (rapid) : même enfant → mêmes octets/BundleHash. (2) Le Runner GATÉ back/runtime/desktoppreview/runner.go : CDPRunner{Toolchain} avec binaires INJECTÉS (NodeBin, ElectronBin, EsbuildBin, XvfbRunBin, NodeModulesDir) — rien depuis $PATH ; CaptureFrame = materialise (WriteFile + symlink node_modules + capture.mjs embarqué) → esbuild bundle renderer.tsx → xvfb-run electron --no-sandbox --remote-debugging-port → waitForCDP → capture.mjs (Node WebSocket global, Page.captureScreenshot) → teardown (kill -pgid) ; FrameResult {JPEG, Width, Height, BundleHash, SourceHash, Project} ; available() = fallback gracieux ADR 0074. (3) Le miroir d'intégration tag electronlive : l'enfant shop BOOTE en vrai Electron 31, JPEG ≥2KB préfixe FFD8FF, 1280×773, content-adressé. (4) Le serveur MCP back/mcp/desktop-preview (ADR 0009) : desktop_children (3 enfants + parentId + artifacts) + desktop_bundle (PURS, gateway-dispatchables) + desktop_frame (gaté, available=false gracieux) ; main.go -capture <out> = mode one-shot que le route-handler du Workbench spawne. Implémentation · Méta · Méta-méta."
+keywords: ["aidos", "krd", "voir electron", "internals", "ADR 0093", "desktoppreview", "Plan", "Bundle", "BundleHash", "content-adressé", "DesktopChild", "honoemit", "EmitDesktopChild", "renderer.tsx", "renderer.js", "esbuild", "prép-lancement", "BlockReason", "CodeOutOfScope", "miroir de reproductibilité", "rapid", "CDPRunner", "Toolchain", "binaires injectés", "NodeBin", "ElectronBin", "EsbuildBin", "XvfbRunBin", "NodeModulesDir", "CaptureFrame", "FrameResult", "materialise", "symlink", "capture.mjs", "go:embed", "xvfb-run", "Xvfb", "headless", "--no-sandbox", "remote-debugging-port", "CDP", "Chrome DevTools Protocol", "Page.captureScreenshot", "WebSocket", "teardown", "setpgid", "available", "ADR 0074", "fallback gracieux", "tag electronlive", "miroir d'intégration", "Electron 31", "JPEG", "FFD8FF", "1280x773", "MCP", "ADR 0009", "desktop-preview", "desktop_children", "desktop_bundle", "desktop_frame", "gateway", "S59", "in-process", "-capture", "route handler", "le mur", "§2", "§6", "§8", "WroteKernel", "determinism-first", "ADR 0092", "ADR 0040", "ADR 0055"]
+---
+
+<Note>Côté « Pour moi » — l'intérieur. Pour le concept, voir [Pour les futurs utilisateurs → Voir Electron](/steps/concept/voir-electron).</Note>
+
+## Implémentation
+
+**Le cœur PUR — `back/runtime/desktoppreview/desktoppreview.go`.** `Plan(child honoemit.DesktopChild) (Bundle, *blockreason.BlockReason)` projette l'enfant desktop émis en **bundle lançable** :
+
+- chaque `Artifact` (chemin `gen/<project>/desktop/<file>`, octets) devient un `File{Path, Bytes}` **relatif** (préfixe strippé), octets **verbatim** ;
+- **une** seule réécriture de prép-lancement : `index.html` charge `./renderer.tsx` ; un renderer ne peut exécuter ni TSX ni des specifiers bare, donc on réécrit la référence en `./renderer.js` (l'output esbuild). Le `renderer.tsx` **source** reste verbatim (on le **bundle**, on ne l'édite pas) ;
+- le set est **path-sorté** et **content-adressé** : `BundleHash = sha256(Σ path‖0‖bytes‖RS)` ;
+- un enfant **vide** ou **incomplet** (sans `main.js`/`renderer.tsx`/`index.html`) est un `BlockReason` typé (`CodeOutOfScope`, how_to_fix français), **jamais** un bundle partiel (honnêteté §8).
+
+`Bundle` porte `Project, MasterHash, SourceHash, Entry ("main.js"), RendererBundle ("renderer.js"), Files, BundleHash`.
+
+**Le Runner GATÉ — `back/runtime/desktoppreview/runner.go`.** `CDPRunner{Tools Toolchain}` orchestre le toolchain Node. Les binaires sont **INJECTÉS** (`Toolchain{NodeBin, ElectronBin, EsbuildBin, XvfbRunBin, NodeModulesDir, WorkRoot}`) — **rien depuis `$PATH`**, donc reproductible ; un hôte sans un binaire **échoue franc** (typé), jamais un binaire surprise. `CaptureFrame(ctx, child)` :
+
+1. `Plan(child)` (pur) → `Bundle` ;
+2. `available()` : node_modules contient-il electron ? sinon → erreur d'I/O claire (le panneau retombe gracieusement, ADR 0074) ;
+3. **matérialise** dans un tmp : `WriteFile` chaque `File`, écrit `capture.mjs` (embarqué via `//go:embed`), **symlink** le `NodeModulesDir` (esbuild + electron résolvent) ;
+4. **esbuild** : `renderer.tsx → renderer.js` (`--bundle --format=iife --loader:.tsx=tsx --jsx=automatic`) ;
+5. **lance** `xvfb-run -a electron <dir> --no-sandbox --disable-gpu --remote-debugging-port=<freePort>` dans un **groupe de process** (`Setpgid`) — le teardown fait `kill(-pgid, SIGKILL)` (xvfb-run forke Xvfb + electron + helpers chromium) ;
+6. `waitForCDP` : poll `/json/version` jusqu'au up ;
+7. **capture** : `node capture.mjs http://127.0.0.1:<port> frame.jpg 900` — `capture.mjs` trouve la cible `page`, se connecte au websocket devtools (Node `WebSocket` global), `Page.captureScreenshot` (jpeg) → écrit le fichier ;
+8. **teardown** + `RemoveAll`.
+
+`FrameResult{JPEG, Width, Height, BundleHash, SourceHash, Project}` lie l'image à l'**enfant** exact (on prouve « ce pixel vient de CET enfant émis »).
+
+**Le serveur MCP — `back/mcp/desktop-preview/`** (ADR 0009). `desktoppreviewsrv.NewServer()` expose :
+
+- `desktop_children` — émet les **3 enfants** (web/mobile/desktop) de la maître, renvoie `{target, parentId, artifacts[]}` ‖ `masterHash` (PUR) ;
+- `desktop_bundle` — `Plan` → métadonnées du bundle desktop (`{path, size}[]`, hashes) (PUR) ;
+- `desktop_frame` — la capture **gatée** ; renvoie `available=false` + `reason` gracieusement si pas de toolchain/affichage.
+
+`main.go` ajoute le **mode CLI** `-capture <out>` : boote l'enfant démo, écrit **une** frame JPEG, `exit 0` (frame) / `3` (pas de toolchain) / `1` (échec). C'est ce que le route-handler du Workbench **spawne** pour la vue live (transport robuste pour une capture lourde ~2 s). Le serveur vit dans la **lib** `desktoppreviewsrv` → la passerelle S59 réutilise le **même** serveur in-process (aucun twin).
+
+## Méta
+
+Les **miroirs** qui prouvent la capacité :
+
+- **Reproductibilité (PUR)** — `desktoppreview_property_test.go` (rapid) : `Plan` du même enfant deux fois → `BundleHash` + octets **identiques** ; le set est **relatif** + **path-sorté** ; la réécriture `./renderer.tsx → ./renderer.js` a bien eu lieu (et le `renderer.tsx` source est intact) ; un enfant vide/incomplet est **refusé** (`CodeOutOfScope`).
+- **Le serveur (PUR)** — `desktoppreviewsrv_test.go` : `desktop_children` rend **3** enfants partageant le **même parent** (l'arête `composes`) avec des artefacts ; `desktop_bundle` est **reproductible** (même `BundleHash`) et porte `main.js`/`renderer.tsx`/`index.html` ; `desktop_frame` **ne jette jamais** (verdict typé `available` + `reason` OU frame réelle).
+- **Le bout-en-bout (GATÉ)** — `runner_electronlive_test.go` (tag `electronlive`, SKIP sans toolchain/affichage) : l'enfant **shop** BOOTE en vrai **Electron 31**, la frame est un **JPEG** (préfixe `FF D8 FF`, ≥ 2 KB), **1280×773**, content-adressée. Le tag isole l'I/O lourde du `go test ./...` par défaut.
+
+Déterminisme-first (§6/§8) : tout ce qui **peut** être pur **l'est** et **fait autorité** (`Plan`, children, bundle — les miroirs) ; **seule** la frame live est l'exception non-déterministe, **isolée** au Runner, jamais autoritaire sur une vérité.
+
+## Méta-méta
+
+Sa place dans le cliquet KRD.
+
+- **Le mur (§2).** Tout le chemin est une **projection below-the-line** : `WroteKernel` est toujours `false`, aucun outil n'écrit `kernel`/`mirrors`/`fitness`. Un aperçu n'est **jamais** une écriture de vérité — il **lit** et **rend**.
+- **Moteur = seule source (ADR 0092).** « Voir Electron » ne **réimplémente** aucune logique d'émission : il **fait tourner** l'enfant que `honoemit` émet, et le front lit les 3 enfants **live** via le serveur (pas un twin). Le cliquet anti-twin reste vert.
+- **Replaceable derrière un port (ADR 0093).** Le mécanisme de capture (CDP screencast) est un choix `replaceable` derrière `desktoppreview.Runner` ; noVNC (Xvfb + websockify) reste une impl alternative si un flux temps-réel multi-frame devient requis, **sans toucher** au cœur pur.
+- **Fallback honnête (ADR 0074).** La SDK ne **jette** jamais : un hôte sans toolchain/affichage donne `available=false` + raison ; le panneau **dégrade** vers l'arbre de fichiers du bundle (`source:"demo"`), badge honnête.
+- **Le trou fermé.** L'audit dormant 2026-06-16 listait « la source Electron est émise, mais aucun chemin pour la VOIR » comme reste réel ; cette capacité le **ferme**, prouvé par le miroir `electronlive`.

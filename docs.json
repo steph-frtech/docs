@@ -562,6 +562,8 @@
        "steps/internals/wb2-28-v3",
        "steps/concept/wb2-29-design",
        "steps/internals/wb2-29-design",
+       "steps/concept/voir-electron",
+       "steps/internals/voir-electron",
        "steps/concept/dp01-stack-spike",
        "steps/internals/dp01-stack-spike",
        "steps/concept/dp02-stack-manifest",

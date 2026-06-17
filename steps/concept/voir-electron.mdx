@@ -1,0 +1,40 @@
+---
+title: "Voir Electron · l'app desktop émise BOOTE et se regarde dans le navigateur"
+description: "AIDOS émet, depuis une seule vue maître, trois enfants distincts : web (React), mobile (Expo) et desktop (Electron). Le web et le mobile se voyaient déjà (URLs déployées). Le desktop, lui, était émis mais jamais VU tourner — sa source existait, sans chemin pour regarder sa fenêtre. « Voir Electron » est ce chemin : l'enfant desktop émis est matérialisé, bundlé, BOOTÉ en vrai (Electron, headless, sous un affichage virtuel Xvfb), et sa fenêtre est capturée image par image via le protocole de debug intégré de Chromium (CDP) — puis affichée dans une simple balise image du Workbench. C'est le « webVNC » de la GUI : on regarde la vraie application Electron sans serveur VNC, sans sudo. Le cœur reste pur (le moteur projette l'enfant en bundle lançable, content-adressé, reproductible) ; seule la capture d'une image live est l'exception non-déterministe, isolée. Honnêteté : sans backend attaché, les panneaux affichent l'erreur de fetch réelle — la coquille desktop est rendue telle qu'émise, aucun trucage."
+keywords: ["aidos", "krd", "voir electron", "desktop", "Electron", "enfant desktop", "trois enfants", "web mobile desktop", "vue maître", "CDP", "Chrome DevTools Protocol", "screencast", "capture", "webVNC", "Xvfb", "headless", "sans sudo", "esbuild", "bundle lançable", "content-adressé", "reproductible", "/v3/emetteurs", "aperçu", "le mur", "honnêteté", "coquille desktop", "ADR 0093", "ADR 0040", "ADR 0055", "ADR 0092", "ADR 0074", "fallback gracieux", "determinism-first"]
+---
+
+<Note>Côté concept — aucune ligne de code. Pour le détail d'implémentation, voir [Pour moi → Voir Electron](/steps/internals/voir-electron).</Note>
+
+## En une phrase
+
+L'**enfant desktop Electron** que AIDOS émet **boote en vrai** et **sa fenêtre se regarde dans le navigateur** — capturée via le protocole de debug intégré de Chromium (CDP), sans serveur VNC, sans sudo.
+
+## Le problème que ça résout
+
+Depuis **une seule vue maître** (le requirement canonique, plateforme-agnostique), AIDOS dérive **trois enfants distincts** : le **web** (React), le **mobile** (Expo) et le **desktop** (Electron) — chacun adaptant sa plateforme (ADR 0040/0055). Le web et le mobile se **voyaient** déjà : ils sont déployés, on ouvre leur URL. Le desktop, lui, était dans un angle mort : sa **source était émise** (une vraie app Electron — `main.js`, le menu applicatif, les raccourcis clavier, la vue desktop dense), mais **aucun chemin n'existait pour le VOIR tourner**. Un audit déterministe l'a nommé noir sur blanc : « la source Electron est émise, mais aucun chemin pour la VOIR ».
+
+« Voir Electron » comble exactement ce trou. L'enfant desktop émis est **matérialisé** sur disque, **bootté** comme une vraie application Electron (en mode **headless**, sur un affichage virtuel **Xvfb**, donc sans écran physique ni privilèges), et sa **fenêtre est capturée** image par image. Le résultat — une image — s'affiche dans le Workbench. On regarde la **vraie** application desktop, pas une maquette, pas un twin qui « simule » une fenêtre.
+
+## Pourquoi « webVNC » sans serveur VNC
+
+Pour streamer une fenêtre dans un navigateur, le réflexe est **noVNC** : un serveur VNC (`x11vnc`) + un pont websocket + le client noVNC. Mais cela exige des paquets système (donc `sudo`, indisponible) et un démon persistant.
+
+Or **Electron, c'est Chromium** — et Chromium expose nativement le **Chrome DevTools Protocol (CDP)**. Le CDP sait **rendre la fenêtre en images** (`Page.captureScreenshot`). Donc on n'installe **aucun** serveur VNC : on demande à Electron sa propre image, et on l'affiche. C'est le « webVNC » de la GUI, gratuit, sans sudo. (Décision tracée : [ADR 0093](https://github.com/steph-frtech/aidos/blob/main/docs/adr/0093-voir-electron-cdp-screencast.md).)
+
+## Comment on s'en sert
+
+Dans le Workbench, à l'écran **Émetteurs** (`/v3/emetteurs`), une section « Aperçu Desktop (Electron) » :
+
+- liste les **trois enfants** émis de la maître — web, mobile, **desktop** — avec leur **empreinte** (content-address) et leurs fichiers ;
+- un bouton **« Capturer la fenêtre »** boote l'app Electron émise et **affiche l'image** de sa fenêtre ;
+- on **re-capture** à volonté (la vue est rafraîchie par clic).
+
+L'image montre la **vraie coquille desktop** : le titre de l'app, la barre d'**actions** (un bouton par action de la maître), les **panneaux** denses (un par section). **Honnêteté** : tant qu'aucun backend n'est attaché, les panneaux affichent l'**erreur de fetch réelle** (l'app émise, en headless, ne trouve pas son API) — on rend la coquille **telle qu'elle est émise**, sans injecter de fausses données. Attacher le backend émis (données live) est une amélioration ultérieure, déclarée.
+
+## Ce que ça garantit
+
+- **Le moteur reste la seule source.** L'enfant est émis par le moteur Go ; « voir Electron » ne **réimplémente** rien — il **fait tourner** ce que le moteur émet (ADR 0092).
+- **Déterminisme.** Le bundle lançable est une **fonction pure** de l'enfant émis (même enfant → mêmes octets → même empreinte), prouvé par un miroir de reproductibilité. Seule la capture d'une image live est non-déterministe — isolée à la plus petite surface.
+- **Le mur (§2).** Un aperçu **n'écrit aucune vérité** : c'est une projection en lecture. Rien ne remonte au kernel.
+- **Fallback gracieux.** Sur un hôte sans le toolchain ou sans affichage, l'aperçu ne **plante pas** : il l'indique et retombe sur l'arbre de fichiers du bundle (ADR 0074).
